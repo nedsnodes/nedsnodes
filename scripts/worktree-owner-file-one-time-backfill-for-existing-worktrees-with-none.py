@@ -12,7 +12,7 @@ holds this program.
 
 WHICH WORKTREES. The owner file is worktree-owner.json, the record that
 scripts/worktree-owner-file-read-and-write.py describes. The agents root is ~/agents, or
-$NEDSCHORUS_AGENTS_ROOT when set on the Mac. The agent-seats are those whose agent-home is a
+$NEDSNODES_AGENTS_ROOT when set on the Mac. The agent-seats are those whose agent-home is a
 directory directly under the agents root and that have a handoff-supervisor state file or a
 session-handoff file in ~/.claude/handoffs/, as scripts/recover-crashed-seats.py lists them.
 
@@ -25,9 +25,8 @@ Each worktree of the clone with no owner file is handled as follows:
   - Given no owner file, and named on a line of its own but not listed for the user to keep or
     delete: a Claude Code subagent's worktree, directly inside .claude/worktrees/ of the
     reference-checkout and named agent-a followed by 16 lowercase hex digits, Claude Code's name
-    for it, while it is locked with `git worktree lock`, whether or not the lock's claude process
-    runs. Its line says what scripts/clean-worktrees.py --remove does with it now: keeps it, and
-    why, or unlocks it, and whether it first writes an owner file.
+    for it, while it is locked with `git worktree lock`. Its line says that
+    scripts/clean-worktrees.py --remove keeps it, with the lock's reason.
   - Given an owner file naming an agent-seat: an unlocked Claude Code subagent's worktree, when
     the Claude Code transcripts of exactly one agent-seat name its subagent, agent-<id> for the
     directory agent-<id>, as agent_seats_whose_claude_code_transcripts_name_subagent in
@@ -137,19 +136,6 @@ def backfill_action(worktree, locked_reason, main_checkout, agents_root, agent_s
     return "write", seat, f"{seat}'s name begins {top}"
 
 
-def clean_worktrees_remove_of_locked_subagent_worktree_text(worktree, record):
-    """What scripts/clean-worktrees.py --remove does now with a locked subagent's worktree."""
-    verdict, ended = cleaner.claude_code_subagent_lock_verdict_or_ended_lock(worktree, record)
-    if verdict is not None:
-        return (f"scripts/clean-worktrees.py --remove keeps it, so nothing needs doing now: "
-                f"{verdict.reason}")
-    owner = ended.owner_to_write
-    first = (f", first giving it an owner file naming the agent-seat {owner['agent_seat']}, whose "
-             f"Claude Code transcripts name its subagent" if owner else "")
-    return (f"the next scripts/clean-worktrees.py --remove unlocks it{first}, since "
-            f"{ended.explanation}, then judges it like any other worktree")
-
-
 def keep_or_delete_facts_text(repo, worktree, branch):
     """The facts FOR THE USER names beside a worktree listed for the user."""
     discarded, listing_error = cleaner.files_a_removal_discards(worktree)
@@ -224,7 +210,9 @@ def main(argv=None):
             continue
         if action == "subagent":
             print(f"{worktree}: given no owner file, since it is {why}; "
-                  f"{clean_worktrees_remove_of_locked_subagent_worktree_text(worktree, record)}")
+                  f"scripts/clean-worktrees.py --remove keeps every locked worktree, so it stays "
+                  f"until someone unlocks it (lock reason: "
+                  f"{record.locked_reason or 'no reason given'})")
             continue
         if action == "for the user":
             print(f"{worktree}: given no owner file, since {why}; for the user to keep or delete: "

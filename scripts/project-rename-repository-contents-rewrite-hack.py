@@ -7,25 +7,32 @@ Usage:
 
 Each stage makes the change of one pull request of the project rename:
   1. the GitHub repository's owner and name: `nedschorus/nedschorus` becomes `nedsnodes/nedsnodes` in every file but Markdown, and the owner and name constants of the bare-number citation hook. It leaves the value of an `OLD_REPOSITORY` constant alone, through which code that reads GitHub links keeps accepting the old name.
-  2. the machine paths, env vars, task-list names, job labels and unit names the move program, scripts/project-rename-machine-state-move-hack.py, moves: the reference-checkout and worktrees directory under Projects, the log-store, ~/.config/nedschorus, Claude Code project keys, `NEDSCHORUS_*` names, `nedschorus-<seat>-tasks`, `com.nedschorus.*` labels, ~/.local/state/nedschorus, ~/.local/share/nedschorus and each ~/.cache/nedschorus-* directory, the `nc-shared-database-service.service` unit, whose file it also renames, and the test suites' slice `nc\x2dtest\x2dsuites.slice`. It leaves the value of an `TASK_LIST_ID_PREFIX_BEFORE_PROJECT_RENAME` constant alone, through which code that reads task-list IDs keeps accepting the old prefix.
-  3. the directories nc-systems, nc-queue and docs/nedschorus-wiki, the files whose names start `nc-shared-database` or `nedschorus-`, and in contents every citation of those paths, every wiki page name, and the nc- system names in code, alone or inside a longer identifier (`nc-shared-database`, `nc_shared_database`, `NC_SHARED_DATABASE`, `NcSharedDatabase`, `nc_systems`, `NC_SYSTEMS`). A kept file moves with its directory but keeps its name and content.
+  2. in file contents, the names of the machine paths, env vars, task lists, job labels and units that the project rename moved on each machine: the reference-checkout and worktrees directory under Projects, the log-store, ~/.config/nedschorus, Claude Code project keys, `NEDSCHORUS_*` names, `nedschorus-<seat>-tasks`, `com.nedschorus.*` labels, ~/.local/state/nedschorus, ~/.local/share/nedschorus and each ~/.cache/nedschorus-* directory, the `nc-shared-database-service.service` unit, whose file it also renames, and the test suites' slice `nc\x2dtest\x2dsuites.slice`. It leaves the value of an `TASK_LIST_ID_PREFIX_BEFORE_PROJECT_RENAME` constant alone, through which code that reads task-list IDs keeps accepting the old prefix.
+  3. the paths that scripts/project-rename-path-names-before-and-after-common.py's one rename list names: the directories nc-systems, nc-queue and docs/nedschorus-wiki, the directories and files whose names start `nc-shared-database` or `nedschorus-`, and in contents every citation of those paths, every wiki page name, and the nc- system names in code, alone or inside a longer identifier (`nc-shared-database`, `nc_shared_database`, `NC_SHARED_DATABASE`, `NcSharedDatabase`, `nc_systems`, `NC_SYSTEMS`). A kept file moves with its directory but keeps its name and content. For each Bash guard it moves, it adds the guard's former path to the map of former paths in the Bash-guard verdict check, so that check still reads a base ref's hook as the same guard.
 A stage changes only the names its rules match, so it can be run alone on any checkout, including one that does not hold this program, and a second invocation changes nothing. Run the stages in order 1, 2, 3 on a branch that should carry all three.
 
---residue-report lists every match of an old name left in the checkout's tracked files and paths, each with the allowlist reason that covers it, counted by reason, and prints each match no reason covers.
+--residue-report lists every match of an old name left in the checkout's tracked files and paths, each with the allowlist reason that covers it, counted by reason, and prints each match no reason covers. In a GHI-MD, a `nedschorus-` name counts as kept only when no directory or file in the checkout has its new name, so a citation stage 3 missed is reported.
 
-WHAT IT DOES NOT DO OR HANDLE. It changes only files git tracks; it does not commit. It leaves alone the files the KEPT_PATHS list names: this program and its test, the move program and its test, which hold the old names on purpose, captured GitHub responses, recorded fixtures and transcripts, the GHI-MD mirrors in docs/issues and archived queue records. It does not rewrite prose: glossary terms that start nc-, such as nc-head-commit, the words NedsChorus and NC, Markdown links to github.com/nedschorus/nedschorus, which GitHub redirects, and `nedschorus#<number>` citations wait for a later pull request, and the residue report names each. It keeps names of machine state that no step of the move program renames: /etc/sudoers.d/nedschorus-* and the `user.email` `unconfigured-agent@nedschorus.invalid` that each checkout's git config pins. The residue report finds an old name only in the spellings its OLD_NAME pattern lists. A file that is not UTF-8 is skipped and named.
+WHAT IT DOES NOT DO OR HANDLE. It changes only files git tracks; it does not commit. It leaves alone a path as it was at a past commit: a commit-pinned link (`blob/<commit>/<path>`), a `<commit>:<path>`, a line marked `# in git history only`, and a line that assigns a name ending `_BEFORE_PROJECT_RENAME`. It leaves alone the files the KEPT_PATHS list names: this program and its test, which hold the old names on purpose, captured GitHub responses, recorded fixtures and transcripts, and archived queue records. It does not rewrite prose: glossary terms that start nc-, such as nc-head-commit, the words NedsChorus and NC, Markdown links to github.com/nedschorus/nedschorus, which GitHub redirects, and `nedschorus#<number>` citations wait for a later pull request, and the residue report names each. It keeps names of machine state that the project rename left as they were: /etc/sudoers.d/nedschorus-* and the `user.email` `unconfigured-agent@nedschorus.invalid` that each checkout's git config pins. The residue report finds an old name only in the spellings its OLD_NAME pattern lists. A file that is not UTF-8 is skipped and named. On a checkout that still holds the retired move program's test, scripts/project-rename-machine-state-move-hack-test.py, stage 2 rewrites that test too, and its Mac fixture then fails with FileExistsError: the fixture makes the rewritten log-store path a directory, then tries to make a symlink at the same path.
 
-HARM IT CAN CAUSE. It rewrites tracked files in place; `git checkout -- .` and `git clean` on the moved paths undo an invocation whose changes were not committed. A rule that matches too much corrupts the names it touches, which the tests guard against for `sync-`, `async-`, `func-` and `SYNC_`.
+HARM IT CAN CAUSE. It rewrites tracked files in place; `git checkout -- .` and `git clean` on the moved paths undo an invocation whose changes were not committed. A path as it was at a past commit in a form it does not recognise, such as a path in prose with no commit beside it, is rewritten to a path that commit never had. A rule that matches too much corrupts the names it touches, which the tests guard against for `sync-`, `async-`, `func-` and `SYNC_`.
 
 HOW IT CAN FAIL. Stage 3 refuses to move a path whose new name is already tracked with other content, names each such path, moves the rest, and exits 1; when the new path holds the same content, it removes the old path with `git rm` instead of moving it, and adds the new path to git when git does not track it. A `git` command that fails prints its error and exits 1, with the changes made so far left in the working tree. --residue-report exits 1 when a match has no allowlist reason, and 0 otherwise.
 """
 
 import argparse
 import fnmatch
+import importlib.util
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+_path_names_spec = importlib.util.spec_from_file_location(
+    "project_rename_path_names_before_and_after_common",
+    Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
+path_names = importlib.util.module_from_spec(_path_names_spec)
+_path_names_spec.loader.exec_module(path_names)
 
 PROGRAM = "project-rename-repository-contents-rewrite-hack"
 EXIT_OK = 0
@@ -42,12 +49,9 @@ ENDH = r"(?![A-Za-z0-9_-])"
 KEPT_PATHS = {
     "scripts/project-rename-repository-contents-rewrite-hack.py": "this program: holds the old names on purpose",
     "scripts/project-rename-repository-contents-rewrite-hack-test.py": "this program's test: holds the old names on purpose",
-    "scripts/project-rename-machine-state-move-hack.py": "the move program: holds the old names on purpose",
-    "scripts/project-rename-machine-state-move-hack-test.py": "the move program's test: holds the old names on purpose",
     "scripts/merge-gate-test-captured-github-responses/*": "captured GitHub responses, which tests name by literal file name",
     "*-fixtures/*": "recorded fixtures",
     "*.jsonl": "recorded transcripts and streams",
-    "docs/issues/*": "GHI-MD files, edited only through ghi-write; whether rename pull request 3 rewrites their path citations is open",
     "nc-queue/archived/*": "archived queue records",
     "nn-queue/archived/*": "archived queue records",
     "cold-read-reviewer-test-cases/*": "frozen documents the cold-read reviewer tests read",
@@ -98,7 +102,7 @@ STAGE_RULES = {
         Rule(BH + r"nedschorus-logs", "nedsnodes-logs"),
         Rule(r"(?<=\.config/)nedschorus" + ENDH, "nedsnodes"),
         Rule(r'(?<="\.config" / ")nedschorus(?=")', "nedsnodes"),
-        # The state directories and caches the move program's step 6a renames.
+        # The state directories and caches the project rename renamed on disk.
         Rule(r"(?<=\.local/state/)nedschorus" + ENDH, "nedsnodes"),
         Rule(r"(?<=\.local/share/)nedschorus" + ENDH, "nedsnodes"),
         Rule(r'(?<="state" / ")nedschorus(?=")|(?<="share" / ")nedschorus(?=")', "nedsnodes"),
@@ -108,7 +112,8 @@ STAGE_RULES = {
         Rule(BH + r"nedschorus(?=-(?:<[^>\n]*>|\{[^}\n]*\}|[^\s\"'/`<{])*-tasks" + ENDH + ")", "nedsnodes"),
         Rule(r"""(?<=["'])""" + TASK_LIST_ID_PREFIX_BEFORE_PROJECT_RENAME_CONSTANT + r"""nedschorus-(?=["'])""", "nedsnodes-"),
         Rule(BH + r"nc-shared-database-service(?=\.service\b)", "nn-shared-database-service"),
-        Rule(r"(?<=systemctl --user status )nc-shared-database-service" + ENDH, "nn-shared-database-service"),
+        # The unit as a systemctl or journalctl argument, where it may go without its .service suffix.
+        Rule(r"(?:(?<=--user status )|(?<=-u ))nc-shared-database-service" + ENDH, "nn-shared-database-service"),
         # The test suites' systemd slice, made at run time and written with systemd's escape for a hyphen.
         Rule(r"(?<![A-Za-z0-9_])nc(?=\\x2dtest\\x2dsuites\.slice)", "nn"),
     ],
@@ -126,7 +131,7 @@ STAGE_RULES = {
         # A wiki page name built from a template, such as f"nedschorus-{system}-architecture-overview.md";
         # the task-list template nedschorus-{seat}-tasks belongs to stage 2.
         Rule(BH + r"nedschorus-(?=\{[^}]*\}-(?!tasks" + ENDH + "))", "nedsnodes-"),
-        # Its file, backups and token files too, which the move program's step 6a renames on disk.
+        # Its file, backups and token files too, which the project rename renamed on disk.
         Rule(BH + r"nc-shared-database", "nn-shared-database"),
         Rule(B + r"nc_shared_database", "nn_shared_database"),
         Rule(B + r"NC_SHARED_DATABASE", "NN_SHARED_DATABASE"),
@@ -144,24 +149,10 @@ STAGE_RULES = {
 def stage_3_path(path):
     """The path stage 3 moves a tracked file to, or the path itself. A kept file moves with its directory but keeps
     its own name."""
-    kept = kept_reason(path) is not None
-    parts = path.split("/")
-    if parts[0] == "nc-systems":
-        parts[0] = "nn-systems"
-    elif parts[0] == "nc-queue":
-        parts[0] = "nn-queue"
-    elif parts[:2] == ["docs", "nedschorus-wiki"]:
-        parts[1] = "nedsnodes-wiki"
-    renamed = []
-    for index, part in enumerate(parts):
-        if kept and index == len(parts) - 1:
-            pass
-        elif part.startswith("nc-shared-database"):
-            part = "nn-" + part[len("nc-"):]
-        elif part.startswith("nedschorus-"):
-            part = "nedsnodes-" + part[len("nedschorus-"):]
-        renamed.append(part)
-    return "/".join(renamed)
+    if kept_reason(path) is None:
+        return path_names.convert_file_path_before_project_rename_to_path_after(path)
+    directory, _, name = path.rpartition("/")
+    return path_names.convert_file_path_before_project_rename_to_path_after(directory) + "/" + name if directory else path
 
 
 def stage_2_path(path):
@@ -182,6 +173,9 @@ def stage_3_page_name_rules(paths):
         name = path.rsplit("/", 1)[-1]
         if name.startswith("nedschorus-") and stage_3_path(path) != path:
             stems.add(name.split(".", 1)[0])
+        elif name.startswith("nedsnodes-") and kept_reason(path) is None:
+            # A file an earlier run of this stage renamed, which a rerun must still find citations of.
+            stems.add("nedschorus-" + name.split(".", 1)[0][len("nedsnodes-"):])
 
     def renamed(match):
         token = match.group(0)
@@ -215,6 +209,38 @@ def read_text(file):
         return None
 
 
+# A path as it was at a past commit, which no rule rewrites: a commit-pinned link such as
+# github.com/<owner>/<repo>/blob/<commit>/<path>, a `<commit>:<path>` argument, and a line that names a former path
+# and is marked so, or assigns the names a reader keeps from before the rename.
+PINNED_TO_A_COMMIT = re.compile(r"(?:blob|tree|raw|blame)/[0-9a-f]{7,40}/[^\s)\]>`'\"]*"
+                                r"|(?<![A-Za-z0-9_/.:-])(?=[0-9]*[a-f])(?=[a-f]*[0-9])[0-9a-f]{7,40}:[^\s)\]>`'\"]+")
+HISTORY_ONLY_MARK = "# in git history only"
+NAMES_BEFORE_PROJECT_RENAME_ASSIGNMENT = re.compile(r"_BEFORE_PROJECT_RENAME = ")
+
+
+def rewritten(text, rules):
+    lines = []
+    for line in text.splitlines(keepends=True):
+        if HISTORY_ONLY_MARK in line or NAMES_BEFORE_PROJECT_RENAME_ASSIGNMENT.search(line):
+            lines.append(line)
+            continue
+        pieces = []
+        start = 0
+        for pinned in PINNED_TO_A_COMMIT.finditer(line):
+            pieces.append(rewritten_piece(line[start:pinned.start()], rules))
+            pieces.append(pinned.group(0))
+            start = pinned.end()
+        pieces.append(rewritten_piece(line[start:], rules))
+        lines.append("".join(pieces))
+    return "".join(lines)
+
+
+def rewritten_piece(piece, rules):
+    for rule in rules:
+        piece = rule.pattern.sub(rule.replacement, piece)
+    return piece
+
+
 def rewrite_contents(checkout, paths, rules):
     changed = 0
     skipped = []
@@ -231,9 +257,7 @@ def rewrite_contents(checkout, paths, rules):
         if text is None:
             skipped.append(path)
             continue
-        new_text = text
-        for rule in applicable:
-            new_text = rule.pattern.sub(rule.replacement, new_text)
+        new_text = rewritten(text, applicable)
         if new_text != text:
             # write_bytes keeps the file's mode, so an executable stays executable.
             file.write_bytes(new_text.encode("utf-8"))
@@ -269,6 +293,30 @@ def move_paths(checkout, paths, move):
     return moved, refused
 
 
+BASH_GUARD_CHECK = "bash-guards-verdict-changes-between-git-refs-on-recorded-commands-check.py"
+
+
+def add_former_paths_of_moved_bash_guards(checkout, paths):
+    """Give each Bash guard stage 3 moved a line in the Bash-guard check's map of former paths, so the check reads a
+    base ref's hook at the former path as the same guard."""
+    check = next((path for path in paths if path.rsplit("/", 1)[-1] == BASH_GUARD_CHECK), None)
+    if check is None:
+        return
+    file = checkout / check
+    text = file.read_text(encoding="utf-8")
+    guards = re.search(r"^GUARDS = \{\n(.*?)^\}", text, re.MULTILINE | re.DOTALL)
+    former_paths = re.search(r"^BASH_GUARD_CURRENT_PATHS_BY_FORMER_PATH = \{\n", text, re.MULTILINE)
+    if guards is None or former_paths is None:
+        return
+    added = ""
+    for guard in re.findall(r'^    "([^"]+)":', guards.group(1), re.MULTILINE):
+        former = path_names.convert_file_path_after_project_rename_to_path_before(guard)
+        if former != guard and f'"{former}":' not in text:
+            added += f'    "{former}":  {HISTORY_ONLY_MARK}\n        "{guard}",\n'
+    if added:
+        file.write_text(text[:former_paths.end()] + added + text[former_paths.end():], encoding="utf-8")
+
+
 def run_stage(checkout, stage):
     paths = tracked_paths(checkout)
     rules = list(STAGE_RULES[stage])
@@ -276,6 +324,8 @@ def run_stage(checkout, stage):
         rules = stage_3_page_name_rules(paths) + rules
     changed = rewrite_contents(checkout, paths, rules)
     moved, refused = move_paths(checkout, tracked_paths(checkout), STAGE_PATH_MOVES[stage])
+    if stage == 3:
+        add_former_paths_of_moved_bash_guards(checkout, tracked_paths(checkout))
     print(f"{PROGRAM}: stage {stage}: rewrote {changed} files, moved {moved} paths")
     if refused:
         print(f"{PROGRAM}: REFUSED to move {len(refused)} paths, because the new path already holds other content:")
@@ -292,7 +342,8 @@ OLD_NAME = re.compile(r"(?i:nedschorus)|" + B + r"(?:nc[-_]|NC_|Nc(?=[A-Z]))|" +
 
 GLOSSARY_TERM_STEMS = (r"head[-_]commits?|test[-_]suites?|test[-_]sandbox(?:es)?|architecture[-_]overviews?|"
                        r"topic[-_]branch(?:es)?|mutation[-_]testing|critical[-_]code|checkin[-_]quality[-_]gate|"
-                       r"python[-_]toolchain|system(?!s)|tests?|candidate|prune[-_]test")
+                       r"python[-_]toolchain|system(?!s)|tests?|candidate|prune[-_]test|"
+                       r"(?:scheduled[-_]|one[-_]shot[-_])?canary[-_]test|canary[-_]runner")
 
 # (path glob, pattern, reason): the pattern is searched in one line of a file whose path matches the glob,
 # and every span it matches is covered by the reason.
@@ -311,12 +362,12 @@ ALLOWLIST = [
     ("*", r"(?:NedSchorus|Nedschorus)/(?:NedSchorus|nedschorus)", "test data spelling the owner in another case"),
     ("*", r"nedschorus-nedschorus-\d+-[a-z-]+(?:\.json)?", "the name of a captured GitHub response file"),
     ("*", r"nedschorus\.invalid",
-     "the git user.email each checkout's config pins, and test identities; no step of the move program changes the config"),
-    ("*", r"nedschorus-git-gatekeeper-github-token", "a keychain item on the Mac, which no step of the move program renames"),
+     "the git user.email each checkout's config pins, and test identities; the project rename left the config as it was"),
+    ("*", r"nedschorus-git-gatekeeper-github-token", "a keychain item on the Mac, which the project rename left as it was"),
     ("*", r"(?:(?<=in )|(?<=for ))nedschorus\b|(?<=org )`nedschorus`", "the project's name in prose, for the later pull request"),
     ("*", r"(?i:nedschorus)/(?:ghi-api-probes|side-work|topic-)", "another repository or a branch of the old owner, in prose or test data"),
     ("*", r"from (?i:nedschorus)/", "a merge commit subject in test data"),
-    ("*", r"sudoers\.d/nedschorus-[a-z-]+|# nedschorus:", "an installed sudoers file no step of the move program renames"),
+    ("*", r"sudoers\.d/nedschorus-[a-z-]+|# nedschorus:", "an installed sudoers file the project rename left as it was"),
     ("*", r"nc-systems-[a-z0-9-]+-tool-message-to-agent-[0-9-]+|[0-9-]+-nedschorus-[a-z0-9-]+",
      "the name of a file already in the log-store"),
     ("*", r"(?i:nedschorus)[-_](?:gatekeeper|emergency-stop-hook-notes|pull-request-head-test-run|run-all-test-suites-test|"
@@ -337,16 +388,43 @@ ALLOWLIST = [
           r"|nedschorus's|in_nedschorus|nedschorus \"$",
      "the project's name in prose or test data, for the later pull request"),
     ("*", r"projects-nedschorus-", "test data name, renamed in the prose pull request"),
+    ("docs/issues/*", r"(?i:nedschorus)\.com\b", "the project's old domain, in prose for the later pull request"),
+    ("docs/issues/*", r"(?<![A-Za-z0-9_-])[a-z0-9]+(?:-[a-z0-9]+)*-nedschorus-[a-z0-9.-]*",
+     "a file name with nedschorus- inside it, not at its start: an outside file or a log-store record"),
+    ("docs/issues/*", r"nedschorus-\[", "a regular expression for the old page-name prefix, in a command a GHI-MD records as run"),
+    ("*", PINNED_TO_A_COMMIT.pattern, "a path as it was at a past commit, which stage 3 leaves alone"),
+    ("*", r"^.*" + re.escape(HISTORY_ONLY_MARK) + r".*$|^.*_BEFORE_PROJECT_RENAME = .*$",
+     "a former path marked `# in git history only`, or the names a reader keeps from before the rename"),
+    ("docs/issues/*", r"^docs/issues/\S+\.md$",
+     "a GHI-MD's own file name, which its GitHub issue's body links, so it keeps its name"),
     ("*", r"(?i:nedschorus)(?= (?:checkout|project|repository)\b)|(?<=in a )nedschorus\b|\bthe nedschorus\b",
      "the project's name in prose, for the later pull request"),
 ]
+
+
+# A GHI-MD names files by name alone; such a name keeps its old spelling only when no file in the checkout has the
+# renamed name, as for a retired file, a page a GHI-MD proposes, a log-store record or a machine path.
+NAME_OF_NO_RENAMED_FILE_REASON = ("a `nedschorus-` name of no file in the checkout under its new name: a retired, "
+                                  "proposed or outside file, a log-store record or a machine path")
+NEDSCHORUS_NAME = re.compile(BH + r"nedschorus-[a-z0-9]+(?:-[a-z0-9]+)*-?" + ENDH)
+
+
+def names_of_no_renamed_file(line, renamed_stems):
+    for found in NEDSCHORUS_NAME.finditer(line):
+        new_name = "nedsnodes-" + found.group(0)[len("nedschorus-"):]
+        if not any(stem.startswith(new_name) for stem in renamed_stems):
+            yield found.start(), found.end(), NAME_OF_NO_RENAMED_FILE_REASON
 
 
 def residue(checkout):
     allowlist = [(glob, re.compile(pattern), reason) for glob, pattern, reason in ALLOWLIST]
     counts = {}
     uncovered = []
-    for path in tracked_paths(checkout):
+    paths = tracked_paths(checkout)
+    # Every directory and file name stage 3 gave a new name, a directory such as nedsnodes-wiki included.
+    renamed_stems = {part.split(".", 1)[0] for path in paths for part in path.split("/")
+                     if path_names.convert_file_path_after_project_rename_to_path_before(part) != part}
+    for path in paths:
         reason = kept_reason(path)
         file = checkout / path
         text = read_text(file) if file.is_file() and not file.is_symlink() else None
@@ -363,6 +441,8 @@ def residue(checkout):
                 if fnmatch.fnmatchcase(path, glob):
                     for found in pattern.finditer(line):
                         covered_spans.append((found.start(), found.end(), entry_reason))
+            if fnmatch.fnmatchcase(path, "docs/issues/*"):
+                covered_spans.extend(names_of_no_renamed_file(line, renamed_stems))
             for match in matches:
                 entry = next((r for start, end, r in covered_spans if start <= match.start() < end), None)
                 if entry is None:

@@ -14,8 +14,8 @@ The equivalence cases run each hook's turn reader twice on the same transcript: 
 reading from the end, and once with the reader swapped for a whole-file read, which is what each
 hook did before. Both must give the same answer on every fixture transcript: several turns,
 mid-turn prompts, peer and task-notification messages, a compaction, subagent hand-backs, tool
-results, a partial last line and a turn with no prompt before it. When the machine holds real
-transcripts under ~/.claude/projects/, copies of the five largest are compared too.
+results, a partial last line and a turn with no prompt before it. Copies of the five largest real
+transcripts under ~/.claude/projects/ are compared too; the test fails when it sees none.
 
 The early-stop case writes a transcript of about 20 MB whose first line holds bytes that are not
 UTF-8: a whole-file read raises on it, so a hook that reads only the last turn shows it stopped
@@ -47,7 +47,7 @@ absence = load("absence_claim_locator_reminder_hook", SCRIPTS / "absence-claim-l
 bare_number = load("bare_number_citation_in_markdown_and_agent_reply_warning_hook",
                    SCRIPTS / "bare-number-citation-in-markdown-and-agent-reply-warning-hook.py")
 walk = load("walk_me_through_current_item_stop_hook",
-            REPOSITORY_TOP / "nc-systems" / "skills" / "walk-me-through"
+            REPOSITORY_TOP / "nn-systems" / "skills" / "walk-me-through"
             / "walk-me-through-agent-reply-to-user-not-ending-with-waiting-item-closing-line-refusal-stop-hook.py")
 
 failures = []
@@ -300,8 +300,11 @@ def run_equivalence_cases(directory):
                              tail='{"type": "system", "subtype": "compact_boundary", "par'))
     real = sorted(Path.home().glob(".claude/projects/*/*.jsonl"),
                   key=lambda path: path.stat().st_size, reverse=True)[:5]
-    if not real:
-        print("SKIP  no real transcripts under ~/.claude/projects/ to compare")
+    # Every machine this project runs on holds Claude Code transcripts, so none here means the
+    # nn-test-sandbox hid them, and the real-transcript cases below would not run.
+    check("real transcripts under ~/.claude/projects/ are visible to compare", real,
+          "none found; run-all-test-suites.py's TEST_SANDBOX_HOME_PATHS_SHOWN_READ_ONLY must show "
+          "~/.claude/projects to the nn-test-sandbox")
     for path in real:
         # A live transcript grows between the two reads compare makes, so compare a copy.
         copy = Path(directory) / f"real-{path.name}"

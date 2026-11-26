@@ -33,18 +33,22 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
         Path(__file__).resolve().parent / "guard-approval-marker-common.py")
     _guard_approval_marker_common = importlib.util.module_from_spec(_marker_spec)
     _marker_spec.loader.exec_module(_guard_approval_marker_common)
+    _draft_place_spec = importlib.util.spec_from_file_location(
+        "draft_document_place_directories_definition_and_membership_common",
+        Path(__file__).resolve().parent / "draft-document-place-directories-definition-and-membership-common.py")
+    _draft_place = importlib.util.module_from_spec(_draft_place_spec)
+    _draft_place_spec.loader.exec_module(_draft_place)
 consume_approval_marker = _guard_approval_marker_common.consume_approval_marker
 read_marker_approval = _guard_approval_marker_common.read_marker_approval
 
 PROTECTED_BASENAMES = ("CLAUDE.md", "CLAUDE.local.md")
 PROTECTED_DIRECTORY = ".claude"
 REUSABLE_PROMPT_SUFFIXES = ("-prompt.md", "-instructions.md")
-PROMPT_DRAFT_DIRECTORY_NAMES = ("queue", "nc-queue")
-PROMPT_EXEMPT_DIRECTORY_PREFIXES = (("docs", "drafts"), (".claude", "jobs"), (".claude", "handoffs"))
+PROMPT_SCRATCH_DIRECTORY_PREFIXES = ((".claude", "jobs"), (".claude", "handoffs"))
 REVIEWED_DOCUMENT_SUFFIX = ".md"
-REVIEWED_HOME_DIRECTORY_PREFIXES = (("docs", "agents"), ("docs", "nedschorus-wiki"), ("nc-systems", "skills"))
-REVIEWED_DESIGN_SUFFIX = "-design.md"
-UNREVIEWED_DOCUMENT_SUFFIXES = ("-test-design.md", "-contract.md")
+REVIEWED_HOME_DIRECTORY_PREFIXES = (("docs", "agents"), ("docs", "nedsnodes-wiki"), ("nn-systems", "skills"))
+REVIEWED_DESIGN_SUFFIX = ".design.md"
+UNREVIEWED_DOCUMENT_SUFFIXES = (".test-design.md", ".contract.md")
 REVIEW_RECORD_DIRECTORY_NAMES = ("cold-read-records", "md-review-records", "sanity-check-records")
 APPROVAL_MARKER_NAME = ".walk-approved"
 
@@ -92,7 +96,7 @@ COLD_READ_BEFORE_ASKING_SENTENCES = (
     "obvious error `CLAUDE.md` lets you fix without asking."
 )
 
-APPROVAL_PAGE_PATH = "docs/nedschorus-wiki/nedschorus-which-changes-need-the-users-approval.md"
+APPROVAL_PAGE_PATH = "docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md"
 PRE_APPROVED_CHANGE_MARKER_FIRST_LINE = "#pre_approved_change"
 PRE_APPROVED_CHANGE_MARKER_SECOND_LINE = (
     "words naming the exception on the approval page that the change falls under, such as "
@@ -139,7 +143,7 @@ REUSABLE_PROMPT_DENY_MESSAGE = guarded_write_deny_message(
 REVIEWED_DOCUMENT_DENY_MESSAGE = guarded_write_deny_message(
     "a document the user reviews,",
     "\nIf this is a first draft, write it in docs/drafts/ or in a queue directory such as "
-    "docs/issues/queue/, docs/agents/queue/ or docs/nedschorus-wiki/queue/ instead.")
+    "docs/issues/queue/, docs/agents/queue/ or docs/nedsnodes-wiki/queue/ instead.")
 
 DENY_MESSAGE = guarded_write_deny_message(
     "an instruction file, which CLAUDE.md, a CLAUDE.local.md identity file and .claude/ "
@@ -244,10 +248,10 @@ def checkout_directory_parts(path: Path):
 
 
 def is_in_draft_or_working_place(directory_parts) -> bool:
-    if any(part in PROMPT_DRAFT_DIRECTORY_NAMES for part in directory_parts):
+    if _draft_place.directory_is_a_draft_document_place(directory_parts):
         return True
     return any(directory_parts[:len(prefix)] == prefix
-               for prefix in PROMPT_EXEMPT_DIRECTORY_PREFIXES)
+               for prefix in PROMPT_SCRATCH_DIRECTORY_PREFIXES)
 
 
 def is_in_review_record_directory(path: Path) -> bool:

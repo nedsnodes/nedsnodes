@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""Run one Antigravity (`agy`) cold-read-cell against a cold-read-target.
+
+One invocation = one cold-read-cell — the third leg beside the Claude
+cold-read-cell launcher (nn-systems/cold-read/cold-read-claude-cell.py) and the Codex
+cold-read-cell launcher (nn-systems/cold-read/cold-read-codex-cell.py). Everything the three
+do apart from invoking their model lives in nn-systems/cold-read/cold-read-cell-common.py
+and is imported by all of them, so the legs cannot drift. Read that file for
+the report contract, the write-detection rule, and why the reviewer writes a
+file rather than answering in chat.
+
+Usage:
+  nn-systems/cold-read/cold-read-agy-cell.py --cell fast-clarify --tier fast \\
+      --target docs/walk/foo-draft.md \\
+      --report cold-read-records/foo-2026-01-01/cold-read-fast-read.md
+
+The reviewer writes its findings to --report. This program prints progress
+to stderr and nothing to stdout.
+
+Exit codes: 0 a model produced a report; 1 every model in the cold-read-tier's
+chain, TIER_TO_AGY_MODEL_CHAIN, failed to produce one, including the case where `agy` never started
+because the binary is not on PATH (the common module names that on stderr
+and lets the chain advance, so a 1 always means "no review was produced");
+64 this program refused the invocation and never launched agy, naming its
+own fix -- including when this machine has no sandbox to run agy in. 64 rather than the conventional 2 for the reason written beside
+EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py, which every
+cold-read-cell shares.
+
+WHAT THIS LEG IS FOR: the cold-read-fast-read, on the models and effort that
+TIER_TO_AGY_MODEL_CHAIN and TIER_TO_REASONING_EFFORT, in this file, give the
+`fast` cold-read-tier; --effort's help below names that effort. It is the one
+cold-read-tier this launcher pins. The `deep` and
+`second-strongest-model` (the agent-binary's second-strongest model)
+cold-read-tiers stay on the Claude and Codex launchers, and this
+launcher refuses them (exit 64 from argparse) rather than running a Gemini
+model under a stamp that names a cold-read-tier the roster never measured it on.
+
+THE INVOCATION, as measured working in the 2026-09-04 campaign
+(cold-read-records/2026-09-03-cold-read-tier-roster-campaign/tools/
+run-astra-and-gemini-cells.py on the cold-read-research machine, not
+committed): `agy --add-dir <repo> --dangerously-skip-permissions --model <id>
+--effort <eff> --print-timeout 30m --output-format text --print <prompt>`.
+That is the campaign's command; the cell's own differs in one flag, as the
+end of this paragraph says.
+`--print` takes the prompt as its value. `--add-dir` is required, or the
+repository's AGENTS.md does not load. `--dangerously-skip-permissions` is what
+lets the Write of the report happen headless. Antigravity's model ids carry the
+effort as a suffix (gemini-4-neon-{low,medium,high,xhigh}); `--effort` is passed
+as well, exactly as the campaign passed it. agy does not always stop at
+`--print-timeout`, so the cell runs agy in a process group of its own and kills
+that group 60 seconds after agy's own deadline; the attempt then fails with
+the cause `timed-out`, like any other failed attempt.
+The cell passes `--output-format stream-json` in place of `text`, for the
+reason the next paragraph gives.
+
+AGY OFTEN DOES NOT EXIT AFTER IT HAS FINISHED: it prints its result, logs that
+it is shutting down, then hangs, for minutes, and it ignores SIGTERM. So agy
+prints one JSON event per line (`--output-format stream-json`), and the line
+whose `event` is `result` ends the run: the cell waits up to
+COLD_READ_AGY_CELL_WAIT_FOR_REPORT_FILE_AFTER_AGY_STDOUT_RESULT_LINE_BEFORE_PROCESS_GROUP_KILL_SECONDS for the report file
+or for agy to exit, then kills agy's process group with SIGKILL and says so on
+stderr. The result's `status` SUCCESS counts as exit 0 and any other status as
+exit 1, unless agy exited by itself, when its own exit code counts. The
+result's `response`, the text the model answered in chat, stands in for agy's
+stdout from then on, so the chat-instead-of-file rule below reads the same
+text it read when agy printed plain text. A run with no result line ends
+when agy exits or at the deadline above. When agy exits 0 without a result
+line, its stdout is raw stream events, not an answer, so the stdout rule below
+is not given it: unless agy wrote the report file, the attempt fails as a
+missing report. agy's error line, opening
+`AGY_ERROR:`, and its no-login line stay on stderr in this format.
+
+THE CHAT-INSTEAD-OF-FILE QUIRK, and how it is handled. The campaign measured
+that gemini-3.8-flash sometimes answers the whole review in chat instead of
+writing the file it was told to. Its runner took stdout as the report body
+when the file was missing and stdout was long enough to be a review, and
+stamped provenance after exit. This launcher does the same through a seam the
+common module provides for it: `stdout_is_a_review` below is the rule, applied
+only when the model exited 0 and no report exists at the given path or
+anywhere the near-miss search looks; the common module writes the text into
+place, announces it on stderr under STDOUT_RECOVERY_PHRASE, and stamps it like
+any other report. The threshold is the campaign's own, 120 words: a remark
+such as "I have written the report to <path>" is a sentence, and a review of
+even a short document restates every section and then reports two more
+sections, so the two do not overlap in length. A run whose stdout falls under
+the threshold with no file written fails, as on the other legs.
+
+AGY RUNS INSIDE THE OPERATING SYSTEM'S SANDBOX, because nothing inside agy
+keeps a reviewer from reading a credential file (user-ruled 2026-09-28; the
+lists of credential files are CREDENTIAL_FILES_ON_NED_BOX and its neighbours in
+nn-systems/cold-read/cold-read-cell-common.py). Measured 2026-09-28 with
+canary files: unguarded, agy read all three canaries, on the Mac and on
+ned-box; its own `--sandbox` switch still let it read all three; inside the
+sandbox below it read none, still read README.md, and wrote its report, on
+both machines.
+  - macOS: `sandbox-exec` with a profile that denies reading or writing the
+    credential directories and any path whose name matches a credential
+    file name.
+  - Linux: `bwrap` over the whole filesystem, with /dev/null mounted over
+    each of ned-box's credential files that exists, except agy's own login.
+Neither sandbox cuts the network, so agy's own web tool still fetches the
+pages a document links to, which the reviewer reads (user-ruled 2026-09-29,
+items 3 and 5 of the walk what-a-cold-read-reviewer-may-read-2026-09-28;
+measured that day inside both sandboxes).
+Both also withhold Claude's and Codex's login files (user-ruled 2026-09-29),
+not agy's own: agy runs whole inside the sandbox, and masking its own login
+would log it out. Measured 2026-09-29 on both machines: inside the sandbox
+agy could not read canaries at those paths, still read its own, and stayed
+logged in with the real files masked.
+With no such sandbox on the machine, this program refuses before agy runs:
+agy is never run unguarded.
+
+AGY USES THE USER'S GOOGLE LOGIN, NOT A GEMINI API KEY. A key is billed per
+call; the login draws on the user's subscription. agy's login lives under
+~/.gemini/, which the sandbox leaves readable. This program removes
+GEMINI_API_KEY from agy's environment, so that a key the caller holds cannot
+move agy's calls onto per-call billing. It also removes GH_TOKEN and
+GITHUB_TOKEN, so agy gets no GitHub token from its caller; an agent-seat's
+supervisor sets GH_TOKEN to the agent-seat's own GitHub token. How gh behaves
+inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py. When agy finds no login, it prints
+a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
+minute for a login that cannot come headless, and exits 1; the cell's cause
+line is then logged-out, saying how to log agy in.
+
+WHY THIS LEG'S STAMP CARRIES NO `tokens=` FIELD. The Antigravity CLI prints
+no "tokens used" line the way the Codex CLI does, so the field is omitted
+rather than filled with a zero; if it starts printing one, the shared parser in
+nn-systems/cold-read/cold-read-cell-common.py picks it up with no change here.
+"""
+
+import importlib.util
+import json
+import os
+import pathlib
+import re
+import shutil
+import sys
+
+_common_spec = importlib.util.spec_from_file_location(
+    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py")
+)
+common = importlib.util.module_from_spec(_common_spec)
+_common_spec.loader.exec_module(common)
+
+PROGRAM = "cold-read-agy-cell"
+
+# Antigravity model IDs encode effort as a suffix.
+TIER_TO_AGY_MODEL_CHAIN = {
+    "fast": ("gemini-4-neon-low",),
+}
+
+# Pin effort explicitly so machine defaults cannot change the review.
+TIER_TO_REASONING_EFFORT = {
+    "fast": "low",
+}
+
+# The fast read's limit; the cold-read-grid passes its own with
+# --per-model-run-timeout-seconds, since both run the fast cold-read-tier.
+COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 15 * 60
+# agy does not always honour --print-timeout, so the cell kills agy's process
+# group this long after agy's own deadline. The fast read on the Mac sizes its
+# ssh time limit from the sum.
+COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS = 60
+COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS = (
+    COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS
+    + COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS)
+# agy writes the report before its result line; a model that answered in chat
+# writes none and pays this whole wait.
+COLD_READ_AGY_CELL_WAIT_FOR_REPORT_FILE_AFTER_AGY_STDOUT_RESULT_LINE_BEFORE_PROCESS_GROUP_KILL_SECONDS = 2
+AGY_RESULT_EVENT_NAME = "result"
+AGY_RESULT_SUCCESS_STATUS = "SUCCESS"
+
+AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX = "Authentication required."
+AGY_LOGGED_OUT_CAUSE_DETAIL = ("agy has no Google login on this machine; "
+                               "the user logs in by running agy in a terminal there")
+
+# Exclude brief acknowledgements from stdout report recovery.
+STDOUT_REVIEW_MINIMUM_WORDS = 120
+
+
+def stdout_is_a_review(agent_binary_stdout: str) -> str:
+    """Return stdout as the report body when long enough, otherwise an empty string."""
+    if len(agent_binary_stdout.split()) >= STDOUT_REVIEW_MINIMUM_WORDS:
+        return agent_binary_stdout
+    return ""
+
+
+def agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none(line: str):
+    """Return (exit code, response text) for agy's stream-json result line, else None."""
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(event, dict) or event.get("event") != AGY_RESULT_EVENT_NAME:
+        return None
+    result = event.get(AGY_RESULT_EVENT_NAME)
+    if not isinstance(result, dict):
+        result = {}
+    exit_code = 0 if result.get("status") == AGY_RESULT_SUCCESS_STATUS else 1
+    return exit_code, str(result.get("response") or "")
+
+
+AGY_ENVIRONMENT_REMOVED_VARIABLES = (
+    "GEMINI_API_KEY", *common.COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES)
+
+
+def agy_environment_copy_without_gemini_api_key_or_github_token(environment) -> dict:
+    """Return a copy of environment without AGY_ENVIRONMENT_REMOVED_VARIABLES."""
+    return {name: value for name, value in environment.items()
+            if name not in AGY_ENVIRONMENT_REMOVED_VARIABLES}
+
+
+RECOGNISED_FAILURE_TEXTS = (
+    common.RecognisedFailureText(
+        "logged-out", AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, AGY_LOGGED_OUT_CAUSE_DETAIL),
+)
+
+
+def credential_sandbox_program(platform: str = sys.platform):
+    """Return the platform's sandbox program, or None when unsupported."""
+    if platform == "darwin":
+        return "sandbox-exec"
+    if platform.startswith("linux"):
+        return "bwrap"
+    return None
+
+
+def sandbox_exec_profile() -> str:
+    """Return a macOS sandbox profile denying credential paths."""
+    rules = [f'(subpath "{directory}")' for directory in common.CREDENTIAL_DIRECTORIES]
+    rules += [f'(literal "{path}")'
+              for path in common.reviewer_program_login_files(except_program="agy")]
+    for pattern in common.CREDENTIAL_FILE_NAME_PATTERNS:
+        tail = (re.escape(pattern[1:]) if pattern.startswith("*")
+                else "/" + re.escape(pattern))
+        rules.append(f'(regex #"{tail}$")')
+    return "(version 1)(allow default)(deny file-read* file-write* " + "".join(rules) + ")"
+
+
+def credential_sandbox_prefix(platform: str = sys.platform, *,
+                              writable_paths=None, network: bool = True) -> list:
+    """Return the sandbox argv prefix, optionally restricting writes and network.
+
+    writable_paths contains (path, is_directory) pairs; None preserves the
+    cold-read-cell's write access. Credential denials override write grants.
+    """
+    if platform == "darwin":
+        profile = sandbox_exec_profile()
+        if writable_paths is not None:
+            exceptions = "".join(
+                f'(require-not ({"subpath" if directory else "literal"} '
+                f'{json.dumps(str(path))}))' for path, directory in writable_paths)
+            profile += f"(deny file-write* (require-all {exceptions}))"
+        if not network:
+            profile += "(deny network*)"
+        return ["sandbox-exec", "-p", profile]
+    prefix = ["bwrap", "--dev-bind" if writable_paths is None else "--ro-bind", "/", "/"]
+    if writable_paths is not None:
+        # --ro-bind mounts / nodev, which leaves /dev/null and /dev/urandom unusable.
+        prefix += ["--dev", "/dev"]
+        for path, _directory in writable_paths:
+            prefix += ["--bind", str(path), str(path)]
+    if not network:
+        prefix += ["--unshare-net"]
+    for path in common.ned_box_credential_and_login_files_present(except_program="agy"):
+        prefix += ["--ro-bind", "/dev/null", path]
+    return prefix
+
+
+def cold_read_cell_launcher_own_command_line_options_adder(parser):
+    parser.add_argument(
+        "--per-model-run-timeout-seconds", type=int, metavar="SECONDS",
+        default=COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS,
+        help="agy's --print-timeout for each model of the chain, in seconds, "
+             "rounded down to whole minutes for agy; the cell kills agy "
+             f"{COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS} seconds "
+             "later. Default: "
+             f"{COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS}",
+    )
+
+
+def agy_print_timeout(per_model_run_timeout_seconds: int) -> str:
+    return f"{per_model_run_timeout_seconds // 60}m"
+
+
+def per_model_run_kill_after_seconds(parsed_arguments) -> int:
+    return (parsed_arguments.per_model_run_timeout_seconds
+            + COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS)
+
+
+def invocation_builder(effort: str, parsed_arguments):
+    """Return a callback producing (agy argv, None) for the shared runner."""
+    print_timeout = agy_print_timeout(parsed_arguments.per_model_run_timeout_seconds)
+    # agy takes the prompt through --print; None makes the runner close stdin.
+    def build_invocation(model: str, prompt: str):
+        command = [
+            *credential_sandbox_prefix(),
+            "agy",
+            "--add-dir", str(common.REPO_ROOT),
+            "--dangerously-skip-permissions",
+            "--model", model,
+            "--effort", effort,
+            "--print-timeout", print_timeout,
+            "--output-format", "stream-json",
+            "--print", prompt,
+        ]
+        return command, None
+    return build_invocation
+
+
+def main() -> int:
+    sandbox = credential_sandbox_program()
+    if sandbox is None or shutil.which(sandbox) is None:
+        needed = sandbox or "sandbox-exec (macOS) or bwrap (Linux)"
+        print(f"{PROGRAM}: refused before agy started: agy runs only inside {needed}, "
+              "which is not on PATH.\n"
+              f"{PROGRAM}: install {needed} on this machine and rerun "
+              "(Ubuntu: sudo apt install bubblewrap).\n"
+              f"{PROGRAM}: if you cannot install it, run this cold read on the Mac.",
+              file=sys.stderr)
+        return common.EXIT_BAD_INVOCATION
+    return common.run_cell(
+        program=PROGRAM, runtime="agy", description=__doc__,
+        model_help="explicit Antigravity model id (effort suffix included, "
+                   "e.g. gemini-4-neon-high); overrides the tier mapping",
+        tier_to_model_chain=TIER_TO_AGY_MODEL_CHAIN,
+        tier_to_effort=TIER_TO_REASONING_EFFORT,
+        invocation_builder=invocation_builder,
+        recover_report_from_stdout=stdout_is_a_review,
+        recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
+        child_environment=agy_environment_copy_without_gemini_api_key_or_github_token(os.environ),
+        per_model_run_timeout_seconds_from_parsed_arguments_getter=per_model_run_kill_after_seconds,
+        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
+        parse_agent_binary_final_result_from_stdout_line=agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none,
+        report_wait_after_result_line_seconds=COLD_READ_AGY_CELL_WAIT_FOR_REPORT_FILE_AFTER_AGY_STDOUT_RESULT_LINE_BEFORE_PROCESS_GROUP_KILL_SECONDS,
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

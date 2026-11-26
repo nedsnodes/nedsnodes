@@ -55,13 +55,13 @@ def check(case_name, condition, detail=""):
 def linux_only_cases_run_here(cases):
     """True on Linux; elsewhere prints why the cases are skipped and returns False.
 
-    Every case that builds or inspects an nc-test-sandbox, runs bwrap or reads /proc goes
+    Every case that builds or inspects an nn-test-sandbox, runs bwrap or reads /proc goes
     through this, since only Linux has them. scripts/run-all-test-suites-signal-sandbox-test.py
     runs this file as if on a Mac, and fails a case that does not.
     """
     if sys.platform.startswith("linux"):
         return True
-    print(f"SKIP  {cases}: nc-test-sandboxes, bwrap and /proc exist only on Linux")
+    print(f"SKIP  {cases}: nn-test-sandboxes, bwrap and /proc exist only on Linux")
     return False
 
 
@@ -83,7 +83,7 @@ PID_ONE_SUITE_SOURCE = (
     "print('pid one:', pathlib.Path('/proc/1/comm').read_text().strip())\n"
     "print('inside variable:', os.environ.get('RUN_ALL_TEST_SUITES_INSIDE_SIGNAL_SANDBOX'))\n"
     "print('session variables:', os.environ.get('CLAUDE_CODE_SESSION_ATTENDED'),\n"
-    "      os.environ.get('NEDSCHORUS_SESSION_REINCARNATION_OWNED_BY_CALLER'))\n")
+    "      os.environ.get('NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER'))\n")
 # Passes at once without the mutant; with it, runs long enough for the case to
 # terminate the program while the mutant is in.
 TERMINATES_THE_PROGRAM_SUITE_SOURCE = (
@@ -526,7 +526,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
             refused = True
         check(f"a suite path outside the checkout is refused: {outside}", refused)
 
-# --- What the launch shows read-only in the nc-test-sandbox ----------------------
+# --- What the launch shows read-only in the nn-test-sandbox ----------------------
 
 class LaunchPathsRecorded(Exception):
     pass
@@ -672,7 +672,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
           "runs with no prefix, and the inside check still proves the inherited sandbox",
           code == program.EXIT_PASSED_OR_KILLED and len(ran) == 1 and ran[0][3] == ()
           and ran[0][5] == "darwin", (code, output, ran))
-    # Under a bwrap prefix the suite runs in its nc-test-sandbox, admitted by readings of
+    # Under a bwrap prefix the suite runs in its nn-test-sandbox, admitted by readings of
     # this machine that only Linux gives.
     if linux_only_cases_run_here("the child subreaper on Linux"):
         bwrap_prefix = ("/usr/bin/bwrap",)
@@ -761,8 +761,8 @@ with tempfile.TemporaryDirectory() as scratch_name:
           code == program.EXIT_NOT_RUN and ran == [] and "not a file" in output,
           (code, output, ran))
 
-# --- In an nc-test-sandbox the suite runs at low priority, in a cgroup scope of its own ---
-if linux_only_cases_run_here("the low-priority cgroup scope of a suite in an nc-test-sandbox"):
+# --- In an nn-test-sandbox the suite runs at low priority, in a cgroup scope of its own ---
+if linux_only_cases_run_here("the low-priority cgroup scope of a suite in an nn-test-sandbox"):
     with tempfile.TemporaryDirectory() as scratch_name:
         scratch = pathlib.Path(scratch_name).resolve()
         repository = scratch_checkout(scratch)
@@ -798,7 +798,7 @@ if linux_only_cases_run_here("the low-priority cgroup scope of a suite in an nc-
         (program.subprocess.Popen, program.stop_descendants,
          program.runner.why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none) = originals
         nice = ["nice", "-n", str(program.runner.TEST_SUITE_NICE_INCREMENT)]
-        check("in an nc-test-sandbox, the suite runs in a cgroup scope of its own and at low "
+        check("in an nn-test-sandbox, the suite runs in a cgroup scope of its own and at low "
               "priority, as the runner's suites do",
               len(launched) == 2
               and launched[0][:len(program.runner.test_suite_cgroup_scope_command())]
@@ -871,7 +871,7 @@ else:
         completed, last = run_program(
             scratch, repository, "pid-one-test.py",
             environment={**os.environ, "CLAUDE_CODE_SESSION_ATTENDED": "0",
-                         "NEDSCHORUS_SESSION_REINCARNATION_OWNED_BY_CALLER": "1"})
+                         "NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER": "1"})
         check("the suite runs with process 1 bwrap and the inside variable set to 1",
               completed.returncode == 0 and "pid one: bwrap" in completed.stdout
               and "inside variable: 1" in completed.stdout, completed.stdout)
@@ -1062,7 +1062,7 @@ else:
               work_directories_left(scratch, "terminated"))
 
         # --- An interrupted run leaves no process of the suite running ---------
-        # Looked for by a marker in the command line, from outside: a suite in an nc-test-sandbox
+        # Looked for by a marker in the command line, from outside: a suite in an nn-test-sandbox
         # of its own writes nowhere this test can read.
         marker = f"left-behind-by-the-interrupted-suite-{os.getpid()}"
 
@@ -1233,7 +1233,7 @@ else:
             holder.write("pid 1, checkout elsewhere, started then\n")
             holder.flush()
             started = time.monotonic()
-            # The lock is taken only where the suite gets no nc-test-sandbox, so the program
+            # The lock is taken only where the suite gets no nn-test-sandbox, so the program
             # is told it already runs inside a sandbox; it refuses before running anything.
             completed, last = run_program(
                 scratch, repository, "doubling-test.py", "--mutant", str(killing),

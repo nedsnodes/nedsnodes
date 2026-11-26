@@ -31,7 +31,7 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 LISTER_PATH = Path(__file__).with_name("new-shared-names-in-changed-files-list.py")
 HOOK_PATH = Path(__file__).with_name("new-shared-names-reminder-hook.py")
-EXCEPTION_LIST_PATH = "docs/nedschorus-wiki/nedschorus-ordinary-hyphenated-words-list.md"
+EXCEPTION_LIST_PATH = "docs/nedsnodes-wiki/nedsnodes-ordinary-hyphenated-words-list.md"
 
 FAILURES = []
 
@@ -652,6 +652,11 @@ def case_hook_reports_once_per_worktree(root):
           "and rename any name that breaks the page" in first, first)
     check("the hook says renames from the report and from the by-hand check go in one commit",
           "Make every rename, from its report and from your own check, in one single commit" in first, first)
+    check("the hook says a new project-term goes to the user before it is used",
+          "is a new project-term, put the new term to the user before you use it." in first, first)
+    check("the hook says a new system-term is added to its system's glossary without asking the user",
+          "If it is a new system-term, add it to its system's glossary yourself, without asking the user." in first
+          and "project-term or system-term, put the new term" not in first, first)
     _, second = run_hook(clone, state_root, {"tool_name": "Edit", "tool_input": {"file_path": "beta.py"}})
     check("the same names are not reported twice in one agent-session", second == "", second)
     git_directory = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], cwd=str(clone), check=True,
@@ -1178,8 +1183,26 @@ def case_hook_ignores_other_input(root):
     check("unreadable input exits 0 silently", finished.returncode == 0 and not finished.stdout.strip())
 
 
+def case_import_needs_no_temporary_directory(root):
+    real_gettempdir = tempfile.gettempdir
+
+    def no_writable_temporary_directory():
+        raise FileNotFoundError(2, "No usable temporary directory found")
+    tempfile.gettempdir = no_writable_temporary_directory
+    try:
+        try:
+            load_module("lister_with_no_temporary_directory", LISTER_PATH)
+            failure = ""
+        except FileNotFoundError as error:
+            failure = str(error)
+    finally:
+        tempfile.gettempdir = real_gettempdir
+    check("loading the lister where no temporary directory is writable succeeds, so a program "
+          "that imports it still starts", failure == "", failure)
+
+
 def main() -> int:
-    cases = [case_python_function_used_from_another_file_is_listed,
+    cases = [case_python_function_used_from_another_file_is_listed, case_import_needs_no_temporary_directory,
              case_no_listed_word_is_a_glossary_term, case_committed_changes_are_listed,
              case_changed_file_on_main_is_not_a_new_path, case_function_listed_once_its_caller_appears,
              case_same_name_defined_in_two_files_is_not_a_use, case_one_word_constant_used_elsewhere_is_listed,

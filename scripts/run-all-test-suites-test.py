@@ -36,6 +36,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree
 
 # Before anything runs git: a run started with GIT_DIR set, or with another
 # variable that redirects git, must still build this suite's scratch
@@ -55,7 +56,7 @@ RAN_FILE_VARIABLE = "RUN_ALL_TEST_SUITES_TEST_RAN_FILE"
 # Every fixture run behaves as it does inside a full run, whose signal sandbox sets this:
 # its suites run unconfined, sharing the scratch directory's ran.txt, under the run.lock
 # this file reads. Run on its own on Linux, a fixture run would otherwise give each fixture
-# suite an nc-test-sandbox, whose private writes ran.txt never sees. The nc-test-sandbox itself is
+# suite an nn-test-sandbox, whose private writes ran.txt never sees. The nn-test-sandbox itself is
 # tested in run-all-test-suites-signal-sandbox-test.py and
 # run-all-test-suites-machine-wide-test-suite-admission-test.py.
 os.environ["RUN_ALL_TEST_SUITES_INSIDE_SIGNAL_SANDBOX"] = "1"
@@ -78,12 +79,12 @@ def check(case_name, condition, detail=""):
 def linux_only_cases_run_here(cases):
     """True on Linux; elsewhere prints why the cases are skipped and returns False.
 
-    Every case that builds or inspects an nc-test-sandbox, runs bwrap or reads /proc goes
+    Every case that builds or inspects an nn-test-sandbox, runs bwrap or reads /proc goes
     through this, since only Linux has them.
     """
     if sys.platform.startswith("linux"):
         return True
-    print(f"SKIP  {cases}: nc-test-sandboxes, bwrap and /proc exist only on Linux")
+    print(f"SKIP  {cases}: nn-test-sandboxes, bwrap and /proc exist only on Linux")
     return False
 
 
@@ -130,8 +131,8 @@ git("add", "-A")
 git("commit", "-q", "-m", "the suite's own commit")
 
 # A child this suite gives GIT_DIR of its own must still get it: that is the
-# fixture pattern nc-systems/cold-read/tests/cold-read-grid-test.py and
-# nc-systems/cold-read/tests/cold-read-cell-common-test.py are built on.
+# fixture pattern nn-systems/cold-read/tests/cold-read-grid-test.py and
+# nn-systems/cold-read/tests/cold-read-cell-common-test.py are built on.
 child = dict(os.environ)
 child["GIT_DIR"] = str(here / "the-child-s-own-git-directory")
 child_saw = subprocess.run(
@@ -695,14 +696,14 @@ with tempfile.TemporaryDirectory() as scratch:
         f"here = pathlib.Path(os.environ['{RAN_FILE_VARIABLE}']).parent\n"
         "(here / 'session-variables-the-suite-saw.json').write_text(json.dumps("
         "{name: os.environ.get(name) for name in "
-        "['CLAUDE_CODE_SESSION_ATTENDED', 'NEDSCHORUS_SESSION_REINCARNATION_OWNED_BY_CALLER']}))\n")})
+        "['CLAUDE_CODE_SESSION_ATTENDED', 'NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER']}))\n")})
     result = run(root, environment_extra={"CLAUDE_CODE_SESSION_ATTENDED": "0",
-                                         "NEDSCHORUS_SESSION_REINCARNATION_OWNED_BY_CALLER": "1"})
+                                         "NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER": "1"})
     saw_file = root / "session-variables-the-suite-saw.json"
     saw = json.loads(saw_file.read_text()) if saw_file.exists() else None
     check("a suite launched by the program sees neither variable that says whether a user attends",
           saw == {"CLAUDE_CODE_SESSION_ATTENDED": None,
-                  "NEDSCHORUS_SESSION_REINCARNATION_OWNED_BY_CALLER": None},
+                  "NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER": None},
           (saw, result.returncode, result.stdout[-300:], result.stderr[-300:]))
 
 # --- The program's own git calls: no git redirection either ------------------
@@ -880,9 +881,9 @@ def commit_files(repo, files, message):
     return git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
-def selective_run(root, since):
+def selective_run(root, *since):
     (root / "ran.txt").unlink(missing_ok=True)
-    return run(root, CHANGED_SINCE, since)
+    return run(root, *[argument for commit in since for argument in (CHANGED_SINCE, commit)])
 
 
 def recording(root, suite):
@@ -960,6 +961,38 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the SELECTED line names the file that differs",
           "SELECTED reads-a-file-test.py: it reads inputs/read-directly.txt, which differs"
           in out, out)
+
+    # Given twice, as the after-merge test run gives it the pull request's head test run's
+    # commit and the newest main commit whose after-merge test run passed.
+    changed = git(repo, "rev-parse", "HEAD").stdout.strip()
+    result = selective_run(root, base, changed)
+    out = lines(result.stdout)
+    check("given two commits, a suite only one comparison selects does not run, and its NOT "
+          "SELECTED line names the comparison that leaves it out",
+          result.returncode == 0 and ran(root) == []
+          and any(line.startswith(f"NOT SELECTED reads-a-file-test.py: the comparison with "
+                                  f"{changed[:12]} leaves it out: none of the ")
+                  and f"files it read differs since {changed[:12]}" in line for line in out)
+          and f"selected by inputs changed since {base[:12]} and since {changed[:12]}"
+          in result.stdout
+          and out[-1].endswith(f"suites not selected, their recorded inputs unchanged since "
+                               f"{base[:12]} or since {changed[:12]}"),
+          (ran(root), result.stdout, result.stderr))
+    commit_files(repo, {"inputs/read-directly.txt": "third\n"}, "change the file again")
+    result = selective_run(root, base, changed)
+    out = lines(result.stdout)
+    check("given two commits, a suite both comparisons select runs, and its SELECTED line "
+          "gives each comparison's reason",
+          ran(root) == ["reads-a-file-test.py"]
+          and f"SELECTED reads-a-file-test.py: the comparison with each commit selects it: "
+              f"{base[:12]}: it reads inputs/read-directly.txt, which differs; {changed[:12]}: "
+              f"it reads inputs/read-directly.txt, which differs" in out,
+          (ran(root), result.stdout, result.stderr))
+    result = selective_run(root, changed, "no-such-commit")
+    check("a second commit git cannot resolve stops the run with exit 2, naming it",
+          result.returncode == 2 and ran(root) == []
+          and "git cannot resolve no-such-commit to a commit" in result.stderr,
+          (result.returncode, result.stdout, result.stderr))
     base = git(repo, "rev-parse", "HEAD").stdout.strip()
 
     commit_files(repo, {"inputs/read-by-a-child.txt": "second\n"}, "change a child's input")
@@ -1008,6 +1041,83 @@ with tempfile.TemporaryDirectory() as scratch:
               ran(root) == sorted(RECORDING_SUITES)
               and f"SELECTED reads-nothing-else-test.py: {changed} differs, and every suite "
                   f"runs under it" in lines(result.stdout), (ran(root), result.stdout))
+
+    # A pull request head test run leaves out the suites that run the real claude CLI and
+    # most no-sandbox suites, so its commit, the second one given, must not leave them out.
+    head_test_run_leaves_out = {"SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI": "reads-nothing-else-test.py",
+                                "SUITES_RUN_WITHOUT_ANY_SANDBOX": "reads-a-file-test.py"}
+    commit_files(repo, {"scripts/run-all-test-suites.py": "# lists naming fixture suites\n" + "".join(
+        f"{name} = {{{head_test_run_leaves_out[name]!r}: 'the fixture names it'}}\n"
+        if name in head_test_run_leaves_out else f"{name} = {{}}\n"
+        for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST)},
+        "name fixture suites in the lists a head test run leaves out")
+    selective_run(root, base)
+    main_passed = git(repo, "rev-parse", "HEAD").stdout.strip()
+    head_tested = commit_files(repo, {".claude/guard-hooks/another-guard.py": "# guard\n"},
+                               "change a guard hook")
+    result = selective_run(root, main_passed, head_tested)
+    out = lines(result.stdout)
+    check("given two commits, a suite that runs the real claude CLI, which a head test run "
+          "leaves out, is judged by the first commit alone, so a change under "
+          ".claude/guard-hooks/ since that commit runs it",
+          "reads-nothing-else-test.py" in ran(root)
+          and any(line.startswith("SELECTED reads-nothing-else-test.py: ") and
+                  "the first commit alone" in line for line in out),
+          (ran(root), result.stdout, result.stderr))
+    check("given two commits, a suite in SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the first "
+          "commit alone too, and a suite in neither list stays left out by the second",
+          any(line.startswith("SELECTED reads-a-file-test.py: ") and "the first commit alone"
+              in line for line in out)
+          and "loads-a-program-by-path-test.py" not in ran(root)
+          and any(line.startswith(f"NOT SELECTED loads-a-program-by-path-test.py: the "
+                                  f"comparison with {head_tested[:12]} leaves it out")
+                  for line in out),
+          (ran(root), result.stdout, result.stderr))
+
+    # A head test run runs main's test runner, so the after-merge test run of a pull request
+    # that changes the runner is the first to run any suite under the changed runner.
+    selective_run(root, head_tested)
+    main_passed = head_tested
+    head_tested = commit_files(repo, {"scripts/run-all-test-suites.py": "# a changed runner\n"
+                                      + runner_copy_lists}, "change the test runner")
+    result = selective_run(root, main_passed, head_tested)
+    out = lines(result.stdout)
+    check("given two commits, when the test runner differs from the first, every suite runs, "
+          "though the second commit already holds the changed runner",
+          ran(root) == sorted(RECORDING_SUITES)
+          and any(line.startswith("SELECTED loads-a-program-by-path-test.py: judged by the "
+                                  f"comparison with the first commit alone, {main_passed[:12]}")
+                  and "scripts/run-all-test-suites.py differs" in line for line in out),
+          (ran(root), result.stdout, result.stderr))
+    base = head_tested
+
+    # When the runner differs from the first commit, the later comparisons are not made, so a
+    # later commit whose comparison would fail, such as one git ls-tree cannot read, stops
+    # nothing.
+    real_suites_selected_since = module.suites_selected_since
+    compared = []
+
+    def suites_selected_since_failing_after_the_first(top, suites, recordings, commit, *rest):
+        compared.append(commit)
+        if len(compared) > 1:
+            raise module.CouldNotRun("injected: git ls-tree of the second commit failed")
+        return [(suite, False, "none of its files differs") for suite in suites]
+
+    module.suites_selected_since = suites_selected_since_failing_after_the_first
+    try:
+        answer = module.suites_selected_since_every_commit(
+            pathlib.Path("/nowhere"), ["a-test.py"], {}, ["first-commit", "second-commit"],
+            [{module.PROGRAM: "M"}, {}], {}, {}, None)
+        refused = None
+    except module.CouldNotRun as refusal:
+        answer, refused = None, str(refusal)
+    finally:
+        module.suites_selected_since = real_suites_selected_since
+    check("given two commits, when the test runner differs from the first, the comparison with "
+          "the second is not made, so its failure does not stop the run, and every suite runs",
+          refused is None and compared == ["first-commit"] and answer is not None
+          and [(suite, selected) for suite, selected, _ in answer] == [("a-test.py", True)],
+          (compared, answer, refused))
 
     result = run(root, CHANGED_SINCE, "no-such-commit")
     check("a commit git cannot resolve is refused, exit 2, before anything runs",
@@ -1344,7 +1454,7 @@ with tempfile.TemporaryDirectory() as scratch:
           in lines(result.stdout), (ran(root), result.stdout))
 
 # A new directory under a listed one: the shape of a new system directory
-# under nc-systems/, which a glob of `nc-systems/*/*.py` reads.
+# under nn-systems/, which a glob of `nn-systems/*/*.py` reads.
 with tempfile.TemporaryDirectory() as scratch:
     root = pathlib.Path(scratch)
     repo = make_repo(root, {"globs-systems-test.py": (
@@ -1742,7 +1852,7 @@ check("when no suite has a list, the agent is told to tell the user, with the lo
       notice is not None and notice.startswith("scripts/run-all-test-suites.py: 1 of 1 suites")
       and "If you have not yet told the user in this agent-session that the scheduled full test "
           "run's lists are stale: tell him" in notice
-      and "nedlern@ned-box:/home/nedlern/nedschorus-logs/scheduled-full-test-runs-of-main/ned-box/." in notice,
+      and "nedlern@ned-box:/home/nedlern/nedsnodes-logs/scheduled-full-test-runs-of-main/ned-box/." in notice,
       notice)
 notice = module.suites_with_missing_or_stale_files_only_strace_saw_list_notice_or_none(
     ["a-test.py", "b-test.py", "c-test.py"],
@@ -2331,41 +2441,41 @@ with tempfile.TemporaryDirectory() as scratch:
           "of cases, so it recorded only what the cases that ran read" in lines(result.stdout),
           result.stdout)
 
-# A suite a cause outside this repository stopped, such as claude's usage limit, is NOT RUN,
+# A suite a cause outside this repository stopped, such as claude logged out, is NOT RUN,
 # not FAIL, and names the cause; a failing case in the same run still fails the run.
-OUTSIDE_CAUSE_EXIT = module.NC_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES
-STOPPED_BY_WEEKLY_LIMIT = ("print('PASS  a case that needs no claude')\n"
-                           "print(\"NOT RUN: the trial; claude stopped: account-limit — weekly limit · "
-                           "resets Nov 16, 8pm (America/Los_Angeles)\")\n"
-                           f"sys.exit({OUTSIDE_CAUSE_EXIT})\n")
+OUTSIDE_CAUSE_EXIT = module.NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES
+STOPPED_BY_CLAUDE_LOGGED_OUT = ("print('PASS  a case that needs no claude')\n"
+                                "print(\"NOT RUN: the trial; claude stopped: logged-out — Not logged in · "
+                                "Please run /login\")\n"
+                                f"sys.exit({OUTSIDE_CAUSE_EXIT})\n")
 with tempfile.TemporaryDirectory() as scratch:
     root = pathlib.Path(scratch)
-    repo = make_repo(root, {"claude-limit-test.py": STOPPED_BY_WEEKLY_LIMIT, "passes-test.py": PASSES})
+    repo = make_repo(root, {"claude-logged-out-test.py": STOPPED_BY_CLAUDE_LOGGED_OUT, "passes-test.py": PASSES})
     base = head(repo)
     result = run(root)
     not_run_lines = [line for line in lines(result.stdout)
-                     if line.startswith(module.NOT_RUN_SUITE_LINE_PREFIX + "claude-limit-test.py ")]
+                     if line.startswith(module.NOT_RUN_SUITE_LINE_PREFIX + "claude-logged-out-test.py ")]
     check("a suite that exits the outside-cause exit code is NOT RUN, not FAIL, with its last line "
           "as the cause, and the run exits 2 with no suite failed",
           result.returncode == module.EXIT_COULD_NOT_RUN
           and len(not_run_lines) == 2
-          and all("stopped by an outside cause: NOT RUN: the trial; claude stopped: account-limit — "
-                  "weekly limit · resets Nov 16, 8pm (America/Los_Angeles)" in line for line in not_run_lines)
+          and all("stopped by an outside cause: NOT RUN: the trial; claude stopped: logged-out — "
+                  "Not logged in · Please run /login" in line for line in not_run_lines)
           and not any(line.startswith(module.FAILED_SUITE_LINE_PREFIX) for line in lines(result.stdout))
           and any(line.startswith(module.SUMMARY_LINE_PREFIX) and " 1 passed, 0 failed, 1 not run, " in line
                   for line in lines(result.stdout)), (result.returncode, result.stdout))
     commit_files(repo, {"other.txt": "x\n"}, "unrelated")
     result = select_since(root, base)
     check("a suite NOT RUN for an outside cause is selected again by the next selective run",
-          "claude-limit-test.py" in ran(root) and "passes-test.py" not in ran(root),
+          "claude-logged-out-test.py" in ran(root) and "passes-test.py" not in ran(root),
           (ran(root), result.stdout))
 with tempfile.TemporaryDirectory() as scratch:
     root = pathlib.Path(scratch)
-    make_repo(root, {"claude-limit-test.py": STOPPED_BY_WEEKLY_LIMIT, "fails-test.py": "sys.exit(1)\n"})
+    make_repo(root, {"claude-logged-out-test.py": STOPPED_BY_CLAUDE_LOGGED_OUT, "fails-test.py": "sys.exit(1)\n"})
     result = run(root)
     check("beside a suite NOT RUN for an outside cause, a failing suite still makes the run exit 1",
           result.returncode == module.EXIT_SOME_FAILED
-          and any(line.startswith(module.NOT_RUN_SUITE_LINE_PREFIX + "claude-limit-test.py ")
+          and any(line.startswith(module.NOT_RUN_SUITE_LINE_PREFIX + "claude-logged-out-test.py ")
                   for line in lines(result.stdout)), (result.returncode, result.stdout))
 
 with tempfile.TemporaryDirectory() as scratch:
@@ -3781,7 +3891,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and "not run to the end — stopped by SIGTERM" in stopped_output,
           (stub_pids, runner_process.returncode, stopped_output))
 
-# A suite outside an nc-test-sandbox whose grandchild starts a session of its own, which the
+# A suite outside an nn-test-sandbox whose grandchild starts a session of its own, which the
 # suite's process group does not hold. The grandchild writes outlived-its-tmpdir when it sees
 # the suite's TMPDIR removed while it still runs; it ends then, once this test no longer runs,
 # or after 60 s, so a kill that misses it leaves nothing running.
@@ -4218,7 +4328,7 @@ with tempfile.TemporaryDirectory() as scratch:
 
 with tempfile.TemporaryDirectory() as scratch:
     temp = pathlib.Path(scratch)
-    prefix = module.SUITE_OUTSIDE_NC_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX
+    prefix = module.SUITE_OUTSIDE_NN_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX
     left_by_killed_runner = temp / f"{prefix}ab_cd123"
     still_in_use = temp / f"{prefix}xy_z9876"
     not_mkdtemp_shaped = temp / f"{prefix}another-program"
@@ -4789,6 +4899,216 @@ with tempfile.TemporaryDirectory() as scratch:
           "and killed before the group is",
           signalled[-2:] == [("kill", 205, signal.SIGKILL), ("killpg", 200, signal.SIGKILL)]
           and still_running == [], (signalled, still_running))
+
+# A checkout committed before runs read a list from it: the nightly mutation pass tests such
+# checkouts with main's module.
+def checkout_runner_source(declarations):
+    """A checkout's scripts/run-all-test-suites.py holding each list the runner reads: the
+    declaration given for a name, none for a name given None, else the runner's own list."""
+    return "".join(
+        declarations[name] or "" if name in declarations
+        else f"{name} = {module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name]!r}\n"
+        for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST)
+
+
+def lists_read_from_checkout_whose_runner_is(source):
+    with tempfile.TemporaryDirectory() as scratch:
+        checkout = pathlib.Path(scratch)
+        (checkout / "scripts").mkdir()
+        (checkout / "scripts" / "run-all-test-suites.py").write_text(source, encoding="utf-8")
+        try:
+            return module.suite_sandbox_lists_read_from_checkout_under_test(checkout)[0]
+        except module.CouldNotRun as refusal:
+            return refusal
+
+
+REAL_CLAUDE = "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI"
+own_real_claude_list = module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[REAL_CLAUDE]
+own_real_claude_suite = "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py"
+older_checkout_sources = (
+    ("assigns the real-claude list the set it was before it became a dict",
+     checkout_runner_source({REAL_CLAUDE: "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {\n    "
+                                           "\"scripts/an-older-real-claude-test.py\",\n}\n"})),
+    *((f"has no {name} list", checkout_runner_source({name: None}))
+      for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST),
+)
+check("the runner's own real-claude list names the trial against the installed Claude Code, "
+      "which the cases below look for under its path from before the project rename",
+      own_real_claude_suite in own_real_claude_list, own_real_claude_list)
+for how, source in older_checkout_sources:
+    name = REAL_CLAUDE if "real-claude" in how else how.split()[2]
+    lists = lists_read_from_checkout_whose_runner_is(source)
+    check(f"a checkout whose scripts/run-all-test-suites.py {how} is read without a "
+          f"refusal, and gets the runner's own {name} list",
+          isinstance(lists, dict)
+          and lists[name].items() >= module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name].items(),
+          lists)
+    if name == REAL_CLAUDE:
+        check(f"a checkout whose scripts/run-all-test-suites.py {how} also gets each suite of "
+              f"the runner's real-claude list under its path from before the project rename, as "
+              f"a checkout from before the rename names it",
+              isinstance(lists, dict)
+              and lists[name].get(own_real_claude_suite.replace("nn-systems/", "nc-systems/"))
+              == own_real_claude_list[own_real_claude_suite],
+              lists)
+
+# The report's source line names this program for each list it supplied, so it does not name
+# only a file that lacks the list the run used.
+with tempfile.TemporaryDirectory() as scratch:
+    checkout = pathlib.Path(scratch)
+    (checkout / "scripts").mkdir()
+    lists_file = checkout / "scripts" / "run-all-test-suites.py"
+    lists_file.write_text(checkout_runner_source({REAL_CLAUDE: None}), encoding="utf-8")
+    _, lacking_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+    lists_file.write_text(checkout_runner_source({}), encoding="utf-8")
+    _, whole_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+    lists_file.write_text(checkout_runner_source(
+        {name: None for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}),
+        encoding="utf-8")
+    _, all_fallback_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+    lists_file.write_text(checkout_runner_source(
+        {name: None for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}
+        | {REAL_CLAUDE: "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {\"scripts/a-test.py\"}\n"}),
+        encoding="utf-8")
+    _, set_and_lacking_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+check("when the checkout lacks one list, the lists' source names the checkout's file and this "
+      "program for that list",
+      lacking_source == (f"{lists_file}, and in {pathlib.Path(module.__file__).resolve()} for "
+                         f"{REAL_CLAUDE}, which the checkout lacks or assigns a set"),
+      lacking_source)
+check("when the checkout has every list, the lists' source is the checkout's file alone",
+      whole_source == str(lists_file), whole_source)
+check("when the checkout lacks every list, the lists' source is this program alone, not the "
+      "checkout's file, which supplied none",
+      all_fallback_source == (f"{pathlib.Path(module.__file__).resolve()}, since {lists_file} "
+                              f"supplies none of the lists, lacking each or assigning it a set"),
+      all_fallback_source)
+check("when the checkout assigns one list a set and lacks the others, the lists' source is this "
+      "program alone, with the same reason",
+      set_and_lacking_source == all_fallback_source, set_and_lacking_source)
+
+# A current checkout's list that this program cannot read is refused, not taken for an older
+# checkout's missing list.
+annotated = lists_read_from_checkout_whose_runner_is(checkout_runner_source({
+    REAL_CLAUDE:
+        'SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI: dict = {"scripts/the-checkouts-own-test.py": "its reason"}\n'}))
+check("a checkout that assigns the real-claude list with a type annotation gets its own list",
+      isinstance(annotated, dict)
+      and annotated[REAL_CLAUDE] == {"scripts/the-checkouts-own-test.py": "its reason"}, annotated)
+for how, replacement in (
+        ("binds the real-claude list by unpacking", "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI, _ = {}, {}\n"),
+        ("assigns the real-claude list something not literal", "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = dict()\n")):
+    refused = lists_read_from_checkout_whose_runner_is(
+        checkout_runner_source({REAL_CLAUDE: replacement}))
+    check(f"a checkout that {how} is refused, naming the list, rather than given the runner's "
+          f"own list",
+          isinstance(refused, module.CouldNotRun) and REAL_CLAUDE in str(refused), refused)
+
+
+
+def case_line(verdict, text):
+    return {"verdict": verdict, "name": text.split(": ", 1)[0] if verdict == "FAIL" else text,
+            "detail": "", "text": text}
+
+
+resolved = {case["text"]: (case["name"], case["detail"]) for case in
+            module.test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names([
+                case_line("PASS", "--failures-only: prints Z"),
+                case_line("FAIL", "--failures-only: prints X: /tmp/a: gone"),
+                case_line("FAIL", "--failures-only: prints Y: status 2"),
+                case_line("FAIL", "plain: status 2"),
+                case_line("FAIL", "no detail")])}
+check("a failing case whose name holds ': ' keeps its whole name when another case's name "
+      "starts the same way, and a lone case's name ends at its first ': '",
+      resolved == {"--failures-only: prints Z": ("--failures-only: prints Z", ""),
+                   "--failures-only: prints X: /tmp/a: gone": ("--failures-only: prints X",
+                                                              "/tmp/a: gone"),
+                   "--failures-only: prints Y: status 2": ("--failures-only: prints Y",
+                                                           "status 2"),
+                   "plain: status 2": ("plain", "status 2"),
+                   "no detail": ("no detail", "")}, resolved)
+check("a SKIP line's case text drops SKIP and the this-machine-cannot-run-it mark",
+      module.skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker("SKIP  [this machine cannot run it] case a: no Mac") == "case a: no Mac"
+      and module.skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker("SKIP case b") == "case b")
+
+ran_to_the_end_directory = pathlib.Path(tempfile.mkdtemp(prefix="ran-to-the-end-"))
+crashed_log = ran_to_the_end_directory / "crashed.log"
+crashed_log.write_text("FAIL  case a: x\nTraceback (most recent call last):\n  boom\n")
+clean_log = ran_to_the_end_directory / "clean.log"
+clean_log.write_text("FAIL  case a: x\n      Traceback (most recent call last): quoted\n")
+failing_case = [case_line("FAIL", "case a: x")]
+for how, result, expected in (
+        ("passed", {"exit": 0, "cases": failing_case[:0] + [case_line("PASS", "case a")]}, True),
+        ("failed a case and exited", {"exit": 1, "cases": failing_case, "log": clean_log}, True),
+        ("printed no case line and failed", {"exit": 1, "cases": []}, True),
+        ("was killed by a signal", {"exit": -9, "cases": failing_case, "log": clean_log}, False),
+        ("passed its time limit", {"exit": 1, "cases": failing_case, "log": clean_log,
+                                   "timeout": {"limit": 1}}, False),
+        ("was NOT RUN", {"exit": 2, "cases": [], "test sandbox did not start": True}, False),
+        ("was stopped by the run", {"exit": -15, "cases": [], "stopped by": "run"}, False),
+        ("failed after its last case line", {"exit": 1, "cases": [case_line("PASS", "case a")]},
+         False),
+        ("printed an uncaught traceback", {"exit": 1, "cases": failing_case, "log": crashed_log},
+         False),
+        ("has an unreadable log", {"exit": 1, "cases": failing_case,
+                                   "log": ran_to_the_end_directory / "missing.log"}, False)):
+    check(f"a suite that {how} {'ran' if expected else 'did not run'} to the end",
+          module.test_suite_ran_to_the_end(result) is expected, result)
+
+junit_directory = ran_to_the_end_directory / "junit"
+junit_directory.mkdir()
+module.write_case_times_suite_resources_and_junit_xml_of_run(junit_directory, [
+    {"suite": "scripts/a-test.py", "exit": 1, "seconds": 1.0, "log": clean_log,
+     "skips": ["SKIP  case s: no Mac"],
+     "cases": [dict(case_line("FAIL", "case a: x"), seconds=0.5, ended=0.5, unix_time=0.0)]},
+    {"suite": "scripts/b-test.py", "exit": 2, "seconds": 0.0, "log": clean_log, "skips": [],
+     "cases": [], "test sandbox did not start": True},
+    {"suite": "scripts/c-test.py", "exit": 0, "seconds": 1.0, "log": clean_log, "skips": [],
+     "cases": [dict(case_line("FAIL", "double(3)"), seconds=0.5, ended=0.5, unix_time=0.0),
+               dict(case_line("PASS", "case c"), seconds=0.5, ended=1.0, unix_time=0.0)]}])
+junit_root = xml.etree.ElementTree.parse(junit_directory / "junit.xml").getroot()
+junit_suites = {element.get("name"): element for element in junit_root.iter("testsuite")}
+check("the JUnit XML gives a suite that exits 0 no failure, even for a FAIL case line it printed",
+      junit_suites["scripts/c-test.py"].get("failures") == "0"
+      and not any(case.find("failure") is not None
+                  for case in junit_suites["scripts/c-test.py"].iter("testcase")),
+      xml.etree.ElementTree.tostring(junit_suites["scripts/c-test.py"]))
+check("the JUnit XML names each skipped case, and says whether each suite ran to the end and "
+      "was judged",
+      [(case.get("name"), case.find("skipped") is not None)
+       for case in junit_suites["scripts/a-test.py"].iter("testcase")]
+      == [("case s: no Mac", True), ("case a", False)]
+      and junit_suites["scripts/a-test.py"].get("ran_to_the_end") == "true"
+      and junit_suites["scripts/a-test.py"].get("judged") == "true"
+      and junit_suites["scripts/b-test.py"].get("ran_to_the_end") == "false"
+      and junit_suites["scripts/b-test.py"].get("judged") == "false",
+      xml.etree.ElementTree.tostring(junit_root))
+check("the JUnit XML counts each skipped case among a suite's tests",
+      junit_suites["scripts/a-test.py"].get("tests") == "2"
+      and junit_suites["scripts/a-test.py"].get("skipped") == "1",
+      xml.etree.ElementTree.tostring(junit_root))
+shutil.rmtree(ran_to_the_end_directory)
+
+skipped_sibling = module.test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(
+    [case_line("FAIL", "p: X: got 1")], ["p: Y: no Mac"])
+check("a failing case's name is read against the suite's SKIP lines too, so a skipped sibling "
+      "case leaves it the name a passing sibling would",
+      [(case["name"], case["detail"]) for case in skipped_sibling] == [("p: X", "got 1")],
+      skipped_sibling)
+
+for how, text, expected in (
+        ("reached its SUMMARY with only FAIL suites", "FAIL scripts/a-test.py exit 1\nSUMMARY: 0 passed, 1 failed\n", True),
+        ("was cut short at its run time limit before its SUMMARY",
+         "FAIL scripts/a-test.py exit 1\n"
+         f"{module.RUN_STOPPED_AT_RUN_TIME_LIMIT_NOT_COUNTING_ADMISSION_WAITS_LINE_PREFIX}\n"
+         "SUMMARY: 0 passed, 1 failed\n", False),
+        ("was cut short, in a runner's bare-name form",
+         "FAIL scripts/a-test.py exit 1\nrun-all-test-suites: not run to the end — stopped\n"
+         "SUMMARY: 0 passed, 1 failed\n", False)):
+    check(f"a run that {how} {'has' if expected else 'does not have'} failed suites as its only "
+          f"problem",
+          module.run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(
+              module.EXIT_SOME_FAILED, text) is expected, text)
 
 print()
 # The count is printed so a short run is visible on sight: a run that ends

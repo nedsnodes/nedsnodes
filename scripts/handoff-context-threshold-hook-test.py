@@ -91,7 +91,7 @@ for statement in ast.parse(guard_source.read_text(encoding="utf-8")).body:
             for target in statement.targets):
         reason = ast.literal_eval(statement.value)
         check("the refusal says the handoff writer adds the command without agent action",
-              "The handoff writer script, nc-systems/handoff/handoff-write-and-check-supervisor.py,"
+              "The handoff writer script, nn-systems/handoff/handoff-write-and-check-supervisor.py,"
               " adds the command to your session-handoff, so you need not." in reason,
               reason)
         break
@@ -911,16 +911,21 @@ with tempfile.TemporaryDirectory() as workspace:
             ("python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py --quick", 105),
             ("gh pr checks 3101 --watch --interval 30", 0),
             ("gh run watch 12345", 0),
-            ("python3 -u scripts/watch-open-pull-requests-hack.py --exit-after-first-poll-with-events", 0),
+            ("python3 -u scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --exit-after-first-poll-with-events", 0),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once-write-baseline", 75),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once", 75),
+            # --poll-once counts only as an argument of its own.
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --batch-events-for-seconds 1200 --token-file /x/--poll-once-token", 0),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --repo 'a;b' --poll-once", 75),
             ("cd /home/nedlern/x && until grep -q done out.txt; do sleep 5; done", 0),
             ("while kill -0 4242; do sleep 30; done", 0),
             ("sleep 120; echo finished", 75),
             ("sleep 120 >/dev/null 2>&1", 0),
-            ("sleep 600 && python3 nc-systems/cold-read/cold-read-grid.py", 75),
+            ("sleep 600 && python3 nn-systems/cold-read/cold-read-grid.py", 75),
             ("until grep -q done out.txt; do sleep 5; done; python3 scripts/run-all-test-suites.py", 90),
-            ("until [ -f /tmp/r ]; do sleep 5; done; python3 nc-systems/cold-read/cold-read-grid.py --target CLAUDE.md", 75),
+            ("until [ -f /tmp/r ]; do sleep 5; done; python3 nn-systems/cold-read/cold-read-grid.py --target CLAUDE.md", 75),
             ("while pgrep -f x >/dev/null; do sleep 20; done; python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py 1 2 3", 75),
-            ("until [ -s first.out ]; do sleep 10; done && python3 nc-systems/cold-read/cold-read-fast-read.py --target a.md", 75),
+            ("until [ -s first.out ]; do sleep 10; done && python3 nn-systems/cold-read/cold-read-fast-read.py --target a.md", 75),
             ("until grep -q done out.txt; do sleep 5; done; cat out.txt | tail -5", 75),
             ("until [ -f x ]; do sleep 5; done; for p in 1 2 3; do python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py $p; done", 75),
             ("while kill -0 4242; do\n  sleep 30\ndone > /dev/null 2>&1", 0),
@@ -928,7 +933,7 @@ with tempfile.TemporaryDirectory() as workspace:
             ("while kill -0 4242; do sleep 30; done && echo finished; gh pr view 12", 75),
             ("for f in scripts/*-test.py; do python3 $f; done", 90),
             ("while read -r line; do echo \"$line\" >> out.txt; done < in.txt", 75),
-            ("python3 nc-systems/cold-read/cold-read-grid.py --target docs/x.md", 75),
+            ("python3 nn-systems/cold-read/cold-read-grid.py --target docs/x.md", 75),
             (None, 75)):
         seconds = hook.background_task_kind_and_wait_limit_minutes_from_command(command)[1] * 60
         check(f"the wait-limit of {command!r} is {expected_minutes} minutes",
@@ -936,7 +941,7 @@ with tempfile.TemporaryDirectory() as workspace:
 
     # Each waiting-task shape, as recorded background launches wrote it, gets 0 alone; with work
     # beside it, before it, after it or inside its loop, the command gets the no-match limit.
-    waiter = "/home/nedlern/nedschorus-logs/seats/merge-lane-2/merge-helpers/loop/watch-and-merge-provisional-ghi-md-edits.sh"
+    waiter = "/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/loop/watch-and-merge-provisional-ghi-md-edits.sh"
     waiting_task_shapes = (
         "sleep 120",
         "sleep 120 >/dev/null 2>&1",
@@ -945,7 +950,7 @@ with tempfile.TemporaryDirectory() as workspace:
         f"bash {waiter}",
         waiter,
         f"bash {waiter} 2>&1 | tail -30",
-        "python3 -u scripts/watch-open-pull-requests-hack.py --exit-after-first-poll-with-events",
+        "python3 -u scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --exit-after-first-poll-with-events",
         "/tmp/claude-1000/x/scratchpad/wait-review-runs.sh",
         "until grep -q done out.txt; do sleep 5; done",
         "while kill -0 4242; do sleep 30; done",
@@ -984,7 +989,7 @@ with tempfile.TemporaryDirectory() as workspace:
             f"sleep 120 > $({work})",
             "sleep 120 >/dev/null;./work.sh",
             "gh run watch 12345 && gh pr merge 3101",
-            "cd /home/nedlern/agents/merge-lane-2; H=/home/nedlern/nedschorus-logs/seats/merge-lane-2/merge-helpers; "
+            "cd /home/nedlern/agents/merge-lane-2; H=/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers; "
             "python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py "
             "3220 abc t > $H/merge-3220.log 2>&1; while true; do bash $H/loop/watch-and-merge-provisional-ghi-md-edits.sh; done",
             "python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py 3220 abc t "
@@ -1011,7 +1016,7 @@ with tempfile.TemporaryDirectory() as workspace:
 
     eighty_minutes_after_launch = datetime(2026, 9, 15, 0, 1, 47, 899000, tzinfo=timezone.utc)
     for command, in_flight in (("python3 scripts/run-all-test-suites.py", True),
-                               ("python3 nc-systems/cold-read/cold-read-grid.py", False),
+                               ("python3 nn-systems/cold-read/cold-read-grid.py", False),
                                (None, False)):
         records = [usage_record(100_000, cache_read=450_000)]
         if command is not None:
@@ -1245,6 +1250,22 @@ with tempfile.TemporaryDirectory() as workspace:
                                      task_ids_ended_in_session_transcript=flight.ended_task_ids)
     check("a subagent's own transcript, read with the ids the session transcript ended, shows no "
           "background command the parent stopped",
+          own_flight.background_task_ids == [], str(own_flight.background_task_ids))
+    # A command both transcripts end must stay ended: an exclusive-or of the two sets of ended ids
+    # would drop it from both and count it as running.
+    command_ended_in_both_own = transcript_of(command_stopped_own.parent,
+                                              "command-ended-in-both-transcripts.jsonl", [
+        background_task_launch_record("b9otyo6lx"),
+        *notification_records(
+            "<task-notification>\n<task-id>b9otyo6lx</task-id>\n<status>stopped</status>\n"
+            "<summary>Task \"Wait for both close-suite runs to finish\" was stopped by main "
+            "session</summary>\n</task-notification>"),
+    ])
+    own_flight = hook.work_in_flight(str(command_ended_in_both_own), float("inf"),
+                                     now=grid_at_13_minutes,
+                                     task_ids_ended_in_session_transcript=flight.ended_task_ids)
+    check("a subagent's own transcript shows no background command that both it and the session "
+          "transcript ended",
           own_flight.background_task_ids == [], str(own_flight.background_task_ids))
 
     # An interim notification queued before the TaskStop can be delivered after it; the stop holds.
@@ -1630,12 +1651,39 @@ with tempfile.TemporaryDirectory() as workspace:
         check("the deferral names the work it waits for",
               "(subagent a2573a7737ae643dc)" in result.stderr, result.stderr[:600])
         check("the instruction on new work says the handoff writer, not the agent, adds stopped work to the session-handoff",
-              "When you run the handoff writer script, nc-systems/handoff/handoff-write-and-check-supervisor.py,"
-              " before this agent-session ends, it names in your session-handoff each subagent still working,"
-              " whenever it started, and each background Bash task that started since this handoff-deferral"
-              " began and is still running, so you need not add that work to your task list"
+              "When you run the handoff writer script, nn-systems/handoff/handoff-write-and-check-supervisor.py,"
+              " before this agent-session ends, it names in your session-handoff each subagent still working"
+              " and each background Bash task still running, whenever it started, so you need not add that"
+              " work to your task list"
               in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
               hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
+        # Whether the agent names a background Bash task by hand depends on whether the writer can list it, not on when the task started.
+        check("the instruction on new work does not tell the agent to name a background Bash task"
+              " started before the deferral in the next-step file",
+              "started before the deferral" not in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION
+              and "is named, with its command, in the next-step file"
+              not in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
+              hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
+        check("the instruction on new work limits the subagent, background or detached rule to work left running at the turn's end",
+              "Work you leave running when your turn ends must run as a subagent, a background Bash task,"
+              " or a detached process, such as one started with setsid or systemd-run --user, that writes"
+              " its result to a file; name that file in your next-step file, since the handoff writer script"
+              " cannot name that process. A command or an edit that finishes within your turn needs none of"
+              " these." in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
+              hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
+        writer_script = "nn-systems/handoff/handoff-write-and-check-supervisor.py"
+        check("the instruction on new work says unlisted work means running the writer again with a new next-step file",
+              "Write work the writer could not list into a new next-step file that holds your next step and"
+              " names that work, and run the writer again with --next-step-file."
+              in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION
+              and writer_script in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
+              hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
+        writer_help = subprocess.run(
+            [sys.executable, str(HOOK_SCRIPT.parents[1] / writer_script), "--help"],
+            capture_output=True, text=True, check=False)
+        check("the writer script the instruction on new work names accepts --next-step-file",
+              writer_help.returncode == 0 and "--next-step-file" in writer_help.stdout,
+              f"exit {writer_help.returncode}: {(writer_help.stdout + writer_help.stderr)[-300:]}")
         # Agents read "handoff" in the notice and ran the skill anyway.
         check("the deferral tells the agent, on a line of its own, not to run the skill yet",
               opens_a_line_with_do_not_run_handoff_skill_yet(result.stderr),
@@ -2163,10 +2211,10 @@ with tempfile.TemporaryDirectory() as workspace:
         # wait-limit, and one millisecond less.
         boundary_clock = clock.replace(microsecond=clock.microsecond // 1000 * 1000)
         for kind_name, command, limit_minutes in (
-                ("nc-mutation-testing",
+                ("nn-mutation-testing",
                  "python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py", 105),
                 ("test-suite", "cd /tmp/x && python3 scripts/run-all-test-suites.py", 90),
-                ("a command no kind matches", "python3 nc-systems/cold-read/cold-read-grid.py", 75)):
+                ("a command no kind matches", "python3 nn-systems/cold-read/cold-read-grid.py", 75)):
             for age, holds in ((timedelta(minutes=limit_minutes), False),
                                (timedelta(minutes=limit_minutes) - timedelta(milliseconds=1), True)):
                 boundary_session = transcript_of(
@@ -2911,7 +2959,7 @@ def runtime_union_annotations(path):
 
 # The Mac's python3 is Apple's 3.9, which runs this hook and the handoff writer that imports it.
 for importing_script in (HOOK_SCRIPT,
-                         HOOK_SCRIPT.parent.parent / "nc-systems" / "handoff" / "handoff-write-and-check-supervisor.py"):
+                         HOOK_SCRIPT.parent.parent / "nn-systems" / "handoff" / "handoff-write-and-check-supervisor.py"):
     union_annotations = runtime_union_annotations(importing_script)
     check(f"{importing_script.name} imports under Python 3.9: no `X | None` annotation evaluated at import",
           not union_annotations, union_annotations)

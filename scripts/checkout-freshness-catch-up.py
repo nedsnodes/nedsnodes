@@ -60,7 +60,8 @@ Wired as a Stop hook, so it runs at every turn boundary. Each run:
      only when main changed a standing instruction the agent may hold in its
      context: a CLAUDE.md, whose changed lines the note carries; a skill's
      SKILL.md, whose skill the agent is told to invoke again; or an
-     -instructions.md or -prompt.md file. Claude Code reloads skills' list,
+     -instructions.md or -prompt.md file that is not a numbered GHI-MD, whose
+     name comes from its issue's title. Claude Code reloads skills' list,
      hooks and subagent definitions by itself, and reads CLAUDE.md only at an
      agent-session's start and after a compaction, so nothing else needs
      telling. A diff git cannot produce is told as such, never read as
@@ -133,14 +134,14 @@ from pathlib import Path, PurePosixPath
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
@@ -148,17 +149,35 @@ _next_step_lines_spec.loader.exec_module(next_step_lines)
 # Every Stop hook obeys this rule first: see the module's docstring.
 _stop_hooks_stay_silent_rule_specification = importlib.util.spec_from_file_location(
     "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
 stop_hooks_stay_silent_rule = importlib.util.module_from_spec(_stop_hooks_stay_silent_rule_specification)
 _stop_hooks_stay_silent_rule_specification.loader.exec_module(stop_hooks_stay_silent_rule)
 
 _rebase_or_replace_spec = importlib.util.spec_from_file_location(
     "pull_request_conflict_with_main_rebase_or_replace_answer_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
 rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
 _rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
+
+_branch_lock_spec = importlib.util.spec_from_file_location(
+    "branch_rebase_and_push_per_checkout_mutual_exclusion_lock_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "branch-rebase-and-push-per-checkout-mutual-exclusion-lock-common.py")
+branch_lock = importlib.util.module_from_spec(_branch_lock_spec)
+_branch_lock_spec.loader.exec_module(branch_lock)
+
+# Well under the Stop hook's 60-second default, which the fetch before it also spends. A turn end
+# that cannot take the lock leaves the checkout as it is; the next turn end catches it up.
+CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = 20
+
+_reusable_prompt_rule_spec = importlib.util.spec_from_file_location(
+    "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py")
+reusable_prompt_rule = importlib.util.module_from_spec(_reusable_prompt_rule_spec)
+_reusable_prompt_rule_spec.loader.exec_module(reusable_prompt_rule)
 
 STAMP_FILE_NAME = "checkout-freshness-stamp.json"
 
@@ -284,7 +303,7 @@ DETACHED_OPERATION_IN_PROGRESS_LINE = (
 DETACHED_WORK_OF_ITS_OWN_LINE = (
     "It holds work of its own.\n"
     "This checkout is an agent-home, so git refuses commits in it: carry that work to a "
-    "worktree of your own on an nc-topic-branch, as the refusal of `git commit` here says how."
+    "worktree of your own on an nn-topic-branch, as the refusal of `git commit` here says how."
 )
 DETACHED_FAST_FORWARD_REFUSED_LINES = (
     "Git refused the fast-forward: {error}\n"
@@ -344,7 +363,7 @@ NOT_FOR_THE_USER_ADVICE = (
 # agent should care where that is not self-evident. A file's category is
 # decided by path, and the first match wins.
 #
-# nc-systems/ holds the project's systems kept whole — a system's code, its
+# nn-systems/ holds the project's systems kept whole — a system's code, its
 # tests and its design of record in one directory — so a change there is
 # neither a loose script nor a document the agent merely cites: the design it
 # builds to may have moved under it. Without its own category it would fall to
@@ -360,7 +379,7 @@ DRIFT_PATH_CATEGORIES = (
      lambda path: path.startswith(".claude/guard-hooks/")
      or path == ".claude/settings.json"),
     ("systems you build on, code and design of record",
-     lambda path: path.startswith("nc-systems/")),
+     lambda path: path.startswith("nn-systems/")),
     ("scripts your tests run against",
      lambda path: path.startswith("scripts/")),
     ("documents you may cite",
@@ -458,14 +477,10 @@ def skill_of(path: str):
     return None
 
 
-def is_instruction_file(path: str) -> bool:
-    name = path.rsplit("/", 1)[-1]
-    return name.endswith("-instructions.md") or name.endswith("-prompt.md")
-
-
 def standing_instruction_paths(paths):
     return [path for path in paths
-            if is_claude_md(path) or skill_of(path) or is_instruction_file(path)]
+            if is_claude_md(path) or skill_of(path)
+            or reusable_prompt_rule.has_reusable_prompt_file_name_and_is_not_ghi_md(path)]
 
 
 # A CLAUDE.md diff longer than this is named by its changed lines instead of
@@ -588,7 +603,7 @@ NOTE_KINDS_DROPPED = set()
 STOP_AGENT_LINES = []   # notes that could not be queued, sent at Stop instead
 
 
-# Messages here follow docs/nedschorus-wiki/nedschorus-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+# Messages here follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 def report(line: str) -> None:
     """Queue one line for the USER's display."""
     REPORT_LINES.append(line)
@@ -1211,7 +1226,7 @@ def merges_from_main(checkout: Path):
     branch's merges. Raises GitCommandFailed when git cannot read a merge's
     second parent or cannot say whether that parent is on origin/main.
 
-    A merge of another nc-topic-branch is not the banned thing, so the second
+    A merge of another nn-topic-branch is not the banned thing, so the second
     parent is tested for being on main rather than every merge being flagged.
     A branch that carries older catch-up merges is flagged once, which is
     correct: those merges are real and the agent has not been told of them.
@@ -1466,6 +1481,16 @@ def catch_up_session_checkout(checkout: Path, interval_seconds: int) -> None:
     branch = current_branch(checkout)
     if branch is None:
         return
+    # Held from deciding the branch was never pushed until any rebase ends, so the turn-end push
+    # hook, running in parallel, pushes the branch either before that decision or after the rebase.
+    with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(
+            git_dir, CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS) as held:
+        if held:
+            catch_up_session_checkout_branch_under_lock(checkout, git_dir, stamp_path, stamp, branch)
+
+
+def catch_up_session_checkout_branch_under_lock(checkout: Path, git_dir: Path, stamp_path: Path,
+                                                stamp: dict, branch: str) -> None:
     state_key, state_text = head_state(checkout, branch)
 
     # 1. Misbehaviour, to the agent, once per distinct finding of each

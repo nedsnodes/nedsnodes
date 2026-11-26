@@ -1,5 +1,5 @@
 ---
-issue: "[Review reboot-test's archived task list](https://github.com/nedschorus/nedschorus/issues/3846)"
+issue: "[Review reboot-test's archived task list](https://github.com/nedsnodes/nedsnodes/issues/3846)"
 ---
 
 # Review reboot-test's archived task list
@@ -10,13 +10,13 @@ Before the restructure, the user asked for every agent-seat to archive its task 
 
 ## The archive
 
-On 2026-11-17, reboot-test archived its whole task list, 186 tasks (121 pending, 30 in_progress, 35 completed), to `nedlern@ned-box:/home/nedlern/nedschorus-logs/seats/reboot-test/task-list-archive-2026-11-17/`. In that directory, `task-list-archive.md` gives each task's id, status, subject and description, and each `<id>.json` file is that task as the task store held it, with its `blocks`, `blockedBy` and `metadata` fields. The user's rulings are kept in walk-minutes and GHI-MDs, so the archive holds no ruling that exists only there.
+On 2026-11-17, reboot-test archived its whole task list, 186 tasks (121 pending, 30 in_progress, 35 completed), to `nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/reboot-test/task-list-archive-2026-11-17/`. In that directory, `task-list-archive.md` gives each task's id, status, subject and description, and each `<id>.json` file is that task as the task store held it, with its `blocks`, `blockedBy` and `metadata` fields. The user's rulings are kept in walk-minutes and GHI-MDs, so the archive holds no ruling that exists only there.
 
 ## In flight when the list was archived
 
 These may have changed since; check each one's current state before deciding it.
 
-- Open pull requests: [3818](https://github.com/nedschorus/nedschorus/pull/3818), [3348](https://github.com/nedschorus/nedschorus/pull/3348), [3320](https://github.com/nedschorus/nedschorus/pull/3320), [3731](https://github.com/nedschorus/nedschorus/pull/3731), and the draft [3426](https://github.com/nedschorus/nedschorus/pull/3426).
+- Open pull requests: [3818](https://github.com/nedsnodes/nedsnodes/pull/3818), [3348](https://github.com/nedsnodes/nedsnodes/pull/3348), [3320](https://github.com/nedsnodes/nedsnodes/pull/3320), [3731](https://github.com/nedsnodes/nedsnodes/pull/3731), and the draft [3426](https://github.com/nedsnodes/nedsnodes/pull/3426).
 - Pushed branches with no pull request, by archived task:
   - 480: `bash-guards-replay-merge-tree-refusals-print-the-exact-rerun-command-topic-branch`
   - 524: `idle-sweep-failures-to-owning-agent-seat-tasks-and-headless-usage-limit-pause-topic-branch`

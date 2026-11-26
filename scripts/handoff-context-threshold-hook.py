@@ -9,6 +9,10 @@ shows a running subagent, workflow or background shell task younger than its kin
 from BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND, or while a
 transcript it reads launch records from cannot be read, since it then cannot tell what runs.
 With no background_tasks list it counts nothing as running.
+The open-pull-request watcher counts as a one-shot run, not a watcher, only when --poll-once or
+--poll-once-write-baseline stands as an argument of its own; quoted or abbreviated, it is not
+handled, and the one-shot run is counted as the watcher. Written with "=", it is no one-shot run:
+argparse refuses a value for the flag, and the command exits at once.
 
 The post-compaction hook deletes only <session>-handoff-asked, so while <session>-handoff-deferred
 exists the hook still fires below the threshold once the awaited work has finished; it then
@@ -37,7 +41,7 @@ from typing import NamedTuple, Optional
 # Every Stop hook obeys this rule first: see the module's docstring.
 _stop_hooks_stay_silent_rule_specification = importlib.util.spec_from_file_location(
     "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
 stop_hooks_stay_silent_rule = importlib.util.module_from_spec(_stop_hooks_stay_silent_rule_specification)
 _stop_hooks_stay_silent_rule_specification.loader.exec_module(stop_hooks_stay_silent_rule)
@@ -57,7 +61,7 @@ _interim_recognizer_specification.loader.exec_module(interim_recognizer)
 
 _deferred_marker_file_specification = importlib.util.spec_from_file_location(
     "handoff_deferred_marker_and_refused_commands_files_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "handoff"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "handoff"
     / "handoff-deferred-marker-and-refused-commands-files-common.py")
 handoff_deferred_marker_and_refused_commands_files_common = importlib.util.module_from_spec(_deferred_marker_file_specification)
 _deferred_marker_file_specification.loader.exec_module(handoff_deferred_marker_and_refused_commands_files_common)
@@ -78,7 +82,7 @@ def deferred_marker_path(session_id: str) -> Path:
         HANDOFF_DIRECTORY, session_id)
 
 # Caller-owned reincarnation must not replace the caller's answer with a handoff.
-REINCARNATION_OWNED_BY_CALLER_VARIABLE = "NEDSCHORUS_SESSION_REINCARNATION_OWNED_BY_CALLER"
+REINCARNATION_OWNED_BY_CALLER_VARIABLE = "NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER"
 
 # Unknown models use the default, and the handoff instruction names the model id so the table gets updated.
 CONTEXT_WINDOW_TOKENS_BY_MODEL_PREFIX = {
@@ -97,7 +101,7 @@ DEFAULT_THRESHOLD_USED_PERCENTAGE = 33.0
 
 FIRST_TAIL_READ_BYTES = 256 * 1024
 
-# Messages below follow docs/nedschorus-wiki/nedschorus-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+# Messages below follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 # Keep the procedure in the skill so hook instructions cannot drift from it.
 # The count can pass 100% of the window, so a compacted session's message gives both shares.
 SHARE_WITH_COMPACTION_DROPPED = (
@@ -128,20 +132,22 @@ CLAUDE_VERSION_TIMEOUT_SECONDS = 10
 # The approved ban on new work; the wait no longer counts work started after the deferral began.
 NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION = (
     "Carry on, open approval-walks included. Short work, which usually ends "
-    "within 10 minutes, such as a cold-read-fast-read, may start; run such work "
-    "as a subagent or a background Bash task. When you run the handoff writer "
-    "script, nc-systems/handoff/handoff-write-and-check-supervisor.py, before "
-    "this agent-session ends, it names in your session-handoff each subagent "
-    "still working, whenever it started, and each background Bash task that "
-    "started since this handoff-deferral began and is still running, so you need "
-    "not add that work to "
-    "your task list; the end of this agent-session stops that work. Your "
-    "successor is shown that work, and "
-    "decides whether to start it again. If the writer script says it could not list "
-    "that work, it says what to name by hand; name it in the session-handoff's next "
-    "step. Do not start long "
-    "work, such as a cold-read-full-run or a pull-request review: add it to "
-    "your task list for your successor."
+    "within 10 minutes, such as a cold-read-fast-read, may start. Work you leave "
+    "running when your turn ends must run as a subagent, a background Bash task, "
+    "or a detached process, such as one started with setsid or systemd-run --user, "
+    "that writes its result to a file; name that file in your next-step file, "
+    "since the handoff writer script cannot name that process. A command or an "
+    "edit that finishes within your turn needs none of these. When you run the "
+    "handoff writer script, nn-systems/handoff/handoff-write-and-check-supervisor.py, "
+    "before this agent-session ends, it names in your session-handoff each subagent "
+    "still working and each background Bash task still running, whenever it "
+    "started, so you need not add that work to your task list; the end of this "
+    "agent-session stops that work. Your successor is shown that work, and decides "
+    "whether to start it again. Write work the "
+    "writer could not list into a new next-step file that holds your next step "
+    "and names that work, and run the writer again with --next-step-file. Do not "
+    "start long work, such as a cold-read-full-run or a pull-request review: add "
+    "it to your task list for your successor."
 )
 
 HANDOFF_DEFERRED_MARKER_NOT_DELETED = (
@@ -211,7 +217,7 @@ MARKER_NOT_WRITTEN_LINE = (
 )
 
 
-def awaited_phrase(flight: WorkInFlight) -> str:
+def awaited_phrase(flight: "WorkInFlight") -> str:
     """Return the ids of the work the deferral waits for, by kind."""
     parts = [f"subagent {agent_id}" for agent_id in flight.subagent_ids]
     parts += [f"workflow {workflow_id}" for workflow_id in flight.workflow_ids]
@@ -235,14 +241,16 @@ _COMMAND_PREFIX = r"\s*(?:(?:(?:cd|export)[ \t]+" + _WORD + r"|[A-Za-z_]\w*=(?:"
 _TO_THE_END = _REDIRECTIONS + r"[ \t]*;?\s*"
 _WATCHER = (r"(?:bash[ \t]+|python3(?:[ \t]+-u)?[ \t]+)?(?:" + _WORD + r"/)?"
             r"(?:watch-and-merge-provisional[\w.-]*|wait-review-runs[\w.-]*"
-            r"|wait-for-next-pull-request-event[\w.-]*|watch-open-pull-requests-hack\.py)"
+            r"|wait-for-next-pull-request-event[\w.-]*"
+            r"|merge-lane-open-prs-watch-and-reviewer-assign\.py(?!(?:[ \t]+" + _WORD
+            + r")*?[ \t]+--poll-once(?:-write-baseline)?(?![^\s;&|<>])))"
             + _ARGUMENTS + _REDIRECTIONS
             + r"""(?:[ \t]*\|[ \t]*(?:grep[ \t]+-v[ \t]+(?:'[^']*'|"[^"`$\\]*")|tail[ \t]+-n?[ \t]*\d+))*""")
 _LOOP_CONDITION_CHECK = r"(?:![ \t]+)?(?:grep|pgrep|kill[ \t]+-0|test|\[|true|:)" + _ARGUMENTS + _REDIRECTIONS
 _DEADLINE = r"\$\(date[ \t]+\+%s\)"
 WAIT_LIMIT_TABLE_WAITING_TASK_KIND_NAME = "waiting-task"
 BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND = (
-    ("nc-mutation-testing", (r".*(?:mutation|mutmut|mutant).*",), 105.0),
+    ("nn-mutation-testing", (r".*(?:mutation|mutmut|mutant).*",), 105.0),
     ("test-suite", (r".*(?:run-all-test-suites\.py|pytest|-test\.py\b|_test\.py\b|unittest"
                     r"|head-tests-with-retry|head-test-run|test-suite|run-suites).*",), 90.0),
     (WAIT_LIMIT_TABLE_WAITING_TASK_KIND_NAME, tuple(_COMMAND_PREFIX + shape + _TO_THE_END for shape in (

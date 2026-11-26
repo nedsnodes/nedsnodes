@@ -25,17 +25,19 @@ from pathlib import Path, PurePosixPath
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 GIT_CALL_TIMEOUT_SECONDS = 20
 MAIN_REF = "origin/main"
-ORDINARY_HYPHENATED_WORDS_LIST_PATH = "docs/nedschorus-wiki/nedschorus-ordinary-hyphenated-words-list.md"
+ORDINARY_HYPHENATED_WORDS_LIST_PATH = "docs/nedsnodes-wiki/nedsnodes-ordinary-hyphenated-words-list.md"
 GLOSSARY_FILE_SUFFIX = "-glossary.md"
-# One token set per main commit, shared by every caller on this machine.
-MAIN_TOKEN_CACHE_DIRECTORY = Path(tempfile.gettempdir()) / "new-shared-names-main-token-cache"
+# One token set per main commit, shared by every caller on this machine. None means the folder of
+# that name in the temporary directory, found when first used: a program that only imports this
+# one, such as merge-lane-2's watcher, must still start where no temporary directory is writable.
+MAIN_TOKEN_CACHE_DIRECTORY = None
 # Files larger than this on main are data, not prose or code a name is defined in.
 MAIN_BLOB_SIZE_LIMIT_BYTES = 2_000_000
 
@@ -103,7 +105,9 @@ def changed_files(checkout: Path, merge_base: str):
 
 def main_token_set(checkout: Path, main_commit: str):
     """Return every token in main's files, read once per main commit and cached on disk."""
-    cache_path = MAIN_TOKEN_CACHE_DIRECTORY / f"{main_commit}.txt"
+    cache_directory = MAIN_TOKEN_CACHE_DIRECTORY or (
+        Path(tempfile.gettempdir()) / "new-shared-names-main-token-cache")
+    cache_path = cache_directory / f"{main_commit}.txt"
     try:
         return set(cache_path.read_text().split("\n"))
     except OSError:
@@ -129,8 +133,8 @@ def main_token_set(checkout: Path, main_commit: str):
         tokens.add(entry.path)
         tokens.update(PurePosixPath(entry.path).parts)
     try:
-        MAIN_TOKEN_CACHE_DIRECTORY.mkdir(parents=True, exist_ok=True)
-        for stale in MAIN_TOKEN_CACHE_DIRECTORY.glob("*.txt"):
+        cache_directory.mkdir(parents=True, exist_ok=True)
+        for stale in cache_directory.glob("*.txt"):
             stale.unlink()
         temporary = cache_path.with_suffix(".partial")
         temporary.write_text("\n".join(sorted(tokens)))

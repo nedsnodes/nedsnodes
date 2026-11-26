@@ -1,10 +1,10 @@
 ---
-issue: "[Mutual oversight: agents watch each other's session transcripts, both runtimes — capability record + lean build candidate](https://github.com/nedschorus/nedschorus/issues/36)"
+issue: "[Mutual oversight: agents watch each other's session transcripts, both runtimes — capability record + lean build candidate](https://github.com/nedsnodes/nedsnodes/issues/36)"
 ---
 
 # Mutual oversight: agents watch each other's session transcripts, both runtimes — capability record + lean build candidate
 
-Boss-named capability ("mutual oversight" — his replacement for "spying"), boss-directed GHI 2026-07-29, filed by new-vp (nedlern session b6241858). Capability record plus build candidate: **agents watch each other's session transcripts, in both runtime directions**, so one agent can follow another's work in near-real time without the human ferrying content between sessions.
+Boss-named capability ("mutual oversight" — his replacement for "spying"), boss-directed GHI 2026-07-29, filed by new-vp (nedlern session b6241858). Capability record plus build candidate: **agents watch each other's session transcripts, in both directions between Claude Code and Codex**, so one agent can follow another's work in near-real time without the human ferrying content between sessions.
 
 ## What is proven today (all evidence verified on disk before filing)
 
@@ -22,14 +22,14 @@ A Codex-side monitor: file-change detection (watchexec, established OSS) → sav
 - Research report (machine-local session artifact, verified 11.9KB): `/Users/el/Projects/nedlern-sonnet/cvp/tasks/sessions/cvp-cross-agent-jsonl-monitor-research-2026-07-29.md` — **re-home this file if this GHI outlives the legacy worktrees**; it is not repository-committed.
 - Wake-canary evidence (verified): `/Users/el/Projects/nedlern-sonnet/cvp/tasks/sessions/cvp-monitor-wake-canary-2026-07-28.md`
 - Official docs cited by the research: Claude Code Monitor tool — https://code.claude.com/docs/en/tools-reference#monitor-tool ; Codex App Server — https://learn.chatgpt.com/docs/app-server ; watchexec — https://github.com/watchexec/watchexec
-- Research: cvp (Codex runtime), 2026-07-29, boss-directed, relayed and verified by new-vp. Related: the session-lifecycle observations on GHI [Runtime-behavior research bundle: instruction compression + deliberate scrub, instruction precedence, output styles, context clearing, names reviewer, memory maintenance](https://github.com/nedschorus/nedschorus/issues/29) (transcript identity and store keying) and the comms-bridge/companion design surfaces this capability may partially subsume.
+- Research: cvp (Codex), 2026-07-29, boss-directed, relayed and verified by new-vp. Related: the session-lifecycle observations on GHI [Runtime-behavior research bundle: instruction compression + deliberate scrub, instruction precedence, output styles, context clearing, names reviewer, memory maintenance](https://github.com/nedschorus/nedschorus/issues/29) (transcript identity and store keying) and the comms-bridge/companion design surfaces this capability may partially subsume.
 
 ## Outcome
 
-Closed as not planned on 2026-09-29, by the user's "y" to item 2 of the walk eight-deferrals-with-no-trigger-2026-09-29, shown updated at his request ("repeat 2, updated"). Minutes: `nedlern@ned-box:/home/nedlern/nedschorus-logs/walk/eight-deferrals-with-no-trigger-2026-09-29-minutes.md`.
+Closed as not planned on 2026-09-29, by the user's "y" to item 2 of the walk eight-deferrals-with-no-trigger-2026-09-29, shown updated at his request ("repeat 2, updated"). Minutes: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/eight-deferrals-with-no-trigger-2026-09-29-minutes.md`.
 
 Nothing left in this issue needs building:
 
 - **Claude watching Claude already runs.** The Mac merge-lane seat follows the other seats' dialogs on both machines with `scripts/watch-agent-dialogs.py`.
-- **No nedschorus seat runs Codex, so there is no Codex session to wake.** In this repository Codex runs only as a one-shot reviewer: `scripts/code-review-codex-cell.py`, the cold-read Codex cell `nc-systems/cold-read/cold-read-codex-cell.py`, and `scripts/sanity-check-attacks.py`. Outside nedschorus, the legacy nedlern checkout runs a Codex App Server adapter on the Mac, `/Users/el/Projects/nedlern/scripts/codex-app-server-adapter.py`; whoever reopens the Codex wake path starts from that adapter.
+- **No nedschorus seat runs Codex, so there is no Codex session to wake.** In this repository Codex runs only as a one-shot reviewer: `scripts/code-review-codex-cell.py`, the cold-read Codex cell `nn-systems/cold-read/cold-read-codex-cell.py`, and `scripts/sanity-check-attacks.py`. Outside nedschorus, the legacy nedlern checkout runs a Codex App Server adapter on the Mac, `/Users/el/Projects/nedlern/scripts/codex-app-server-adapter.py`; whoever reopens the Codex wake path starts from that adapter.
 - **The oversight the user asked for during the walk does not need a transcript watcher.** Spotting a seat's open tasks stranded after the seat is retired or renamed is a check a program runs, and checking whether another seat is already on a piece of work is the asking agent reading every seat's task list itself, with the task viewer `scripts/seat-task-list-read-hack.py`, which reads the task lists of the seats on both machines. Both are proposed to the user as a small task subsystem, recorded under "Side rulings and open questions" in the same walk's minutes and still open with him.

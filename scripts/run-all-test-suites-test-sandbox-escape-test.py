@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Tests that a suite inside its nc-test-sandbox cannot escape it.
+"""Tests that a suite inside its nn-test-sandbox cannot escape it.
 
 A probe is run as a suite by scripts/run-all-test-suites.py's own run_one_suite,
 the path every suite takes: in a cgroup scope at low priority, with the input
 recorder, in a checkout that is a linked worktree, as merge-lane-2's head test
-runs and nc-mutation-testing use. The probe tries every escape. Each target is one
+runs and nn-mutation-testing use. The probe tries every escape. Each target is one
 this file made for the purpose: a file in the real home directory, a tmux server
 on a socket of its own, a listening socket in the session's runtime directory, a
 sleeper process, a scratch repository. If a protection were missing, the worst a
-probe can do is change those targets, and this file removes them afterwards. The
+probe can do is change those targets, and this file removes them afterwards; what a run
+killed with SIGKILL could not remove, the next run removes before it starts. The
 real credential files are only measured, never printed, and the machine's real
 listening sockets only connected to and closed.
 
@@ -25,12 +26,15 @@ Run: python3 scripts/run-all-test-suites-test-sandbox-escape-test.py   (exit 0 =
 """
 
 import contextlib
+import errno
 import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -80,7 +84,7 @@ CREDENTIAL_VARIABLES_THAT_MUST_BE_UNSET = (
     "DATABASE_PASSWORD")
 # Relative to the home directory, each matched in its own directory.
 CREDENTIAL_FILE_PATTERNS_THAT_MUST_BE_HIDDEN = (
-    ".config/nedschorus/*.token", ".claude/.credentials.json", ".codex/auth.json*",
+    ".config/nedsnodes/*.token", ".claude/.credentials.json", ".codex/auth.json*",
     ".config/gh/hosts.yml", ".ssh/id_*", ".git-credentials", ".netrc",
     ".gnupg/private-keys-v1.d/*", ".local/share/keyrings/*", ".steam/*.token",
     ".aws/credentials", ".docker/config.json", "nedsmessenger/secrets/*",
@@ -91,7 +95,7 @@ MACHINE_SOCKETS_NAMED = (
     "/run/docker.sock", "/run/dbus/system_bus_socket", "/run/snapd.socket",
     "/run/systemd/io.systemd.Manager")
 # gnome-shell on ned-box serves displays :0 and :1; its authorization cookie lives in the
-# runtime directory, which the nc-test-sandbox hides.
+# runtime directory, which the nn-test-sandbox hides.
 X11_DISPLAYS_PROBED = (0, 1)
 PROBE_SUITE = "escape-probe-test.py"
 
@@ -314,7 +318,7 @@ for path in targets["late_sockets"]:
 
 def bwrap_unavailable_reason():
     if not sys.platform.startswith("linux"):
-        return f"{sys.platform} has no nc-test-sandbox; it is built with bwrap on Linux"
+        return f"{sys.platform} has no nn-test-sandbox; it is built with bwrap on Linux"
     if os.environ.get(runner.SIGNAL_SANDBOX_INSIDE_VARIABLE):
         return "this suite is already inside a sandbox, where bwrap cannot start again"
     if shutil.which("bwrap") is None:
@@ -349,6 +353,98 @@ def listening_unix_sockets_of_this_machine():
             kind = socket.SOCK_SEQPACKET if fields[4] == "0005" else socket.SOCK_STREAM
             found.add((fields[7], int(kind)))
     return sorted(found)
+
+
+TARGET_NAME_PREFIX = "run-all-test-suites-escape-test-"
+RUN_NAME = re.escape(TARGET_NAME_PREFIX) + r"(\d+)"
+# The probe tries to write this name in every directory it can reach.
+PROBE_FILE_NAME = RUN_NAME + "-probe"
+# The names run_probe gives what it makes in each directory outside its scratch directory,
+# so a later run can find what a killed run left and keep an unrelated entry of a like name.
+# Each alternative holds one group, the PID.
+HOME_TARGET_NAME_PATTERN = re.compile(rf"\.{RUN_NAME}-unlisted|{PROBE_FILE_NAME}")
+CACHE_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}|{RUN_NAME}-log|{RUN_NAME}-main-worktree")
+# The 8 characters are mkdtemp's.
+TMP_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}-[a-z0-9_]{{8}}")
+TMUX_TARGET_NAME_PATTERN = re.compile(RUN_NAME)
+VAR_TMP_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}-late\.sock|{PROBE_FILE_NAME}")
+DEV_SHM_TARGET_NAME_PATTERN = re.compile(PROBE_FILE_NAME)
+RUNTIME_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}\.sock|{PROBE_FILE_NAME}")
+
+
+def file_type_test_for_what_run_probe_makes(path, target_name_pattern):
+    """The stat module's test for the file type run_probe makes under this name."""
+    if target_name_pattern is TMUX_TARGET_NAME_PATTERN or path.name.endswith(".sock"):
+        return stat.S_ISSOCK
+    if path.name.endswith("-probe"):
+        return stat.S_ISREG
+    return stat.S_ISDIR
+
+
+def target_name_pattern_by_directory_run_probe_sweeps(writable_directories, home, runtime):
+    """The directories run_probe sweeps for what killed runs left, each once, keyed by its
+    path as a string, with the name pattern of what run_probe makes there."""
+    fixed = {
+        home: HOME_TARGET_NAME_PATTERN,
+        home / ".cache": CACHE_TARGET_NAME_PATTERN,
+        "/tmp": TMP_TARGET_NAME_PATTERN,
+        pathlib.Path("/tmp") / f"tmux-{os.getuid()}": TMUX_TARGET_NAME_PATTERN,
+        "/var/tmp": VAR_TMP_TARGET_NAME_PATTERN,
+        "/dev/shm": DEV_SHM_TARGET_NAME_PATTERN,
+        runtime: RUNTIME_TARGET_NAME_PATTERN,
+    }
+    return {
+        **{str(pathlib.Path(directory)): re.compile(PROBE_FILE_NAME)
+           for directory in writable_directories},
+        **{str(pathlib.Path(directory)): pattern for directory, pattern in fixed.items()},
+    }
+
+
+def remove_targets_left_by_ended_runs(target_name_pattern_by_directory):
+    """Remove each entry whose name its directory's pattern matches, whose file type is the
+    one run_probe makes under that name, and whose PID is of a process that no longer runs, or of this process, which an ended run may have had;
+    return the paths removed.
+
+    The runner ends a suite past its time limit, or every suite of a stopped run, with
+    SIGKILL, so run_probe's own cleanup never runs and the targets stay, among them a
+    directory in the real home directory holding a planted credential."""
+    removed = []
+    for directory, target_name_pattern in target_name_pattern_by_directory.items():
+        try:
+            entries = sorted(pathlib.Path(directory).iterdir())
+        except FileNotFoundError:
+            continue
+        for path in entries:
+            matched = target_name_pattern.fullmatch(path.name)
+            if not matched:
+                continue
+            pid = int(matched.group(matched.lastindex))
+            if pid != os.getpid():
+                try:
+                    os.kill(pid, 0)
+                    continue
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    continue
+            is_the_type_run_probe_makes = file_type_test_for_what_run_probe_makes(
+                path, target_name_pattern)
+            # Another run starting at the same time may remove the same path first, or put a
+            # directory where this run found a socket or file, which unlink then refuses.
+            try:
+                if not is_the_type_run_probe_makes(os.lstat(path).st_mode):
+                    continue
+                if is_the_type_run_probe_makes is stat.S_ISDIR:
+                    shutil.rmtree(path)
+                else:
+                    try:
+                        path.unlink()
+                    except IsADirectoryError:
+                        continue
+            except FileNotFoundError:
+                continue
+            removed.append(str(path))
+    return removed
 
 
 @contextlib.contextmanager
@@ -386,14 +482,21 @@ def make_linked_worktree(scratch):
 
 
 def run_probe(scratch):
-    """Run the probe as a suite in its nc-test-sandbox, and check every target after."""
+    """Run the probe as a suite in its nn-test-sandbox, and check every target after."""
     sandbox_prefix, unconfined_because = runner.signal_sandbox()
     if not sandbox_prefix:
         print(f"SKIP  every escape case: the runner builds no sandbox here: {unconfined_because}")
         return
     home = pathlib.Path(runner.REAL_HOME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
     runtime = pathlib.Path(runner.XDG_RUNTIME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
-    name = f"run-all-test-suites-escape-test-{os.getpid()}"
+    name = f"{TARGET_NAME_PREFIX}{os.getpid()}"
+    writable_directories = [*runner.directories_this_account_can_create_files_in_hidden_in_test_sandbox(),
+                            str(home)]
+    left = remove_targets_left_by_ended_runs(
+        target_name_pattern_by_directory_run_probe_sweeps(writable_directories, home, runtime))
+    if left:
+        print(f"removed {len(left)} target(s) runs killed before their cleanup left: "
+              + ", ".join(left))
 
     git_directory, checkout = make_linked_worktree(scratch)
     (checkout / PROBE_SUITE).write_text(X11_PROBE_SOURCE + PROBE_SOURCE)
@@ -481,8 +584,6 @@ def run_probe(scratch):
     unlisted_credential.write_text("planted-secret")
     credential_files.append(str(unlisted_credential))
     probe_file_name = f"{name}-probe"
-    writable_directories = [*runner.directories_this_account_can_create_files_in_hidden_in_test_sandbox(),
-                            str(home)]
     late_sockets = [pathlib.Path("/var/tmp") / f"{name}-late.sock", canary_dir / "late.sock"]
     late_ready, late_made = "escape-test\tlate sockets ready", "escape-test\tlate sockets made"
     late_listeners = []
@@ -584,7 +685,7 @@ def run_probe(scratch):
             except ValueError:
                 continue
             attempts[record["attempt"]] = record
-        check("the probe ran as a suite inside its nc-test-sandbox and reported",
+        check("the probe ran as a suite inside its nn-test-sandbox and reported",
               result["exit"] == 0 and len(attempts) > 40, (result["exit"], log_text[-1500:]))
         check("the probe ran in a cgroup scope of its own, as suites do, and its counters "
               "were read",
@@ -917,10 +1018,230 @@ def check_blob_hashes_run_no_filter(scratch):
           not marker.exists() and hashes.get("file.txt") not in (None, "unknown"), hashes)
 
 
+def check_targets_of_a_killed_run_removed_by_the_next(scratch):
+    """What a run killed with SIGKILL planted is removed by the next run's start, while a
+    running run's targets and names this file never makes are kept."""
+    home, cache, tmp = scratch / "home", scratch / "cache", scratch / "tmp"
+    var_tmp = scratch / "var-tmp"
+    home.mkdir()
+    cache.mkdir()
+    tmp.mkdir()
+    var_tmp.mkdir()
+    planter = subprocess.Popen(
+        [sys.executable, "-c",
+         "import os, pathlib, sys, time\n"
+         "home, cache = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])\n"
+         f"name = {TARGET_NAME_PREFIX!r} + str(os.getpid())\n"
+         "(home / f'.{name}-unlisted').mkdir()\n"
+         "(home / f'.{name}-unlisted' / 'oauth-token').write_text('planted-secret')\n"
+         "(cache / name).mkdir()\n"
+         "(cache / f'{name}-log').mkdir()\n"
+         "(home / f'{name}-probe').write_text('')\n"
+         "(cache / f'{name}-main-worktree').mkdir()\n"
+         "print('planted', flush=True)\n"
+         "time.sleep(600)\n",
+         str(home), str(cache)],
+        stdout=subprocess.PIPE, text=True)
+    planted_line = planter.stdout.readline()
+    planter.kill()
+    planter.wait()
+    planter.stdout.close()
+    killed = TARGET_NAME_PREFIX + str(planter.pid)
+    killed_paths = [home / f".{killed}-unlisted", cache / killed, cache / f"{killed}-log",
+                    home / f"{killed}-probe", cache / f"{killed}-main-worktree"]
+    running = subprocess.Popen(["sleep", "600"])
+    # A PID this process may not signal; os.kill is made to say so below.
+    unsignalable_pid = planter.pid + 1_000_000_000
+    real_kill = os.kill
+
+    def kill_refusing_the_unsignalable_pid(pid, signal_number):
+        if pid == unsignalable_pid:
+            raise PermissionError(1, "Operation not permitted")
+        return real_kill(pid, signal_number)
+
+    tmp_target = tmp / f"{killed}-abc_1234"
+    var_tmp_target = var_tmp / f"{killed}-late.sock"
+    directory_named_like_a_late_socket = scratch / "var-tmp-holding-a-directory" / var_tmp_target.name
+    try:
+        kept = [home / f".{TARGET_NAME_PREFIX}{running.pid}-unlisted",
+                home / f".{TARGET_NAME_PREFIX}{unsignalable_pid}-unlisted",
+                home / f".{killed}-unlisted-by-someone-else", cache / f"{TARGET_NAME_PREFIX}notes",
+                cache / f"{killed}-abc_1234", home / f"{killed}-main-worktree",
+                tmp / f"{killed}-main-worktree", var_tmp / f"{killed}-log",
+                var_tmp / f"{killed}-probe"]
+        for path in kept:
+            path.mkdir()
+        directory_named_like_a_late_socket.mkdir(parents=True)
+        probe_named_files_where_run_probe_writes_none = [tmp / f"{killed}-probe",
+                                                         cache / f"{killed}-probe"]
+        for path in probe_named_files_where_run_probe_writes_none:
+            path.write_text("")
+        kept += [directory_named_like_a_late_socket, *probe_named_files_where_run_probe_writes_none]
+        tmp_target.mkdir()
+        # A relative bind, because a scratch path can exceed the length a socket address allows.
+        working_directory = os.getcwd()
+        os.chdir(var_tmp)
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale_socket:
+                stale_socket.bind(var_tmp_target.name)
+        finally:
+            os.chdir(working_directory)
+        own = cache / f"{TARGET_NAME_PREFIX}{os.getpid()}-log"
+        own.mkdir()
+        check("a run killed with SIGKILL leaves its targets, among them a planted credential",
+              planted_line == "planted\n" and all(path.exists() for path in killed_paths),
+              planted_line)
+        os.kill = kill_refusing_the_unsignalable_pid
+        try:
+            removed = remove_targets_left_by_ended_runs({
+                home: HOME_TARGET_NAME_PATTERN, cache: CACHE_TARGET_NAME_PATTERN,
+                tmp: TMP_TARGET_NAME_PATTERN, var_tmp: VAR_TMP_TARGET_NAME_PATTERN,
+                directory_named_like_a_late_socket.parent: VAR_TMP_TARGET_NAME_PATTERN,
+                scratch / "missing": DEV_SHM_TARGET_NAME_PATTERN})
+        finally:
+            os.kill = real_kill
+        check("the next run removes every target the killed run left, its mkdtemp directory "
+              "in /tmp among them, and one named for its own PID",
+              not any(path.exists() for path in [*killed_paths, tmp_target, var_tmp_target, own])
+              and sorted(removed) == sorted(
+                  map(str, [*killed_paths, tmp_target, var_tmp_target, own])), removed)
+        check("the next run keeps a running run's targets, one named for a process it may not "
+              "signal, names this file never makes, a mkdtemp-like name outside /tmp, "
+              "main-worktree and log names outside .cache, probe names in /tmp and .cache, "
+              "and a directory with a socket's or a probe file's name",
+              all(path.exists() for path in kept))
+
+        # Another run removes the same target between this run's listing and its removal.
+        raced = cache / f"{killed}-log"
+        raced.mkdir()
+        real_rmtree = shutil.rmtree
+
+        def rmtree_after_another_run_removed_it(path, *arguments, **keywords):
+            real_rmtree(path)
+            real_rmtree(path, *arguments, **keywords)
+
+        shutil.rmtree = rmtree_after_another_run_removed_it
+        try:
+            raced_removed = remove_targets_left_by_ended_runs({cache: CACHE_TARGET_NAME_PATTERN})
+            raised = None
+        except OSError as error:
+            raced_removed, raised = [], error
+        finally:
+            shutil.rmtree = real_rmtree
+        check("the next run passes over a target another run removed first",
+              raised is None and not raced.exists() and str(raced) not in raced_removed,
+              (raised, raced_removed))
+
+        # Another run puts a directory where this run's lstat found a probe file.
+        replaced = scratch / "probe-replaced-by-a-directory" / f"{killed}-probe"
+        replaced.mkdir(parents=True)
+        (replaced / "kept.txt").write_text("kept\n")
+        regular_file_status = os.lstat(__file__)
+        real_lstat = os.lstat
+
+        real_unlink = pathlib.Path.unlink
+
+        lookups_of_replaced = []
+        unlink_attempts_on_replaced = []
+
+        def lstat_seeing_a_file_where_a_directory_now_is(path, *arguments, **keywords):
+            if pathlib.Path(path) == replaced and not lookups_of_replaced:
+                lookups_of_replaced.append(path)
+                return regular_file_status
+            return real_lstat(path, *arguments, **keywords)
+
+        # Linux's error, injected, since macOS refuses with EPERM, which the sweep must not
+        # swallow.
+        def unlink_refusing_a_directory_as_linux_does(self, *arguments, **keywords):
+            if self == replaced:
+                unlink_attempts_on_replaced.append(self)
+                raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(self))
+            return real_unlink(self, *arguments, **keywords)
+
+        os.lstat = lstat_seeing_a_file_where_a_directory_now_is
+        pathlib.Path.unlink = unlink_refusing_a_directory_as_linux_does
+        try:
+            replaced_removed = remove_targets_left_by_ended_runs(
+                {replaced.parent: re.compile(PROBE_FILE_NAME)})
+            raised = None
+        except OSError as error:
+            replaced_removed, raised = [], error
+        finally:
+            os.lstat = real_lstat
+            pathlib.Path.unlink = real_unlink
+        check("the next run never removes recursively a directory put where it found a probe "
+              "file",
+              raised is None and (replaced / "kept.txt").exists()
+              and str(replaced) not in replaced_removed, (raised, replaced_removed))
+        check("the next run tries to unlink the probe file it found and passes over the "
+              "directory unlink refuses",
+              len(unlink_attempts_on_replaced) == 1, unlink_attempts_on_replaced)
+
+        # The sweep cannot remove a stale directory a killed run left.
+        unremovable = cache / f"{killed}-log"
+        unremovable.mkdir()
+
+        def rmtree_refused(path, *arguments, **keywords):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+
+        shutil.rmtree = rmtree_refused
+        try:
+            remove_targets_left_by_ended_runs({cache: CACHE_TARGET_NAME_PATTERN})
+            raised = None
+        except PermissionError as error:
+            raised = error
+        finally:
+            shutil.rmtree = real_rmtree
+        check("the next run fails when it cannot remove a stale directory a killed run left",
+              raised is not None, raised)
+
+        # A child of the stale directory turns into a directory partway through its removal.
+        def rmtree_finding_a_child_turned_directory(path, *arguments, **keywords):
+            raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR),
+                                    str(pathlib.Path(path) / "child"))
+
+        shutil.rmtree = rmtree_finding_a_child_turned_directory
+        try:
+            remove_targets_left_by_ended_runs({cache: CACHE_TARGET_NAME_PATTERN})
+            raised = None
+        except IsADirectoryError as error:
+            raised = error
+        finally:
+            shutil.rmtree = real_rmtree
+        check("the next run fails when a stale directory's removal stops partway",
+              raised is not None, raised)
+        real_rmtree(unremovable)
+
+        # The map is built as run_probe builds it, from a simulated writable-directory scan.
+        scan_found = scratch / "scan-found"
+        scan_found.mkdir()
+        stale_probe = scan_found / f"{killed}-probe"
+        stale_probe.write_text("")
+        runtime = scratch / "runtime"
+        swept = target_name_pattern_by_directory_run_probe_sweeps(
+            [str(scan_found), str(home)], home, runtime)
+        check("run_probe's map names each directory once, the home directory with the "
+              "pattern of what run_probe makes there",
+              len({pathlib.Path(directory) for directory in swept}) == len(swept)
+              and swept.get(str(home)) is HOME_TARGET_NAME_PATTERN, sorted(map(str, swept)))
+        scan_found_removed = remove_targets_left_by_ended_runs(
+            {directory: pattern for directory, pattern in swept.items()
+             if pathlib.Path(directory).is_relative_to(scratch)})
+        check("the next run removes a probe file a killed run left in a directory the "
+              "writable-directory scan found",
+              not stale_probe.exists() and str(stale_probe) in scan_found_removed,
+              scan_found_removed)
+    finally:
+        running.kill()
+        running.wait()
+
+
 with tempfile.TemporaryDirectory() as scratch_name:
     check_runner_writes_and_reads_refuse_symbolic_links(pathlib.Path(scratch_name))
 with tempfile.TemporaryDirectory() as scratch_name:
     check_blob_hashes_run_no_filter(pathlib.Path(scratch_name))
+with tempfile.TemporaryDirectory() as scratch_name:
+    check_targets_of_a_killed_run_removed_by_the_next(pathlib.Path(scratch_name))
 
 unavailable = bwrap_unavailable_reason()
 if unavailable:

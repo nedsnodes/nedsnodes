@@ -96,6 +96,28 @@ def main():
     scratch = Path(tempfile.mkdtemp(prefix="merge-lane-common-test-")).resolve()
     saved_directory, saved_home = os.getcwd(), os.environ.get("HOME")
     try:
+        names_module = (MODULE.resolve().parents[1] / "nn-systems" / "general-tools"
+                        / "github-repository-name-and-name-before-project-rename-common.py")
+        check("the helper imports the shared module merge-gate.sh reads, and REPOSITORY holds its "
+              "value",
+              Path(common._repository_names.__file__).resolve() == names_module.resolve()
+              and common.REPOSITORY == common._repository_names.REPOSITORY,
+              common.REPOSITORY)
+        # A name main does not hold, so a copy of today's name in the helper cannot pass.
+        stand_in = scratch / "stand-in-checkout"
+        (stand_in / "scripts").mkdir(parents=True)
+        shutil.copy(MODULE, stand_in / "scripts" / MODULE.name)
+        (stand_in / "scripts" / "run-all-test-suites.py").write_text("")
+        stand_in_names_module = stand_in / names_module.relative_to(MODULE.resolve().parents[1])
+        stand_in_names_module.parent.mkdir(parents=True, exist_ok=True)
+        stand_in_names_module.write_text('REPOSITORY = "stand-in-owner/stand-in-repository"\n')
+        stand_in_spec = importlib.util.spec_from_file_location(
+            "merge_lane_helpers_common_in_stand_in_checkout", stand_in / "scripts" / MODULE.name)
+        stand_in_common = importlib.util.module_from_spec(stand_in_spec)
+        stand_in_spec.loader.exec_module(stand_in_common)
+        check("REPOSITORY is whatever the shared module beside the helper names",
+              stand_in_common.REPOSITORY == "stand-in-owner/stand-in-repository",
+              stand_in_common.REPOSITORY)
         os.chdir(scratch)
         arguments = parse(["--merge-lane-worktrees-and-outputs-directory", "helpers",
                            "--merge-lane-review-worktrees-directory", "worktrees",
@@ -150,7 +172,7 @@ def main():
               f"{arguments.review_tools_worktree_at_main}")
         check("the token file is the one merge-gate.sh reads, under HOME at call time",
               common.merge_account_token_file()
-              == home / ".config" / "nedschorus" / "ned-review-merge.token",
+              == home / ".config" / "nedsnodes" / "ned-review-merge.token",
               str(common.merge_account_token_file()))
         try:
             common.read_merge_account_token()

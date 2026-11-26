@@ -11,7 +11,7 @@ When a pull request renames or removes a constant, a function or a class, Markdo
 ## The evidence
 
 - PR [Memory refusal prints only the caller's instructions, chosen by agent_id](https://github.com/nedschorus/nedschorus/pull/2818), merged as commit ce0e1fc, replaced the constant `MEMORY_WRITE_DENY_MESSAGE` in `.claude/guard-hooks/instruction-file-guard.py` with `MAIN_AGENT_MEMORY_WRITE_DENY_MESSAGE` and `SUBAGENT_MEMORY_WRITE_DENY_MESSAGE`, both built by `memory_write_deny_message`.
-- At that commit, three GHI-MDs still cite the old name: `docs/issues/30-trigger-first-instruction-delivery-design.md` three times, `docs/issues/1349-save-each-lesson-where-agents-meet-it-at.md` twice and `docs/issues/2118-ruling-agent-keeps-user-rulings-checks-approval-walk.md` once. On main at d7ad9fb2f, `git grep -nw MEMORY_WRITE_DENY_MESSAGE -- '*.md'` still finds those six lines.
+- At that commit, three GHI-MDs still cite the old name: `docs/issues/30-trigger-first-instruction-delivery.system.design.md` three times, `docs/issues/1349-save-each-lesson-where-agents-meet-it-at.md` twice and `docs/issues/2118-ruling-agent-keeps-user-rulings-checks-approval-walk.md` once. On main at d7ad9fb2f, `git grep -nw MEMORY_WRITE_DENY_MESSAGE -- '*.md'` still finds those six lines.
 - A Claude pull request reviewer, posting as `mac-claude`, found them by running `git grep` for the old name, and made no finding on them because no program parses those lines, in [review 5819097651](https://github.com/nedschorus/nedschorus/pull/2818#pullrequestreview-5819097651). merge-lane-2 carried them as non-blocking item 1 of [review 5819112007](https://github.com/nedschorus/nedschorus/pull/2818#pullrequestreview-5819112007) and merged PR 2818. No program reported them.
 - PR [Issue files cite the split memory refusal constants](https://github.com/nedschorus/nedschorus/pull/2829) fixes the six lines; the `#root_cause_not_fixed` line of its description links this issue.
 
@@ -42,7 +42,7 @@ Recommendation: option 1, because the harm condition of CLAUDE.md's rule is not 
 
 ## What the user ruled, 2026-11-08
 
-The user chose option 1, build nothing now, answering "A" at 2026-11-08 19:10 to item 4 of 5 of the approval-walk whose minutes are `nedlern@ned-box:/home/nedlern/nedschorus-logs/walk/memory-refusal-only-the-callers-lines-and-restored-branch-task-rebase-gap-approval-walk-2026-11-08-minutes.md`, which `scripts/walk-files-ship.py` puts there when the walk closes; on 2026-11-08 the walk was still open and the file was there only in the walk's checkout, under `docs/walk/`. The one case did no harm: a pull request reviewer found the six lines and PR 2829 fixed them, so the harm condition of CLAUDE.md's rule on proposing a guard or a validation is not met. The issue closes as not planned, until a second case shows harm.
+The user chose option 1, build nothing now, answering "A" at 2026-11-08 19:10 to item 4 of 5 of the approval-walk whose minutes are `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/memory-refusal-only-the-callers-lines-and-restored-branch-task-rebase-gap-approval-walk-2026-11-08-minutes.md`, which `scripts/walk-files-ship.py` puts there when the walk closes; on 2026-11-08 the walk was still open and the file was there only in the walk's checkout, under `docs/walk/`. The one case did no harm: a pull request reviewer found the six lines and PR 2829 fixed them, so the harm condition of CLAUDE.md's rule on proposing a guard or a validation is not met. The issue closes as not planned, until a second case shows harm.
 
 ## Next action
 

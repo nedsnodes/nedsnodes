@@ -16,6 +16,7 @@ AND that the output says what to do about it.
 
 import atexit
 import contextlib
+import errno
 import importlib.util
 import io
 import json
@@ -23,6 +24,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1490,10 +1492,6 @@ check("the reflog surface on a non-repo is UNAVAILABLE, not NOT FOUND",
 # a caller's git redirect variables — every command runs without them
 # --------------------------------------------------------------------------
 
-# Imported here, not with the others, for the reason given at `import select`
-# below: an import added at the top moves the line run-all-test-suites cites.
-import json  # noqa: E402
-
 # Written out here rather than read from the program, so a name dropped from
 # the program's list fails a case instead of shrinking what the cases check.
 GIT_REDIRECT_VARIABLES_EXPECTED_DROPPED = (
@@ -1723,8 +1721,8 @@ check("--skip timeshift still greps the box's transcripts",
 # --------------------------------------------------------------------------
 
 timeshift_hit = FakeRunner([
-    ("ssh", (0, "HIT /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedschorus/a/b.md\n"
-               "HIT /mnt/backup/timeshift/snapshots/2026-08-14_11-35-50/localhost/home/nedlern/Projects/nedschorus/a/b.md\n", "")),
+    ("ssh", (0, "HIT /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedsnodes/a/b.md\n"
+               "HIT /mnt/backup/timeshift/snapshots/2026-08-14_11-35-50/localhost/home/nedlern/Projects/nedsnodes/a/b.md\n", "")),
 ])
 report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
                                  finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_hit)
@@ -1744,6 +1742,12 @@ generated = glob_probe.calls[0]
 check("a seat-directory root keeps its glob unquoted so the shell expands it",
       "/home/nedlern/agents/*" in generated and "'/home/nedlern/agents/*" not in generated
       and "agents/*'" not in generated,
+      generated)
+check("the snapshots are searched under the reference-checkout's name before the project rename too, which "
+      "snapshots taken before the rename hold",
+      '"$snap/localhost"/home/nedlern/Projects/nedsnodes ' in generated
+      and '"$snap/localhost"/home/nedlern/Projects/'
+      + finder.REFERENCE_CHECKOUT_DIRECTORY_NAME_BEFORE_PROJECT_RENAME + " " in generated,
       generated)
 check("the suffix pattern reaches find as one quoted word, so the shell cannot expand its '*'",
       "-path '*/a/b.md'" in generated, generated)
@@ -1801,7 +1805,7 @@ check("a Timeshift search that times out is UNAVAILABLE, not 'searched every sna
       report.status == UNAVAILABLE and any("did not complete" in l for l in report.lines),
       "%s %s" % (report.status, report.lines))
 
-timeshift_probefail = FakeRunner([("ssh", (0, "PROBEFAIL /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedschorus\n", ""))])
+timeshift_probefail = FakeRunner([("ssh", (0, "PROBEFAIL /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedsnodes\n", ""))])
 report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
                                  finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_probefail)
 check("a find that failed under a snapshot directory makes the surface UNAVAILABLE",
@@ -1845,7 +1849,6 @@ class RunsLocallyRefusesSsh(FakeRunner):
 import select  # noqa: E402
 import signal  # noqa: E402
 import socket  # noqa: E402
-import time  # noqa: E402
 
 
 def log_store_fixture(tmp):
@@ -1855,7 +1858,7 @@ def log_store_fixture(tmp):
     repository path it was read at, as the real store does
     (cold-read-records/2026-09-15-explain-skill-draft/target/docs/drafts/explain-skill-draft.md).
     """
-    store = Path(tmp, "nedschorus-logs")
+    store = Path(tmp, "nedsnodes-logs")
     shipped = Path(store, "seats", "merge-lane")
     shipped.mkdir(parents=True)
     frozen = Path(store, "cold-read-records", "pr-main-process-design-2026-09-01", "target", "docs", "drafts")
@@ -2104,7 +2107,7 @@ with tempfile.TemporaryDirectory() as tmp:
 # path come back FOUND, exit 0, with a cp of another record's dispositions.md.
 FOUNDING_PATH = "md-review-records/2026-08-11-ghi-info-agent-design/dispositions.md"
 with tempfile.TemporaryDirectory() as tmp:
-    store = Path(tmp, "nedschorus-logs")
+    store = Path(tmp, "nedsnodes-logs")
     other_record = Path(store, "cold-read-records", "2026-09-05-SKILL", "dispositions.md")
     other_record.parent.mkdir(parents=True)
     other_record.write_text("another record's dispositions\n")
@@ -2504,7 +2507,7 @@ check("the Mac's copy is where the mirror writes it: <log-store>/agent-session-f
       copy_parts is not None
       and os.path.join(finder.DEFAULT_LOG_STORE_ROOT, *copy_parts)
       == str(mirror_transcripts_root / mirror.MACHINE_NAME_ELSEWHERE / "projects")
-      == "/home/nedlern/nedschorus-logs/agent-session-files-by-machine/mac/projects"
+      == "/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/projects"
       and ("projects", Path(".claude", "projects"), "projects") in [(name, Path(path), store)
                                                                    for name, path, store, _ in mirror.SOURCES]
       and Path(finder.DEFAULT_TRANSCRIPTS_DIR) == Path("~", ".claude", "projects"),
@@ -2750,12 +2753,12 @@ check("every mounted snapshot is released afterwards, with diskutil unmount and 
 
 tm_warm_hit = FakeRunner(WARM + [
     ("sudo -n mount_apfs", (0, "", "")),
-    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedschorus/a/b.md\n", "")),
+    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/a/b.md\n", "")),
 ])
 report = finder.search_time_machine("a/b.md", newest_date_held="2026-08-14", runner=tm_warm_hit)
 check("with warm sudo, a hit is FOUND with the path inside the snapshot and a cp into the found-copies folder",
-      report.status == FOUND and any("holds /Users/el/Projects/nedschorus/a/b.md" in l for l in report.lines)
-      and any(("cp -n " + TM_DATA_ROOT + "/Users/el/Projects/nedschorus/a/b.md "
+      report.status == FOUND and any("holds /Users/el/Projects/nedsnodes/a/b.md" in l for l in report.lines)
+      and any(("cp -n " + TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/a/b.md "
                + finder.found_copies_folder().path + "/timemachine-") in c for c in report.recovery),
       "%s %s %s" % (report.status, report.lines, report.recovery))
 check("... and its printed mount may ask for the password, since a warm credential can expire before it runs",
@@ -2775,7 +2778,7 @@ check("a mounted snapshot whose find fails is UNAVAILABLE quoting find, never a 
 # mounted snapshot of this backup volume. With the sudoers rule installed the
 # mount succeeds, so the wrong root turned an honest UNAVAILABLE into
 # "2 of 2 candidates searched ... and did not find it", exit 1, for
-# /Users/el/Projects/nedschorus/README.md, which is 6130 bytes in the backup.
+# /Users/el/Projects/nedsnodes/README.md, which is 6130 bytes in the backup.
 check("the find runs under <stamp>.backup/Data/Users, never at the mount point's own root",
       any(c.startswith("find " + TM_DATA_ROOT + "/Users") for c in tm_warm_hit.calls)
       and not any(c.startswith("find " + TM_MOUNT + "/Users") for c in tm_warm_hit.calls),
@@ -2783,17 +2786,17 @@ check("the find runs under <stamp>.backup/Data/Users, never at the mount point's
 
 tm_absolute = FakeRunner(WARM + [
     ("sudo -n mount_apfs", (0, "", "")),
-    ("test -e " + TM_DATA_ROOT + "/Users/el/Projects/nedschorus/README.md", (0, "", "")),
+    ("test -e " + TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/README.md", (0, "", "")),
     ("test -e", (1, "", "")),
 ])
-report = finder.search_time_machine("/Users/el/Projects/nedschorus/README.md",
+report = finder.search_time_machine("/Users/el/Projects/nedsnodes/README.md",
                                     newest_date_held="2026-08-14", runner=tm_absolute)
 check("an absolute path is tested under <stamp>.backup/Data too, so a file that IS there is FOUND",
       report.status == FOUND
-      and any("holds /Users/el/Projects/nedschorus/README.md" in l for l in report.lines),
+      and any("holds /Users/el/Projects/nedsnodes/README.md" in l for l in report.lines),
       "%s %s" % (report.status, report.lines))
 check("... and the cp handed back reads from that root, not from the mount point",
-      any(("cp -n " + TM_DATA_ROOT + "/Users/el/Projects/nedschorus/README.md ") in c
+      any(("cp -n " + TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/README.md ") in c
           for c in report.recovery),
       str(report.recovery))
 
@@ -2964,6 +2967,36 @@ check("... and the git-failure lines tell the agent to rerun the very command it
       finder.rerun_command(git_failure_argv) in main_errors.getvalue()
       and "--repo /repo" in finder.rerun_command(git_failure_argv),
       main_errors.getvalue())
+
+
+class StreamRecordingWritesAndFlushes(io.StringIO):
+    """io.StringIO's flush does nothing, so a capture made with it cannot tell whether main flushed."""
+
+    def __init__(self, name, events):
+        super().__init__()
+        self.name, self.events = name, events
+
+    def write(self, text):
+        self.events.append((self.name, "write", text))
+        return super().write(text)
+
+    def flush(self):
+        self.events.append((self.name, "flush", ""))
+
+
+stream_events = []
+with contextlib.redirect_stderr(StreamRecordingWritesAndFlushes("stderr", stream_events)), \
+        contextlib.redirect_stdout(StreamRecordingWritesAndFlushes("stdout", stream_events)):
+    finder.main(git_failure_argv, runner=FakeRunner([("rev-parse --git-dir", (0, ".git\n", "")), TOP_LEVEL_FAILS]))
+git_failure_written = next((i for i, (name, kind, text) in enumerate(stream_events)
+                            if name == "stderr" and kind == "write" and "unable to read index" in text), None)
+header_written = next((i for i, (name, kind, text) in enumerate(stream_events)
+                       if name == "stdout" and kind == "write" and "Searching every history" in text), None)
+check("... and the git-failure lines are flushed to stderr before the header is written to stdout, "
+      "so a block-buffered stderr cannot print them after the search results",
+      git_failure_written is not None and header_written is not None
+      and ("stderr", "flush", "") in stream_events[git_failure_written:header_written],
+      stream_events)
 
 code, text = run_main(["a/b.md", "--repo", "/repo", "--skip", "transcripts", "--skip", "box",
                        "--skip", "timemachine", "--skip", "localsnapshots"],
@@ -3254,7 +3287,7 @@ COLD_THEN_PROMPTED = [
     ("sudo mount_apfs", (0, "", "")),
     ("diskutil unmount", (0, "", "")),
     TM_LAID_OUT,
-    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedschorus/a/b.md\n", "")),
+    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/a/b.md\n", "")),
 ]
 
 tm_cold_default = FakeRunner(COLD_THEN_PROMPTED)
@@ -3275,7 +3308,7 @@ report = finder.search_time_machine("a/b.md", newest_date_held="2026-08-14",
                                     runner=tm_cold_prompted, prompt_for_root=True)
 check("with --prompt-for-root a cold sudo is crossed and the snapshot is searched",
       report.status == FOUND
-      and any("holds /Users/el/Projects/nedschorus/a/b.md" in l for l in report.lines),
+      and any("holds /Users/el/Projects/nedsnodes/a/b.md" in l for l in report.lines),
       "%s %s" % (report.status, report.lines))
 check("... by running the mount itself, without -n, so sudo can ask at the terminal",
       any(c == "sudo mount_apfs -o ro -s com.apple.TimeMachine.2026-08-13-183101.backup "
@@ -3330,7 +3363,7 @@ RULE_INSTALLED = [
     ("sudo -n mount_apfs", (0, "", "")),
     ("diskutil unmount", (0, "", "")),
     TM_LAID_OUT,
-    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedschorus/a/b.md\n", "")),
+    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/a/b.md\n", "")),
 ]
 
 tm_rule_installed = FakeRunner(RULE_INSTALLED)
@@ -3404,14 +3437,14 @@ check("sudo's non-interactive refusal is told apart from mount_apfs's own failur
 
 plain = finder._plain_path_from_cited_query
 check("cited query: the scp form with a user and an absolute path is that path",
-      plain("nedlern@ned-box:/home/nedlern/nedschorus-logs/walk/x.md") == "/home/nedlern/nedschorus-logs/walk/x.md")
+      plain("nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/x.md") == "/home/nedlern/nedsnodes-logs/walk/x.md")
 check("cited query: a known host without a user is taken off too",
       plain("ned-box:/home/nedlern/x.md") == "/home/nedlern/x.md")
 check("cited query: ~ after a known host is that host's home, not this machine's",
-      plain("nedlern@ned-box:~/nedschorus-logs/x.md") == "/home/nedlern/nedschorus-logs/x.md"
+      plain("nedlern@ned-box:~/nedsnodes-logs/x.md") == "/home/nedlern/nedsnodes-logs/x.md"
       and plain("ned-box:~") == "/home/nedlern")
 check("cited query: a relative path after a known host is inside that host's home",
-      plain("nedlern@ned-box:nedschorus-logs/x.md") == "/home/nedlern/nedschorus-logs/x.md")
+      plain("nedlern@ned-box:nedsnodes-logs/x.md") == "/home/nedlern/nedsnodes-logs/x.md")
 check("cited query: an unknown host keeps an absolute path and a bare name",
       plain("someone@elsewhere:/srv/x.md") == "/srv/x.md" and plain("someone@elsewhere:x.md") == "x.md")
 try:
@@ -3487,7 +3520,7 @@ check("cited query: ... and the command line exits 2 with that instruction, sear
 # merge-lane-mac-helper-open-items-and-questions-2026-09-23, cited in the scp
 # form, read NOT FOUND, exit 1, from the path they sat at.
 with tempfile.TemporaryDirectory() as tmp:
-    store = Path(tmp, "nedschorus-logs")
+    store = Path(tmp, "nedsnodes-logs")
     minutes = Path(store, "walk", "some-walk-minutes.md")
     minutes.parent.mkdir(parents=True)
     minutes.write_text("the rulings\n")
@@ -4242,6 +4275,217 @@ with tempfile.TemporaryDirectory() as tmp:
           recovery.returncode != 2 and "usage:" not in recovery.stderr,
           "exit %s\n%s" % (recovery.returncode, recovery.stderr))
 
+# --restore copies the chosen copy to the path and searches nothing.
+RESTORE_TOP_LEVEL = ("rev-parse --show-toplevel", top_level_is_the_directory_given)
+
+
+def run_restore(argv, table=(RESTORE_TOP_LEVEL,)):
+    runner = FakeRunner(list(table))
+    out, errors = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(errors):
+        try:
+            code = finder.main(argv, runner=runner)
+        except SystemExit as stop:
+            code = stop.code
+    return code, out.getvalue(), errors.getvalue(), runner.calls
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    content = b"\xff\xfe not utf-8 \x00\n"
+    copy = tmp / "found" / "b.md-from-git"
+    copy.parent.mkdir()
+    copy.write_bytes(content)
+    repo = tmp / "repo"
+    repo.mkdir()
+    code, out, errors, calls = run_restore(["deleted/dir/b.md", "--repo", str(repo), "--restore", str(copy)])
+    restored = repo / "deleted" / "dir" / "b.md"
+    check("--restore copies the copy's bytes to the repo-relative path under the repository's top level, "
+          "creating its missing directories, exits 0, says so, and runs no git command but the top-level one",
+          code == 0 and restored.is_file() and restored.read_bytes() == content
+          and "restored %s to %s" % (copy, restored) in out
+          and calls == ["git -C %s rev-parse --show-toplevel" % repo] and errors == "",
+          "exit=%s calls=%s\n%s\n%s" % (code, calls, out, errors))
+
+    existing = tmp / "elsewhere" / "c.md"
+    existing.parent.mkdir()
+    existing.write_bytes(b"what was there before\n")
+    subdirectory = repo / "docs"
+    subdirectory.mkdir()
+    code, out, errors, calls = run_restore(["deleted/f.md", "--repo", str(subdirectory), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (0, "%s\n" % repo, ""))])
+    check("--restore places a relative path under the top level of the repository --repo is in, not under --repo",
+          code == 0 and (repo / "deleted" / "f.md").read_bytes() == content
+          and not (subdirectory / "deleted").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
+    outside = tmp / "outside"
+    outside.mkdir()
+    code, out, errors, calls = run_restore(["g.md", "--repo", str(outside), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel",
+                                                   (128, "", "fatal: not a git repository"))])
+    check("--restore places a relative path under --repo itself when --repo is in no repository",
+          code == 0 and (outside / "g.md").read_bytes() == content, "exit=%s\n%s\n%s" % (code, out, errors))
+
+    code, out, errors, calls = run_restore(["h.md", "--repo", str(outside), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (128, "", "fatal: unable to read index"))])
+    check("--restore of a relative path exits 1 and says on stderr what failed when git cannot give the top level",
+          code == 1 and "could NOT restore %s to h.md" % copy in errors and "unable to read index" in errors
+          and not (outside / "h.md").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
+    code, out, errors, calls = run_restore([str(existing), "--repo", str(repo), "--restore", str(copy)])
+    check("--restore given an absolute path copies to that path, replacing the file already there",
+          code == 0 and existing.read_bytes() == content and calls == [],
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    missing_copy = tmp / "found" / "never-copied.md"
+    code, out, errors, calls = run_restore(["gone/d.md", "--repo", str(repo), "--restore", str(missing_copy)])
+    check("--restore of a copy that does not exist exits 1, says on stderr what failed, and writes nothing",
+          code == 1 and "could NOT restore %s to %s" % (missing_copy, repo / "gone" / "d.md") in errors
+          and "FileNotFoundError" in errors and not (repo / "gone").exists() and out == "",
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    (repo / "a-file").write_bytes(b"not a directory\n")
+    code, out, errors, calls = run_restore(["a-file/e.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore to a path whose parent is a file exits 1 and says on stderr what failed",
+          code == 1 and "could NOT restore %s to %s" % (copy, repo / "a-file" / "e.md") in errors
+          and (repo / "a-file").read_bytes() == b"not a directory\n",
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    code, out, errors, calls = run_restore([finder.git_blob_id_of(content), "--restore", str(copy)])
+    check("--restore with a git blob id in place of a path is a usage error, exit 2, searching nothing",
+          code == 2 and "--restore needs the path the file was deleted from" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    code, out, errors, calls = run_restore(["someone@elsewhere:docs/x.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore with an unknown host's relative path is a usage error, exit 2, running nothing",
+          code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    code, out, errors, calls = run_restore(["someone@elsewhere:x.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore with an unknown host's bare file name is a usage error, exit 2, running nothing, "
+          "not a write to the repository's file of that name",
+          code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    # A path written from the current directory is placed from there, as a search reads it, never from the
+    # top level: "../up.md" from <repo>/docs is <repo>/up.md, not a file beside the repository.
+    directory_before = os.getcwd()
+    os.chdir(str(subdirectory))
+    try:
+        # os.getcwd() gives the resolved directory, such as macOS's /private/var for /var.
+        for given, placed in (("../up.md", repo.resolve() / "up.md"), ("./i.md", subdirectory.resolve() / "i.md"),
+                              ("sub/../j.md", subdirectory.resolve() / "j.md")):
+            code, out, errors, calls = run_restore([given, "--restore", str(copy)],
+                                                   table=[("rev-parse --show-toplevel", (0, "%s\n" % repo, ""))])
+            check("--restore places %s, run from a subdirectory, from the current directory as a search reads it, "
+                  "not from the top level, and runs no git command" % given,
+                  code == 0 and placed.read_bytes() == content and "restored %s to %s" % (copy, placed) in out
+                  and not (tmp / "up.md").exists() and calls == [], "exit=%s calls=%s\n%s\n%s"
+                  % (code, calls, out, errors))
+    finally:
+        os.chdir(directory_before)
+
+    # "<link>/.." is the directory above where the link leads, as the system resolves it, not the link's own
+    # parent, which os.path.abspath would give by collapsing ".." lexically.
+    led_to = tmp / "real" / "inner"
+    led_to.mkdir(parents=True)
+    link = tmp / "link"
+    link.symlink_to(led_to)
+    code, out, errors, calls = run_restore(["s.md", "--repo", str(link) + "/..", "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel",
+                                                   (128, "", "fatal: not a git repository"))])
+    check("--restore with a --repo in no repository whose path holds a symlink and then .. places the file in "
+          "the directory the system reaches, not where .. collapsed lexically would",
+          code == 0 and (tmp / "real" / "s.md").is_file() and (tmp / "real" / "s.md").read_bytes() == content
+          and not (tmp / "s.md").exists(),
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    real_expanduser = os.path.expanduser
+    os.path.expanduser = lambda given: given
+    try:
+        code, out, errors, calls = run_restore(["~/home-x.md", "--repo", str(repo), "--restore", str(copy)])
+    finally:
+        os.path.expanduser = real_expanduser
+    check("--restore of a ~/ path no home directory expands is a usage error, exit 2, writing nothing and "
+          "running nothing, not a write to <repo>/~/",
+          code == 2 and "could not expand '~/home-x.md'" in errors and not (repo / "~").exists() and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    code, out, errors, calls = run_restore(["~tilde.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore places a name that starts with ~ but not ~/ under the repository's top level, "
+          "with no traceback",
+          code == 0 and (repo / "~tilde.md").read_bytes() == content, "exit=%s\n%s\n%s" % (code, out, errors))
+
+    spaced = tmp / "repo ending in a space "
+    spaced.mkdir()
+    code, out, errors, calls = run_restore(["k.md", "--repo", str(spaced), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (0, "%s\n" % spaced, ""))])
+    check("--restore keeps the whitespace that ends the repository's top-level name, and makes no sibling "
+          "directory without it",
+          code == 0 and (spaced / "k.md").read_bytes() == content
+          and not (tmp / "repo ending in a space").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
+# --restore refuses a <path> that is the copy itself, and a failed write leaves the file already there as it was.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    content = b"the only copy\n"
+    copy = tmp / "found" / "only.md"
+    copy.parent.mkdir()
+    copy.write_bytes(content)
+    symlink = tmp / "symlink.md"
+    symlink.symlink_to(copy)
+    hard_link = tmp / "hard-link.md"
+    os.link(copy, hard_link)
+    for name, destination in (("the same path", copy), ("a symlink to the copy", symlink),
+                              ("a hard link to the copy", hard_link)):
+        code, out, errors, calls = run_restore([str(destination), "--restore", str(copy)])
+        check("--restore to %s exits 1, says the two are the same file, and leaves the copy whole" % name,
+              code == 1 and "same file" in errors and "could NOT restore" in errors and out == ""
+              and copy.read_bytes() == content,
+              "exit=%s size=%s\n%s\n%s" % (code, copy.stat().st_size, out, errors))
+
+    existing = tmp / "kept" / "e.md"
+    existing.parent.mkdir()
+    existing.write_bytes(b"what was there before\n")
+    real_copyfileobj = shutil.copyfileobj
+
+    def copy_then_fail(source, target, *rest):
+        target.write(source.read(4))
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    shutil.copyfileobj = copy_then_fail
+    try:
+        code, out, errors, calls = run_restore([str(existing), "--restore", str(copy)])
+        fresh = tmp / "kept" / "new.md"
+        fresh_code, fresh_out, fresh_errors, _ = run_restore([str(fresh), "--restore", str(copy)])
+    finally:
+        shutil.copyfileobj = real_copyfileobj
+    check("--restore whose write fails partway exits 1, leaves the file already there as it was, says so, "
+          "and leaves no staged file behind",
+          code == 1 and existing.read_bytes() == b"what was there before\n"
+          and "No space left on device" in errors and "the file already there was left as it was" in errors
+          and sorted(p.name for p in existing.parent.iterdir()) == ["e.md"] and out == "",
+          "exit=%s %s\n%s\n%s" % (code, sorted(existing.parent.iterdir()), out, errors))
+    check("--restore whose write fails partway to a new path exits 1, says nothing was written there, "
+          "and leaves nothing there",
+          fresh_code == 1 and not fresh.exists() and "nothing was written there" in fresh_errors
+          and sorted(p.name for p in existing.parent.iterdir()) == ["e.md"],
+          "exit=%s\n%s" % (fresh_code, fresh_errors))
+
+    restored = tmp / "kept" / "made.md"
+    code, out, errors, calls = run_restore([str(restored), "--restore", str(copy)])
+    umask = os.umask(0)
+    os.umask(umask)
+    check("--restore to a new path gives the file the mode open() would, not mkstemp's 0600",
+          code == 0 and restored.read_bytes() == content
+          and stat.S_IMODE(restored.stat().st_mode) == 0o666 & ~umask,
+          "exit=%s mode=%o\n%s" % (code, stat.S_IMODE(restored.stat().st_mode), errors))
+    existing.chmod(0o640)
+    code, out, errors, calls = run_restore([str(existing), "--restore", str(copy)])
+    check("--restore over a file already there keeps that file's mode",
+          code == 0 and existing.read_bytes() == content and stat.S_IMODE(existing.stat().st_mode) == 0o640,
+          "exit=%s mode=%o\n%s" % (code, stat.S_IMODE(existing.stat().st_mode), errors))
+
 # A copy of this suite whose finder raises on import, as an unhandled error or a Ctrl-C would, still removes
 # its found-copies scratch folder.
 for raised in ("RuntimeError('a case raised')", "KeyboardInterrupt()"):
@@ -4250,11 +4494,11 @@ for raised in ("RuntimeError('a case raised')", "KeyboardInterrupt()"):
         copy, copy_temp = tmp / "scripts", tmp / "temp"
         copy.mkdir()
         copy_temp.mkdir()
-        (tmp / "nc-systems" / "general-tools").mkdir(parents=True)
+        (tmp / "nn-systems" / "general-tools").mkdir(parents=True)
         shutil.copy(__file__, copy / Path(__file__).name)
         shutil.copy(Path(__file__).with_name("git-redirecting-environment-removal-test-fixture.py"), copy)
-        shutil.copy(Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
-                    / "git-redirecting-environment-variables-removal-common.py", tmp / "nc-systems" / "general-tools")
+        shutil.copy(Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+                    / "git-redirecting-environment-variables-removal-common.py", tmp / "nn-systems" / "general-tools")
         (copy / "find-deleted-path-across-backups.py").write_text("raise %s\n" % raised)
         completed = subprocess.run([sys.executable, str(copy / Path(__file__).name)], capture_output=True, text=True,
                                    env=dict(os.environ, TMPDIR=str(copy_temp)))

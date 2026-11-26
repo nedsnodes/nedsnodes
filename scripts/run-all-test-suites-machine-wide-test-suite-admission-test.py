@@ -49,13 +49,13 @@ def check(case_name, condition, detail=""):
 def linux_only_cases_run_here(cases):
     """True on Linux; elsewhere prints why the cases are skipped and returns False.
 
-    Every case that builds or inspects an nc-test-sandbox, runs bwrap or reads /proc goes
+    Every case that builds or inspects an nn-test-sandbox, runs bwrap or reads /proc goes
     through this, since only Linux has them. scripts/run-all-test-suites-signal-sandbox-test.py
     runs this file as if on a Mac, and fails a case that does not.
     """
     if sys.platform.startswith("linux"):
         return True
-    print(f"SKIP  [this machine cannot run it] {cases}: nc-test-sandboxes, bwrap and /proc exist only on Linux")
+    print(f"SKIP  [this machine cannot run it] {cases}: nn-test-sandboxes, bwrap and /proc exist only on Linux")
     return False
 
 
@@ -691,7 +691,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
     on_the_mac = add(base, platform="darwin", uid=1234, path_exists=bus_exists)
     check("nothing is added on darwin", on_the_mac == base, repr(on_the_mac))
 
-    # No nc-test-sandbox has /run/user/<uid>/bus, so the check is handed a machine where it is.
+    # No nn-test-sandbox has /run/user/<uid>/bus, so the check is handed a machine where it is.
     seen_by_systemctl = []
     runner.environment_with_user_runtime_directory_when_the_user_session_bus_exists = (
         lambda environment: add(environment, platform="linux", uid=1234, path_exists=bus_exists))
@@ -780,7 +780,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
           malformed_count_error is not None, malformed_count_error)
 
     # The counting shell, run on fake cgroup files, so these cases need no real cgroup and
-    # run in an nc-test-sandbox too.
+    # run in an nn-test-sandbox too.
     def counting_shell_run_on_fake_cgroup_files(scratch_directory, cgroup_files, unreadable=()):
         """(the counters the shell wrote, its exit) for a suite that exits 7."""
         fake_proc_self_cgroup = scratch_directory / "proc-self-cgroup"
@@ -866,7 +866,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
           and all("exit 1, OUT OF MEMORY: the kernel killed 2 of its processes at its memory "
                   "ceiling of 4 GB" in line for line in lines), lines)
     check("each such FAIL line is read as the suite's own failure, naming the suite, so "
-          "nc-mutation-testing counts its mutant killed",
+          "nn-mutation-testing counts its mutant killed",
           all(runner.SUITE_FAILED_LINE.match(line)
               and runner.SUITE_FAILED_LINE.match(line)["suite"] == "scripts/a-test.py"
               for line in lines)
@@ -1161,7 +1161,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
         mac_under_bwrap, built = None, str(error)
     finally:
         runner.listening_unix_sockets_the_test_sandbox_would_show = original_listening
-    check("off Linux no nc-test-sandbox is built, whatever the prefix, so nothing reads /proc",
+    check("off Linux no nn-test-sandbox is built, whatever the prefix, so nothing reads /proc",
           built is None and mac_under_bwrap["exit"] == 1, (built, mac_under_bwrap))
 
     # --- The suites' environment carries no credential -----------------------------
@@ -1184,8 +1184,8 @@ with tempfile.TemporaryDirectory() as scratch_name:
           and environment.get("KEEP_THIS_ONE") == "value-of-KEEP_THIS_ONE",
           sorted(name for name in saved if name in environment))
 
-    # --- A checkout whose git directory cannot be found gets no nc-test-sandbox ---------
-    if linux_only_cases_run_here("an nc-test-sandbox for a checkout with no git common directory"):
+    # --- A checkout whose git directory cannot be found gets no nn-test-sandbox ---------
+    if linux_only_cases_run_here("an nn-test-sandbox for a checkout with no git common directory"):
         original_common = runner.git_common_directory_of_checkout
         runner.git_common_directory_of_checkout = lambda top: None
         try:
@@ -1195,11 +1195,11 @@ with tempfile.TemporaryDirectory() as scratch_name:
             raised = str(error)
         finally:
             runner.git_common_directory_of_checkout = original_common
-        check("when the checkout's git common directory cannot be found, the nc-test-sandbox is "
+        check("when the checkout's git common directory cannot be found, the nn-test-sandbox is "
               "refused rather than built without its read-only git directory",
               raised is not None and "git common directory" in raised, raised)
 
-    # --- Every failure of admission or of an nc-test-sandbox ends the run with exit 2 ---
+    # --- Every failure of admission or of an nn-test-sandbox ends the run with exit 2 ---
     run_repository = scratch / "run-repository"
     run_repository.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=run_repository, check=True)
@@ -1238,12 +1238,12 @@ with tempfile.TemporaryDirectory() as scratch_name:
     def no_git_directory(top):
         return None
 
-    # These drive the run path taken where suites run in nc-test-sandboxes, which reads
+    # These drive the run path taken where suites run in nn-test-sandboxes, which reads
     # psutil and /proc.
-    if linux_only_cases_run_here("the exit-2 cases of a run in nc-test-sandboxes"):
+    if linux_only_cases_run_here("the exit-2 cases of a run in nn-test-sandboxes"):
         code, printed, _ = main_with("no-git-directory", git_common_directory_of_checkout=no_git_directory,
                                      **as_if_bwrap)
-        check("an nc-test-sandbox that cannot be built for the checkout stops the run before any "
+        check("an nn-test-sandbox that cannot be built for the checkout stops the run before any "
               "suite, with exit 2 and the reason",
               code == runner.EXIT_COULD_NOT_RUN and "git common directory" in printed
               and "Traceback" not in printed, (code, printed[-800:]))
@@ -1279,7 +1279,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
                                                     "file is not empty; delete it")
 
         code, printed, _ = main_with("cover", run_one_suite=cover_breaks, **as_if_bwrap)
-        check("an nc-test-sandbox that fails while suites run ends the run with exit 2 and the "
+        check("an nn-test-sandbox that fails while suites run ends the run with exit 2 and the "
               "reason, not a traceback",
               code == runner.EXIT_COULD_NOT_RUN and "delete it" in printed
               and "Traceback" not in printed, (code, printed[-800:]))
@@ -1325,6 +1325,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
         (left_out_repository / "scripts" / "run-all-test-suites.py").write_text(
             'SUITES_RUN_WITHOUT_ANY_SANDBOX = {"outside-test.py": "it starts bwrap itself"}\n'
             "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {}\n"
+            "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
             "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n")
         subprocess.run(["git", "add", "."], cwd=left_out_repository, check=True)
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
@@ -1354,7 +1355,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
 
         code, printed = left_out_run("selective", "--only-suites-whose-recorded-inputs-changed-since",
                                      "HEAD")
-        check("a selective run in nc-test-sandboxes runs a no-sandbox suite whose own file "
+        check("a selective run in nn-test-sandboxes runs a no-sandbox suite whose own file "
               "changed, its SELECTED line naming that file and the lock it waits for",
               code == runner.EXIT_ALL_PASSED
               and sorted(suites_started) == ["a-test.py", "outside-test.py"]
@@ -1370,7 +1371,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
                                      "--only-suites-whose-recorded-inputs-changed-since", "HEAD")
         left_out_lines = [line for line in printed.splitlines()
                           if line.startswith(runner.NO_SANDBOX_SUITE_LEFT_OUT_OF_SELECTIVE_TEST_RUN_LINE_PREFIX)]
-        check("a selective run in nc-test-sandboxes leaves out a no-sandbox suite selected only "
+        check("a selective run in nn-test-sandboxes leaves out a no-sandbox suite selected only "
               "because it has no recording, prints its LEFT OUT line with the command that runs "
               "it by hand, counts it in the SUMMARY, and exits 0 on the suites it ran",
               code == runner.EXIT_ALL_PASSED and suites_started == ["a-test.py"]
@@ -1389,10 +1390,11 @@ with tempfile.TemporaryDirectory() as scratch_name:
                     "reads": {path: "0" * 40 for path in paths}}
 
         def kept_and_left_out(recording, files_only_strace_saw=None,
-                              differ=("scripts/tested.py",)):
+                              differs=(("scripts/tested.py",),)):
             selection = [("outside-test.py", True, "it reads scripts/tested.py, which differs")]
             return runner.selective_test_run_selection_without_no_sandbox_suites(
-                selection, applies=True, differ={path: "M" for path in differ},
+                selection, applies=True,
+                differs=[{path: "M" for path in differ} for differ in differs],
                 recordings={"outside-test.py": recording},
                 files_only_strace_saw_by_suite={"outside-test.py": files_only_strace_saw})
 
@@ -1415,6 +1417,28 @@ with tempfile.TemporaryDirectory() as scratch_name:
                  format=runner.RECORDED_INPUTS_FORMAT_VERSION - 1))
         check("a no-sandbox suite whose recording is of an older format, whose reads may mean "
               "something else, is left out", kept == [] and len(left_out) == 1, (kept, left_out))
+        kept, left_out = kept_and_left_out(
+            recording_reading("scripts/tested.py", "scripts/other.py"),
+            differs=(("scripts/tested.py",), ("scripts/other.py",)))
+        check("given two comparisons, a no-sandbox suite is judged by the first, and names the "
+              "file that comparison found",
+              left_out == [] and len(kept) == 1
+              and "reads scripts/tested.py, which differs" in kept[0][2],
+              (kept, left_out))
+        kept, left_out = kept_and_left_out(
+            recording_reading("scripts/tested.py"),
+            differs=(("scripts/tested.py",), ("scripts/unread.py",)))
+        check("given two comparisons, a no-sandbox suite stays when the first finds a file it "
+              "read that differs, though the second, a head test run's commit holding the same "
+              "change, finds none",
+              left_out == [] and len(kept) == 1, (kept, left_out))
+        kept, left_out = kept_and_left_out(
+            recording_reading("scripts/tested.py"),
+            differs=(("scripts/unread.py",), ("scripts/tested.py",)))
+        check("given two comparisons, a no-sandbox suite is left out when the first finds no "
+              "file it read that differs",
+              kept == [] and [suite for suite, _ in left_out] == ["outside-test.py"],
+              (kept, left_out))
 
         code, printed = left_out_run("named", "--only-suites-whose-recorded-inputs-changed-since",
                                      "HEAD", "--only-suites-named", "outside-test.py")
@@ -1426,7 +1450,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
         code, printed = left_out_run(
             "no-bwrap", "--only-suites-whose-recorded-inputs-changed-since", "HEAD",
             sandbox={"signal_sandbox": lambda **options: ((), "bwrap is not on PATH")})
-        check("a selective run without nc-test-sandboxes, where the whole run takes the machine's "
+        check("a selective run without nn-test-sandboxes, where the whole run takes the machine's "
               "lock, still runs a selected no-sandbox suite",
               code == runner.EXIT_ALL_PASSED
               and sorted(suites_started) == ["a-test.py", "outside-test.py"]
@@ -1452,10 +1476,22 @@ with tempfile.TemporaryDirectory() as scratch_name:
                 scratch / f"main-left-out-{label}" / "recorded", left_out_repository),
                 "outside-test.py").exists()
 
-        real_claude = {"SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI": {"outside-test.py"}}
+        # The list comes from the checkout under test, as in a pull request head test run, whose
+        # runner is main's but whose checkout may have renamed the suite.
+        lists_file = left_out_repository / "scripts" / "run-all-test-suites.py"
+        lists_file.write_text(lists_file.read_text().replace(
+            "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}",
+            'SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {"outside-test.py": "it runs the real claude"}'))
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m",
+                        "list the real-claude suite", "--", "scripts/run-all-test-suites.py"],
+                       cwd=left_out_repository, check=True)
+        # .get, so that against a runner that read this list only from itself the case below
+        # is reached and fails for not leaving the suite out.
+        check("this runner's own list does not name the suite the checkout lists as running the "
+              "real claude", "outside-test.py" not in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM.get("SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI", {}))
         selective = ("--only-suites-whose-recorded-inputs-changed-since", "HEAD")
         code, printed = left_out_run("real-claude-run", *selective,
-                                     run_one_suite=note_and_fail_the_claude_suite, **real_claude)
+                                     run_one_suite=note_and_fail_the_claude_suite)
         check("without --leave-out-suites-that-run-the-real-claude-cli, a selective run runs a suite "
               "that runs the real claude when the change edits its file, and it fails where "
               "claude exits 1",
@@ -1466,7 +1502,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
               (code, suites_started, printed[-1500:]))
         for label, extra in (("real-claude-left-out-selective", selective), ("real-claude-left-out-full", ())):
             code, printed = left_out_run(label, *extra, "--leave-out-suites-that-run-the-real-claude-cli",
-                                         run_one_suite=note_and_fail_the_claude_suite, **real_claude)
+                                         run_one_suite=note_and_fail_the_claude_suite)
             left_out_lines = [line for line in printed.splitlines() if line.startswith(
                 runner.SUITE_THAT_RUNS_THE_REAL_CLAUDE_CLI_LEFT_OUT_OF_TEST_RUN_LINE_PREFIX)]
             check(f"{label}: --leave-out-suites-that-run-the-real-claude-cli leaves out the suite that "
@@ -1488,8 +1524,8 @@ with tempfile.TemporaryDirectory() as scratch_name:
                   (code, suites_started, printed[-1500:]))
         check("this runner lists the trial against the installed Claude Code among the suites that "
               "run the real claude",
-              "nc-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-"
-              "worktree-create-hook-real-claude-code-test.py" in runner.SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI)
+              "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-"
+              "worktree-create-hook-real-claude-code-test.py" in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM.get("SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI", {}))
 
         two_suites = scratch / "two-suites-repository"
         two_suites.mkdir()
@@ -1622,7 +1658,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
                                 "--log-dir", str(run_scratch / "logs"),
                                 "--recorded-inputs-directory", str(run_scratch / "recorded"),
                                 "--leave-recorded-inputs-and-failure-history-unchanged"])
-        check("with --leave-recorded-inputs-and-failure-history-unchanged, a run in nc-test-"
+        check("with --leave-recorded-inputs-and-failure-history-unchanged, a run in nn-test-"
               "sandboxes adds nothing to the failure history, and still writes its JUnit XML",
               history_paths == [] and (run_scratch / "logs" / runner.JUNIT_XML_FILE_NAME).exists(),
               (code, history_paths))
@@ -1789,12 +1825,12 @@ with tempfile.TemporaryDirectory() as scratch_name:
 
     code, printed, logs = main_with(
         "no-bwrap", signal_sandbox=lambda **options: ((), "bwrap is not on PATH"))
-    check("without nc-test-sandboxes there is no admission, and no case times, JUnit XML or "
+    check("without nn-test-sandboxes there is no admission, and no case times, JUnit XML or "
           "failure history are written",
           code == runner.EXIT_ALL_PASSED and not (logs / runner.JUNIT_XML_FILE_NAME).exists()
           and runner.ADMISSION_WAITED_LINE_PREFIX not in printed, (code, printed[-800:]))
 
-    # --- On the Mac a run needs neither psutil nor /proc, and builds no nc-test-sandbox ---
+    # --- On the Mac a run needs neither psutil nor /proc, and builds no nn-test-sandbox ---
     mac_scratch = scratch / "main-mac"
     mac_scratch.mkdir()
     fake_sandbox_exec = mac_scratch / "sandbox-exec"

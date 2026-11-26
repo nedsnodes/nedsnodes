@@ -51,7 +51,9 @@ script: it composes a command and sends it over ssh, and the box cannot even
 resolve its own ssh alias. So a box seat splits: --machine ubuntu runs steps 1-4
 over ssh on the box (this same script, --prepare-only, in the box's checkout)
 and then runs launch-claude-ubuntu here on the Mac. A Mac seat does all five
-steps locally.
+steps locally, running the launcher in ~/Projects/nedsnodes, the reference-checkout,
+whichever checkout this script runs from, because the seat's handoff-supervisor keeps
+the code of the checkout its launcher took it from.
 
 That split means --machine ubuntu needs this script present in the box's
 checkout. The box checkout is pulled by hand today (nedschorus#45), so a box
@@ -91,14 +93,14 @@ from pathlib import Path
 
 _supervisor_spec = importlib.util.spec_from_file_location(
     "handoff_supervisor", Path(__file__).resolve().parent.parent
-    / "nc-systems" / "handoff" / "handoff-supervisor.py"
+    / "nn-systems" / "handoff" / "handoff-supervisor.py"
 )
 supervisor = importlib.util.module_from_spec(_supervisor_spec)
 _supervisor_spec.loader.exec_module(supervisor)
 
 _tmux_error_pattern_spec = importlib.util.spec_from_file_location(
     "tmux_target_or_server_does_not_exist_error_pattern_common",
-    Path(__file__).resolve().parent.parent / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parent.parent / "nn-systems" / "general-tools"
     / "tmux-target-or-server-does-not-exist-error-pattern-common.py"
 )
 tmux_error_pattern = importlib.util.module_from_spec(_tmux_error_pattern_spec)
@@ -112,7 +114,7 @@ SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 def default_agents_root() -> Path:
     """Return the agents root using the Mac launcher's environment override."""
     # Checks and launcher must resolve the same root; the Ubuntu launcher always uses ~/agents.
-    return Path(os.environ.get("NEDSCHORUS_AGENTS_ROOT") or "~/agents").expanduser()
+    return Path(os.environ.get("NEDSNODES_AGENTS_ROOT") or "~/agents").expanduser()
 
 
 def refuse(message: str) -> int:
@@ -298,10 +300,14 @@ def retire_seat_tmux_session(name: str, check_ssh_alias=None):
 
 
 def launcher_for(machine: str) -> Path:
-    return SCRIPT_DIRECTORY / f"launch-claude-{machine}"
+    if machine == "mac":
+        # A Mac seat's handoff-supervisor keeps the code of the checkout it starts from, so its
+        # launcher is the reference-checkout's, whichever checkout this script runs from.
+        return Path("~/Projects/nedsnodes/scripts/launch-claude-mac").expanduser()
+    return SCRIPT_DIRECTORY / "launch-claude-ubuntu"
 
 
-BOX_SCRIPT_PATH = "$HOME/Projects/nedschorus/scripts/resupervise-seat.py"
+BOX_SCRIPT_PATH = "$HOME/Projects/nedsnodes/scripts/resupervise-seat.py"
 
 
 def resupervise_box_seat(arguments) -> int:
@@ -365,7 +371,7 @@ def resupervise_box_seat(arguments) -> int:
     sys.stdout.flush()  # exec discards buffered output
     sys.stderr.flush()
     # Forward the checked host and handoff directory so launch targets the seat just prepared.
-    environment = {**os.environ, "NEDSCHORUS_AGENT_BOX": arguments.agent_box}
+    environment = {**os.environ, "NEDSNODES_AGENT_BOX": arguments.agent_box}
     if arguments.handoff_dir:
         environment["LAUNCH_CLAUDE_SUPERVISOR_EXTRA_ARGUMENTS"] = (
             f"--handoff-dir {shlex.quote(arguments.handoff_dir)}")
@@ -389,7 +395,7 @@ def main(argv=None) -> int:
                              "(default ~/.claude/handoffs)")
     parser.add_argument("--agents-root", default="",
                         help="where seat directories live, for --machine mac only "
-                             "(default $NEDSCHORUS_AGENTS_ROOT, else ~/agents); a box "
+                             "(default $NEDSNODES_AGENTS_ROOT, else ~/agents); a box "
                              "seat is always ~/agents/<name> on the box")
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -459,8 +465,8 @@ def main(argv=None) -> int:
     launcher = launcher_for(arguments.machine)
     if not arguments.prepare_only and not launcher.is_file():
         return refuse(
-            f"no launcher beside this script at {launcher} -- run the copy inside a "
-            "nedschorus checkout"
+            f"{launcher} does not exist, so no successor can be launched; nothing was killed. "
+            "Clone nedsnodes to ~/Projects/nedsnodes on this Mac, then re-run."
         )
 
     # Never kill the operator's own tmux session mid-recovery. Without $TMUX, display-message can select an unrelated session.
@@ -523,7 +529,7 @@ def main(argv=None) -> int:
     # Forward the directories checked above so launch cannot switch seats; quote for the launcher's one shell parse.
     # This often runs from another agent-session's shell, whose variables must not reach the seat.
     environment = supervisor.agent_seat_launch_environment_without_calling_agent_session_tmux_and_supervisor_variables(os.environ)
-    environment["NEDSCHORUS_AGENTS_ROOT"] = str(agents_root)
+    environment["NEDSNODES_AGENTS_ROOT"] = str(agents_root)
     environment["LAUNCH_CLAUDE_SUPERVISOR_EXTRA_ARGUMENTS"] = (
         f"--handoff-dir {shlex.quote(str(handoff_directory))}")
     os.execve(str(launcher), [str(launcher), arguments.name], environment)

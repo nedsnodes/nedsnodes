@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py.
 
-Real git in a scratch directory: a repository whose nc-head-commit is checked
+Real git in a scratch directory: a repository whose nn-head-commit is checked
 out, detached, as wt/pr7-head under a scratch review worktrees directory,
 as step 1 builds it, with the brief step 2 writes beside it, and a review
 tools worktree at main that holds only main's .claude/settings.json, whose
@@ -273,8 +273,8 @@ class Case:
         self.main_settings_file = self.main_worktree / ".claude" / "settings.json"
         self.main_settings_file.parent.mkdir(parents=True)
         self.main_settings_file.write_text(json.dumps(MAIN_PROJECT_SETTINGS))
-        (home / ".config" / "nedschorus").mkdir(parents=True)
-        (home / ".config" / "nedschorus" / "mac-claude.token").write_text("stand-in-token\n")
+        (home / ".config" / "nedsnodes").mkdir(parents=True)
+        (home / ".config" / "nedsnodes" / "mac-claude.token").write_text("stand-in-token\n")
         for name, text in (("claude", FAKE_CLAUDE), ("gh", FAKE_GH)):
             (bin_directory / name).write_text(text)
             (bin_directory / name).chmod(0o755)
@@ -584,7 +584,7 @@ def main():
                 ("could-not-review", "the reviewer could not finish the review"),
                 ("nonzero", "claude exited 3: claude: API error 529"),
                 ("not-json", "claude printed no JSON output"),
-                ("move-head", f"moved to")):
+                ("move-head", "moved to")):
             case = Case(scratch).run(mode)
             check(f"a {mode} run posts nothing, exits 1, says why, and removes the reviewer's "
                   f"worktree",
@@ -705,9 +705,9 @@ def main():
               lambda: case.code == 2 and not case.claude_calls, case.detail)
         case = Case(scratch)
         case.run("valid", head="0" * 40)
-        check("a head worktree not at the nc-head-commit refuses with exit 2 before the reviewer runs",
+        check("a head worktree not at the nn-head-commit refuses with exit 2 before the reviewer runs",
               lambda: case.code == 2 and not case.claude_calls
-              and "is not at the nc-head-commit" in case.stdout, case.detail)
+              and "is not at the nn-head-commit" in case.stdout, case.detail)
 
         for name, settings_text, expected in (
                 ("missing", None, "could not read"),

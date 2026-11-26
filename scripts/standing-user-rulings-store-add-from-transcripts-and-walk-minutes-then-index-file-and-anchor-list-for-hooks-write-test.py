@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 PROGRAM = Path(__file__).with_name(
     "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.py")
-WALK_CHECK_PROGRAM = (Path(__file__).resolve().parents[1] / "nc-systems" / "skills" / "walk-me-through"
+WALK_CHECK_PROGRAM = (Path(__file__).resolve().parents[1] / "nn-systems" / "skills" / "walk-me-through"
                       / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
 
 
@@ -58,9 +58,14 @@ def check(case_name, condition, detail=""):
 
 
 SEAT_DIRECTORY = "/home/nedlern/agents/alpha-seat"
-REPOSITORY_FILES = ("CLAUDE.md", "scripts/tool-one.py", "nc-systems/cold-read/cold-read-fast-read.py",
-                    "nc-systems/handoff/handoff-supervisor.py", ".claude/skills/find-info/SKILL.md",
-                    "docs/issues/2118-ruling-agent-keeps-user-rulings.md", "SKILL.md", "CLAUDE")
+# A file the project rename kept under its old name; it is on origin/main under this name.
+KEPT_FILE = "scripts/merge-gate-test-captured-github-responses/nedschorus-nedschorus-1154-issue-view-open-issue.json"
+REPOSITORY_FILES = ("CLAUDE.md", "scripts/tool-one.py", "nn-systems/cold-read/cold-read-fast-read.py",
+                    "nn-systems/handoff/handoff-supervisor.py", ".claude/skills/find-info/SKILL.md",
+                    "docs/issues/2118-ruling-agent-keeps-user-rulings.md", "SKILL.md", "CLAUDE",
+                    "nn-systems/nn-shared-database/nn-shared-database-service.py",
+                    "docs/cross-project/nedsnodes-ai-native-software-development-notes.md",
+                    KEPT_FILE)
 
 
 def human(text, stamp, cwd=SEAT_DIRECTORY, **fields):
@@ -159,12 +164,20 @@ class Case:
         return (self.store_directory / program.ANCHOR_LIST_FILE_NAME).read_text().splitlines()
 
 
+OWNER_REPORT_TEXT = ("If it fails the same way at the next run, send prime-intellect, the agent-seat that owns "
+                     "this program, the FAILED line above with SendMessage.")
+SOURCE_FAILED_TEXT = ("The other transcripts and walk-minutes were read, and what they held was added; each file "
+                      "a FAILED line above names is read again from where it stopped at the next run.")
+MOVE_FAILED_TEXT = "No stored source path was changed; the next run tries the move again."
+CHECK_FAILED_TEXT = "No entry's status was changed; the next run checks every stored message of the user's again."
+
+
 def described(result):
     return f"exit {result.returncode}; stdout {result.stdout!r}; stderr {result.stderr!r}"
 
 
 ANSWERED = ("Item 3 asks about GHI 2118 and PR 2120, my task #127 and merge-lane-2's task #12; "
-            "the change edits /Users/el/agents/alpha-seat/.claude/worktrees/w/nc-systems/cold-read/cold-read-fast-read.py "
+            "the change edits /Users/el/agents/alpha-seat/.claude/worktrees/w/nn-systems/cold-read/cold-read-fast-read.py "
             "and scripts/tool-one.py. Approve?")
 
 # His words, a peer's message, a queued message, a claude -p prompt and a handoff opener.
@@ -208,11 +221,11 @@ with tempfile.TemporaryDirectory() as directory:
     check("GHIs, pull requests, tasks and systems in the agent message, and files in his words, become tags; "
           "a path's shorter trailing parts, such as SKILL.md, do not",
           case.tags(approve) == {"GHI 2118", "PR 2120", "task alpha-seat 127", "task merge-lane-2 12",
-                                 "nc-systems/cold-read/", "CLAUDE.md", ".claude/skills/find-info/SKILL.md",
-                                 "nc-systems/skills/"}, case.tags(approve))
+                                 "nn-systems/cold-read/", "CLAUDE.md", ".claude/skills/find-info/SKILL.md",
+                                 "nn-systems/skills/"}, case.tags(approve))
     check("a file named only in the agent message is not a tag",
           "scripts/tool-one.py" not in case.tags(approve)
-          and "nc-systems/cold-read/cold-read-fast-read.py" not in case.tags(approve), case.tags(approve))
+          and "nn-systems/cold-read/cold-read-fast-read.py" not in case.tags(approve), case.tags(approve))
     header, index = case.index()
     check("the index file starts with its build time and lists standing entries newest first",
           header["standing_entry_count"] == 3 and "index_built_at_utc" in header
@@ -225,8 +238,8 @@ with tempfile.TemporaryDirectory() as directory:
           and "/docs/issues/2118-ruling-agent-keeps-user-rulings.md" in index[1]["anchors"], index[1])
     check("the anchor list holds tagged files, system directories and GHI-MD paths, each with a leading slash",
           case.anchors() == ["/.claude/skills/find-info/SKILL.md", "/CLAUDE.md",
-                             "/docs/issues/2118-ruling-agent-keeps-user-rulings.md", "/nc-systems/cold-read/",
-                             "/nc-systems/skills/"], case.anchors())
+                             "/docs/issues/2118-ruling-agent-keeps-user-rulings.md", "/nn-systems/cold-read/",
+                             "/nn-systems/skills/"], case.anchors())
     rerun = case.run()
     check("a rerun with nothing new adds nothing",
           rerun.returncode == 0 and len(case.entries()) == 4
@@ -288,7 +301,7 @@ with tempfile.TemporaryDirectory() as directory:
     case.transcript("ned-box", "[1, 2]\nnot json\n" + lines_of([
         human("see CLAUDE.md", "2026-10-24T00:02:00Z"),
         human("see scripts/tool-one.py", "2026-10-24T00:03:00Z"),
-        agent("This touches nc-systems/handoff/ and nc-systems/new-system/plan.md."),
+        agent("This touches nn-systems/handoff/ and nn-systems/new-system/plan.md."),
         human("no time", ""),
     ]), append=True)
     result = case.run()
@@ -301,15 +314,81 @@ with tempfile.TemporaryDirectory() as directory:
           and case.tags("ok") == {"GHI 46"}, len(entries["ok"][5] or ""))
     check("a JSON line that is not a record is skipped, and the lines after it are read",
           result.returncode == 0 and entries["see CLAUDE.md"][4] == 8, described(result) + f" {entries}")
-    check("a file outside nc-systems/ and .claude/skills/ is a tag with no system",
+    check("a file outside nn-systems/ and .claude/skills/ is a tag with no system",
           case.tags("see scripts/tool-one.py") == {"scripts/tool-one.py"}, case.tags("see scripts/tool-one.py"))
     check("a system directory named by a path that is no file on origin/main is still a system tag",
-          case.tags("no time") == {"nc-systems/handoff/", "nc-systems/new-system/"}, case.tags("no time"))
+          case.tags("no time") == {"nn-systems/handoff/", "nn-systems/new-system/"}, case.tags("no time"))
     check("a message with no timestamp is stored once, and again not on a rerun",
           "no time" in entries and case.run().returncode == 0
           and [entry[1] for entry in case.entries()].count("no time") == 1, entries.get("no time"))
     check("a top-level repository file named alone, without a path, is a tag",
           case.tags("see CLAUDE.md") == {"CLAUDE.md"}, case.tags("see CLAUDE.md"))
+
+# A record written before the project rename names a system and a file by their old directory names, and a tag
+# stored then keeps its old name. The rename's rewrite program leaves a line assigning a name ending
+# _BEFORE_PROJECT_RENAME alone, so the old name is written only there.
+SYSTEMS_DIRECTORY_BEFORE_PROJECT_RENAME = "nc-systems"
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    old_record = f"see {SYSTEMS_DIRECTORY_BEFORE_PROJECT_RENAME}/handoff/handoff-supervisor.py"
+    case.transcript("ned-box", [human(old_record, "2026-10-24T00:00:00Z")])
+    case.run()
+    check("a path under the old systems directory name in an old record is tagged with its system and file under their new names",
+          case.tags(old_record) == {"nn-systems/handoff/", "nn-systems/handoff/handoff-supervisor.py"},
+          case.tags(old_record))
+    connection = sqlite3.connect(str(case.store_directory / program.STORE_FILE_NAME))
+    with connection:
+        connection.execute("UPDATE entry_tags SET tag = ? WHERE tag = 'nn-systems/handoff/'",
+                           (f"{SYSTEMS_DIRECTORY_BEFORE_PROJECT_RENAME}/handoff/",))
+    connection.close()
+    case.run()
+    check("a system tag stored under its old name makes an anchor under its new name",
+          "/nn-systems/handoff/" in case.anchors()
+          and not any(SYSTEMS_DIRECTORY_BEFORE_PROJECT_RENAME in anchor for anchor in case.anchors()),
+          case.anchors())
+    index_tags = [line["tags"] for line in case.index()[1] if line["text"] == old_record]
+    check("a system tag stored under its old name is written to the index file's tags under its new name",
+          index_tags == [["nn-systems/handoff/", "nn-systems/handoff/handoff-supervisor.py"]], index_tags)
+
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    old_record = f"see {SYSTEMS_DIRECTORY_BEFORE_PROJECT_RENAME}/handoff/ for it"
+    case.transcript("ned-box", [human(old_record, "2026-10-24T00:00:00Z")])
+    case.run()
+    check("a system named in an old record by its old directory alone, with no file, is tagged under its new name",
+          case.tags(old_record) == {"nn-systems/handoff/"}, case.tags(old_record))
+
+# A file the rename kept under its old name is tagged, indexed and anchored under that name, which origin/main holds.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    record = f"see {KEPT_FILE}"
+    case.transcript("ned-box", [human(record, "2026-10-24T00:00:00Z")])
+    case.run()
+    index_tags = [line["tags"] for line in case.index()[1] if line["text"] == record]
+    check("a file the rename kept under its old name is tagged, written to the index file and anchored as it is named",
+          case.tags(record) == {KEPT_FILE} and index_tags == [[KEPT_FILE]] and case.anchors() == ["/" + KEPT_FILE],
+          (case.tags(record), index_tags, case.anchors()))
+
+# The shared database's system and a file outside the wiki whose name had the old prefix, named by their old names in an old record.
+# The old paths are made from the rename's one list, so no line here cites a path the rename removed.
+path_names = load("project_rename_path_names_before_and_after_common",
+                  Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
+SHARED_DATABASE_FILE_BEFORE_PROJECT_RENAME = path_names.convert_file_path_after_project_rename_to_path_before(
+    "nn-systems/nn-shared-database/nn-shared-database-service.py")
+NOTES_FILE_BEFORE_PROJECT_RENAME = path_names.convert_file_path_after_project_rename_to_path_before(
+    "docs/cross-project/nedsnodes-ai-native-software-development-notes.md")
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    old_records = [f"see {SHARED_DATABASE_FILE_BEFORE_PROJECT_RENAME}", f"see {NOTES_FILE_BEFORE_PROJECT_RENAME}"]
+    case.transcript("ned-box", [human(old_records[0], "2026-10-24T00:00:00Z"), human(old_records[1], "2026-10-24T00:01:00Z")])
+    case.run()
+    check("a path under the shared database's old names in an old record is tagged with its system and file under their new names",
+          case.tags(old_records[0]) == {"nn-systems/nn-shared-database/",
+                                        "nn-systems/nn-shared-database/nn-shared-database-service.py"},
+          case.tags(old_records[0]))
+    check("a file outside the wiki named by its old prefixed name in an old record is tagged with the file's new name",
+          case.tags(old_records[1]) == {"docs/cross-project/nedsnodes-ai-native-software-development-notes.md"},
+          case.tags(old_records[1]))
 
 # A transcript is read on from its stored position, not from its start.
 with tempfile.TemporaryDirectory() as directory:
@@ -428,6 +507,38 @@ with tempfile.TemporaryDirectory() as directory:
     check("a run while another holds the lock exits 3 and adds nothing",
           held.returncode == 3 and "No action is needed:" in held.stdout
           and not (case.store_directory / program.STORE_FILE_NAME).exists(), described(held))
+    with open(case.store_directory / program.LOCK_FILE_NAME, "w") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        held_quietly = case.run("--failures-only")
+    check("with --failures-only, a run while another holds the lock prints nothing and still exits 3",
+          held_quietly.returncode == 3 and held_quietly.stdout == "" and held_quietly.stderr == "",
+          described(held_quietly))
+
+# --failures-only, which cron runs each minute: a run that succeeds prints nothing; a failure is still printed.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    case.transcript("ned-box", [human("quiet words", "2026-10-22T00:00:00Z")])
+    quiet = case.run("--failures-only")
+    check("with --failures-only, a run that succeeds prints nothing and still adds and indexes his words",
+          quiet.returncode == 0 and quiet.stdout == "" and quiet.stderr == ""
+          and [entry[1] for entry in case.entries()] == ["quiet words"]
+          and case.index()[0]["standing_entry_count"] == 1, described(quiet))
+    blocked = case.transcript("mac", [human("unreadable", "2026-10-22T00:01:00Z")], name="blocked.jsonl")
+    blocked.chmod(0)
+    failed = case.run("--failures-only")
+    blocked.chmod(0o644)
+    check("with --failures-only, a transcript that cannot be read is still reported FAILED, with no summary line",
+          failed.returncode == 1 and f"FAILED: transcript {blocked}:" in failed.stderr and failed.stdout == "",
+          described(failed))
+
+# The scheduled-jobs table runs this program each minute on ned-box, quietly; the store went unfilled while it did not.
+SCHEDULED_JOBS_TABLE = PROGRAM.resolve().parents[1] / "nn-systems" / "general-tools" / "scheduled-jobs-on-each-machine.json"
+store_jobs = [job for job in json.loads(SCHEDULED_JOBS_TABLE.read_text(encoding="utf-8"))["jobs"]
+              if job["program"] == f"scripts/{PROGRAM.name}"]
+check("the scheduled-jobs table runs this program on ned-box each minute, with --failures-only, and on no other machine",
+      len(store_jobs) == 1 and store_jobs[0]["on"] == {"ned-box": {"scheduler": "cron", "schedule": "* * * * *"}}
+      and store_jobs[0]["arguments"] == ["--failures-only"] and store_jobs[0]["owner"] == "prime-intellect",
+      f"jobs naming the program: {store_jobs!r}")
 
 # A transcript that cannot be read.
 with tempfile.TemporaryDirectory() as directory:
@@ -441,6 +552,7 @@ with tempfile.TemporaryDirectory() as directory:
           result.returncode == 1 and f"FAILED: transcript {blocked}:" in result.stderr
           and "read again from where it stopped at the next run" in result.stderr
           and "send prime-intellect" in result.stderr
+          and MOVE_FAILED_TEXT not in result.stderr
           and [entry[1] for entry in case.entries()] == ["readable"]
           and f"transcript {blocked}" in case.query("SELECT failures FROM index_program_runs")[0][0],
           described(result))
@@ -459,6 +571,7 @@ with tempfile.TemporaryDirectory() as directory:
     blocked.chmod(0o644)
     check("a walk-minutes file that cannot be read is reported FAILED, exit 1, and the others are still added",
           result.returncode == 1 and f"FAILED: walk-minutes {blocked}:" in result.stderr
+          and SOURCE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n" in result.stderr
           and [entry[1] for entry in case.entries()] == ["Open (user-ruled 2026-10-17)."], described(result))
 with tempfile.TemporaryDirectory() as directory:
     case = Case(directory)
@@ -623,12 +736,12 @@ with tempfile.TemporaryDirectory() as directory:
 with tempfile.TemporaryDirectory() as directory:
     case = Case(directory)
     case.transcript("ned-box", [human("Edit scripts/tool-one.py.", "2026-10-26T00:00:00Z"),
-                                human("Is it nc-systems/handoff/handoff-supervisor.py?", "2026-10-26T00:01:00Z")])
+                                human("Is it nn-systems/handoff/handoff-supervisor.py?", "2026-10-26T00:01:00Z")])
     case.run()
     check("a file named at the end of a sentence is tagged without the sentence's full stop or question mark",
           case.tags("Edit scripts/tool-one.py.") == {"scripts/tool-one.py"}
-          and "nc-systems/handoff/handoff-supervisor.py" in case.tags("Is it nc-systems/handoff/handoff-supervisor.py?"),
-          f"{case.tags('Edit scripts/tool-one.py.')} {case.tags('Is it nc-systems/handoff/handoff-supervisor.py?')}")
+          and "nn-systems/handoff/handoff-supervisor.py" in case.tags("Is it nn-systems/handoff/handoff-supervisor.py?"),
+          f"{case.tags('Edit scripts/tool-one.py.')} {case.tags('Is it nn-systems/handoff/handoff-supervisor.py?')}")
 
 # A prompt crash recovery wrote reaches the transcript with human origin; it is not the user's words.
 recover = load("recover_crashed_seats", Path(__file__).with_name("recover-crashed-seats.py"))
@@ -824,8 +937,8 @@ with tempfile.TemporaryDirectory() as directory:
         program.user_words_entries_not_the_users_words_status_set_and_clear = real_check
     check("a check that fails is reported FAILED, exit 1, and rolls back, leaving every entry's state as it was",
           exit_code == 1
-          and "FAILED: checking again which user-words entries are a program's prompt: disk I/O error"
-              in stderr.getvalue()
+          and stderr.getvalue() == "FAILED: checking again which stored messages of the user's are a program's "
+                                   "prompt: disk I/O error\n" + CHECK_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n"
           and states(case) == [("kept words", "standing"), (prompt, "standing")],
           f"exit {exit_code}: {stderr.getvalue()} {states(case)}")
 
@@ -924,11 +1037,92 @@ with tempfile.TemporaryDirectory() as directory:
           and case.query("SELECT name FROM sqlite_master WHERE name = 'entries_schema_version_2'") == [],
           f"exit {exit_code}: {stderr.getvalue()} {case.entries()}")
 
+# The project rename moves the log-store and the project-key directory a transcript is read from.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    old_name = program.OLD_REFERENCE_CHECKOUT_DIRECTORY_NAME
+    case.log_store = case.top / f"{old_name}-logs"
+    case.mirror = case.log_store / "agent-session-files-by-machine"
+    moved = case.transcript("mac", [human("the moved one", "2026-10-22T00:00:00Z")],
+                            key=f"-Users-el-Projects-{old_name}")
+    kept = case.transcript("mac", [human("the kept one", "2026-10-22T00:01:00Z")],
+                           key=f"-Users-el-Projects-{old_name}--claude-worktrees-gone")
+    first = case.run()
+    (case.top / f"{old_name}-logs").rename(case.top / "nedsnodes-logs")
+    case.log_store = case.top / "nedsnodes-logs"
+    case.mirror = case.log_store / "agent-session-files-by-machine"
+    (case.mirror / "mac" / "projects" / f"-Users-el-Projects-{old_name}").rename(
+        case.mirror / "mac" / "projects" / "-Users-el-Projects-nedsnodes")
+    second = case.run()
+    paths = dict(case.query("SELECT text, source_path FROM entries"))
+    check("after the project rename moves the log-store and a project-key directory, an entry's source path moves "
+          "with them, and one whose project-key directory kept its old name moves with the log-store only",
+          first.returncode == 0 and second.returncode == 0
+          and paths == {"the moved one": str(case.mirror / "mac/projects/-Users-el-Projects-nedsnodes/session-one.jsonl"),
+                        "the kept one": str(case.mirror / f"mac/projects/-Users-el-Projects-{old_name}--claude-worktrees-gone/session-one.jsonl")},
+          described(second) + f" {paths}")
+
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    case.transcript("mac", [human("one", "2026-10-22T00:00:00Z")])
+    real_update = program.source_paths_moved_by_project_rename_update
+
+    def failing_update(connection):
+        raise sqlite3.OperationalError("database is locked")
+
+    program.source_paths_moved_by_project_rename_update = failing_update
+    stdout, stderr = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = program.run(case.log_store, case.agents, case.checkout)
+    finally:
+        program.source_paths_moved_by_project_rename_update = real_update
+    check("when moving stored source paths fails, the run still adds his words, then prints FAILED and exits nonzero",
+          exit_code == program.EXIT_SOURCE_OR_OUTPUT_FAILED and len(case.entries()) == 1
+          and "moving stored source paths to the names the project rename gave them" in stderr.getvalue()
+          and "database is locked" in stderr.getvalue(), f"exit {exit_code}: {stderr.getvalue()}")
+    check("when moving stored source paths fails, the FAILED line is followed by the move's own follow-up text, "
+          "which says the stored paths are unchanged, and by no unreadable file's text",
+          stderr.getvalue() == "FAILED: moving stored source paths to the names the project rename gave them: "
+                               "database is locked\n" + MOVE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n",
+          stderr.getvalue())
+
+# Failures from two groups in one run: each group's FAILED lines come once, right before that group's own text.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    blocked = case.transcript("mac", [human("unreadable", "2026-10-22T00:00:00Z")], name="blocked.jsonl")
+    blocked.chmod(0)
+    real_update = program.source_paths_moved_by_project_rename_update
+
+    def failing_update(connection):
+        raise sqlite3.OperationalError("database is locked")
+
+    program.source_paths_moved_by_project_rename_update = failing_update
+    stdout, stderr = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = program.run(case.log_store, case.agents, case.checkout)
+    finally:
+        program.source_paths_moved_by_project_rename_update = real_update
+        blocked.chmod(0o644)
+    check("a run with a move failure and an unreadable transcript prints each FAILED line once, followed by its own "
+          "follow-up text and no other",
+          exit_code == program.EXIT_SOURCE_OR_OUTPUT_FAILED
+          and stderr.getvalue() == "FAILED: moving stored source paths to the names the project rename gave them: "
+                                   "database is locked\n" + MOVE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n"
+                                   + f"FAILED: transcript {blocked}: [Errno 13] Permission denied: {str(blocked)!r}\n"
+                                   + SOURCE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n",
+          f"exit {exit_code}: {stderr.getvalue()!r}")
+
 old_issue = program.GHI_REFERENCE.search(f"see https://github.com/{program.repository_names.OLD_REPOSITORY}/issues/12 now")
 old_pull = program.PULL_REQUEST_REFERENCE.search(f"see https://github.com/{program.repository_names.OLD_REPOSITORY}/pull/34 now")
 check("a GHI or pull request link with the repository's old name, which GitHub redirects, is read",
       old_issue is not None and "12" in old_issue.groups() and old_pull is not None and "34" in old_pull.groups(),
       f"{old_issue!r} {old_pull!r}")
+check("an agent-session in the reference-checkout under its name before the project rename is one of this project's",
+      program.session_context(f"/Users/el/Projects/{program.OLD_REFERENCE_CHECKOUT_DIRECTORY_NAME}/scripts")
+      == (True, None) and program.session_context("/Users/el/Projects/nedsnodes") == (True, None)
+      and program.session_context("/Users/el/Projects/other") == (False, None))
 
 print(f"{'FAILED' if failures else 'all cases passed'}: {len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

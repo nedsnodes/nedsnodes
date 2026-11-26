@@ -15,10 +15,9 @@ running. A worktree that is not idle is KEPT, with the reason, when:
   - its owner file cannot be read;
   - it has no owner file, as agent-homes and worktrees made by hand have,
     and is not a merge-lane review checkout;
-  - it is locked with `git worktree lock`, apart from the lock CLAUDE CODE'S
-    LOCK below unlocks; a subagent's worktree that Claude Code made through
-    its `WorktreeCreate` hook, with an owner file and no lock, is judged by
-    its owner;
+  - it is locked with `git worktree lock`; a subagent's worktree, which
+    Claude Code makes through its `WorktreeCreate` hook with an owner file
+    and no lock, is judged by its owner;
   - git would prune it, its directory being gone, unless STOPPED PARTWAY
     below applies;
   - a rebase, merge, cherry-pick or revert is in progress in it, or git
@@ -52,7 +51,7 @@ needs a pull request is kept, as is one whose ancestry git cannot read.
   origin/main lacks, get a branch of their own, named
   worktree-cleaner-detached-commits-<worktree directory name>-<12 hex digits
   of the commit>; and its uncommitted and untracked files go to a
-  work-snapshot (nc-systems/handoff/uncommitted-work-snapshots.py) owned by
+  work-snapshot (nn-systems/handoff/uncommitted-work-snapshots.py) owned by
   this invocation's own process and carrying the owner file's agent-seat, so
   the agent-seat's next agent-session is told of it once this invocation has
   ended. The branch is kept, unless BRANCHES deletes it.
@@ -60,8 +59,9 @@ needs a pull request is kept, as is one whose ancestry git cannot read.
 IDLE WORKTREES. A worktree is idle, and is removed, owner file or not,
 when all of these hold: it is not an agent-home, which is a worktree directly
 inside ~/agents or one whose own git directory holds AGENT_HOME_MARKER_FILE_NAME;
-no file or directory in it or in its own git directory, by mtime, has changed
-for IDLE_WORKTREE_REMOVED_AFTER_DAYS days; it holds no uncommitted or untracked
+no file or directory in it, and no file in its own git directory, has changed
+for IDLE_WORKTREE_REMOVED_AFTER_DAYS days, each by its mtime except a reflog,
+by its newest entry's time; it holds no uncommitted or untracked
 file; every commit of its HEAD is on a remote-tracking ref of origin, as last
 fetched; no open pull request has its branch as head branch or its HEAD as
 head commit; and no rebase, merge, cherry-pick or revert is in progress in it.
@@ -70,26 +70,10 @@ runs with --no-optional-locks, so that its own index refresh does not reset
 the clock. Removing an idle worktree loses nothing: its branch is kept, unless BRANCHES
 deletes it. When any of these cannot be read, such as gh
 failing or a file that cannot be read, the worktree is not idle and the other
-rules judge it. A locked worktree is not idle, since the lock is judged first,
-nor is one whose ended Claude Code lock --remove unlocks, since writing its
-owner file changes its git directory. An idle worktree is still kept when the
-vacancy check finds or cannot rule out a live process in it, or git cannot
-list its files; its ignored files are named and discarded with it, as for any
-removal.
-
-CLAUDE CODE'S LOCK. A lock in the form Claude Code writes on a subagent's
-worktree, "claude agent agent-<id> (pid N start T)", once no process N that
-started at T runs, as /proc says on Linux and ps says on macOS, where T is the
-date ps prints, such as "Tue Nov  3 21:24:32 2026", is not kept for: --remove unlocks
-the worktree, first writing it an owner file when it has none, naming that
-ended agent-session and the agent-seat whose Claude Code transcripts name
-subagent agent-<id> (scripts/worktree-owner-file-read-and-write.py says which
-transcripts those are), then judges it like any other. When no agent-seat's
-transcripts name the subagent, or more than one's do, the worktree is kept,
-locked, and named on a line of its own for the user to keep or delete. The
-report modes say what --remove would do and change nothing. While whether
-process N runs cannot be read, and on any platform but Linux and macOS, the lock
-keeps the worktree, as does a lock in any other form.
+rules judge it. A locked worktree is not idle, since the lock is judged first.
+An idle worktree is still kept when the vacancy check finds or cannot rule
+out a live process in it, or git cannot list its files; its ignored files are
+named and discarded with it, as for any removal.
 
 MERGE-LANE REVIEW CHECKOUTS. A worktree with no owner file directly inside
 ~/.cache/merge-lane-review-worktrees, where merge-lane-2 checks out each pull
@@ -117,7 +101,7 @@ work anyone carries on.
 
 Ignored files do not keep a worktree. Before --remove removes one, it ships
 each walk in the worktree's docs/walk/, one for each <name>-minutes.md there,
-with nc-systems/skills/walk-me-through/walk-files-ship.py, given by its walk text <name>.md, or by its
+with nn-systems/skills/walk-me-through/walk-files-ship.py, given by its walk text <name>.md, or by its
 minutes when it has no walk text, which the shipper refuses, so the worktree
 is kept, and each non-empty record directory under its cold-read-records/ and
 sanity-check-records/ with the shipper of that kind
@@ -165,7 +149,7 @@ equals that pull request's `refs/pull/<number>/head`, as GitHub reports just
 before, and that no open task on that machine names in its `branches` field.
 When GitHub cannot be reached, it deletes no branch with `-D`. It names each
 deleted branch in the report modes. origin/main is read as fetched; a stale
-ref only keeps more. A task list under ~/.claude/tasks/nedschorus-*-tasks
+ref only keeps more. A task list under ~/.claude/tasks/nedsnodes-*-tasks
 that cannot be read in full, or a ~/.claude/tasks that exists but cannot be
 listed, stops every `-D` deletion, as GitHub out of reach does. GitHub out of
 reach is named on a line of its own outside --only-done, and is no failure.
@@ -178,7 +162,7 @@ ONE NAMED WORKTREE OR BRANCH. --remove-worktree-and-force-delete-its-branch
 PATH and --force-delete-branch NAME act on the one worktree or branch named,
 for an agent-session that has decided its agent-seat will not carry it on;
 the first prompt's list,
-nc-systems/handoff/agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py,
+nn-systems/handoff/agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py,
 prints the command beside each entry. Unlike --remove,
 --remove-worktree-and-force-delete-its-branch does not keep a worktree
 because the agent-seat that owns it runs, since that agent-seat has decided;
@@ -217,8 +201,7 @@ THE COUNT LINE. The report and --remove end their worktree lines with one
 line of counts: worktrees kept, by reason; worktrees with no owner file;
 local branches other than main with no pull request; and work-snapshots
 still present. A second line names the kept worktrees owned by an agent-seat
-whose handoff-supervisor is not running, when there are any, and a third the
-worktrees CLAUDE CODE'S LOCK keeps for the user to keep or delete.
+whose handoff-supervisor is not running, when there are any.
 
 Separately from the worktrees themselves, the report ends with one line
 naming dead registrations — the ones `git worktree prune` would remove,
@@ -226,11 +209,11 @@ typically because the worktree's directory is gone, which is what a
 temp-area clearing leaves behind — each with git's own reason, and the
 prune command. The line prints in every mode and is report only: the prune
 stays a deliberate human act (ruled 2026-08-18; R25 in
-docs/nedschorus-wiki/nedschorus-fleet-git-worktree-working-model.md).
+docs/nedsnodes-wiki/nedsnodes-fleet-git-worktree-working-model.md).
 
 Separately again, it handles work-snapshots, the copies of uncommitted work
 that scripts/uncommitted-work-snapshot-hook.py keeps under
-refs/work-snapshots/ (nc-systems/handoff/uncommitted-work-snapshots.py). A
+refs/work-snapshots/ (nn-systems/handoff/uncommitted-work-snapshots.py). A
 work-snapshot whose owner `claude` process is gone is reported with its age
 and whether the handoff-supervisor has listed it in a first prompt, which it
 does only when the worktree is gone or no longer holds its changes; --remove
@@ -241,7 +224,7 @@ id. --only-done prints only the ones --remove would delete.
 A live owner's work-snapshot is never touched.
 
 Last, it closes the tasks that `uncommitted-work-snapshots.py restore` opens,
-in every task list on the machine, ~/.claude/tasks/nedschorus-*-tasks, or under
+in every task list on the machine, ~/.claude/tasks/nedsnodes-*-tasks, or under
 the directory CLEAN_WORKTREES_TASK_LISTS_DIRECTORY_OVERRIDE names, which is how
 the tests keep out of the machine's task lists. Each
 task not marked completed whose subject starts with
@@ -281,7 +264,7 @@ and each branch it deletes to its machine's file in the log-store, whichever
 program ran it, so a removal can be traced afterwards without the caller's
 output:
 
-  nedlern@ned-box:/home/nedlern/nedschorus-logs/clean-worktrees-removed-worktrees-and-deleted-branches-log/<machine>.txt
+  nedlern@ned-box:/home/nedlern/nedsnodes-logs/clean-worktrees-removed-worktrees-and-deleted-branches-log/<machine>.txt
 
 <machine> is `ned-box` or `mac`. Each line is tab-separated: the UTC time,
 the machine, `removed-worktree` or `deleted-branch`, then key=value fields:
@@ -292,7 +275,7 @@ repository given with --repo, and the parent process that ran this one, its
 pid and command line, which tells the handoff-supervisor, cron and a shell
 apart. A commit git could not read is written as `unknown`. On ned-box the
 line is appended locally, on the Mac over ssh, with run_on_ned_box_or_here
-from nc-systems/handoff/handoff-user-review-of-agent-memory-stores-mark.py.
+from nn-systems/handoff/handoff-user-review-of-agent-memory-stores-mark.py.
 When a line cannot be written, the run prints a line containing FAILED
 with the cause, then the command that writes the unwritten line once the
 cause is fixed, then what to do if that command fails; it carries on
@@ -305,12 +288,12 @@ log-store.
 
 SCHEDULED. --remove runs once a day on both machines, from the reference
 clone, and at every session-handoff. The job is declared in
-nc-systems/general-tools/scheduled-jobs-on-each-machine.json and installed
-with nc-systems/general-tools/install-scheduled-jobs-on-this-machine.py: on
+nn-systems/general-tools/scheduled-jobs-on-each-machine.json and installed
+with nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py: on
 the Mac a launchd job at 06:30, so a run missed while the Mac sleeps starts at
 the next wake; on ned-box the cron line
 
-    30 6 * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/clean-worktrees.py --remove >> /home/nedlern/.claude/clean-worktrees.log 2>&1
+    30 6 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/clean-worktrees.py --remove >> /home/nedlern/.claude/clean-worktrees.log 2>&1
 
 It does not fetch, apart from the fetch before it judges the restored branches'
 tasks; a stale origin/main only keeps more.
@@ -352,27 +335,27 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _work_snapshots_spec = importlib.util.spec_from_file_location(
     "uncommitted_work_snapshots",
-    REPO_ROOT / "nc-systems" / "handoff" / "uncommitted-work-snapshots.py")
+    REPO_ROOT / "nn-systems" / "handoff" / "uncommitted-work-snapshots.py")
 work_snapshots = importlib.util.module_from_spec(_work_snapshots_spec)
 _work_snapshots_spec.loader.exec_module(work_snapshots)
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    REPO_ROOT / "nc-systems" / "general-tools"
+    REPO_ROOT / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    REPO_ROOT / "nc-systems" / "general-tools"
+    REPO_ROOT / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
 _mark_spec = importlib.util.spec_from_file_location(
     "handoff_user_review_of_agent_memory_stores_mark",
-    REPO_ROOT / "nc-systems" / "handoff" / "handoff-user-review-of-agent-memory-stores-mark.py")
+    REPO_ROOT / "nn-systems" / "handoff" / "handoff-user-review-of-agent-memory-stores-mark.py")
 mark = importlib.util.module_from_spec(_mark_spec)
 _mark_spec.loader.exec_module(mark)
 
@@ -384,7 +367,7 @@ _merge_lane_common_spec.loader.exec_module(merge_lane_common)
 
 _task_file_rewrite_spec = importlib.util.spec_from_file_location(
     "agent_seat_task_list_task_file_rewrite_common",
-    REPO_ROOT / "nc-systems" / "general-tools" / "agent-seat-task-list-task-file-rewrite-common.py")
+    REPO_ROOT / "nn-systems" / "general-tools" / "agent-seat-task-list-task-file-rewrite-common.py")
 _task_file_rewrite = importlib.util.module_from_spec(_task_file_rewrite_spec)
 _task_file_rewrite_spec.loader.exec_module(_task_file_rewrite)
 agent_seat_task_list_task_file_rewrite = _task_file_rewrite.agent_seat_task_list_task_file_rewrite
@@ -402,11 +385,11 @@ AGENT_HOME_MARKER_FILE_NAME = "agent-home-marker"
 MERGE_LANE_REVIEW_CHECKOUT_NAME_PULL_REQUEST_NUMBER_PART = re.compile(r"(?:pr)?(\d+)(?:r\d*)?[a-z]?")
 
 REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_DIRECTORY = (
-    "/home/nedlern/nedschorus-logs/clean-worktrees-removed-worktrees-and-deleted-branches-log")
+    "/home/nedlern/nedsnodes-logs/clean-worktrees-removed-worktrees-and-deleted-branches-log")
 REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_FILE_OVERRIDE_VARIABLE = (
     "CLEAN_WORKTREES_REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_FILE_OVERRIDE")
 REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_WRITE_TIMEOUT_SECONDS = 30
-# nc-systems/handoff/handoff-supervisor.py keeps the lines holding these in its handoff report.
+# nn-systems/handoff/handoff-supervisor.py keeps the lines holding these in its handoff report.
 LOG_OF_REMOVALS_RECORD_BY_HAND_PHRASE = ": to record it, run this once: "
 LOG_OF_REMOVALS_RECORD_BY_HAND_FAILED_PHRASE = (
     ": if that printf command fails too, do not run scripts/clean-worktrees.py again; ")
@@ -415,7 +398,7 @@ PRINTF_EACH_ARGUMENT_ON_ITS_OWN_LINE = r"%s\n"
 
 # The reference clone's walk shipper, given the path of one walk's file, ships that walk; loaded
 # as a module by walk_files_ship_module only so that which files make a walk is decided by its own rules.
-WALK_FILES_SHIPPER = REPO_ROOT / "nc-systems" / "skills" / "walk-me-through" / "walk-files-ship.py"
+WALK_FILES_SHIPPER = REPO_ROOT / "nn-systems" / "skills" / "walk-me-through" / "walk-files-ship.py"
 WALK_MINUTES_SUFFIX = "-minutes.md"
 _walk_files_ship = None
 
@@ -449,7 +432,7 @@ FORCE_DELETABLE_BRANCH_LINE_START = (
     "git branch -D: ")
 
 # Its reader of the open tasks' `branches` fields decides which branches a task holds.
-FIRST_PROMPT_LIST = (REPO_ROOT / "nc-systems" / "handoff"
+FIRST_PROMPT_LIST = (REPO_ROOT / "nn-systems" / "handoff"
                      / "agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py")
 _first_prompt_list = None
 
@@ -469,7 +452,7 @@ _owner_file_spec.loader.exec_module(owner_file)
 # Gitignored directories whose records belong in the log-store, each with the program that ships one
 # record of that kind. The reference clone's shippers, not the worktree's possibly older copies.
 LOG_STORE_RECORD_SHIPPERS = (
-    ("cold-read-records", REPO_ROOT / "nc-systems" / "cold-read" / "cold-read-record-ship.py"),
+    ("cold-read-records", REPO_ROOT / "nn-systems" / "cold-read" / "cold-read-record-ship.py"),
     ("sanity-check-records", REPO_ROOT / "scripts" / "sanity-check-record-ship.py"),
 )
 
@@ -1070,9 +1053,6 @@ class Verdict:
     # When the idle rule judged the worktree, in seconds since the epoch; --remove keeps the
     # worktree when anything in it changed since, or its HEAD did.
     idle_judged_at: float | None = None
-    # Kept locked by Claude Code's lock of an ended agent-session that no agent-seat's
-    # transcripts name: the count lines name it for the user.
-    for_the_user_to_keep_or_delete: bool = False
 
 
 def owner_text(owner):
@@ -1085,95 +1065,12 @@ def pull_request_text(pull_request):
     return f"pull request #{pull_request['number']} ({pull_request['state'].lower()})"
 
 
-@dataclass
-class EndedClaudeCodeSubagentLock:
-    """Claude Code's lock on a worktree, naming a `claude` process that has ended, which
-    --remove unlocks, first writing owner_to_write as the worktree's owner file when it is set."""
-    lock: object
-    explanation: str
-    owner_to_write: dict | None
-
-
-def claude_code_subagent_lock_verdict_or_ended_lock(worktree, record):
-    """For a locked worktree, return (the Verdict that keeps it, None), or (None, the
-    EndedClaudeCodeSubagentLock that --remove unlocks), as CLAUDE CODE'S LOCK says."""
-    lock = owner_file.claude_code_subagent_worktree_lock_reason_parse(record.locked_reason)
-    locked = f"locked with git worktree lock ({record.locked_reason or 'no reason given'})"
-    if lock is None:
-        return Verdict(False, locked, KEPT_LOCKED), None
-    state, explanation = owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state(lock)
-    if state != owner_file.STOPPED:
-        return Verdict(False, f"{locked}: {explanation}", KEPT_LOCKED), None
-    try:
-        owner = owner_file.worktree_owner_file_read(worktree)
-    except owner_file.WorktreeOwnerFileError as error:
-        return Verdict(False, f"{locked}, whose claude process has ended, and its owner file "
-                              f"could not be read: {error}", KEPT_NOT_CHECKABLE), None
-    if owner is not None:
-        return None, EndedClaudeCodeSubagentLock(lock, explanation, None)
-    try:
-        seats = owner_file.agent_seats_whose_claude_code_transcripts_name_subagent(lock.agent_id)
-        owner_key = owner_file.claude_code_subagent_worktree_lock_ended_agent_session_owner_key(lock)
-    except Exception as error:
-        return Verdict(False, f"{locked}, whose claude process has ended, and the agent-seat whose "
-                              f"Claude Code transcripts name subagent agent-{lock.agent_id} could "
-                              f"not be read: {type(error).__name__}: {error}",
-                       KEPT_NOT_CHECKABLE), None
-    if len(seats) != 1:
-        whose = ("no agent-seat's Claude Code transcripts name" if not seats
-                 else f"the Claude Code transcripts of {len(seats)} agent-seats, "
-                      f"{', '.join(seats)}, name")
-        return Verdict(False, f"{locked}, whose claude process has ended, it has no owner file, "
-                              f"and {whose} subagent agent-{lock.agent_id}, so no agent-seat "
-                              f"owns it; the user keeps or deletes it", KEPT_LOCKED,
-                       for_the_user_to_keep_or_delete=True), None
-    return None, EndedClaudeCodeSubagentLock(lock, explanation, {
-        "owner_kind": owner_file.OWNER_AGENT_SESSION, "agent_seat": seats[0],
-        "owner_key": owner_key})
-
-
-def ended_claude_code_subagent_lock_unlock(worktree, repo, ended):
-    """Write the owner file ended names, then unlock the worktree; print and return False when
-    either fails, leaving the worktree locked or unlocked as git left it."""
-    if ended.owner_to_write is not None:
-        try:
-            owner_file.worktree_owner_file_write(
-                worktree, ended.owner_to_write["owner_kind"], ended.owner_to_write["agent_seat"],
-                ended.owner_to_write["owner_key"])
-        except owner_file.WorktreeOwnerFileError as error:
-            print(f"{worktree.name}: owner file FAILED, worktree kept locked — {error}")
-            print(WORKTREE_KEPT_AFTER_FAILURE_NEXT_REMOVE_RUN_RETRIES_LINE_TEMPLATE.format(
-                name=worktree.name))
-            return False
-        print(f"{worktree.name}: owner file written, naming {owner_text(ended.owner_to_write)}, "
-              f"whose subagent agent-{ended.lock.agent_id} its Claude Code transcripts name")
-    unlocked = run_git(repo, "worktree", "unlock", str(worktree))
-    if unlocked.returncode != 0:
-        print(f"{worktree.name}: unlock FAILED, worktree kept — git worktree unlock exited "
-              f"{unlocked.returncode}: {unlocked.stderr.strip()[:160] or 'no error text'}")
-        print(WORKTREE_KEPT_AFTER_FAILURE_NEXT_REMOVE_RUN_RETRIES_LINE_TEMPLATE.format(
-            name=worktree.name))
-        return False
-    print(f"{worktree.name}: unlocked, since {ended.explanation}")
-    return True
-
-
 def classify(worktree, branch, record, pull_requests):
     """Return the Verdict for a worktree: whether its work is done, and why."""
-    ended_lock = None
     if record.locked_reason is not None:
-        verdict, ended_lock = claude_code_subagent_lock_verdict_or_ended_lock(worktree, record)
-        if verdict is not None:
-            return verdict
-    verdict = classify_unlocked(worktree, branch, record, pull_requests,
-                                None if ended_lock is None else ended_lock.owner_to_write)
-    if ended_lock is not None:
-        writes = ("" if ended_lock.owner_to_write is None
-                  else f", writing first its owner file naming "
-                       f"{owner_text(ended_lock.owner_to_write)}")
-        verdict.reason = (f"{ended_lock.explanation}, so --remove unlocks it{writes}, then judges "
-                          f"it: {verdict.reason}")
-    return verdict
+        return Verdict(False, f"locked with git worktree lock "
+                              f"({record.locked_reason or 'no reason given'})", KEPT_LOCKED)
+    return classify_unlocked(worktree, branch, record, pull_requests)
 
 
 def is_agent_home(worktree, git_directory):
@@ -1200,6 +1097,35 @@ def path_changed_since(roots, cutoff):
     return None
 
 
+REFLOG_ENTRY_TIME = re.compile(rb"> (\d+) [-+]\d{4}(?:\t|$)")
+
+
+def git_directory_file_changed_since(git_directory, cutoff):
+    """Return the first file in a worktree's own git directory that changed at or after cutoff
+    (seconds since the epoch), or None when none did; raise OSError when one cannot be read. A file
+    under logs/, a reflog, changed when its newest entry was written; any other file, by its mtime."""
+    # git gc's `reflog expire --all` rewrites every worktree's reflogs without adding an entry, and
+    # its lock files change the mtimes of the directories that hold them, so neither mtime shows use.
+    def raise_error(error):
+        raise error
+    for directory, _, file_names in os.walk(git_directory, onerror=raise_error):
+        in_logs = Path(directory).relative_to(git_directory).parts[:1] == ("logs",)
+        for name in file_names:
+            path = Path(directory, name)
+            changed_at = os.lstat(path).st_mtime
+            if in_logs:
+                entries = path.read_bytes().rstrip(b"\n")
+                if not entries:
+                    continue
+                newest = REFLOG_ENTRY_TIME.search(entries.rsplit(b"\n", 1)[-1])
+                # An entry it cannot parse is judged by the mtime, which keeps the worktree sooner.
+                if newest is not None:
+                    changed_at = int(newest.group(1))
+            if changed_at >= cutoff:
+                return path
+    return None
+
+
 def idle_worktree_verdict(worktree, branch, record, pull_requests):
     """Return the Verdict for a worktree that holds no unsaved work and in which nothing has changed
     for IDLE_WORKTREE_REMOVED_AFTER_DAYS, owner file or not; or None when the rule does not apply, so
@@ -1215,7 +1141,8 @@ def idle_worktree_verdict(worktree, branch, record, pull_requests):
     judged_at = time.time()
     cutoff = judged_at - IDLE_WORKTREE_REMOVED_AFTER_DAYS * 86400
     try:
-        if path_changed_since([worktree, git_directory], cutoff) is not None:
+        if (path_changed_since([worktree], cutoff) is not None
+                or git_directory_file_changed_since(git_directory, cutoff) is not None):
             return None
     except OSError:
         return None
@@ -1323,20 +1250,16 @@ def finished_pull_requests_holding_head(worktree, head, pull_requests_of_branch,
     return candidates, None
 
 
-def classify_unlocked(worktree, branch, record, pull_requests, owner_to_write=None):
-    """Return the Verdict for an unlocked worktree, or one --remove will have unlocked and given
-    owner_to_write as its owner file."""
+def classify_unlocked(worktree, branch, record, pull_requests):
+    """Return the Verdict for an unlocked worktree."""
     if record.prunable_reason is not None:
         return Verdict(False, f"git would prune its registration ({record.prunable_reason}); "
                               f"the dead registration line below names it", KEPT_NOT_CHECKABLE)
-    # An ended lock's owner file is written only by --remove, so the report judges the worktree
-    # as --remove will find it after the write: changed today, so not idle.
-    if owner_to_write is None:
-        verdict = idle_worktree_verdict(worktree, branch, record, pull_requests)
-        if verdict is not None:
-            return verdict
+    verdict = idle_worktree_verdict(worktree, branch, record, pull_requests)
+    if verdict is not None:
+        return verdict
     try:
-        owner = owner_to_write or owner_file.worktree_owner_file_read(worktree)
+        owner = owner_file.worktree_owner_file_read(worktree)
     except owner_file.WorktreeOwnerFileError as error:
         return Verdict(False, f"its owner file could not be read: {error}", KEPT_NOT_CHECKABLE)
     if owner is None:
@@ -1885,12 +1808,6 @@ def print_count_lines(repo, kept_verdicts, pull_requests):
     if stopped_seats:
         print("worktrees kept whose agent-seat's handoff-supervisor is not running: "
               + ", ".join(f"{worktree} ({seat})" for worktree, seat in stopped_seats))
-    for_the_user = [worktree for worktree, verdict in kept_verdicts
-                    if verdict.for_the_user_to_keep_or_delete]
-    if for_the_user:
-        print("worktrees for the user to keep or delete, locked by Claude Code for a subagent "
-              "whose claude process has ended and which no one agent-seat's Claude Code "
-              "transcripts name: " + ", ".join(str(worktree) for worktree in for_the_user))
 
 
 def clean_worktrees_and_branch_refs(repo, main_checkout, remove, only_done):
@@ -1904,18 +1821,7 @@ def clean_worktrees_and_branch_refs(repo, main_checkout, remove, only_done):
     for worktree, branch, record in list_worktrees(repo, main_checkout):
         if worktree.resolve() in recorded:
             continue
-        verdict = None
-        if remove and record.locked_reason is not None:
-            verdict, ended_lock = claude_code_subagent_lock_verdict_or_ended_lock(worktree, record)
-            if ended_lock is not None:
-                if not ended_claude_code_subagent_lock_unlock(worktree, repo, ended_lock):
-                    failures += 1
-                    kept_verdicts.append((worktree, Verdict(
-                        False, "its owner file or its unlock failed", KEPT_NOT_CHECKABLE)))
-                    continue
-                record = record._replace(locked_reason=None)
-        if verdict is None:
-            verdict = classify(worktree, branch, record, pull_requests)
+        verdict = classify(worktree, branch, record, pull_requests)
         if not verdict.done:
             kept_verdicts.append((worktree, verdict))
         elif branch is not None:
@@ -1987,7 +1893,7 @@ def task_lists_directory_from_override_or_home_claude_tasks():
     return Path(override) if override else Path.home() / ".claude" / "tasks"
 
 
-NEDSCHORUS_TASK_LISTS_GLOB = "nedschorus-*-tasks"
+NEDSNODES_TASK_LISTS_GLOB = "nedsnodes-*-tasks"
 
 
 def agent_seat_task_list_directory_paths_in_claude_code_tasks_directory_collect(task_lists_directory):
@@ -2000,7 +1906,7 @@ def agent_seat_task_list_directory_paths_in_claude_code_tasks_directory_collect(
     except FileNotFoundError:
         return []
     return [path for path in sorted(Path(task_lists_directory) / name for name in names
-                                    if fnmatch.fnmatchcase(name, NEDSCHORUS_TASK_LISTS_GLOB))
+                                    if fnmatch.fnmatchcase(name, NEDSNODES_TASK_LISTS_GLOB))
             if stat.S_ISDIR(os.stat(path).st_mode)]
 RESTORED_BRANCH_TASKS_CLOSE_GIT_FETCH_TIMEOUT_SECONDS = 300
 

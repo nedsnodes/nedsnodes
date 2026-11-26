@@ -12,7 +12,7 @@ message, quoted exactly, and the channel the message came through, such as
 
 Two fresh-agents read both, one on the cold-read-tier `fast` (Claude Sonnet) and
 one on `deep` (Claude Opus), each started through
-nc-systems/cold-read/cold-read-claude-cell.py from this checkout, at the same
+nn-systems/cold-read/cold-read-claude-cell.py from this checkout, at the same
 time. That launcher runs `claude -p` in the checkout with hooks off, so each
 fresh-agent has CLAUDE.md, the user's CLAUDE.md and the repository to read, as a
 real agent does, but only the tools Read, Grep, Glob, Write and WebFetch. A
@@ -49,19 +49,19 @@ import tempfile
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PROGRAM_PATH = "scripts/tool-message-to-agent-ask-two-fresh-agents-next-step-and-check-named-script-flags.py"
-CLAUDE_CELL_LAUNCHER = REPO_ROOT / "nc-systems/cold-read/cold-read-claude-cell.py"
+CLAUDE_CELL_LAUNCHER = REPO_ROOT / "nn-systems/cold-read/cold-read-claude-cell.py"
 FOLLOWER_ANSWER_FILE_LABEL_FOR_CELL_FLAG = "tool-message-to-agent-follower"
 FOLLOWER_TIERS = ("fast", "deep")
 HELP_TIMEOUT_SECONDS = 60
 EXIT_CHECKOUT_CHANGED = 3
 
 _common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", REPO_ROOT / "nc-systems/cold-read/cold-read-cell-common.py")
+    "cold_read_cell_common", REPO_ROOT / "nn-systems/cold-read/cold-read-cell-common.py")
 cell_common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(cell_common)
 
 # Messages this program hands an agent follow
-# docs/nedschorus-wiki/nedschorus-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+# docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 
 FOLLOWER_PROMPT = """You are an agent-session working in the repository at {REPO_ROOT}, in your own worktree. In your real work you can use the tools Bash, Read, Edit, Write, Grep, Glob, TaskList, SendMessage (send a message to another agent-seat by its name), ListAgents (list the agent-seats you can message) and the skills under .claude/skills/.
 
@@ -135,7 +135,7 @@ def run_follower(tier: str, target: pathlib.Path, prompt_file: pathlib.Path,
             f"{CLAUDE_CELL_LAUNCHER} exited {completed.returncode}.",
             "The launcher's output is below. Its last line beginning `cold-read-claude-cell: cause:` "
             "names the cause.",
-            "If that line names logged-out, account-limit or model-limit: tell the user what the line "
+            "If that line names logged-out: tell the user what the line "
             "says; a subagent tells the agent that dispatched it.",
             f"Otherwise, or when there is no such line: rerun {PROGRAM_PATH} once with the same "
             "--message-file and --situation-file; if a fresh-agent fails again, tell the user the "

@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
-PAGE_PATH = (REPOSITORY_ROOT / "docs" / "nedschorus-wiki"
-             / "nedschorus-how-to-write-an-architecture-overview.md")
+PAGE_PATH = (REPOSITORY_ROOT / "docs" / "nedsnodes-wiki"
+             / "nedsnodes-how-to-write-an-architecture-overview.md")
 
 _spec = importlib.util.spec_from_file_location(
     "architecture_overview_path_template_and_checked_against_commit_reader", Path(__file__).with_name("architecture-overview-path-template-and-checked-against-commit-reader-common.py"))
@@ -54,31 +54,31 @@ check("the line an overview had before the page does not count",
       is None)
 
 # A tree with a hyphenated system holding a subsystem, a hyphenated subsystem, and a plain system.
-directories = {"nc-systems/general-tools", "nc-systems/general-tools/scheduled",
-               "nc-systems/skills", "nc-systems/skills/walk-me-through", "nc-systems/handoff"}
+directories = {"nn-systems/general-tools", "nn-systems/general-tools/scheduled",
+               "nn-systems/skills", "nn-systems/skills/walk-me-through", "nn-systems/handoff"}
 level = lambda path: architecture_overview_path_template_and_checked_against_commit_reader.architecture_overview_level_and_described_code_directory_from_path(
     path, directories.__contains__)
-wiki = "docs/nedschorus-wiki/"
-check("the project overview has no code directory of its own, and needs no nc-systems/project",
-      level(wiki + "nedschorus-project-architecture-overview.md") == ("project", None))
-check("a system's overview describes nc-systems/<system>",
-      level(wiki + "nedschorus-handoff-architecture-overview.md") == ("system", "nc-systems/handoff"))
+wiki = "docs/nedsnodes-wiki/"
+check("the project overview has no code directory of its own, and needs no nn-systems/project",
+      level(wiki + "nedsnodes-project-architecture-overview.md") == ("project", None))
+check("a system's overview describes nn-systems/<system>",
+      level(wiki + "nedsnodes-handoff-architecture-overview.md") == ("system", "nn-systems/handoff"))
 check("a hyphenated system's overview is read as the system, not as a subsystem",
-      level(wiki + "nedschorus-general-tools-architecture-overview.md") == ("system", "nc-systems/general-tools"))
-check("a subsystem's overview describes nc-systems/<system>/<subsystem>, the subsystem name holding hyphens",
-      level(wiki + "nedschorus-skills-walk-me-through-architecture-overview.md")
-      == ("subsystem", "nc-systems/skills/walk-me-through"))
+      level(wiki + "nedsnodes-general-tools-architecture-overview.md") == ("system", "nn-systems/general-tools"))
+check("a subsystem's overview describes nn-systems/<system>/<subsystem>, the subsystem name holding hyphens",
+      level(wiki + "nedsnodes-skills-walk-me-through-architecture-overview.md")
+      == ("subsystem", "nn-systems/skills/walk-me-through"))
 check("a subsystem of a hyphenated system is found",
-      level(wiki + "nedschorus-general-tools-scheduled-architecture-overview.md")
-      == ("subsystem", "nc-systems/general-tools/scheduled"))
+      level(wiki + "nedsnodes-general-tools-scheduled-architecture-overview.md")
+      == ("subsystem", "nn-systems/general-tools/scheduled"))
 check("a name with no directory behind it is not an overview",
-      level(wiki + "nedschorus-skills-gone-architecture-overview.md") is None)
+      level(wiki + "nedsnodes-skills-gone-architecture-overview.md") is None)
 check("the how-to page itself is not an overview",
-      level(wiki + "nedschorus-how-to-write-an-architecture-overview.md") is None)
+      level(wiki + "nedsnodes-how-to-write-an-architecture-overview.md") is None)
 check("a proposed-improvements file beside an overview is not an overview",
-      level(wiki + "nedschorus-handoff-architecture-overview-proposed-improvements-or-changes-x.md") is None)
+      level(wiki + "nedsnodes-handoff-architecture-overview-proposed-improvements-or-changes-x.md") is None)
 check("a path elsewhere is not an overview",
-      level("docs/nedschorus-handoff-architecture-overview.md") is None)
+      level("docs/nedsnodes-handoff-architecture-overview.md") is None)
 
 # The page is where the path and the line are defined; this module must say the same.
 page = PAGE_PATH.read_text(encoding="utf-8")

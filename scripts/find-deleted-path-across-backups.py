@@ -41,7 +41,7 @@ THE SEVEN SURFACES, in the order they are searched:
                     rebase left behind. Surface 2 walks refs and cannot see
                     them. git prunes these reflog entries after 30 days by
                     default, so this surface's memory is about a month.
-  4. log-store    — every file name under /home/nedlern/nedschorus-logs on the
+  4. log-store    — every file name under /home/nedlern/nedsnodes-logs on the
                     box, where seats ship what git does not carry. FOUND only
                     for a file whose path ends with the path asked for, the
                     rule git's surface uses; any other file whose name
@@ -70,7 +70,7 @@ THE SEVEN SURFACES, in the order they are searched:
 
 WHY SURFACES 3 AND 4, AND WHY EACH SURFACE PRINTS AS IT FINISHES. Both were
 added on 2026-09-23 after the lost-file research
-(nedlern@ned-box:/home/nedlern/nedschorus-logs/seats/merge-lane/lost-file-research-report-2026-09-23.md,
+(nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/merge-lane/lost-file-research-report-2026-09-23.md,
 episodes E11 and E14). Two seats, three days apart, could not find
 docs/drafts/pr-main-process-design.md. It was in commits 12c18b5 and 28e4f5f,
 which only the merge-lane worktree's HEAD reflog still named after its seat
@@ -108,18 +108,20 @@ A surface that cannot be read must never render as "not found". That distinction
 is the whole point: an agent told "not in Time Machine" stops looking, and an
 agent told "Time Machine needs your password, here is the command" asks for it.
 
-READ-ONLY BY CONSTRUCTION, APART FROM ONE FOLDER. This script lists and reads,
+READ-ONLY BY CONSTRUCTION, APART FROM ONE FOLDER. A search lists and reads,
 and it writes in one place only: each version it finds is copied into
 ~/Downloads/nedschorus-found-copies/<time of the search>/ (--found-copies-root
 or FIND_DELETED_PATH_FOUND_COPIES_ROOT moves the folder), named for where it
-came from and when, so an agent opens a copy and never runs a command that
-writes a backup over a file where it stands. A copy
+came from and when, so an agent opens and compares the copies before it puts
+one back, and no search writes over a file where it stands. A copy
 never replaces a file already in that folder. A version this run can only
 reach through a mount it did not make, a Time Machine snapshot or an unmounted
 local snapshot, gets a printed command that copies it into the same folder.
 It never writes backup state, which
 agents are forbidden to do (.claude/guard-hooks/backup-and-snapshot-write-guard.py
-holds the tool path; the rule binds shell commands too). Two calls it makes
+holds the tool path; the rule binds shell commands too). Restoring is not a
+search: `--restore <copy>` searches nothing, and copies the one copy the agent
+chose to <path>, which is the only write outside that folder. Two calls a search makes
 change mount state and nothing else. `diskutil mount` on the Time Machine
 destination mounts a disk the user already attached, which is how you read a
 backup, not a modification of one; it is attempted only when the destination is
@@ -259,20 +261,28 @@ Usage:
   python3 scripts/find-deleted-path-across-backups.py <40-hex git blob id>
   python3 scripts/find-deleted-path-across-backups.py <path> --skip box
   python3 scripts/find-deleted-path-across-backups.py <path> --skip localsnapshots
-  python3 scripts/find-deleted-path-across-backups.py <path> --log-store-root /home/nedlern/nedschorus-logs
-  python3 scripts/find-deleted-path-across-backups.py <path> --repo ~/Projects/nedschorus
+  python3 scripts/find-deleted-path-across-backups.py <path> --log-store-root /home/nedlern/nedsnodes-logs
+  python3 scripts/find-deleted-path-across-backups.py <path> --repo ~/Projects/nedsnodes
   python3 scripts/find-deleted-path-across-backups.py <path> --prompt-for-root
+  python3 scripts/find-deleted-path-across-backups.py <path> --restore <copy>
 
 Each FOUND surface says where this run copied what it found, under
 ~/Downloads/nedschorus-found-copies/<time of the search>/, or prints the command
-that copies it there when the copy needs a mount.
+that copies it there when the copy needs a mount. Once you have chosen a copy,
+`--restore <copy>` copies it to <path>, creating any missing parent directories
+and replacing any file already there. Search and --restore read <path> the same
+way: a path written from the current directory ("./x.md", "../x.md") is taken
+from the current directory; any other relative <path> is repo-relative, placed
+under the top level of the repository --repo is in, or under --repo itself
+when that is in no repository; so give the file's repo-relative or absolute
+path, not a fragment of it.
 
 <path> may be repo-relative ("docs/issues/46-x.md"), absolute, or any trailing
 fragment of a path ("dispositions.md"). A fragment matches whole trailing
 path components: "dispositions.md" matches "docs/dispositions.md", not
 "docs/old-dispositions.md". It
 may also be written as it is cited: in the scp form
-("nedlern@ned-box:/home/nedlern/nedschorus-logs/x.md", or "ned-box:<path>"),
+("nedlern@ned-box:/home/nedlern/nedsnodes-logs/x.md", or "ned-box:<path>"),
 from the current directory ("../x.md", "./x.md"), or from a home ("~/x.md").
 Each of those is turned into the path it names before any surface is
 searched, and the header shows both.
@@ -328,6 +338,11 @@ version returned 1 for the third case too, so a wrapper branching on $? was
 told "not found" by a run that had searched nothing. Log-store candidates
 never count toward 0: the summary names them on a line of their own instead,
 because counting them told a wrapper "found" for a path that never existed.
+
+With --restore, which searches nothing: 0 when the copy was copied to <path>,
+1 when it was not, with what failed on stderr, such as a git failure that
+left a relative <path> with no top level to place it under, and 2 on a usage
+error.
 """
 
 # Deferred annotations support the Mac's system Python 3.9.
@@ -340,6 +355,7 @@ import importlib.util
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -354,14 +370,14 @@ _locator_spec.loader.exec_module(locator)
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
@@ -382,18 +398,24 @@ EXIT_INCOMPLETE = 3
 EXIT_FOUND_BUT_NOT_COPIED = 4
 EXIT_FOUND_COPY_COMMAND_PRINTED = 5
 
+EXIT_RESTORED = 0
+EXIT_NOT_RESTORED = 1
+
 FOUND_COPIES_ROOT_ENVIRONMENT_VARIABLE = "FIND_DELETED_PATH_FOUND_COPIES_ROOT"
 DEFAULT_FOUND_COPIES_ROOT = "~/Downloads/nedschorus-found-copies"
 
 DEFAULT_BOX_SSH_HOST = "nedlern@ned-box"
 DEFAULT_TIMESHIFT_SNAPSHOT_ROOT = "/mnt/backup/timeshift/snapshots"
+# Snapshots taken before the project rename hold the reference-checkout under this name.
+REFERENCE_CHECKOUT_DIRECTORY_NAME_BEFORE_PROJECT_RENAME = "nedschorus"
 # Each seat has its own directory, so a repo-relative path may exist under several roots.
 DEFAULT_BOX_SEARCH_ROOTS = (
-    "/home/nedlern/Projects/nedschorus",
+    "/home/nedlern/Projects/nedsnodes",
+    "/home/nedlern/Projects/" + REFERENCE_CHECKOUT_DIRECTORY_NAME_BEFORE_PROJECT_RENAME,
     "/home/nedlern/agents/*",
 )
 DEFAULT_TRANSCRIPTS_DIR = "~/.claude/projects"
-DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedschorus-logs"
+DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedsnodes-logs"
 MAC_TRANSCRIPTS_COPY_UNDER_LOG_STORE = (
     *transcript_mirror.split_destination(transcript_mirror.LOG_STORE_AGENT_SESSION_FILES_DESTINATION)[1]
     .relative_to(DEFAULT_LOG_STORE_ROOT).parts,
@@ -688,15 +710,16 @@ class CitedQueryCannotBePlaced(Exception):
     """A cited path cannot be resolved from the available host and directory information."""
 
 
-def _plain_path_from_cited_query(query, cwd=None):
-    """Resolve host, home and dot-relative forms, or raise CitedQueryCannotBePlaced."""
+def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
+    """Resolve host, home and dot-relative forms, or raise CitedQueryCannotBePlaced. An unknown host's bare
+    name is returned as a search fragment, or refused when fragment_allowed is False."""
     host, path = locator.split_host(query)
     if host is not None and not path.startswith("/"):
         home = locator.KNOWN_HOST_HOMES.get(host.split(".")[0])
         inside = path[2:] if path.startswith("~/") else ("" if path == "~" else path)
         if home:
             return os.path.normpath(home + ("/" + inside if inside else ""))
-        if "/" in inside.rstrip("/"):
+        if "/" in inside.rstrip("/") or not fragment_allowed:
             raise CitedQueryCannotBePlaced(
                 "Give the file's absolute path on %s: this program does not know that host's home directory." % host)
         return inside
@@ -1487,8 +1510,10 @@ def _git_top_level(repo, runner):
 
     Raises _GitCommandFailed for any other git failure, such as a bare repository or a corrupt one."""
     code, out, stderr = runner(["git", "-C", repo, "rev-parse", "--show-toplevel"])
-    if code == 0 and out.strip():
-        return out.strip()
+    # Only git's newline goes: a directory name may itself end in whitespace.
+    top_level = out[:-1] if out.endswith("\n") else out
+    if code == 0 and top_level:
+        return top_level
     if code != 0 and git_output.git_stderr_says_outside_a_repository(stderr):
         return None
     raise _GitCommandFailed("git -C %s rev-parse --show-toplevel exited %s — %s"
@@ -2526,12 +2551,56 @@ def main(argv=None, runner=run_command):
                         default=os.environ.get(FOUND_COPIES_ROOT_ENVIRONMENT_VARIABLE, DEFAULT_FOUND_COPIES_ROOT),
                         help="the folder each found version is copied into, under a subfolder named for the time "
                              "of the search (default: %s)" % DEFAULT_FOUND_COPIES_ROOT)
+    parser.add_argument("--restore", metavar="COPY",
+                        help="search nothing, and copy the file COPY, such as a copy whose path a search's "
+                             "'copied to' line printed, to <path> on this machine, creating any missing parent "
+                             "directories and replacing any file already there. A relative COPY is read from the "
+                             "current directory. A <path> written from the current directory, with ./ or .., is placed from "
+                             "there, as a search reads it; any other relative <path> is placed under the top level "
+                             "of the repository --repo is in, or under --repo when that is in no repository, so give "
+                             "the file's repo-relative or absolute path, not a fragment of it; a git blob id is "
+                             "refused as a usage error. Exits 0 when the copy was made, and 1 when it was not, "
+                             "printing what failed on stderr")
     parser.add_argument("--prompt-for-root", action="store_true",
                         help="mount the Time Machine snapshot from here, letting sudo ask for your "
                              "password in this terminal, instead of printing the command. Only ever "
                              "pass this by hand: a hook has no terminal to answer a prompt in")
     args = parser.parse_args(argv)
     rerun = rerun_command(sys.argv[1:] if argv is None else argv)
+
+    if args.restore is not None:
+        if is_git_blob_id(args.path):
+            parser.error("--restore needs the path the file was deleted from, not a git blob id")
+        try:
+            named = _plain_path_from_cited_query(args.path, fragment_allowed=False)
+        except CitedQueryCannotBePlaced as refusal:
+            parser.error(str(refusal))
+        if named == "~" or named.startswith("~/"):
+            parser.error("--restore could not expand %r to a home directory, because HOME is unset and this user "
+                         "has no passwd entry; give the file's absolute path instead" % args.path)
+        destination = named
+        if not os.path.isabs(named):
+            try:
+                top_level = _git_top_level(args.repo, runner)
+            except _GitCommandFailed as failure:
+                print("%s: could NOT restore %s to %s — the path is relative, and git could not give the top "
+                      "level of the repository it belongs under: %s"
+                      % (THIS_SCRIPT_NAME, args.restore, args.path, failure), file=sys.stderr, flush=True)
+                return EXIT_NOT_RESTORED
+            # realpath, not abspath: ".." must climb from the directory a symlink in --repo leads to, as the
+            # system does, not lexically from the link.
+            destination = os.path.join(top_level or os.path.realpath(args.repo), named)
+        destination_existed = os.path.lexists(destination)
+        try:
+            restore_copy(args.restore, destination)
+        except OSError as error:
+            print("%s: could NOT restore %s to %s — %s: %s; %s"
+                  % (THIS_SCRIPT_NAME, args.restore, destination, type(error).__name__, error,
+                     "the file already there was left as it was" if destination_existed
+                     else "nothing was written there"), file=sys.stderr, flush=True)
+            return EXIT_NOT_RESTORED
+        print("restored %s to %s" % (args.restore, destination), flush=True)
+        return EXIT_RESTORED
 
     use_found_copies_folder(FoundCopiesFolder(args.found_copies_root))
     if is_git_blob_id(args.path):
@@ -2574,6 +2643,39 @@ def main(argv=None, runner=run_command):
     )
     print(render_summary(reports), flush=True)
     return exit_status(reports)
+
+
+def restore_copy(copy, destination):
+    """Copy the file copy to destination, creating its missing parent directories; raise OSError when it
+    cannot, with any file already at destination left as it was."""
+    # Opened first, so a copy that cannot be read leaves no new directories behind.
+    with open(copy, "rb") as source:
+        if os.path.exists(destination) and os.path.samefile(copy, destination):
+            raise shutil.SameFileError("%s and %s are the same file, so there is nothing to restore"
+                                       % (copy, destination))
+        directory = os.path.dirname(destination) or "."
+        os.makedirs(directory, exist_ok=True)
+        # Staged beside destination, so a write that fails partway never touches the file already there,
+        # and os.replace swaps the whole file in at once.
+        descriptor, staged = tempfile.mkstemp(dir=directory, prefix=".%s." % os.path.basename(destination),
+                                              suffix=".restoring")
+        try:
+            with os.fdopen(descriptor, "wb") as target:
+                shutil.copyfileobj(source, target)
+            if os.path.exists(destination):
+                shutil.copymode(destination, staged)
+            else:
+                # mkstemp makes the file 0600; a file open() creates gets 0666 less the umask.
+                umask = os.umask(0)
+                os.umask(umask)
+                os.chmod(staged, 0o666 & ~umask)
+            os.replace(staged, destination)
+        except BaseException:
+            try:
+                os.unlink(staged)
+            except OSError:
+                pass
+            raise
 
 
 def exit_status(reports):

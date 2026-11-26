@@ -1,5 +1,5 @@
 ---
-issue: "[ned-box reads the Mac's agent-seat task lists live, through the Mac's forced command for ned-box](https://github.com/nedschorus/nedschorus/issues/1564)"
+issue: "[ned-box reads the Mac's agent-seat task lists live, through the Mac's forced command for ned-box](https://github.com/nedsnodes/nedsnodes/issues/1564)"
 kind: design
 ---
 
@@ -11,7 +11,7 @@ An agent on ned-box cannot read the task lists of the agent-seats that run on th
 
 That gap now matters for citations. A rule the user is approving for design-to-main designs lets a deferred line name the event it waits on, and one kind of event is another agent-seat's task, cited by agent-seat, number and subject and found with `scripts/seat-task-list-read-hack.py`. An agent on ned-box must be able to open such a citation when the task belongs to a Mac agent-seat.
 
-The copy of the Mac's task lists that `scripts/transcript-mirror-to-log-store.py` keeps on ned-box, `/home/nedlern/nedschorus-logs/transcripts/mac/tasks/`, is not the answer: the user asked for the task lists themselves, not a copy, so that a citation shows a task as it stands.
+The copy of the Mac's task lists that `scripts/transcript-mirror-to-log-store.py` keeps on ned-box, `/home/nedlern/nedsnodes-logs/transcripts/mac/tasks/`, is not the answer: the user asked for the task lists themselves, not a copy, so that a citation shows a task as it stands.
 
 ## What exists
 
@@ -37,5 +37,5 @@ Build the change on a topic branch, with tests for the new request (accepted, re
 
 ## Related
 
-- GHI [A small HTTP service with SQLite on ned-box keeps one record of every agent-seat on both machines](https://github.com/nedschorus/nedschorus/issues/972): its build-slice 5 plans for the whole-fleet view on ned-box to read the Mac's tasks from the mirror's copy; once this change lands, that view can read them live instead.
-- GHI [Relaunch stopped agent-seats with open tasks daily](https://github.com/nedschorus/nedschorus/issues/936): its GHI-MD says the reader, run on ned-box, reads ned-box's store alone; that sentence changes when this lands.
+- GHI [A small HTTP service with SQLite on ned-box keeps one record of every agent-seat on both machines](https://github.com/nedsnodes/nedsnodes/issues/972): its build-slice 5 plans for the whole-fleet view on ned-box to read the Mac's tasks from the mirror's copy; once this change lands, that view can read them live instead.
+- GHI [Relaunch stopped agent-seats with open tasks daily](https://github.com/nedsnodes/nedsnodes/issues/936): its GHI-MD says the reader, run on ned-box, reads ned-box's store alone; that sentence changes when this lands.

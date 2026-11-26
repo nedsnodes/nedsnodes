@@ -18,16 +18,21 @@ check() {
 WORKSPACE=$(mktemp -d)
 trap 'rm -rf "$WORKSPACE"' EXIT
 STUBS="$WORKSPACE/stubs"
-mkdir -p "$STUBS" "$WORKSPACE/home" "$WORKSPACE/agents"
+mkdir -p "$STUBS" "$WORKSPACE/home/Projects" "$WORKSPACE/agents"
+# The Mac launcher runs the handoff-supervisor of ~/Projects/nedsnodes and
+# refuses when that file is missing.
+ln -s "$(cd "$SCRIPT_DIRECTORY/.." && pwd)" "$WORKSPACE/home/Projects/nedsnodes"
 
 # Stubs. `claude update` behavior comes from CLAUDE_UPDATE_MODE: hang, fail,
-# or ok — each leaves a marker so a test can assert whether update ran.
+# or ok — each leaves a marker so a test can assert whether update ran. A hang
+# that ends leaves a second marker, so a hang that was waited out is told from
+# one that was killed.
 cat > "$STUBS/claude" << 'EOF'
 #!/bin/sh
 [ "${1:-}" = "update" ] || exit 0
 touch "${CLAUDE_UPDATE_MARKER:?}"
 case "${CLAUDE_UPDATE_MODE:-ok}" in
-    (hang) sleep 600 ;;
+    (hang) sleep 600; touch "$CLAUDE_UPDATE_MARKER-hang-ended" ;;
     (fail) exit 1 ;;
     (ok) echo "stub: up to date" ;;
 esac
@@ -74,7 +79,7 @@ run_mac_launcher() {
     CLAUDE_UPDATE_MARKER="$WORKSPACE/update-ran-$label"
     TMUX_CALL_LOG="$WORKSPACE/tmux-calls-$label"
     : > "$TMUX_CALL_LOG"
-    HOME="$WORKSPACE/home" NEDSCHORUS_AGENTS_ROOT="$WORKSPACE/agents" \
+    HOME="$WORKSPACE/home" NEDSNODES_AGENTS_ROOT="$WORKSPACE/agents" \
         PATH="$STUBS:$PATH" \
         CLAUDE_UPDATE_MARKER="$CLAUDE_UPDATE_MARKER" CLAUDE_UPDATE_MODE="$update_mode" \
         TMUX_CALL_LOG="$TMUX_CALL_LOG" LAUNCH_CLAUDE_UPDATE_TIMEOUT_SECONDS=2 \
@@ -86,11 +91,9 @@ run_mac_launcher() {
 # A HANGING update: the launch must still complete, fast, and say so — the
 # timeout is the one case the launcher reports, because it killed the command
 # before the command could report anything itself.
-start=$(date +%s)
 status=$(run_mac_launcher hang hangcase)
-elapsed=$(( $(date +%s) - start ))
 check "a hanging update does not block the launch" "$([ "$status" -eq 0 ]; echo $?)"
-check "the hang is cut off by the timeout, not waited out" "$([ "$elapsed" -lt 15 ]; echo $?)"
+check "the hang is cut off by the timeout, not waited out" "$([ ! -e "$WORKSPACE/update-ran-hangcase-hang-ended" ]; echo $?)"
 if launcher_wrote_to_stderr "$WORKSPACE/err-hangcase"; then hang_warned=0; else hang_warned=1; fi
 check "the hang is reported by the launcher" "$hang_warned"
 grep -q "still running after 2s and was stopped" "$WORKSPACE/err-hangcase"
@@ -134,7 +137,7 @@ check "the mac launcher's window title reads [mac] <seat>" $?
 # seat on -L default. HOME is sandboxed like every invocation here (see the
 # note below: an unsandboxed run edits the operator's real ~/.claude.json).
 : > "$WORKSPACE/tmux-calls-transition"
-HOME="$WORKSPACE/home" NEDSCHORUS_AGENTS_ROOT="$WORKSPACE/agents" \
+HOME="$WORKSPACE/home" NEDSNODES_AGENTS_ROOT="$WORKSPACE/agents" \
     PATH="$STUBS:$PATH" \
     CLAUDE_UPDATE_MARKER="$WORKSPACE/update-ran-transition" CLAUDE_UPDATE_MODE=ok \
     TMUX_CALL_LOG="$WORKSPACE/tmux-calls-transition" LAUNCH_CLAUDE_UPDATE_TIMEOUT_SECONDS=2 \
@@ -297,7 +300,7 @@ esac
 HOME="$WORKSPACE/home" \
 TMUX_CALL_LOG="$WORKSPACE/tmux-calls-afterexit" \
 CLAUDE_UPDATE_MARKER="$WORKSPACE/update-ran-afterexit" \
-NEDSCHORUS_AGENTS_ROOT="$WORKSPACE/agents" \
+NEDSNODES_AGENTS_ROOT="$WORKSPACE/agents" \
 PATH="$STUBS:$PATH" sh "$SCRIPT_DIRECTORY/launch-claude-mac" seatprompt \
     > "$WORKSPACE/out-mac-prompt" 2>&1
 assert_supervised_option_is_first "mac tmux command" "$(cat "$WORKSPACE/tmux-calls-afterexit")"

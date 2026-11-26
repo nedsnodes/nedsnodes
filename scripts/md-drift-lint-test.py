@@ -29,7 +29,7 @@ LINT_SCRIPT = Path(__file__).with_name("md-drift-lint.py")
 # sys.dont_write_bytecode keeps one from being written either. The two cover
 # different halves of the same hazard and both are needed.
 #
-# nc-mutation-testing of this lint -- change PLACEHOLDER_SPAN, rerun, read which
+# nn-mutation-testing of this lint -- change PLACEHOLDER_SPAN, rerun, read which
 # case fails -- is how its exclusions are checked, and a stale .pyc makes it
 # report a clean, plausible, entirely wrong table. Python decides a cached
 # .pyc is current by (mtime, size) at one-second resolution, so two mutations
@@ -354,7 +354,7 @@ with tempfile.TemporaryDirectory() as workspace:
     # split on whitespace first, so a placeholder containing a space lost its
     # "<" to the split and its tail was checked as a real path. Five standing
     # findings on main were this. The first case is the repository's own text,
-    # from docs/design-to-main/design-to-main-state-machine-design.md:521.
+    # from docs/design-to-main/design-to-main-state-machine.system.design.md:521.
     findings = problems_for(
         "| `<component's directory>/design-to-main-record/design-to-main-component-user-rulings-log.md` | every ruling |",
         root)
@@ -438,7 +438,7 @@ with tempfile.TemporaryDirectory() as workspace:
           problems_for("the value `9999` per [d](docs/real-doc.md)", root) == [])
     # A paragraph is one line, so a number and a code file in different
     # sentences of it are different claims. The shape is
-    # nc-systems/handoff/handoff-design.md:114, whose exit codes `143` and
+    # nn-systems/handoff/handoff.system.design.md:114, whose exit codes `143` and
     # `137` belong to the handoff-supervisor it names in prose, not to the
     # one script the paragraph cites as a path, several sentences later.
     findings = problems_for(
@@ -615,18 +615,20 @@ with tempfile.TemporaryDirectory() as frozen_workspace:
           findings == ["path does not exist: scripts/long-gone.py"], str(findings))
 
 
-# An nc-architecture-overview gets the overview checks of
-# docs/nedschorus-wiki/nedschorus-how-to-write-an-architecture-overview.md on
+# An nn-architecture-overview gets the overview checks of
+# docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md on
 # top of the ordinary ones; any other Markdown file does not.
-OVERVIEW_NAME = "docs/nedschorus-wiki/nedschorus-demo-architecture-overview.md"
+OVERVIEW_NAME = "docs/nedsnodes-wiki/nedsnodes-demo-architecture-overview.md"
 OVERVIEW_PATH_MODULE = LINT_SCRIPT.with_name(
     "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT = (
+    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 
 
 def overview_repository(root: Path):
-    (root / "docs" / "nedschorus-wiki").mkdir(parents=True)
+    (root / "docs" / "nedsnodes-wiki").mkdir(parents=True)
     (root / "scripts").mkdir()
-    (root / "nc-systems" / "demo").mkdir(parents=True)
+    (root / "nn-systems" / "demo").mkdir(parents=True)
     (root / ".claude").mkdir()
     (root / ".claude" / "settings.json").write_text(
         '{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": '
@@ -663,12 +665,12 @@ with tempfile.TemporaryDirectory() as overview_workspace:
           findings == ["hook scripts/unregistered-hook.py is not registered under "
                        "Stop in .claude/settings.json"], str(findings))
     with tempfile.TemporaryDirectory() as outside_workspace:
-        outside = Path(outside_workspace) / "nedschorus-demo-architecture-overview.md"
+        outside = Path(outside_workspace) / "nedsnodes-demo-architecture-overview.md"
         outside.write_text("- `scripts/unregistered-hook.py`, a `Stop` hook.\n",
                            encoding="utf-8")
         findings = [problem for _, problem in lint.lint_markdown(
             outside, root, architecture_overview_checks=True)]
-        check("a file outside the repository is not taken for an nc-architecture-overview",
+        check("a file outside the repository is not taken for an nn-architecture-overview",
               findings == [], str(findings))
     findings = problems_for(
         "- `scripts/unregistered-hook.py`, a `Stop` hook: does a thing.\n", root,
@@ -677,16 +679,16 @@ with tempfile.TemporaryDirectory() as overview_workspace:
           findings == [], str(findings))
     findings = problems_for(
         "- `scripts/unregistered-hook.py`, a `Stop` hook: does a thing.\n", root,
-        "docs/nedschorus-wiki/nedschorus-how-to-write-an-architecture-overview.md")
-    check("a page at the overview path with no nc-systems/ directory is not an overview",
+        "docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md")
+    check("a page at the overview path with no nn-systems/ directory is not an overview",
           findings == [], str(findings))
     findings = problems_for(
         "- `scripts/<name>-hook.py`, a `Stop` hook: a template.\n", root, OVERVIEW_NAME)
     check("a hook path holding a placeholder is skipped", findings == [], str(findings))
     findings = problems_for(
         "- `scripts/unregistered-hook.py`, a `Stop` hook: does a thing.\n", root,
-        "docs/nedschorus-wiki/ordinary-page.md")
-    check("a file that is not an nc-architecture-overview gets no hook check",
+        "docs/nedsnodes-wiki/ordinary-page.md")
+    check("a file that is not an nn-architecture-overview gets no hook check",
           findings == [], str(findings))
 
     findings = problems_for(
@@ -764,7 +766,7 @@ with tempfile.TemporaryDirectory() as overview_workspace:
     finally:
         lint.github_issue_states_and_titles = real_query
 
-    system = root / "nc-systems" / "demo"
+    system = root / "nn-systems" / "demo"
     (system / "tests").mkdir()
     (system / "named-program.py").write_text("", encoding="utf-8")
     (system / "unnamed-program.py").write_text("", encoding="utf-8")
@@ -774,14 +776,14 @@ with tempfile.TemporaryDirectory() as overview_workspace:
     (system / "design.md").write_text("", encoding="utf-8")
     (system / "tests" / "unnamed-program-test.py").write_text("", encoding="utf-8")
     overview = root / OVERVIEW_NAME
-    overview.write_text("- `nc-systems/demo/named-program.py`, and `demo-supervisor.py`.\n",
+    overview.write_text("- `nn-systems/demo/named-program.py`, and `demo-supervisor.py`.\n",
                         encoding="utf-8")
     unnamed = lint.architecture_overview_unnamed_programs(overview, root)
-    check("the programs under nc-systems/<system>/ the overview does not name are listed, "
+    check("the programs under nn-systems/<system>/ the overview does not name are listed, "
           "tests/ and documents left out",
-          unnamed == ["nc-systems/demo/supervisor.py", "nc-systems/demo/unnamed-launcher",
-                      "nc-systems/demo/unnamed-program.py",
-                      "nc-systems/demo/unnamed-runner.bash"], str(unnamed))
+          unnamed == ["nn-systems/demo/supervisor.py", "nn-systems/demo/unnamed-launcher",
+                      "nn-systems/demo/unnamed-program.py",
+                      "nn-systems/demo/unnamed-runner.bash"], str(unnamed))
 
     # The hierarchy: the project overview, and a subsystem's overview, get the
     # overview checks too; a subsystem with its own overview drops out of its
@@ -789,30 +791,30 @@ with tempfile.TemporaryDirectory() as overview_workspace:
     unregistered = "- `scripts/unregistered-hook.py`, a `Stop` hook: does a thing.\n"
     unregistered_finding = ["hook scripts/unregistered-hook.py is not registered under "
                             "Stop in .claude/settings.json"]
-    project_name = "docs/nedschorus-wiki/nedschorus-project-architecture-overview.md"
+    project_name = "docs/nedsnodes-wiki/nedsnodes-project-architecture-overview.md"
     findings = problems_for(unregistered, root, project_name)
-    check("the project overview gets the overview checks, with no nc-systems/project",
+    check("the project overview gets the overview checks, with no nn-systems/project",
           findings == unregistered_finding, str(findings))
     check("the project overview gets no note of unnamed programs",
           lint.architecture_overview_unnamed_programs(root / project_name, root) == [])
     for name in ("covered-part", "uncovered-part"):
         (system / name).mkdir()
         (system / name / f"{name}-program.py").write_text("", encoding="utf-8")
-    subsystem_name = "docs/nedschorus-wiki/nedschorus-demo-covered-part-architecture-overview.md"
+    subsystem_name = "docs/nedsnodes-wiki/nedsnodes-demo-covered-part-architecture-overview.md"
     findings = problems_for(unregistered, root, subsystem_name)
     check("a subsystem's overview gets the overview checks",
           findings == unregistered_finding, str(findings))
     unnamed = lint.architecture_overview_unnamed_programs(root / subsystem_name, root)
     check("a subsystem's overview's note lists only the programs in the subsystem's directory",
-          unnamed == ["nc-systems/demo/covered-part/covered-part-program.py"], str(unnamed))
+          unnamed == ["nn-systems/demo/covered-part/covered-part-program.py"], str(unnamed))
     unnamed = lint.architecture_overview_unnamed_programs(overview, root)
     check("a system's overview's note leaves out a subsystem with an overview of its own, "
           "and keeps one without",
-          "nc-systems/demo/uncovered-part/uncovered-part-program.py" in unnamed
+          "nn-systems/demo/uncovered-part/uncovered-part-program.py" in unnamed
           and not any("covered-part/" in program and "uncovered" not in program for program in unnamed),
           str(unnamed))
     findings = problems_for(unregistered, root,
-                            "docs/nedschorus-wiki/nedschorus-demo-absent-part-architecture-overview.md")
+                            "docs/nedsnodes-wiki/nedsnodes-demo-absent-part-architecture-overview.md")
     check("an overview-shaped name with no directory behind it gets no overview checks",
           findings == [], str(findings))
 
@@ -838,7 +840,10 @@ def run_lint_with_fake_gh(gh_source):
         for script in (LINT_SCRIPT, OVERVIEW_PATH_MODULE):
             (root / "scripts" / script.name).write_text(
                 script.read_text(encoding="utf-8"), encoding="utf-8")
-        (root / "nc-systems" / "demo" / "unnamed-program.py").write_text("", encoding="utf-8")
+        (root / "nn-systems" / "demo" / "unnamed-program.py").write_text("", encoding="utf-8")
+        (root / REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT).parent.mkdir(parents=True)
+        (root / REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT).write_text(
+            (LINT_SCRIPT.resolve().parents[1] / REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT).read_text(encoding="utf-8"), encoding="utf-8")
         (root / OVERVIEW_NAME).write_text(
             "## Planned work\n\n"
             "- GHI [Open one](https://github.com/nedsnodes/nedsnodes/issues/1)\n",
@@ -859,7 +864,7 @@ returncode, stdout, stderr = run_lint_with_fake_gh(
     f"import sys\nsys.stdout.write({ANSWER_OPEN!r})\n")
 check("an open GHI with its title exits 0, with the unnamed program as a note only",
       returncode == 0 and stdout.strip() == (
-          f"{OVERVIEW_NAME}: note: nc-systems/demo/unnamed-program.py "
+          f"{OVERVIEW_NAME}: note: nn-systems/demo/unnamed-program.py "
           "is a program the overview does not name"),
       f"{returncode} {stdout!r} {stderr!r}")
 
@@ -895,7 +900,7 @@ check("a GHI GitHub reports NOT_FOUND is a finding, not a stopped check",
 
 
 old_name_line = lint.PLANNED_WORK_GHI_LINE.fullmatch(
-    f"- GHI [A title](https://github.com/{lint.OLD_REPOSITORY}/issues/12)")
+    f"- GHI [A title](https://github.com/{lint.repository_names.OLD_REPOSITORY}/issues/12)")
 check("a Planned work line linking with the repository's old name, which GitHub redirects, is read",
       old_name_line is not None and old_name_line.group("number") == "12", repr(old_name_line))
 

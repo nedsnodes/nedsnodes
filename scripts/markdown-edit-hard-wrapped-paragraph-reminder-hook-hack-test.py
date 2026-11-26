@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Before anything runs git: a run started with GIT_DIR set must still build this
@@ -150,7 +151,7 @@ try:
 except ImportError:
     PARSER_AVAILABLE = False
 PARSER_INSTALL_COMMAND = ("python3 -m pip install --user --break-system-packages -r "
-                          "nc-systems/general-tools/python-libraries-pinned-requirements.txt, "
+                          "nn-systems/general-tools/python-libraries-pinned-requirements.txt, "
                           "run with the python3 that `command -v python3` finds in the shell Claude Code runs hooks from")
 check("markdown-it-py is installed, so the reminder works on this machine",
       PARSER_AVAILABLE, f"install it with: {PARSER_INSTALL_COMMAND}")
@@ -330,11 +331,12 @@ if PARSER_AVAILABLE:
         check(f"silent: {case_name}", hook.markdown_has_hard_wrapped_paragraph(text) is False)
 
     large_text = ("One whole paragraph on one line.\n\n" * 50000)
-    import time as _time
-    _started = _time.monotonic()
+    # CPU time of this process, because wall-clock time on a loaded machine measures the machine, not the detector.
+    cpu_seconds_before = time.process_time()
     hook.markdown_has_hard_wrapped_paragraph(large_text)
-    check("a 1.6 MB file is judged in under five seconds",
-          _time.monotonic() - _started < 5.0)
+    detector_cpu_seconds = time.process_time() - cpu_seconds_before
+    check("a 1.6 MB file is judged in under five seconds of CPU time",
+          detector_cpu_seconds < 5.0, f"{detector_cpu_seconds:.3f} CPU seconds")
 else:
     print("the detector's cases were not run: markdown-it-py is missing")
 

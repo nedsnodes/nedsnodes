@@ -1,12 +1,12 @@
 ---
-issue: "[The recorded mutant killed check in scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py can apply a recorded mutant to a second copy of its hunk](https://github.com/nedschorus/nedschorus/issues/2780)"
+issue: "[The recorded mutant killed check in scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py can apply a recorded mutant to a second copy of its hunk](https://github.com/nedsnodes/nedsnodes/issues/2780)"
 ---
 
 # The recorded mutant killed check in scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py can apply a recorded mutant to a second copy of its hunk
 
 ## Reproduction
 
-Run on ned-box on 2026-11-07, against origin/main at 69db0032a27766e4db86612d79ddaaee50d4a3e9, in a scratch git repository made from that commit's tree, never in a shared checkout. `$SP` is any empty scratch directory, and `$CHECKOUT` is any nedschorus checkout that has a fetched `origin/main`.
+Run on ned-box on 2026-11-07, against origin/main at 69db0032a27766e4db86612d79ddaaee50d4a3e9, in a scratch git repository made from that commit's tree, never in a shared checkout. `$SP` is any empty scratch directory, and `$CHECKOUT` is any nedsnodes checkout that has a fetched `origin/main`.
 
 1. Make the scratch repository, with origin/main's tree as its first commit:
 
@@ -109,7 +109,7 @@ recorded_mutant_line_ends_with_pragma: False
 line 15 changed: '    return y * 2' -> '    return y + 2'
 ```
 
-Line 15 is in `twice`, not in `double`. A merge-lane-2 subagent got the same result on main and on the head of [pull request 2772](https://github.com/nedschorus/nedschorus/pull/2772), 4af47171ed3add8ac624f7b3c9b67e9410c55006.
+Line 15 is in `twice`, not in `double`. A merge-lane-2 subagent got the same result on main and on the head of [pull request 2772](https://github.com/nedsnodes/nedsnodes/pull/2772), 4af47171ed3add8ac624f7b3c9b67e9410c55006.
 
 ## What is wrong
 
@@ -118,17 +118,17 @@ For each recorded mutant, `recorded_mutants_judged_in_one_worktree` finds the hu
 - `recorded_mutant_line_ends_with_pragma` (line 854 on origin/main 69db0032a) calls `recorded_mutant_hunk_place` (line 752) with `line_equal_or_with_pragma_no_mutate_after`, which reads `y = x  # pragma: no mutate` as `y = x`. The hunk matches at its own line in `double`, the mutated line has no pragma, so it returns False.
 - `source_with_recorded_mutant_applied` (line 775) then calls `recorded_mutant_hunk_place` with exact comparison. At the hunk's own line the context line now differs, so it searches the whole file, finds the 7 lines exactly once, in `twice`, and mutates `twice`.
 
-The suites then judge the twin's mutant, not the recorded one. The defect is on main; pull request 2772 neither causes it nor fixes it. The Codex review cell found it while reviewing that pull request; its report is `nedlern@ned-box:/home/nedlern/nedschorus-logs/seats/merge-lane-2/merge-helpers/cx/pr2772-fb66f1c0/codex-code-review-report.md`, whose finding "Apply the mutant at the pragma lookup's resolved location" cites lines 899-900 of the program at that pull request's head.
+The suites then judge the twin's mutant, not the recorded one. The defect is on main; pull request 2772 neither causes it nor fixes it. The Codex review cell found it while reviewing that pull request; its report is `nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/cx/pr2772-fb66f1c0/codex-code-review-report.md`, whose finding "Apply the mutant at the pragma lookup's resolved location" cites lines 899-900 of the program at that pull request's head.
 
 ## What it costs, and how likely it is
 
 - A false MUTANT KILLED, as in the reproduction, closes the task the nightly full mutation pass opened for the surviving mutant, while the recorded mutant may still survive. The test gap stays unseen until a later full mutation pass records the mutant again.
 - A false MUTANT SURVIVED happens in the mirror case, when a suite tests `double` but nothing tests `twice`: the twin's mutant survives, so the check reports the recorded mutant as surviving although a suite kills it. It sends an agent to write a test the code does not need.
 
-It is hypothetical today. Of the 122 diff files in `nedlern@ned-box:/home/nedlern/nedschorus-logs/scheduled-full-mutation-pass-runs-of-merged-pull-requests/surviving-mutant-diffs/` on 2026-11-07, 97 name a file present on origin/main 69db0032a, and in none of those 97 do a hunk's whole lines appear at more than one place in the file, read either exactly or reading a pragma comment as absent. The other 25 name a file no longer on origin/main.
+It is hypothetical today. Of the 122 diff files in `nedlern@ned-box:/home/nedlern/nedsnodes-logs/scheduled-full-mutation-pass-runs-of-merged-pull-requests/surviving-mutant-diffs/` on 2026-11-07, 97 name a file present on origin/main 69db0032a, and in none of those 97 do a hunk's whole lines appear at more than one place in the file, read either exactly or reading a pragma comment as absent. The other 25 name a file no longer on origin/main.
 
 ## What to do
 
-The owner is the agent-seat fleet-restart-at-login: its commits wrote this code, including a9241f1f0, which made the pragma be read at the mutant's place, and its open [pull request 2772](https://github.com/nedschorus/nedschorus/pull/2772) is working on the same check.
+The owner is the agent-seat fleet-restart-at-login: its commits wrote this code, including a9241f1f0, which made the pragma be read at the mutant's place, and its open [pull request 2772](https://github.com/nedsnodes/nedsnodes/pull/2772) is working on the same check.
 
 Suggested fix, from the Codex report: find each hunk's place once, with the pragma-aware comparison, and use that one place both for the pragma check and for applying the mutant, replacing only the lines the mutant changes, so that a context line carrying a pragma keeps it. At the least, detect when the two lookups pick different places and give the verdict MUTANT COULD NOT BE JUDGED, saying that the hunk's lines were found at two places and naming both lines. Add the reproduction as a test in `scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors-test.py`; calling the program's functions on the twin-hunk file, as step 6's script does, takes seconds, where the whole check takes minutes.

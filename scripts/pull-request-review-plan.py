@@ -2,7 +2,13 @@
 """Compute the review tier and facts the merge-lane puts in a pull request's review brief.
 
 Rule 1: tiers follow content. Tests, fenced Markdown code, and Python changes
-limited to docstrings, comments and string constants get codex-review-and-head-tests-tier.
+limited to docstrings, comments and tool-message-to-agent strings get codex-review-and-head-tests-tier.
+A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in_source,
+in nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py, finds;
+any other string, such as a regular expression, a command's argument or a path,
+carries behaviour, so a change to it is a behaviour change; so does a module constant's value
+the collector marks collected_string_is_module_constant_whose_value_also_steers_the_program, such as MODE in print(MODE) and
+if requested_mode == MODE:.
 Python behaviour changes and other code get claude-and-codex-review-and-head-tests-tier. Prose gets
 no-reviewer-tier. Settings, Bash guards and registered hooks always get
 claude-and-codex-review-and-head-tests-tier; all of .claude/guard-hooks/ does too,
@@ -39,7 +45,7 @@ base branch to the earlier reviewed head, each measured from its merge base;
 main's unrelated files should not decide it.
 
 Rule 3: list changed tool-message-to-agent strings, with their context and old text.
-nc-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py
+nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py
 decides which strings are tool-messages-to-agent and which files are tests. Tool-message-to-agent
 strings are printed, written or raised strings; strings assigned to names
 ending in _ADVICE, _INSTRUCTION, _LINE, _MESSAGE, _NOTICE, _REASON, _REFUSAL
@@ -52,18 +58,18 @@ print(stopped_line(...)) does. Test files are those ending in
 expected message is not handed to an agent. F-string
 placeholders survive in the listing. Beside each listed string is its
 cold-read-fast-read command, whose target file holds the string's new text as
-the agent reads it, with each placeholder shown as <its source>, or as its value
+the agent reads it, with each placeholder shown as <filled in: its source>, or as its value
 when it names a module-level string constant, as the collector's
 text_as_agent_reads_it_with_placeholder_stand_ins says; --json gives that text
 as new_text_as_agent_reads_it_with_placeholder_stand_ins. The
 target file is written as
-nc-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py
+nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py
 writes it: in the directory tool-message-to-agent-fast-read-targets under the
 system temporary directory, named after the source file and a digest of the
 text. A listed string whose cold-read-record the pull request's description names, and whose text matches that record's target file, gets the record's path instead of a cold-read-fast-read command; every other string keeps its command.
 The description names a record by an absolute path that ends
 /cold-read-records/<record name>, as in
-nedlern@ned-box:/home/nedlern/nedschorus-logs/cold-read-records/<record name>;
+nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/<record name>;
 the program drops any text before the path's first slash and reads the path on
 the machine it runs on, so a record kept on ned-box is used only when the
 program runs on ned-box. A string's new text as the agent reads it, the text its
@@ -91,13 +97,13 @@ needs-approval label, with needs_user_approval set in --json, including an added
 prompt and one the plan lists with no old text, such as a prompt moved into
 another string.
 
-Rule 4: a pull request that adds or changes an nc-architecture-overview, a
+Rule 4: a pull request that adds or changes an nn-architecture-overview, a
 file at a path scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py
 gives for the project, or for a system or subsystem whose directory under
-nc-systems/ is at the head, is refused, with exit 1
+nn-systems/ is at the head, is refused, with exit 1
 and no plan, until the newest claim-check report for the overview's text at
 the head says every claim is supported, or that no must-fix claim remains.
-nc-systems/skills/overview-write/overview-write-architecture-overview-claim-check-by-fresh-agent.py
+nn-systems/skills/overview-write/overview-write-architecture-overview-claim-check-by-fresh-agent.py
 writes the reports, keyed by the overview's blob, under
 --overview-write-architecture-overview-claim-check-report-directory, the log-store's
 overview-write-architecture-overview-claim-check-reports by default.
@@ -162,29 +168,33 @@ from urllib.parse import quote
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "git-redirecting-environment-variables-removal-common.py")
 git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
 _git_redirecting_removal_spec.loader.exec_module(git_redirecting_removal)
 
 _tool_message_to_agent_string_collector_spec = importlib.util.spec_from_file_location(
     "python_source_tool_message_to_agent_string_collector_common",
-    Path(__file__).resolve().parent.parent / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parent.parent / "nn-systems" / "general-tools"
     / "python-source-tool-message-to-agent-string-collector-common.py")
 _tool_message_to_agent_string_collector = importlib.util.module_from_spec(_tool_message_to_agent_string_collector_spec)
 _tool_message_to_agent_string_collector_spec.loader.exec_module(_tool_message_to_agent_string_collector)
 path_is_test_file = _tool_message_to_agent_string_collector.path_is_test_file
 f_string_field_text = _tool_message_to_agent_string_collector.f_string_field_text
 tool_message_to_agent_string_nodes_in_source = _tool_message_to_agent_string_collector.tool_message_to_agent_string_nodes_in_source
+addition_chain_operands = _tool_message_to_agent_string_collector.addition_chain_operands
+helper_printers_in_tree = _tool_message_to_agent_string_collector.helper_printers_in_tree
+PRINTING_CALL_NAMES = _tool_message_to_agent_string_collector.PRINTING_CALL_NAMES
+STR_METHODS_THAT_RETURN_THE_TEXT = _tool_message_to_agent_string_collector.STR_METHODS_THAT_RETURN_THE_TEXT
 _message_reminder_hook_spec = importlib.util.spec_from_file_location(
     "python_edit_changed_tool_message_to_agent_strings_check_reminder_hook",
-    Path(__file__).resolve().parent.parent / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parent.parent / "nn-systems" / "general-tools"
     / "python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py")
 _message_reminder_hook = importlib.util.module_from_spec(_message_reminder_hook_spec)
 _message_reminder_hook_spec.loader.exec_module(_message_reminder_hook)
@@ -200,12 +210,12 @@ FAST_READ_COMMAND = _message_reminder_hook.FAST_READ_COMMAND
 PLAN_PRINTED_WITH_MESSAGES_MISSING_FAST_READ_COMMAND_EXIT_STATUS = 3
 _cold_read_record_names_spec = importlib.util.spec_from_file_location(
     "cold_read_record_names_common",
-    Path(__file__).resolve().parent.parent / "nc-systems" / "cold-read" / "cold-read-record-names-common.py")
+    Path(__file__).resolve().parent.parent / "nn-systems" / "cold-read" / "cold-read-record-names-common.py")
 cold_read_record_names = importlib.util.module_from_spec(_cold_read_record_names_spec)
 _cold_read_record_names_spec.loader.exec_module(cold_read_record_names)
 _overview_claim_check_spec = importlib.util.spec_from_file_location(
     "overview_write_architecture_overview_claim_check_by_fresh_agent",
-    Path(__file__).resolve().parent.parent / "nc-systems" / "skills" / "overview-write"
+    Path(__file__).resolve().parent.parent / "nn-systems" / "skills" / "overview-write"
     / "overview-write-architecture-overview-claim-check-by-fresh-agent.py")
 overview_claim_check = importlib.util.module_from_spec(_overview_claim_check_spec)
 _overview_claim_check_spec.loader.exec_module(overview_claim_check)
@@ -447,8 +457,80 @@ def fenced_code_block_line_numbers_in_markdown(source):
     return inside_lines
 
 
-class SyntaxTreeWithoutDocstringsOrStringValues(ast.NodeTransformer):
+def source_position(node):
+    return node.lineno, node.col_offset, node.end_lineno, node.end_col_offset
+
+
+def literal_piece_positions(node):
+    """The positions of the string literals that make up a tool-message-to-agent string node: the node itself,
+    an f-string's literal parts, or the literal operands of a + chain. A format spec is left out."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {source_position(node)}
+    if isinstance(node, ast.JoinedStr):
+        return {source_position(part) for part in node.values if isinstance(part, ast.Constant)}
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return set().union(*(literal_piece_positions(operand) for operand in addition_chain_operands(node)))
+    return set()
+
+
+def passes_its_text_up(child, parent):
+    """True when parent's value holds child's text as it is: an f-string part, an operand of a +
+    chain, a keyword argument, or a branch of a conditional expression. A comparison, a
+    subscript or any other expression turns the text into something else, such as a Boolean."""
+    return (isinstance(parent, (ast.JoinedStr, ast.FormattedValue, ast.keyword))
+            or (isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Add))
+            or (isinstance(parent, ast.IfExp) and child is not parent.test))
+
+
+def nearest_call_prints_its_argument(node, parents, helper_printers):
+    """True when node's text reaches, unchanged, a statement or the argument of a printing call or
+    helper printer, or the exception a raise statement builds. A str method that returns the text,
+    as .format does, passes its result on up; one such as .startswith or .count turns the text into
+    a value it steers, as a comparison does. The collector also counts a string inside any call nested
+    in a printed argument, such as the pattern in print(re.sub("a", "b", text)), but such a string
+    steers the call, not the text; and one inside a comparison, as in print(x == "yes") or
+    print(x == "yes".upper()), which prints only a Boolean."""
+    child = node
+    parent = parents.get(child)
+    while True:
+        while passes_its_text_up(child, parent):
+            child, parent = parent, parents.get(parent)
+        call = parents.get(parent)
+        if not (isinstance(parent, ast.Attribute) and parent.value is child
+                and parent.attr in STR_METHODS_THAT_RETURN_THE_TEXT
+                and isinstance(call, ast.Call) and call.func is parent):
+            break
+        child, parent = call, parents.get(call)
+    if isinstance(parent, ast.stmt):
+        return True
+    if not isinstance(parent, ast.Call) or child is parent.func:
+        return False
+    call_name = ast.unparse(parent.func)
+    return (call_name in PRINTING_CALL_NAMES
+            or (isinstance(parent.func, ast.Name) and parent.func.id in helper_printers)
+            or (isinstance(parents.get(parent), ast.Raise) and parents[parent].exc is parent))
+
+
+def tool_message_to_agent_string_literal_positions(tree, source):
+    """The positions of the literal pieces of each tool-message-to-agent string whose change is graded
+    as a message change; a module constant's value that also steers the program, as
+    collected_string_is_module_constant_whose_value_also_steers_the_program says, is left out, so a change to it is a behaviour change."""
+    entry_positions = {(entry["line"], entry["column"], entry["end_line"], entry["end_column"])
+                       for entry in tool_message_to_agent_string_nodes_in_source(source)
+                       if not entry["collected_string_is_module_constant_whose_value_also_steers_the_program"]}
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    helper_printers = helper_printers_in_tree(tree)
+    return set().union(*(literal_piece_positions(node) for node in ast.walk(tree)
+                         if isinstance(node, (ast.Constant, ast.JoinedStr, ast.BinOp))
+                         and source_position(node) in entry_positions
+                         and nearest_call_prints_its_argument(node, parents, helper_printers)))
+
+
+class SyntaxTreeWithoutDocstringsOrToolMessageToAgentStringValues(ast.NodeTransformer):
     """Preserve code structure while ignoring the text allowed at a lower tier."""
+
+    def __init__(self, tool_message_to_agent_positions):
+        self.tool_message_to_agent_positions = tool_message_to_agent_positions
 
     def visit(self, node):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -459,13 +541,15 @@ class SyntaxTreeWithoutDocstringsOrStringValues(ast.NodeTransformer):
         return super().visit(node)
 
     def visit_Constant(self, node):
-        if isinstance(node.value, str):
+        if isinstance(node.value, str) and source_position(node) in self.tool_message_to_agent_positions:
             node.value = ""
         return node
 
 
-def normalized_syntax_tree_dump_without_strings(source):
-    return ast.dump(SyntaxTreeWithoutDocstringsOrStringValues().visit(ast.parse(source)))
+def normalized_syntax_tree_dump_without_docstrings_or_tool_message_to_agent_strings(source):
+    tree = ast.parse(source)
+    tool_message_to_agent_positions = tool_message_to_agent_string_literal_positions(tree, source)
+    return ast.dump(SyntaxTreeWithoutDocstringsOrToolMessageToAgentStringValues(tool_message_to_agent_positions).visit(tree))
 
 
 def registered_hook_paths_at_revision(repository, revision):
@@ -520,9 +604,9 @@ def classify_changed_file_into_class_tier_and_reason(repository, old_revision, n
         if changes_code:
             return "code", "codex-review-and-head-tests-tier", f"{path} changes lines inside fenced code blocks"
         return "prose", "no-reviewer-tier", f"{path} changes only prose outside fenced code blocks"
-    if (path.startswith(("docs/", "nc-queue/"))
+    if (path.startswith(("docs/", "nn-queue/"))
             and Path(path).suffix not in PROSE_DIRECTORY_CODE_EXTENSIONS):
-        return "prose", "no-reviewer-tier", f"{path} is prose under docs/ or nc-queue/"
+        return "prose", "no-reviewer-tier", f"{path} is prose under docs/ or nn-queue/"
     if path.endswith(".py"):
         if status == "A":
             return "code", "claude-and-codex-review-and-head-tests-tier", f"{path} is a new program"
@@ -534,12 +618,12 @@ def classify_changed_file_into_class_tier_and_reason(repository, old_revision, n
             try:
                 if source is None:
                     raise SyntaxError("no source blob")
-                syntax_dumps.append(normalized_syntax_tree_dump_without_strings(source))
+                syntax_dumps.append(normalized_syntax_tree_dump_without_docstrings_or_tool_message_to_agent_strings(source))
             except (SyntaxError, ValueError):
                 return "code", "claude-and-codex-review-and-head-tests-tier", f"{path} does not parse at {side}"
         if syntax_dumps[0] == syntax_dumps[1]:
-            return "code", "codex-review-and-head-tests-tier", f"{path} changes only docstrings, comments and string constants"
-        return "code", "claude-and-codex-review-and-head-tests-tier", f"{path} changes its syntax tree beyond docstrings, comments and string constants"
+            return "code", "codex-review-and-head-tests-tier", f"{path} changes only docstrings, comments and tool-message-to-agent strings"
+        return "code", "claude-and-codex-review-and-head-tests-tier", f"{path} changes its syntax tree beyond docstrings, comments and tool-message-to-agent strings"
     return "code", "claude-and-codex-review-and-head-tests-tier", f"{path} is not Python or Markdown, so no check shows its change leaves behaviour alone"
 
 
@@ -655,7 +739,7 @@ def changed_tool_message_to_agent_text_entries(repository, old_revision, new_rev
     for changed_file in changed_files:
         path = changed_file["path"]
         if (not path.endswith(".py") or path_is_test_file(path)
-                or not path.startswith(("scripts/", ".claude/guard-hooks/", "nc-systems/"))
+                or not path.startswith(("scripts/", ".claude/guard-hooks/", "nn-systems/"))
                 or changed_file["status"] == "D"):
             continue
         new_nodes = tool_message_to_agent_string_nodes_in_source(read_revision_blob_or_none(repository, new_revision, path))
@@ -877,7 +961,7 @@ def merged_tree_against_origin_main(repository, head):
 
 
 def changed_architecture_overview_paths_and_code_directories(repository, head, changed_files):
-    """(path, code directory, excluded directories) for each nc-architecture-overview
+    """(path, code directory, excluded directories) for each nn-architecture-overview
     the pull request adds or changes, as at head; the project overview's code
     directory is None, and a system overview's excluded directories are its
     subsystem directories that have an overview of their own at head."""
@@ -926,7 +1010,7 @@ def path_is_architecture_overview_described_code(path, code_directory, excluded_
 
 
 def architecture_overview_checked_against_commit_problems(repository, head, changed_files):
-    """For each nc-architecture-overview the pull request adds or changes, why
+    """For each nn-architecture-overview the pull request adds or changes, why
     its **Checked against:** commit does not hold the code the overview
     describes at head; an empty list lets the plan go on."""
     problems = []
@@ -977,7 +1061,7 @@ def architecture_overview_checked_against_commit_refusal_message_lines_one_per_o
 
 
 def architecture_overview_checked_against_commit_refusal_message(number, head, problems):
-    lines = [f"pull request {number} adds or changes {len(problems)} nc-architecture-overview(s) whose "
+    lines = [f"pull request {number} adds or changes {len(problems)} nn-architecture-overview(s) whose "
              "**Checked against:** commit does not hold the code the overview describes at "
              f"head {head[:12]}, so no plan was computed. The claim check read the code at that commit, so its "
              "report does not cover the code this pull request would merge."]
@@ -987,8 +1071,8 @@ def architecture_overview_checked_against_commit_refusal_message(number, head, p
     lines.append("  1. Commit every change to the code the overview describes, then make the overview's "
                  "**Checked against:** line name the last of those commits, or a commit of main when the pull request "
                  "no longer changes that code, as the section \"Keeping an overview true\" of "
-                 "docs/nedschorus-wiki/nedschorus-how-to-write-an-architecture-overview.md says, and commit the overview.")
-    lines.extend(f"  2. Run the claim check again: python3 nc-systems/skills/overview-write/"
+                 "docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md says, and commit the overview.")
+    lines.extend(f"  2. Run the claim check again: python3 nn-systems/skills/overview-write/"
                  f"overview-write-architecture-overview-claim-check-by-fresh-agent.py --overview {shlex.quote(problem['path'])}"
                  for problem in problems)
     lines.append("  3. Do what the claim check prints, and push once its report shows no must-fix claim remains.")
@@ -997,7 +1081,7 @@ def architecture_overview_checked_against_commit_refusal_message(number, head, p
 
 
 def architecture_overview_claim_check_shortfalls(repository, head, changed_files, report_directory):
-    """For each nc-architecture-overview the pull request adds or changes, the
+    """For each nn-architecture-overview the pull request adds or changes, the
     newest claim-check report for the overview's text at head, when that report
     shows a must-fix claim remaining, or is missing or malformed; an empty list
     lets the plan go on."""
@@ -1025,17 +1109,17 @@ def architecture_overview_claim_check_refusal_message_lines_one_per_overview(sho
 
 
 def architecture_overview_claim_check_refusal_message(number, head, shortfalls, report_directory):
-    lines = [f"pull request {number} adds or changes {len(shortfalls)} nc-architecture-overview(s), and for each one "
+    lines = [f"pull request {number} adds or changes {len(shortfalls)} nn-architecture-overview(s), and for each one "
              f"listed below no claim-check report on the overview's text at head {head[:12]} shows that no "
              "must-fix claim remains, so no plan was computed."]
     lines.extend(architecture_overview_claim_check_refusal_message_lines_one_per_overview(shortfalls, report_directory))
     lines.append("Send this whole message to the pull request's author. The author clears it on ned-box, in a checkout "
                  "of the pull request's branch at its head, by running for each overview listed:")
-    lines.extend(f"     python3 nc-systems/skills/overview-write/overview-write-architecture-overview-claim-check-by-fresh-agent.py "
+    lines.extend(f"     python3 nn-systems/skills/overview-write/overview-write-architecture-overview-claim-check-by-fresh-agent.py "
                  f"--overview {shlex.quote(shortfall['path'])}" for shortfall in shortfalls)
     lines.append("If the command fails to run, the author does what it prints.")
     lines.append("If its report shows a must-fix claim remaining, the author fixes the overview as the section "
-                 "\"Checking an overview\" of docs/nedschorus-wiki/nedschorus-how-to-write-an-architecture-overview.md "
+                 "\"Checking an overview\" of docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md "
                  "says, commits, runs the command again, and pushes once the report shows no must-fix claim remains.")
     lines.append(f"Once the author says each listed overview's newest report shows no must-fix claim remains: run "
                  f"scripts/pull-request-review-plan.py --pull-request {number} again.")
@@ -1220,7 +1304,7 @@ def changed_lines_for_agent_text_entry(entry):
     return list(difflib.unified_diff(old_lines, new_lines, lineterm="", n=2))[2:]
 
 
-PULL_REQUEST_REVIEW_PLAN_LABEL_PRINTED_BESIDE_CHANGED_AGENT_PROMPT_NEEDING_USER_APPROVAL_LINE = "needs the user's approval unless it is a cosmetic-change, as `docs/nedschorus-wiki/nedschorus-which-changes-need-the-users-approval.md` defines one: this is a prompt, text the program hands an agent as its instructions"
+PULL_REQUEST_REVIEW_PLAN_LABEL_PRINTED_BESIDE_CHANGED_AGENT_PROMPT_NEEDING_USER_APPROVAL_LINE = "needs the user's approval unless it is a cosmetic-change, as `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md` defines one: this is a prompt, text the program hands an agent as its instructions"
 PULL_REQUEST_REVIEW_PLAN_LABEL_PRINTED_BESIDE_CHANGED_AGENT_PROMPT_WITH_COSMETIC_CHANGE_NEEDING_NO_APPROVAL_LINE = "cosmetic-change, needs no approval: this prompt changed only in whitespace at line ends or in the number of blank lines between its paragraphs"
 
 

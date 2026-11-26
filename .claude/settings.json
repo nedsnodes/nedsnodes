@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py"
           }
         ]
       }
@@ -31,6 +31,16 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/scripts/post-compaction-session-continues-hook.py"
+          }
+        ]
+      }
+    ],
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py"
           }
         ]
       }
@@ -55,23 +65,28 @@
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/skills/walk-me-through/walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/general-tools/pull-request-follow-up-request-from-merge-lane-2-message-save-and-forked-subagent-brief-hand-over-user-prompt-submit-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/pull-request-follow-up-request-from-merge-lane-2-message-save-and-forked-subagent-brief-hand-over-user-prompt-submit-hook.py",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py",
+            "timeout": 10
           }
         ]
       }
@@ -89,7 +104,12 @@
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/general-tools/checkout-freshness-changed-skill-invoke-again-refusal-stop-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py",
+            "timeout": 180
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/checkout-freshness-changed-skill-invoke-again-refusal-stop-hook.py",
             "timeout": 30
           },
           {
@@ -99,7 +119,17 @@
           },
           {
             "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/scripts/absence-claim-locator-reminder-hook.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/scripts/agent-reply-possibly-stale-system-status-claim-recheck-reminder-hook.py",
             "timeout": 10
           },
           {
@@ -109,12 +139,12 @@
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/skills/walk-me-through/walk-me-through-agent-reply-to-user-not-ending-with-waiting-item-closing-line-refusal-stop-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-agent-reply-to-user-not-ending-with-waiting-item-closing-line-refusal-stop-hook.py",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py",
             "timeout": 60
           }
         ]
@@ -137,7 +167,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py",
             "timeout": 30
           }
         ]
@@ -182,7 +212,7 @@
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/general-tools/claude-code-bash-git-push-of-markdown-change-citation-checks-reminder-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/claude-code-bash-git-push-of-markdown-change-citation-checks-reminder-hook.py",
             "timeout": 30
           },
           {
@@ -290,7 +320,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nc-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py",
             "timeout": 30
           }
         ]

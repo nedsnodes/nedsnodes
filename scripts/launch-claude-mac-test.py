@@ -4,7 +4,7 @@ environment the seat is launched with.
 
 The rule (PR #137 review P3, user-ruled 2026-08-22): an override either
 works or is blocked, never a third state. A literal-tilde
-NEDSCHORUS_AGENTS_ROOT (a quoted export sends one) used to half-work — this
+NEDSNODES_AGENTS_ROOT (a quoted export sends one) used to half-work — this
 launcher would mkdir a literal ~ directory while every fleet Python tool
 expanduser()s the same value, splitting the seat across two directories.
 Now ~/ resolves to $HOME exactly as the operator's shell would have made
@@ -28,7 +28,7 @@ observed in a process started after it, and a case that greps the composed
 string would pass on a string that never runs.
 
 The launcher's own CLAUDE_CODE_* variables are stripped alongside
-NEDSCHORUS_* and LAUNCH_CLAUDE_*: the launcher runs locally and its
+NEDSNODES_* and LAUNCH_CLAUDE_*: the launcher runs locally and its
 children inherit its environment, so without the strip a suite run from a
 seat that already has CLAUDE_CODE_TASK_LIST_ID set would pass on the
 ambient value rather than the composed one.
@@ -50,6 +50,10 @@ import time
 from pathlib import Path
 
 LAUNCHER = Path(__file__).with_name("launch-claude-mac")
+# The sandbox HOME's ~/Projects/nedsnodes links here, so the launcher finds a
+# reference-checkout and a case that runs the real supervisor finds its modules.
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+SUPERVISOR_WITHIN_A_CHECKOUT = Path("nn-systems") / "handoff" / "handoff-supervisor.py"
 UPDATE_LOCK_HELPER_NAME = "agent-binary-update-under-lock.py"
 # The bytes launch-claude-mac writes to colour an iTerm2 session's background:
 # iTerm2's SetColors sequence, OSC 1337 ... BEL, with the seat colour.
@@ -120,6 +124,9 @@ class MacLaunchSandbox:
     def __init__(self, root: Path):
         self.home = root / "home"
         self.home.mkdir(parents=True)
+        self.reference_checkout = self.home / "Projects" / "nedsnodes"
+        self.reference_checkout.parent.mkdir()
+        self.reference_checkout.symlink_to(REPOSITORY_ROOT)
         self.workdir = root / "workdir"
         self.workdir.mkdir()
         self.captures = root / "captures"
@@ -218,7 +225,7 @@ class MacLaunchSandbox:
         """Hand the supervisor's GitHub token check to the real interpreter, so
         the case measures the refusal the real supervisor prints for the
         sandbox HOME. token_file_accounts names the accounts given a token file."""
-        token_directory = self.home / ".config" / "nedschorus"
+        token_directory = self.home / ".config" / "nedsnodes"
         for account in token_file_accounts:
             token_directory.mkdir(parents=True, exist_ok=True)
             (token_directory / f"{account}.token").write_text(
@@ -265,13 +272,13 @@ class MacLaunchSandbox:
             seat_github_account=None, inherited_github_token=None,
             ambient_git_identity=None, term_program=None,
             stdout_on_terminal=False, no_arguments=False,
-            tmux_socket_parent_directory=None):
+            tmux_socket_parent_directory=None, launcher_options=()):
         """Run the launcher in the sandbox. extra_arguments, when given, is
         placed in LAUNCH_CLAUDE_SUPERVISOR_EXTRA_ARGUMENTS the way
         recover-crashed-seats.py's launch_seat places it — after the strip
         of ambient LAUNCH_CLAUDE_* values, so the case measures its own.
-        seat_github_account rides NEDSCHORUS_SEAT_GITHUB_ACCOUNT the same
-        way, after the strip of ambient NEDSCHORUS_* values.
+        seat_github_account rides NEDSNODES_SEAT_GITHUB_ACCOUNT the same
+        way, after the strip of ambient NEDSNODES_* values.
         inherited_github_token sets GH_TOKEN, which is otherwise stripped so
         the suite's own token cannot decide a case.
         term_program sets TERM_PROGRAM, which is otherwise stripped so the
@@ -280,17 +287,19 @@ class MacLaunchSandbox:
         place of a pipe, and returns what it wrote there as result.stdout.
         no_arguments runs the launcher with no argument at all.
         tmux_socket_parent_directory sets TMUX_TMPDIR, so the no-name usage
-        walks the sandbox's sockets rather than this machine's."""
+        walks the sandbox's sockets rather than this machine's.
+        launcher_options are put after the seat name and --no-attach."""
         arguments = [seat_name] if attach else [seat_name, "--no-attach"]
+        arguments += list(launcher_options)
         if no_arguments:
             arguments = []
         environment = {
             **{key: value for key, value in os.environ.items()
                if key not in ("TERM_PROGRAM", "GH_TOKEN")
                and key not in GIT_IDENTITY_VARIABLES
-               and not key.startswith(("NEDSCHORUS_", "LAUNCH_CLAUDE_",
+               and not key.startswith(("NEDSNODES_", "LAUNCH_CLAUDE_",
                                        "CLAUDE_CODE_"))},
-            "NEDSCHORUS_AGENTS_ROOT": agents_root,
+            "NEDSNODES_AGENTS_ROOT": agents_root,
             "HOME": str(self.home),
             "SHELL": str(self.stubs / "record-shell"),
             "PATH": f"{self.stubs}:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -305,7 +314,7 @@ class MacLaunchSandbox:
             environment["LAUNCH_CLAUDE_UPDATE_TIMEOUT_SECONDS"] = str(
                 update_timeout_seconds)
         if seat_github_account is not None:
-            environment["NEDSCHORUS_SEAT_GITHUB_ACCOUNT"] = seat_github_account
+            environment["NEDSNODES_SEAT_GITHUB_ACCOUNT"] = seat_github_account
         if inherited_github_token is not None:
             environment["GH_TOKEN"] = inherited_github_token
         if ambient_git_identity is not None:
@@ -461,7 +470,7 @@ def main() -> int:
               sandbox.invoked_commands()[:200])
         check("tilde-user root: no directory was created",
               not any(sandbox.workdir.iterdir())
-              and not any(sandbox.home.iterdir()),
+              and list(sandbox.home.iterdir()) == [sandbox.home / "Projects"],
               (sorted(str(p) for p in sandbox.workdir.iterdir()),
                sorted(str(p) for p in sandbox.home.iterdir())))
 
@@ -658,10 +667,10 @@ def main() -> int:
             check(f"boot programs fail: stderr says the {step} failed with exit 2, "
                   "that the launch goes on, where its error is, and who acts",
                   len(first) == 1
-                  and (lines + ["", ""])[first[0] + 1].startswith(f"launch-claude-mac: any error the ")
+                  and (lines + ["", ""])[first[0] + 1].startswith("launch-claude-mac: any error the ")
                   and "if none is there" in (lines + ["", ""])[first[0] + 1]
-                  and (lines + ["", "", ""])[first[0] + 2].startswith(f"launch-claude-mac: if you are an agent that ran this launch, tell the user")
-                  and (lines + ["", "", ""])[first[0] + 3].startswith(f"launch-claude-mac: if you are the user, run the command in the first of these lines")
+                  and (lines + ["", "", ""])[first[0] + 2].startswith("launch-claude-mac: if you are an agent that ran this launch, tell the user")
+                  and (lines + ["", "", ""])[first[0] + 3].startswith("launch-claude-mac: if you are the user, run the command in the first of these lines")
                   and "if it fails and prints nothing, ask an agent" in (lines + ["", "", ""])[first[0] + 3],
                   result.stderr)
         sandbox = MacLaunchSandbox(root / "boot-programs-succeed")
@@ -693,9 +702,9 @@ def main() -> int:
               len(detached_pane_commands) == 1
               and detached_pane_commands[0].endswith("; exit $?"),
               detached_pane_commands)
-        check("task list: the pin reaches the supervisor as nedschorus-<seat>-tasks",
+        check("task list: the pin reaches the supervisor as nedsnodes-<seat>-tasks",
               sandbox.supervisor_environment().get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-a-tasks",
+              == "nedsnodes-seat-a-tasks",
               sandbox.supervisor_environment())
         check("task list: the task tools are enabled for the supervisor",
               sandbox.supervisor_environment().get(
@@ -711,7 +720,7 @@ def main() -> int:
                                                  encoding="utf-8")
         result = sandbox.run("~/agents", seat_name="seat-m")
         prefixed_store = (sandbox.home / ".claude" / "tasks"
-                          / "nedschorus-seat-m-tasks")
+                          / "nedsnodes-seat-m-tasks")
         check("migration: the unprefixed store is renamed to the prefixed id",
               result.returncode == 0 and not unprefixed_store.exists()
               and (prefixed_store / "1.json").is_file(),
@@ -724,7 +733,7 @@ def main() -> int:
         (unprefixed_store / "1.json").write_text("unprefixed",
                                                  encoding="utf-8")
         prefixed_store = (sandbox.home / ".claude" / "tasks"
-                          / "nedschorus-seat-m-tasks")
+                          / "nedsnodes-seat-m-tasks")
         prefixed_store.mkdir(parents=True)
         (prefixed_store / "2.json").write_text("prefixed", encoding="utf-8")
         result = sandbox.run("~/agents", seat_name="seat-m")
@@ -740,7 +749,7 @@ def main() -> int:
         sandbox.run("~/agents", seat_name="seat-b")
         check("task list: a second seat name yields a DIFFERENT list id",
               sandbox.supervisor_environment().get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-b-tasks",
+              == "nedsnodes-seat-b-tasks",
               sandbox.supervisor_environment())
 
         # --- the seat's git identity (user-approved 2026-09-22): author and
@@ -785,15 +794,15 @@ def main() -> int:
         check("attached: tmux gets mouse mode on and copy-command pbcopy",
               tmux_argv_sets_mouse_mode_and_pbcopy(sandbox.tmux_argv()),
               sandbox.tmux_argv())
-        check("task list (attached): the supervisor gets nedschorus-<seat>-tasks",
+        check("task list (attached): the supervisor gets nedsnodes-<seat>-tasks",
               sandbox.supervisor_environment().get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-c-tasks"
+              == "nedsnodes-seat-c-tasks"
               and sandbox.supervisor_environment().get(
                   "CLAUDE_CODE_ENABLE_TODO_TOOLS") == "1",
               sandbox.supervisor_environment())
         check("task list (attached): the after-exit shell keeps the binding",
               sandbox.after_exit_environment().get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-c-tasks"
+              == "nedsnodes-seat-c-tasks"
               and sandbox.after_exit_environment().get(
                   "CLAUDE_CODE_ENABLE_TODO_TOOLS") == "1",
               sandbox.after_exit_environment())
@@ -811,6 +820,59 @@ def main() -> int:
               and Path(sandbox.after_exit_cwd()).resolve()
               == (sandbox.home / "agents" / "seat-c").resolve(),
               sandbox.after_exit_cwd() or "no shell recorded")
+
+        # --- which checkout the supervisor runs from. It keeps that checkout's
+        # code and runs the conversation extractor from there at each
+        # session-handoff, so a launcher run from a topic-worktree must not
+        # tie the seat to that worktree. LAUNCHER lives in this checkout,
+        # never the sandbox's ~/Projects/nedsnodes, so the default case is a
+        # launcher run from another checkout. ---------------------------------
+        sandbox = MacLaunchSandbox(root / "supervisor-checkout-default")
+        result = sandbox.run("~/agents", seat_name="seat-d")
+        check("supervisor checkout: by default the supervisor runs from ~/Projects/nedsnodes, "
+              "not from the launcher's own checkout",
+              result.returncode == 0 and sandbox.supervisor_argv()[:1]
+              == [str(sandbox.reference_checkout / SUPERVISOR_WITHIN_A_CHECKOUT)],
+              (result.returncode, sandbox.supervisor_argv()[:1], result.stderr[-300:]))
+
+        # An apostrophe and a space in the path: it is spliced between single quotes in the pane command.
+        sandbox = MacLaunchSandbox(root / "supervisor-checkout-option")
+        other_checkout = root / "supervisor-checkout-option" / "other's checkout"
+        (other_checkout / SUPERVISOR_WITHIN_A_CHECKOUT).parent.mkdir(parents=True)
+        (other_checkout / SUPERVISOR_WITHIN_A_CHECKOUT).write_text("", encoding="utf-8")
+        result = sandbox.run("~/agents", seat_name="seat-o",
+                             launcher_options=["--supervisor-checkout", str(other_checkout)])
+        check("supervisor checkout: --supervisor-checkout <path> runs the supervisor of that checkout",
+              result.returncode == 0 and sandbox.supervisor_argv()[:1]
+              == [str(other_checkout / SUPERVISOR_WITHIN_A_CHECKOUT)],
+              (result.returncode, sandbox.supervisor_argv()[:1], result.stderr[-300:]))
+
+        sandbox = MacLaunchSandbox(root / "supervisor-checkout-relative")
+        relative_checkout = sandbox.workdir / "relative-checkout"
+        (relative_checkout / SUPERVISOR_WITHIN_A_CHECKOUT).parent.mkdir(parents=True)
+        (relative_checkout / SUPERVISOR_WITHIN_A_CHECKOUT).write_text("", encoding="utf-8")
+        result = sandbox.run("~/agents", seat_name="seat-l",
+                             launcher_options=["--supervisor-checkout", "relative-checkout"])
+        check("supervisor checkout: a relative --supervisor-checkout is resolved against the "
+              "caller's directory, since the pane starts in $HOME",
+              result.returncode == 0 and sandbox.supervisor_argv()[:1]
+              == [str(relative_checkout / SUPERVISOR_WITHIN_A_CHECKOUT)],
+              (result.returncode, sandbox.supervisor_argv()[:1], result.stderr[-300:]))
+
+        sandbox = MacLaunchSandbox(root / "supervisor-checkout-missing")
+        missing_checkout = root / "supervisor-checkout-missing" / "no-such-checkout"
+        result = sandbox.run("~/agents", seat_name="seat-m",
+                             launcher_options=["--supervisor-checkout", str(missing_checkout)])
+        check("supervisor checkout: a path holding no handoff-supervisor.py is refused with "
+              "exit 2, naming the file, and nothing is updated, created or started",
+              result.returncode == 2
+              and f"launch-claude-mac: refused, because {missing_checkout / SUPERVISOR_WITHIN_A_CHECKOUT} "
+                  "does not exist" in result.stderr
+              and "pass the root of a nedschorus checkout that exists" in result.stderr
+              and "claude" not in sandbox.invoked_commands().replace("python3", "")
+              and not sandbox.tmux_argv()
+              and not (sandbox.home / "agents" / "seat-m").exists(),
+              (result.returncode, result.stderr[-400:], sandbox.invoked_commands()))
 
         # --- the extra-arguments hook is CONSUMED, not inherited. Measured
         # 2026-09-03: recover-crashed-seats.py launched a seat with
@@ -876,7 +938,7 @@ def main() -> int:
               result.returncode == 0
               and "handoff-supervisor.py" in composed_command
               and "GH_TOKEN" not in composed_command
-              and ".config/nedschorus" not in composed_command,
+              and ".config/nedsnodes" not in composed_command,
               (result.returncode, composed_command[:400], result.stderr[:300]))
 
         # --- a GH_TOKEN the launcher inherits reaches neither the seat's tmux
@@ -934,7 +996,7 @@ def main() -> int:
                              seat_github_account="ned-review-merge")
         check("account override: refused with exit 2, naming the variable and the table",
               result.returncode == 2
-              and "NEDSCHORUS_SEAT_GITHUB_ACCOUNT" in result.stderr
+              and "NEDSNODES_SEAT_GITHUB_ACCOUNT" in result.stderr
               and "AGENT_SEAT_GITHUB_ACCOUNTS_OTHER_THAN_THE_MACHINE_DEFAULT" in result.stderr,
               (result.returncode, result.stderr[:300]))
         check("account override: refused before any side effect",

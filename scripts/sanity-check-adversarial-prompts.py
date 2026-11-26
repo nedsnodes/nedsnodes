@@ -2,7 +2,7 @@
 """Run a sanity-check: independent audits, each on both agent-binaries, over one document.
 
 The sanity-check is this project's second review instrument, separate from
-the cold read (`nc-systems/cold-read/cold-read-grid.py`, the prose-and-clarity review) and
+the cold read (`nn-systems/cold-read/cold-read-grid.py`, the prose-and-clarity review) and
 never part of it. Three audits, each in its own
 fresh context:
 
@@ -35,9 +35,9 @@ fails before any model cost is spent.
 
 Operating rules:
 
-- Both agent-binaries on every audit — the claude CLI (claude-fable-5-1, falling
-  back to claude-opus-5 when Fable produces no review) and
-  gpt-6.1-sol (the codex CLI), at xhigh reasoning effort. Each audit
+- Both agent-binaries on every audit — the claude CLI (claude-fable-5-2, falling
+  back to claude-opus-5-5 when Fable produces no review) and
+  gpt-6.2-sol (the codex CLI), at xhigh reasoning effort. Each audit
   therefore runs as two review agents, one per agent-binary, named
   `<audit>-adversarial-prompt-<runtime>`, such as `cut-adversarial-prompt-claude`
   (the `--adversarial-prompt` flag still takes the short `<audit>`, such as
@@ -60,7 +60,7 @@ Operating rules:
   with a stated reason.
 - The review agents read a copy, not the checkout. When a run starts, the
   runner makes a local clone of the repository at the checkout's last commit
-  (under `~/.cache/nedschorus-sanity-check-review-copies/`, with the whole
+  (under `~/.cache/nedsnodes-sanity-check-review-copies/`, with the whole
   history and no remote pointing back at the checkout), every agent runs in
   it, and the runner removes it when the run ends, a run that fails and a
   run a stop signal ends included (WHEN A RUN IS STOPPED, below). So the
@@ -142,8 +142,8 @@ Running a sanity-check, and reading its output:
   prints the `record:` line and the record's path.
 - An agent that saves no report is launched once more by the runner, with the
   same prompt, in the same copy, unless the cause is one only the user can
-  clear or the launch timed out. The cause classes: `logged-out`,
-  `agent-binary-missing`, `account-limit` and `model-limit`, which only the
+  clear or the launch timed out. The cause classes: `logged-out` and
+  `agent-binary-missing`, which only the
   user can clear and which are never relaunched; `timeout`, the launch cut off
   after an hour, never relaunched, because the same launch would cost the same
   hour; `exit-<code>`, any other failed launch, whose detail is the last line
@@ -223,7 +223,7 @@ Running a sanity-check, and reading its output:
   therefore launches once more itself, except where the cause is known to
   outlast a relaunch: the classes only the user can clear
   (USER_CLEARABLE_CAUSE_CLASSES in
-  nc-systems/cold-read/cold-read-cell-common.py), which also reach the user by
+  nn-systems/cold-read/cold-read-cell-common.py), which also reach the user by
   the printed instruction, and a timeout. The classification is read from the
   CLI's own output, matched only at the start of a line and only on a launch
   that failed; a launch whose text misleads it is told to the user, who can
@@ -297,15 +297,27 @@ import typing
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 RECORDS_DIRECTORY_NAME = "sanity-check-records"
+SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION = (
+    "Note this failed model in sanity-check-finding-dispositions.md; the runner has already "
+    "recorded it.")
+SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION = (
+    "Before you trust this quote, look for it in git history or on the web, and record what "
+    "you found in sanity-check-finding-dispositions.md.")
+SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION = (
+    "The runner discards these writes with the review copy; note this warning in "
+    "sanity-check-finding-dispositions.md.")
+SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION = (
+    "Set this warning aside in sanity-check-finding-dispositions.md as needing no action: the "
+    "runner wrote the cell's report over the stray file.")
 RECORDS_ROOT = REPO_ROOT / RECORDS_DIRECTORY_NAME
 # The record reaches the log-store by program, not by an agent remembering to
-# run one, the way nc-systems/cold-read/cold-read-grid.py ships its own.
+# run one, the way nn-systems/cold-read/cold-read-grid.py ships its own.
 RECORD_SHIPPER = REPO_ROOT / "scripts" / "sanity-check-record-ship.py"
 # The shipper's one line opens with this only when the record reached the
 # log-store; REFUSED and FAILED both leave it on disk alone.
 RECORD_SHIPPED_LINE_PREFIX = "shipped:"
 _common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", REPO_ROOT / "nc-systems" / "cold-read" / "cold-read-cell-common.py")
+    "cold_read_cell_common", REPO_ROOT / "nn-systems" / "cold-read" / "cold-read-cell-common.py")
 common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(common)
 _record_ship_spec = importlib.util.spec_from_file_location(
@@ -314,20 +326,20 @@ record_ship = importlib.util.module_from_spec(_record_ship_spec)
 _record_ship_spec.loader.exec_module(record_ship)
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    REPO_ROOT / "nc-systems" / "general-tools"
+    REPO_ROOT / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    REPO_ROOT / "nc-systems" / "general-tools"
+    REPO_ROOT / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 _command_line_prefix_spec = importlib.util.spec_from_file_location(
     "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
-    REPO_ROOT / "nc-systems" / "general-tools"
+    REPO_ROOT / "nn-systems" / "general-tools"
     / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
 command_line_prefix = importlib.util.module_from_spec(_command_line_prefix_spec)
 _command_line_prefix_spec.loader.exec_module(command_line_prefix)
@@ -341,23 +353,21 @@ def _cold_read_cell_program(file_name: str):
     when a launch fails for a reason the agent-binary can name."""
     spec = importlib.util.spec_from_file_location(
         pathlib.Path(file_name).stem.replace("-", "_"),
-        REPO_ROOT / "nc-systems" / "cold-read" / file_name)
+        REPO_ROOT / "nn-systems" / "cold-read" / file_name)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 # What each agent-binary prints when a launch fails for a reason it can name
-# (logged out, a usage limit), per agent-binary: a function from the model to the
-# texts, which common.classify_failed_attempt matches against the start of
+# (logged out), per agent-binary: the texts that
+# common.classify_failed_attempt matches against the start of
 # each line the agent-binary wrote. Each text was captured from a real run and
 # is kept, with its source, beside the cold-read cell that met it; taken from
 # there, not copied, so a text added for one instrument is recognised by both.
-RECOGNISED_FAILURE_TEXTS_FOR_MODEL = {
-    "claude": _cold_read_cell_program(
-        "cold-read-claude-cell.py").recognised_failure_texts_for_model,
-    "codex": _cold_read_cell_program(
-        "cold-read-codex-cell.py").recognised_failure_texts_for_model,
+RECOGNISED_FAILURE_TEXTS = {
+    "claude": _cold_read_cell_program("cold-read-claude-cell.py").RECOGNISED_FAILURE_TEXTS,
+    "codex": _cold_read_cell_program("cold-read-codex-cell.py").RECOGNISED_FAILURE_TEXTS,
 }
 
 # The signals that end a run early and that this runner answers by stopping
@@ -459,7 +469,7 @@ CELL_SCRATCH_DIRECTORY_NAME = "scratch"
 # the requester's own work there is never a cell's; and outside /tmp, which the
 # Codex cells' permission profile makes read-only on Linux, where the copy must
 # stay writable for the scratch directories inside it.
-REVIEW_COPIES_ROOT = pathlib.Path.home() / ".cache" / "nedschorus-sanity-check-review-copies"
+REVIEW_COPIES_ROOT = pathlib.Path.home() / ".cache" / "nedsnodes-sanity-check-review-copies"
 
 # What the run saves in its record beside the reports: everything it printed,
 # and the request the fresh-eyes cells were given, so neither depends on an
@@ -491,19 +501,19 @@ IGNORED_PATHS_WATCHED_FOR_WRITES = (RECORDS_DIRECTORY_NAME,)
 IGNORED_PATH_STATUS_CODE = "!!"
 
 # The claude agent-binary's chain, tried in order until one produces a review.
-# "claude-fable-5" is obsolete, and Fable is sometimes unavailable, so Opus 5
+# "claude-fable-5" is obsolete, and Fable is sometimes unavailable, so Opus 5.5
 # stands behind it and ends the chain.
 #
 # WHAT COUNTS AS A FAILURE WORTH FALLING BACK FROM follows the house chain,
-# run_model_chain in nc-systems/cold-read/cold-read-cell-common.py: a model that exits
+# run_model_chain in nn-systems/cold-read/cold-read-cell-common.py: a model that exits
 # non-zero, cannot be launched at all, or exits 0 having written nothing are
 # one event — no review was produced — so the chain advances on all three.
 # That module is not imported here: it is built around the cold-read cell's
 # command line and report file, and this runner has neither.
-CLAUDE_MODEL_CHAIN = ("claude-fable-5-1", "claude-opus-5")
-# Matches cold-read-codex-cell.py's `deep` tier; the id needs codex-cli 0.159.1
+CLAUDE_MODEL_CHAIN = ("claude-fable-5-2", "claude-opus-5-5")
+# Matches cold-read-codex-cell.py's `deep` tier; the id needs codex-cli 0.169.1
 # or later.
-CODEX_MODEL = "gpt-6.1-sol"
+CODEX_MODEL = "gpt-6.2-sol"
 # xhigh for both agent-binaries, by the user's calibration and a tier probe of both:
 # max earned neither slot.
 REASONING_EFFORT = "xhigh"
@@ -639,7 +649,6 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # The run was stopped: the chain does not go on to a model whose
             # review nobody is left to save.
             break
-        recognised_texts = RECOGNISED_FAILURE_TEXTS_FOR_MODEL["claude"](model)
         # dontAsk: a tool call --allowedTools does not allow is refused, with no one to ask.
         command = [
             *command_line_prefix.claude_code_headless_run_command_line_prefix_build("dontAsk"),
@@ -669,14 +678,14 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # the run. run_cell's own OSError handler still covers the codex
             # agent-binary, which has no chain to advance.
             failed_attempts.append(f"{model}({type(error).__name__})")
-            print(f"WARNING: {model} could not be run: {error}", flush=True)
+            print_warning_with_its_next_step(f"{model} could not be run: {error}", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
                 start_error=str(error))
             continue
         # The agent-binary's own words survive every ending, the house chain's rule
         # (BOTH STREAMS ARE CAPTURED, in run_model_chain,
-        # nc-systems/cold-read/cold-read-cell-common.py). A CLI that is logged out or out of
+        # nn-systems/cold-read/cold-read-cell-common.py). A CLI that is logged out or out of
         # credits explains itself on one of these streams and nowhere else, so
         # discarding them leaves "WARNING: <model> failed (exit 1)" as the whole
         # account of why. It is worse here than it
@@ -698,20 +707,20 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             failed_attempts.append(f"{model}(exit{completed.returncode})")
             if completed.stdout:
                 print(completed.stdout, flush=True)
-            print(f"WARNING: {model} failed (exit {completed.returncode})", flush=True)
+            print_warning_with_its_next_step(f"{model} failed (exit {completed.returncode})", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
-                exit_code=completed.returncode, recognised_texts=recognised_texts)
+                exit_code=completed.returncode, recognised_texts=RECOGNISED_FAILURE_TEXTS["claude"])
             continue
         if not completed.stdout.strip():
             # Exiting 0 with nothing to show is the ending that looks most like
             # success to a caller reading only the exit code, and the report it
             # would save is an empty review carrying a provenance stamp.
             failed_attempts.append(f"{model}(no-report)")
-            print(f"WARNING: {model} exited 0 but produced no review", flush=True)
+            print_warning_with_its_next_step(f"{model} exited 0 but produced no review", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr=completed.stderr or "", exit_code=0,
-                recognised_texts=recognised_texts)
+                recognised_texts=RECOGNISED_FAILURE_TEXTS["claude"])
             continue
         return 0, completed.stdout, model, "+".join(failed_attempts), None
     return 1, "", "", "+".join(failed_attempts), last_cause
@@ -783,7 +792,7 @@ def run_codex(prompt: str, checkout: pathlib.Path = None) -> tuple:
     # the house doctrine. Both come from a permission profile extending
     # `:workspace` with network on, which also denies every credential file:
     # the builder the cold-read Codex cell uses, in
-    # nc-systems/cold-read/cold-read-cell-common.py.
+    # nn-systems/cold-read/cold-read-cell-common.py.
     last_message_path = pathlib.Path(tempfile.mkstemp(suffix=".md", prefix="adversarial-prompt-cell-")[1])
     command = [
         "codex", "exec",
@@ -842,7 +851,7 @@ def run_codex(prompt: str, checkout: pathlib.Path = None) -> tuple:
             cause = common.classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
                 exit_code=completed.returncode,
-                recognised_texts=RECOGNISED_FAILURE_TEXTS_FOR_MODEL["codex"](CODEX_MODEL))
+                recognised_texts=RECOGNISED_FAILURE_TEXTS["codex"])
             return completed.returncode, "", CODEX_MODEL, "", cause
         return (0, last_message_path.read_text(encoding="utf-8", errors="replace"),
                 CODEX_MODEL, "", None)
@@ -981,8 +990,9 @@ def quote_scan(corpus: tuple, report: str, cell: str) -> None:
                 continue
             normalized = normalized_for_quote_match(fragment)
             if not any(normalized in file_text for file_text in corpus):
-                print(f'WARNING: {cell} quote found in no tracked file: '
-                      f'"{fragment[:60]}"', flush=True)
+                print_warning_with_its_next_step(
+                    f'{cell} quote found in no tracked file: "{fragment[:60]}"',
+                    SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION)
 
 
 def missing_report_phrases(adversarial_prompt: str, text: str) -> list:
@@ -1044,7 +1054,7 @@ def provenance_line(runtime: str, model: str, adversarial_prompt: str, target: s
     `fallback_from=` appears only when an earlier model in a chain produced
     no review, so a degraded cell is visible in the record and not only in
     the run's output. Both follow the cold-read cells' stamp
-    (stamp_provenance in nc-systems/cold-read/cold-read-cell-common.py), and so does the
+    (stamp_provenance in nn-systems/cold-read/cold-read-cell-common.py), and so does the
     order of the line's first four fields: `runtime=`, `model=`,
     `fallback_from=` when present, `effort=`. After those the two stamps
     differ: `cli=`, `adversarial_prompt=` and `isolation=` are this runner's own;
@@ -1439,8 +1449,11 @@ class RunOutputCopiedToRecordLog:
     is held and written when `attach` names the file. `detach` closes the file
     before the record is shipped, so the copy in the log-store is the whole
     log and the add-only shipper finds it unchanged when the dispositions file
-    is shipped after it. The cells print from several threads; the lock keeps
-    the file's writes whole.
+    is shipped after it. The cells print from several threads, and print()
+    writes its text and its newline as two writes; so each thread's text is
+    held until its line ends, and only whole lines are written, under the
+    lock, to the stream and the file alike. One write of several lines, such
+    as a WARNING line with its instruction, stays together.
     """
 
     def __init__(self, stream) -> None:
@@ -1455,19 +1468,31 @@ class RunOutputCopiedToRecordLog:
         self._held = []
         self._file = None
         self._lock = threading.Lock()
+        self._unended_line_of_this_thread = threading.local()
+
+    def _write_out(self, text: str) -> None:
+        self.stream.write(text)
+        if self._file is not None:
+            self._file.write(text)
+        elif self._held is not None:
+            self._held.append(text)
 
     def write(self, text: str) -> int:
-        self.stream.write(text)
         with self._lock:
-            if self._file is not None:
-                self._file.write(text)
-            elif self._held is not None:
-                self._held.append(text)
+            pending = getattr(self._unended_line_of_this_thread, "text", "") + text
+            whole_lines, newline, unended = pending.rpartition("\n")
+            self._unended_line_of_this_thread.text = unended
+            if newline:
+                self._write_out(whole_lines + newline)
         return len(text)
 
     def flush(self) -> None:
-        self.stream.flush()
         with self._lock:
+            unended = getattr(self._unended_line_of_this_thread, "text", "")
+            if unended:
+                self._unended_line_of_this_thread.text = ""
+                self._write_out(unended)
+            self.stream.flush()
             if self._file is not None:
                 self._file.flush()
 
@@ -1479,6 +1504,7 @@ class RunOutputCopiedToRecordLog:
             self._held = None
 
     def detach(self) -> None:
+        self.flush()
         with self._lock:
             if self._file is not None:
                 self._file.close()
@@ -1598,9 +1624,10 @@ def launch_cell_once(cell: str, adversarial_prompt: str, runtime: str, prompt: s
         git_check_failed_after_a_cell(cell, f"whether {cell} modified the review copy", failure,
                                       rerun_command)
     if stray:
-        print(f"WARNING: the review copy was modified outside the cells' scratch "
-              f"directories, seen when {cell} finished: {', '.join(stray)}",
-              flush=True)
+        print_warning_with_its_next_step(
+            f"the review copy was modified outside the cells' scratch "
+            f"directories, seen when {cell} finished: {', '.join(stray)}",
+            SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION)
     # After the worktree check, so a cell that ran to the end has its writes
     # compared whatever it returned; before the quote scan and the write, so a
     # text that is not a report raises no warnings to triage, never lands as a
@@ -1626,10 +1653,20 @@ def launch_cell_once(cell: str, adversarial_prompt: str, runtime: str, prompt: s
         + "\n\n" + output,
     )
     if overwrote_stray_write:
-        print(f"WARNING: {cell} found a stray write at its own report path and "
-              f"overwrote it: {out_path}", flush=True)
+        print_warning_with_its_next_step(
+            f"{cell} found a stray write at its own report path and overwrote it: {out_path}",
+            SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION)
     print(f"saved: {out_path}", flush=True)
     return None
+
+
+def print_warning_with_its_next_step(warning: str, next_step_instruction: str) -> None:
+    """Print a WARNING line and the line after it that says what to do about it."""
+    # One write: cells run on parallel threads, and two prints let another cell's
+    # line land between these, where a Monitor filter for the line after each
+    # WARNING would show it in place of the instruction.
+    sys.stdout.write(f"WARNING: {warning}\n{next_step_instruction}\n")
+    sys.stdout.flush()
 
 
 def git_check_failed_after_a_cell(cell: str, what: str, failure, rerun: str) -> None:
@@ -1783,7 +1820,7 @@ def ship_record(record_dir: pathlib.Path) -> str:
     FAILED line of this program's own when the shipper could not run.
 
     Never raises: the shipper's outcome is reported and the run goes on (the
-    same shape as nc-systems/cold-read/cold-read-grid.py's ship_record). A
+    same shape as nn-systems/cold-read/cold-read-grid.py's ship_record). A
     sanity check that found something and could not reach ned-box has still
     found it, and the record stays on disk for a later run; the run's exit
     code says the record did not arrive.

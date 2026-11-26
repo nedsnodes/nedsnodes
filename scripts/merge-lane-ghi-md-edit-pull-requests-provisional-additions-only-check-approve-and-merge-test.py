@@ -83,7 +83,11 @@ import json, os, sys
 directory = os.environ["GHI_MD_AUTO_MERGE_TEST_DIRECTORY"]
 with open(os.path.join(directory, "merge-calls.log"), "a") as log:
     log.write(json.dumps(sys.argv[1:]) + "\n")
-print("merge line one\nmerge line two\nmerge program last line", flush=True)
+stdout_path = os.path.join(directory, "merge.stdout")
+if os.path.exists(stdout_path):
+    print(open(stdout_path).read(), end="", flush=True)
+else:
+    print("merge line one\nmerge line two\nmerge program last line", flush=True)
 code = int(open(os.path.join(directory, "merge.exit")).read())
 if code < 0:
     os.kill(os.getpid(), -code)
@@ -135,8 +139,8 @@ class Scratch:
         self.directory = root / name
         self.directory.mkdir()
         self.home = self.directory / "home"
-        (self.home / ".config" / "nedschorus").mkdir(parents=True)
-        (self.home / ".config" / "nedschorus" / "ned-review-merge.token").write_text(TOKEN + "\n")
+        (self.home / ".config" / "nedsnodes").mkdir(parents=True)
+        (self.home / ".config" / "nedsnodes" / "ned-review-merge.token").write_text(TOKEN + "\n")
         self.bin = self.directory / "bin"
         self.bin.mkdir()
         (self.bin / "gh").write_text(FAKE_GH)
@@ -209,22 +213,24 @@ def approvals(scratch):
 def main():
     root = Path(tempfile.mkdtemp(prefix="ghi-md-edit-auto-merge-test-"))
     try:
-        # --- a passing pull request is approved at its nc-head-commit and merged
+        # --- a passing pull request is approved at its nn-head-commit and merged
         scratch = Scratch(root, "passes")
         scratch.routes(routes_for())
         code, output = scratch.run()
         approval = approvals(scratch)
         merges = scratch.merge_calls()
         check("a pull request that only adds provisional-additions is approved, pinned to its "
-              "nc-head-commit, and merged with the approval's time, exit 0",
+              "nn-head-commit, and merged with the approval's time, exit 0",
               code == 0 and len(approval) == 1 and f"commit_id={HEAD}" in approval[0]
               and "event=APPROVE" in approval[0]
               and any(argument.startswith("body=") and "adding a \"Provisional additions"
                       in argument for argument in approval[0])
+              # The merge gate refuses the merge account's approval without the posting program's verdict line.
+              and any(argument.startswith("body=APPROVE\n\n") for argument in approval[0])
               and merges and merges[0][:3] == ["9", HEAD, SUBMITTED]
               and "merged: merge program last line" in output and scratch.messages() == [],
               f"exit {code}\n{output}\n{approval}\n{merges}")
-        check("the file is read at the nc-head-commit",
+        check("the file is read at the nn-head-commit",
               any(call["argv"][-1] == f"repos/nedsnodes/nedsnodes/contents/docs/issues/9-x.md"
                   f"?ref={HEAD}" for call in scratch.gh_calls()), scratch.gh_calls())
         check("every gh call carries the merge account's token",
@@ -268,7 +274,7 @@ def main():
         for character in "\r\x0b\x0c\x1c\x1d\x1e\x85  ":
             for base_text, head_text, where, line in (
                     (SECTION_BASE_TEXT, SECTION_HEAD_TEXT.replace("- new", "- n" + character + "ew"),
-                     "nc-head-commit", 7),
+                     "nn-head-commit", 7),
                     (SECTION_BASE_TEXT.replace("- old", "- o" + character + "ld"),
                      SECTION_HEAD_TEXT.replace("- old", "- o" + character + "ld"), "merge base", 6)):
                 problem = program.provisional_additions_only_problem(parser, base_text, head_text)
@@ -289,13 +295,13 @@ def main():
                  "## Problem\n" + long_line + "\n\n" + HEADING + "\n- a\n",
                  "## Problem\n" + long_line + "z\n\n" + HEADING + "\n- a\n- b\n",
                  f"it changes text outside the section \"{HEADING}\" (lines 3 to 6 of the file at "
-                 f"the nc-head-commit): the first line that differs is {long_line[:120]!r} at the "
-                 f"merge base and {long_line[:120]!r} at the nc-head-commit"),
+                 f"the nn-head-commit): the first line that differs is {long_line[:120]!r} at the "
+                 f"merge base and {long_line[:120]!r} at the nn-head-commit"),
                 ("an added heading is named by its place among the other headings",
                  "## One\n## Two\n" + HEADING + "\n- a\n",
                  "## One\n## Two\n" + HEADING + "\n- a\n## Three\n",
                  f"it adds, removes or changes a heading other than \"{HEADING}\": heading 3 is "
-                 f"'none' at the merge base and ('h2', 0, '## Three') at the nc-head-commit"),
+                 f"'none' at the merge base and ('h2', 0, '## Three') at the nn-head-commit"),
                 ("a link reference definition already outside the section does not stop lines "
                  "being added to it",
                  "## Problem\nSee [x].\n\n[x]: https://example.com\n\n" + HEADING + "\n- a\n",
@@ -304,21 +310,21 @@ def main():
                 ("an added link reference definition is named with the one it adds",
                  "See [x].\n\n" + HEADING + "\n- a\n",
                  "See [x].\n\n" + HEADING + "\n- a\n\n[x]: https://example.com\n",
-                 f"it adds, removes or changes a Markdown link reference definition, such as "
-                 f"\"[x]: https://example.com\", which renders as nothing and can change where "
-                 f"other links in the file point: definition 1 is 'none' at the merge base and "
-                 f"('X', 'https://example.com', '') at the nc-head-commit"),
+                 "it adds, removes or changes a Markdown link reference definition, such as "
+                 "\"[x]: https://example.com\", which renders as nothing and can change where "
+                 "other links in the file point: definition 1 is 'none' at the merge base and "
+                 "('X', 'https://example.com', '') at the nn-head-commit"),
                 ("a moved section is named with the line its heading moved from and to",
                  "## A\na\n\n" + HEADING + "\n- x\n\n## B\nb\n",
                  "## A\na\n\n## B\nb\n\n" + HEADING + "\n- x\n",
                  f"it moves the section \"{HEADING}\", whose heading is on line 4 of the file at "
-                 f"the merge base and on line 7 at the nc-head-commit, instead of only adding lines "
+                 f"the merge base and on line 7 at the nn-head-commit, instead of only adding lines "
                  f"to it"),
                 ("a removed heading is named the other way round",
                  "## One\n## Two\n" + HEADING + "\n- a\n",
                  "## One\n" + HEADING + "\n- a\n- b\n",
                  f"it adds, removes or changes a heading other than \"{HEADING}\": heading 2 is "
-                 f"('h2', 0, '## Two') at the merge base and 'none' at the nc-head-commit")):
+                 f"('h2', 0, '## Two') at the merge base and 'none' at the nn-head-commit")):
             problem = program.provisional_additions_only_problem(parser, base_text, head_text)
             check(name, problem == expected, problem)
 
@@ -337,7 +343,7 @@ def main():
               and "could not be loaded" in scratch.message("invocation-stopped.txt"),
               f"exit {code}\n{output}")
 
-        # --- each failed condition is reported to merge-lane-2 once per nc-head-commit
+        # --- each failed condition is reported to merge-lane-2 once per nn-head-commit
         later_heading_base = "line 1\n" + HEADING + "\nline 3\n## Deferred-decisions\nline 5\n"
         for name, routes, why in (
                 ("two-files", routes_for(files=FILE + [{"filename": "docs/issues/1-y.md",
@@ -359,17 +365,17 @@ def main():
                 ("subheading-added-inside-the-section", routes_for(
                     base_text=SECTION_BASE_TEXT,
                     file_text=SECTION_HEAD_TEXT.replace("- new\n", "- new\n\n### Details\n")),
-                 "('h3', 0, '### Details') at the nc-head-commit"),
+                 "('h3', 0, '### Details') at the nn-head-commit"),
                 ("adds-nothing", routes_for(file_text=BASE_TEXT), "does not change the file's text"),
                 ("heading-missing", routes_for(file_text=PASSING_FILE_TEXT.replace(HEADING, "x")),
-                 "at the nc-head-commit has the heading \"" + HEADING + "\" 0 times, not once"),
+                 "at the nn-head-commit has the heading \"" + HEADING + "\" 0 times, not once"),
                 ("addition-above-the-section", routes_for(
                     base_text=SECTION_BASE_TEXT,
                     file_text=SECTION_BASE_TEXT.replace("vetted\n", "vetted\n- an addition\n", 1)),
                  "the first line that differs is '' at the merge base and '- an addition'"),
                 ("addition-under-a-later-heading", routes_for(
                     base_text=later_heading_base, file_text=later_heading_base + "- an addition\n"),
-                 "'- an addition' at the nc-head-commit"),
+                 "'- an addition' at the nn-head-commit"),
                 ("existing-section-line-changed", routes_for(
                     base_text=SECTION_BASE_TEXT,
                     file_text=SECTION_HEAD_TEXT.replace("- old\n", "- changed\n")),
@@ -391,7 +397,7 @@ def main():
                 # Markdown reads a lone carriage return as a line break, so this adds a heading.
                 ("carriage-returns-in-an-added-line", routes_for(
                     file_text=PASSING_FILE_TEXT + "- new item\r## Next action\rSneaky text.\n"),
-                 "at the nc-head-commit holds U+000D on line 14"),
+                 "at the nn-head-commit holds U+000D on line 14"),
                 # A carriage return already in the merge base's section hides "## Next action" from
                 # a splitter that splits on "\n" alone, so the line added beneath it would pass.
                 ("carriage-return-at-the-merge-base", routes_for(
@@ -403,27 +409,27 @@ def main():
                     base_text="## Problem\ntext\n" + HEADING + "\n- item\n## Next action\nmore\n",
                     file_text=("## Problem\ntext\n\x0c\n\x0c\n" + HEADING
                                + "\n- item\n## Next action\nSneaky.\nmore\n")),
-                 "at the nc-head-commit holds U+000C on line 3"),
+                 "at the nn-head-commit holds U+000C on line 3"),
                 ("indented-heading-added", routes_for(
                     base_text=HEADING + "\nprovisional\n",
                     file_text=HEADING + "\nprovisional\n   ## Next action\nSneaky.\n"),
-                 "('h2', 0, '   ## Next action') at the nc-head-commit"),
+                 "('h2', 0, '   ## Next action') at the nn-head-commit"),
                 ("setext-heading-added", routes_for(
                     base_text=SECTION_BASE_TEXT,
                     file_text=SECTION_BASE_TEXT.replace("- old\n", "- old\n\nNext action\n---\n")),
-                 "('h2', 0, 'Next action\\n---') at the nc-head-commit"),
+                 "('h2', 0, 'Next action\\n---') at the nn-head-commit"),
                 ("setext-underline-under-an-existing-line", routes_for(
                     base_text=HEADING + "\nvetted? no, provisional paragraph\n",
                     file_text=HEADING + "\nvetted? no, provisional paragraph\n===\n"),
-                 "('h1', 0, 'vetted? no, provisional paragraph\\n===') at the nc-head-commit"),
+                 "('h1', 0, 'vetted? no, provisional paragraph\\n===') at the nn-head-commit"),
                 ("heading-in-a-block-quote-added", routes_for(
                     base_text=SECTION_BASE_TEXT,
                     file_text=SECTION_HEAD_TEXT.replace("- new\n", "- new\n> ## Next action\n")),
-                 "('h2', 1, '> ## Next action') at the nc-head-commit"),
+                 "('h2', 1, '> ## Next action') at the nn-head-commit"),
                 ("open-fence-swallows-a-later-heading", routes_for(
                     base_text=SECTION_BASE_TEXT,
                     file_text=SECTION_HEAD_TEXT.replace("- new\n", "- new\n```\n")),
-                 "('h2', 0, '## Next action') at the merge base and 'none' at the nc-head-commit"),
+                 "('h2', 0, '## Next action') at the merge base and 'none' at the nn-head-commit"),
                 # The section moves below a vetted section, so the vetted text it sat above now
                 # reads as if it came before the provisional-additions.
                 ("section-moved-below-a-vetted-section", routes_for(
@@ -471,14 +477,14 @@ def main():
         handled.mkdir()
         (scratch.state / "needs-a-look" / message_name).rename(handled / message_name)
         code, output = scratch.run()
-        check("a pull request reported at its nc-head-commit, its message moved into handled/, "
+        check("a pull request reported at its nn-head-commit, its message moved into handled/, "
               "is not read or reported again",
               code == 0 and scratch.messages() == ["handled"]
               and len(scratch.gh_calls()) == calls_before + 1
               and output == "", f"exit {code}\n{output}")
         scratch.routes(routes_for(head=NEW_HEAD, file_text=PASSING_FILE_TEXT + "## Another heading\n"))
         code, output = scratch.run()
-        check("a reported pull request with a new nc-head-commit is reported again",
+        check("a reported pull request with a new nn-head-commit is reported again",
               code == 0 and scratch.messages() == ["handled", f"pr9-{NEW_HEAD[:12]}.txt"]
               and scratch.record() == {"9": NEW_HEAD}, f"exit {code}\n{output}")
         scratch.routes({"pr list": {"out": "[]"}})
@@ -517,11 +523,11 @@ def main():
         check("an unreadable held list stops the invocation, exit 2",
               code == 2 and "could not read the held list" in output, f"exit {code}\n{output}")
 
-        # --- a pull request whose nc-head-commit moves while it is read waits
+        # --- a pull request whose nn-head-commit moves while it is read waits
         scratch = Scratch(root, "moved")
         scratch.routes(routes_for(head_after_read=NEW_HEAD))
         code, output = scratch.run()
-        check("a pull request whose nc-head-commit moved while it was read is left for the next "
+        check("a pull request whose nn-head-commit moved while it was read is left for the next "
               "invocation, unapproved and unreported",
               code == 0 and approvals(scratch) == [] and scratch.messages() == []
               and "moved while it was read" in output, f"exit {code}\n{output}")
@@ -555,6 +561,21 @@ def main():
                   code == 1 and f"exited {merge_exit}: {outcome}" in message
                   and "merge line one\nmerge line two\nmerge program last line" in message
                   and scratch.record() == {"9": HEAD}, f"exit {code}\n{output}\n{message}")
+
+        scratch = Scratch(root, "merge-stop-longer-than-the-line-limit")
+        (scratch.directory / "merge.exit").write_text("3")
+        stop = ["STOP: merged, but the branch b could not be deleted, and whether it is gone "
+                "from GitHub could not be read."]
+        stop += [f"error line {number}" for number in range(1, program.MERGE_OUTPUT_LINES_IN_MESSAGE + 1)]
+        (scratch.directory / "merge.stdout").write_text(
+            "\n".join(["merge line one", "merge line two", *stop]) + "\n")
+        scratch.routes(routes_for())
+        code, output = scratch.run()
+        message = scratch.message(f"pr9-{HEAD[:12]}.txt")
+        check("a merge program STOP longer than the line limit is reported from its STOP line "
+              "on, exit 1",
+              code == 1 and "\n".join(stop) in message and "merge line two" not in message,
+              f"exit {code}\n{output}\n{message}")
 
         scratch = Scratch(root, "approval-refused-then-next-merged")
         refused, passing = routes_for(review_exit=1), routes_for(number=10, head=NEW_HEAD)
@@ -590,7 +611,7 @@ def main():
         scratch = Scratch(root, "contents-fails")
         scratch.routes(routes_for(contents_exit=1))
         code, output = scratch.run()
-        check("a file that cannot be read at the nc-head-commit stops the invocation before any "
+        check("a file that cannot be read at the nn-head-commit stops the invocation before any "
               "approval, exit 2",
               code == 2 and approvals(scratch) == [] and "HTTP 404" in output,
               f"exit {code}\n{output}")
@@ -670,7 +691,7 @@ def main():
               and "could not run" in output, f"exit {code}\n{output}")
 
         scratch = Scratch(root, "no-token")
-        (scratch.home / ".config" / "nedschorus" / "ned-review-merge.token").unlink()
+        (scratch.home / ".config" / "nedsnodes" / "ned-review-merge.token").unlink()
         scratch.routes(routes_for())
         code, output = scratch.run()
         check("a missing token stops the invocation before any gh call, exit 2",
@@ -682,7 +703,7 @@ def main():
         (scratch.state / "reported-nc-head-commits.json").write_text('{"nine": "x"}')
         scratch.routes(routes_for())
         code, output = scratch.run()
-        check("a record that is not pull request numbers to nc-head-commits stops the "
+        check("a record that is not pull request numbers to nn-head-commits stops the "
               "invocation, exit 2",
               code == 2 and "is not a JSON object" in output and scratch.gh_calls() == [],
               f"exit {code}\n{output}")

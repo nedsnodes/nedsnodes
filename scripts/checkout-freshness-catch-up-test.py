@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Before anything runs git: a run started with GIT_DIR set, or with another
@@ -365,7 +366,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           merge_note.endswith("\n" + NOT_FOR_THE_USER_LINE), merge_note)
     check("and only once",
           "merge commit(s) from main" not in agent_text(run_catch_up(["--cwd", str(merge_seat)])))
-    # A merge of another nc-topic-branch is not the banned thing.
+    # A merge of another nn-topic-branch is not the banned thing.
     topic_seat = tmp / "topic-merge-worktree"
     git(["worktree", "add", "-q", "-b", "topic-a", str(topic_seat), "main"], reference)
     configure_identity(topic_seat)
@@ -377,7 +378,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     commit_file(other, "topic-b.txt", "b\n", "topic b work")
     git(["-c", "core.editor=true", "merge", "--no-ff", "--no-edit", "topic-b"], topic_seat)
     result = run_catch_up(["--cwd", str(topic_seat)])
-    check("a merge of another nc-topic-branch is NOT reported as a merge from main",
+    check("a merge of another nn-topic-branch is NOT reported as a merge from main",
           "merge commit(s) from main" not in agent_text(result), agent_text(result))
 
     # -----------------------------------------------------------------------
@@ -567,7 +568,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     detached_work_line = (
         "It holds work of its own.\n"
         "This checkout is an agent-home, so git refuses commits in it: carry that work to a "
-        "worktree of your own on an nc-topic-branch, as the refusal of `git commit` here says "
+        "worktree of your own on an nn-topic-branch, as the refusal of `git commit` here says "
         "how.")
     detached_bisect_line = (
         "A bisect is in progress: finish it or abort it; the next turn's end moves the "
@@ -929,7 +930,7 @@ import importlib.util
 specification = importlib.util.spec_from_file_location("catch_up_module", SCRIPT_PATH)
 catch_up_module = importlib.util.module_from_spec(specification)
 specification.loader.exec_module(catch_up_module)
-import contextlib, io
+import contextlib
 
 # ---------------------------------------------------------------------------
 # PR #87's review: git's prose must be read in a stable locale
@@ -940,7 +941,6 @@ import contextlib, io
 # should abort the merge is skipped, and the seat's tree is left parked
 # mid-merge. A stub git reports the locale it was handed.
 import os as _os
-import shutil as _shutil
 import tempfile as _tempfile
 
 with _tempfile.TemporaryDirectory() as locale_scratch:
@@ -1326,26 +1326,26 @@ with tempfile.TemporaryDirectory() as naming_scratch:
     check("an uncategorised path is still surfaced rather than hidden",
           "other files (1): Makefile" in named(("Makefile", "a makefile")), named())
 
-    # nc-systems/ holds a system kept whole — its code, its tests and its
+    # nn-systems/ holds a system kept whole — its code, its tests and its
     # design of record in one directory — so a change there is named as what
     # it is. Until 2026-09-22 the directory matched no category and fell to
     # the catch-all: observed live that day, when
-    # nc-systems/handoff/handoff-design.md moved on main and this hook
+    # nn-systems/handoff/handoff.system.design.md moved on main and this hook
     # reported it as "other files". The pair is a design AND a program, so the
     # case proves the category is decided by the path's prefix, not by the
     # extension; the catch-all still holds this scratch repository's Makefile
-    # from the case above, so what is asserted is that nc-systems/ is not on
+    # from the case above, so what is asserted is that nn-systems/ is not on
     # that line.
-    systems_listing = named(("nc-systems/handoff/handoff-design.md", "a design of record"),
-                            ("nc-systems/handoff/handoff-supervisor.py", "the system's code"))
+    systems_listing = named(("nn-systems/handoff/handoff.system.design.md", "a design of record"),
+                            ("nn-systems/handoff/handoff-supervisor.py", "the system's code"))
     check("a system kept whole is named as one, its design of record and its code together",
           "systems you build on, code and design of record (2): "
-          "nc-systems/handoff/handoff-design.md, nc-systems/handoff/handoff-supervisor.py"
+          "nn-systems/handoff/handoff-supervisor.py, nn-systems/handoff/handoff.system.design.md"
           in systems_listing, systems_listing)
     catch_all_line = next((line for line in systems_listing.splitlines()
                            if line.lstrip().startswith("other files")), "")
     check("and never under the catch-all, the least informative label available",
-          "nc-systems/" not in catch_all_line, catch_all_line or systems_listing)
+          "nn-systems/" not in catch_all_line, catch_all_line or systems_listing)
 
     # A wide gap is capped, or the agent reads a wall and skims it. Its own
     # repository, so the count is exactly what this case put there.
@@ -1685,8 +1685,8 @@ with tempfile.TemporaryDirectory() as exception_scratch:
     rename_origin, rename_seat = seat_on_main("renamed-under-the-branch")
     commit_file(rename_seat, "scripts/main-will-move-this.py", "the seat's edit\n",
                 "the seat edits the script at its old path")
-    (rename_origin / "nc-systems").mkdir()
-    git(["mv", "scripts/main-will-move-this.py", "nc-systems/main-moved-it-here.py"],
+    (rename_origin / "nn-systems").mkdir()
+    git(["mv", "scripts/main-will-move-this.py", "nn-systems/main-moved-it-here.py"],
         rename_origin)
     git(["commit", "-q", "-m", "main moves the script out of scripts/"], rename_origin)
     merge_main_into(rename_seat)
@@ -2029,9 +2029,11 @@ with tempfile.TemporaryDirectory() as notes_scratch:
     origin_repo, notes_seat = notes_fixture()
     commit_file(origin_repo, ".claude/skills/walk-me-through/SKILL.md", "steps\n", "a skill changes")
     commit_file(origin_repo, "docs/agents/pr-reviewer-instructions.md", "rules\n", "instructions change")
-    commit_file(origin_repo, "nc-systems/cold-read/cold-read-fast-clarify-prompt.md", "p\n", "a prompt")
+    commit_file(origin_repo, "nn-systems/cold-read/cold-read-fast-clarify-prompt.md", "p\n", "a prompt")
     commit_file(origin_repo, ".claude/skills/walk-me-through/reference.md", "r\n", "not a SKILL.md")
     commit_file(origin_repo, "scripts/tool.py", "t\n", "a script")
+    commit_file(origin_repo, "docs/issues/4080-fix-the-arbitrator-agent-instructions.md", "i\n",
+                "a GHI-MD whose title ends in instructions")
     stop_only(notes_seat)
     told = delivered_text(deliver(notes_seat))
     check("a changed SKILL.md tells the agent to invoke the skill again",
@@ -2040,10 +2042,12 @@ with tempfile.TemporaryDirectory() as notes_scratch:
           "its new text loads." in told, told)
     check("a changed -instructions.md and -prompt.md are told as standing instructions",
           "main changed docs/agents/pr-reviewer-instructions.md, a file of standing instructions."
-          in told and "main changed nc-systems/cold-read/cold-read-fast-clarify-prompt.md, a file"
+          in told and "main changed nn-systems/cold-read/cold-read-fast-clarify-prompt.md, a file"
           in told, told)
     check("a skill's other files and scripts are not told",
           "reference.md" not in told and "scripts/tool.py" not in told, told)
+    check("a GHI-MD whose name ends in -instructions.md is not told",
+          "docs/issues/4080-" not in told, told)
 
     origin_repo, notes_seat = notes_fixture({"CLAUDE.md": "- one rule\n"})
     commit_file(origin_repo, "CLAUDE.md", "".join(f"- new rule {n:04d} {'x' * 60}\n"
@@ -2658,6 +2662,34 @@ with tempfile.TemporaryDirectory() as failing_git_scratch:
               moved == (answer == shared_answer.REBASE_ONTO_MAIN), f"{before} {tip(answered_seat)}")
     check("checkout-freshness asks the shared answer for a branch with no open pull request",
           asked == [False, False], repr(asked))
+
+    # The branch lock the turn-end push hook pushes under: catch-up waits for it before deciding
+    # the branch was never pushed, and a turn end that cannot take it leaves the branch as it is.
+    branch_lock = catch_up_module.branch_lock
+    _, locked_seat = seat_behind_main(own_commit=True)
+    locked_git_dir = Path(git(["rev-parse", "--absolute-git-dir"], locked_seat).stdout.strip())
+    before = tip(locked_seat)
+    real_wait = catch_up_module.CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS
+    catch_up_module.CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = 0
+    try:
+        with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(locked_git_dir, 0) as held:
+            catch_up_module.catch_up_session_checkout(locked_seat, 0)
+    finally:
+        catch_up_module.CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = real_wait
+    check("a never-pushed branch whose lock another process holds past the wait is left where it is",
+          held and tip(locked_seat) == before, f"{held} {before} {tip(locked_seat)}")
+    released = []
+    with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(locked_git_dir, 0) as held:
+        run = subprocess.Popen([sys.executable, str(SCRIPT_PATH), "--interval-seconds", "0",
+                                "--cwd", str(locked_seat)], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+        time.sleep(2)
+        tip_while_held = tip(locked_seat)
+        released.append(time.monotonic())
+    run_stdout, run_stderr = run.communicate(timeout=120)
+    check("catch-up waits while the push hook holds the branch lock, and rebases once it is released",
+          held and tip_while_held == before and tip(locked_seat) != before and run.returncode == 0,
+          f"{held} {before} {tip_while_held} {tip(locked_seat)} {run_stdout} {run_stderr}")
 
     # merges_from_main: a merge commit from main on the seat.
     _, merged_seat = seat_behind_main(own_commit=True)

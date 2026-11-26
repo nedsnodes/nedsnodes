@@ -121,9 +121,9 @@ The outcome line after the opener returns is reported if it cannot be written,
 but does not change the exit status, because the window has already opened and
 a caller told it failed would ask for a second one.
 
-NEDSCHORUS_MAC_WINDOW_OPENER overrides the opener's path, NEDSCHORUS_MAC_OPEN_PROGRAM
-the program that opens Typora and the browser, NEDSCHORUS_NED_BOX_HOME ned-box's home and
-NEDSCHORUS_MAC_NED_BOX_HOME_MOUNT the Mac's mount of it: the seams the nc-test-suites
+NEDSNODES_MAC_WINDOW_OPENER overrides the opener's path, NEDSNODES_MAC_OPEN_PROGRAM
+the program that opens Typora and the browser, NEDSNODES_NED_BOX_HOME ned-box's home and
+NEDSNODES_MAC_NED_BOX_HOME_MOUNT the Mac's mount of it: the seams the nn-test-suites
 use, so no test opens a real window or a real file. sshd does not pass
 a client's environment to a forced command, so ned-box cannot set them.
 """
@@ -138,7 +138,7 @@ from pathlib import Path
 
 _ned_box_home_specification = importlib.util.spec_from_file_location(
     "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 ned_box_home_path_constants = importlib.util.module_from_spec(_ned_box_home_specification)
 _ned_box_home_specification.loader.exec_module(ned_box_home_path_constants)
@@ -146,8 +146,14 @@ _ned_box_home_specification.loader.exec_module(ned_box_home_path_constants)
 PROGRAM = "mac-request-from-ned-box-forced-command"
 REQUEST_VERB = "open-window"
 AGENT_SEAT_WINDOW_VERB = "open-agent-seat-window"
-# launch-claude-ubuntu refuses any other seat name; its test checks the two rules agree.
-AGENT_SEAT_NAME_PATTERN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,63}")
+_agent_seat_name_specification = importlib.util.spec_from_file_location(
+    "agent_seat_name_regular_expression_constant_same_as_launch_claude_ubuntu_check_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py")
+_agent_seat_name = importlib.util.module_from_spec(_agent_seat_name_specification)
+_agent_seat_name_specification.loader.exec_module(_agent_seat_name)
+AGENT_SEAT_NAME_PATTERN = _agent_seat_name.AGENT_SEAT_NAME_PATTERN
+AGENT_SEAT_NAME_MAXIMUM_LENGTH = 64
 LAUNCH_CLAUDE_UBUNTU_PATH = Path(__file__).with_name("launch-claude-ubuntu")
 SAFE_WORD_PATTERN = re.compile(r"[A-Za-z0-9_./:=@%+,-]+")
 MAXIMUM_WORD_COUNT = 32
@@ -164,7 +170,7 @@ MAXIMUM_PATH_LENGTH = 1024
 MAXIMUM_WORD_LENGTH = MAXIMUM_PATH_LENGTH
 DEFAULT_OPEN_PROGRAM = "/usr/bin/open"
 OPEN_IN_BROWSER_REQUEST_VERB = "open-in-browser"
-LOG_STORE_DIRECTORY_NAME = "nedschorus-logs"
+LOG_STORE_DIRECTORY_NAME = "nedsnodes-logs"
 BROWSER_PAGE_SUFFIX = ".html"
 AGENT_SEAT_TASK_LISTS_READ_VERB = "read-agent-seat-task-lists"
 TASK_STORE_UNDER_HOME = Path(".claude") / "tasks"
@@ -227,7 +233,7 @@ def agent_seat_window_seat_name(request):
     if len(words) != 2:
         raise RequestRefused(
             f"{AGENT_SEAT_WINDOW_VERB} takes exactly one agent-seat name, and the request has {len(words) - 1} words after the verb")
-    if not AGENT_SEAT_NAME_PATTERN.fullmatch(words[1]):
+    if not AGENT_SEAT_NAME_PATTERN.fullmatch(words[1]) or len(words[1]) > AGENT_SEAT_NAME_MAXIMUM_LENGTH:
         raise RequestRefused(
             "the agent-seat name is empty, over 64 characters, starts with '-', "
             "or holds a character other than letters, digits, _ and -")
@@ -321,8 +327,8 @@ def append_to_request_log(outcome, request):
 
 
 def open_in_typora(request):
-    ned_box_home = os.environ.get("NEDSCHORUS_NED_BOX_HOME") or NED_BOX_HOME
-    mount = os.environ.get("NEDSCHORUS_MAC_NED_BOX_HOME_MOUNT") or MAC_MOUNT_OF_NED_BOX_HOME
+    ned_box_home = os.environ.get("NEDSNODES_NED_BOX_HOME") or NED_BOX_HOME
+    mount = os.environ.get("NEDSNODES_MAC_NED_BOX_HOME_MOUNT") or MAC_MOUNT_OF_NED_BOX_HOME
     try:
         mac_path = ned_box_file_on_mac(typora_path_on_ned_box(request, ned_box_home), ned_box_home, mount)
     except RequestRefused as refusal:
@@ -338,7 +344,7 @@ def open_in_typora(request):
         print(f"{PROGRAM}: Typora was not opened, because the request could not be added to the request log {REQUEST_LOG_PATH}: {log_error}.", file=sys.stderr)
         print("Every file ned-box opens on the Mac is logged first, so none opens unlogged. Tell the user this error.", file=sys.stderr)
         return EXIT_LOG_UNWRITABLE
-    open_program = os.environ.get("NEDSCHORUS_MAC_OPEN_PROGRAM") or DEFAULT_OPEN_PROGRAM
+    open_program = os.environ.get("NEDSNODES_MAC_OPEN_PROGRAM") or DEFAULT_OPEN_PROGRAM
     result = subprocess.run([open_program, "-a", TYPORA_APPLICATION, mac_path], capture_output=True, text=True)
     if result.returncode != 0:
         log_error = append_to_request_log(f"open-failed-{result.returncode}", request)
@@ -356,8 +362,8 @@ def open_in_typora(request):
 
 
 def open_in_browser(request):
-    ned_box_home = os.environ.get("NEDSCHORUS_NED_BOX_HOME") or NED_BOX_HOME
-    mount = os.environ.get("NEDSCHORUS_MAC_NED_BOX_HOME_MOUNT") or MAC_MOUNT_OF_NED_BOX_HOME
+    ned_box_home = os.environ.get("NEDSNODES_NED_BOX_HOME") or NED_BOX_HOME
+    mount = os.environ.get("NEDSNODES_MAC_NED_BOX_HOME_MOUNT") or MAC_MOUNT_OF_NED_BOX_HOME
     try:
         mac_path = ned_box_file_on_mac(open_in_browser_request_html_page_path_check(request, ned_box_home), ned_box_home, mount,
                                        within=LOG_STORE_DIRECTORY_NAME)
@@ -375,7 +381,7 @@ def open_in_browser(request):
         print(f"{PROGRAM}: the page was not opened, because the request could not be added to the request log {REQUEST_LOG_PATH}: {log_error}.", file=sys.stderr)
         print("Every page ned-box opens on the Mac is logged first, so none opens unlogged. Tell the user this error.", file=sys.stderr)
         return EXIT_LOG_UNWRITABLE
-    open_program = os.environ.get("NEDSCHORUS_MAC_OPEN_PROGRAM") or DEFAULT_OPEN_PROGRAM
+    open_program = os.environ.get("NEDSNODES_MAC_OPEN_PROGRAM") or DEFAULT_OPEN_PROGRAM
     result = subprocess.run([open_program, mac_path], capture_output=True, text=True)
     if result.returncode != 0:
         log_error = append_to_request_log(f"open-failed-{result.returncode}", request)
@@ -471,7 +477,7 @@ def main():
         print(f"{PROGRAM}: no window was opened, because the request could not be added to the request log {REQUEST_LOG_PATH}: {log_error}.", file=sys.stderr)
         print("Every window ned-box opens on the Mac is logged first, so none opens unlogged. Tell the user this error.", file=sys.stderr)
         return EXIT_LOG_UNWRITABLE
-    opener = os.environ.get("NEDSCHORUS_MAC_WINDOW_OPENER") or str(DEFAULT_WINDOW_OPENER)
+    opener = os.environ.get("NEDSNODES_MAC_WINDOW_OPENER") or str(DEFAULT_WINDOW_OPENER)
     result = subprocess.run(["/bin/sh", opener, *command],
                             capture_output=True, text=True)
     if result.returncode != 0:

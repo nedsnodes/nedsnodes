@@ -3,13 +3,16 @@
 every version, and tell the agent to ask him.
 
 Registered under PostToolUse and PostToolUseFailure for every tool. A guarded file is a file
-instruction-file-guard.py protects, plus ~/.claude/CLAUDE.md and ~/.claude/settings.json. At
+instruction-file-guard.py protects, plus ~/.claude/CLAUDE.md, ~/.claude/settings.json and every
+agent-seat's ~/agents/<agent-seat>/CLAUDE.local.md and .claude/settings.local.json, which are
+checked whatever the tool call's working directory. At
 each run the hook compares each checked file's stat data with what it stored at its previous
 run, hashes only a file whose stat data differs, logs each new version in this machine's
 directory of the log-store kind guarded-file-versions-and-approvals/, copies it there unless
 the file's checkout is on a branch whose HEAD commit holds it, and, when the version is not in its path's
 approved set, tells the agent to show the user the change and run this program with --approve
-or --restore. A version that the checkout's local origin/main holds at the same path enters the
+or --restore; for a file whose path has no approved version and that origin/main does not hold,
+when the store keeps its copy, it also offers the rm that deletes it. A version that the checkout's local origin/main holds at the same path enters the
 approved set without asking, since main's versions came through reviewed pull requests; when
 git cannot read origin/main, the run reports that failure and settles nothing. A deletion of a
 guarded file enters the approved set without asking, wherever it came from; a rename's new path
@@ -58,9 +61,9 @@ GUARD_HOOKS_DIRECTORY = CLONE_ROOT / ".claude" / "guard-hooks"
 HOOK_NAME = HOOK_PATH.stem
 
 LOG_STORE_KIND = "guarded-file-versions-and-approvals"
-NED_BOX_STORE = Path("/home/nedlern/nedschorus-logs") / LOG_STORE_KIND / "ned-box"
+NED_BOX_STORE = Path("/home/nedlern/nedsnodes-logs") / LOG_STORE_KIND / "ned-box"
 MAC_MOUNT_POINT = Path("/Volumes/nedhome")
-MAC_STORE = MAC_MOUNT_POINT / "nedschorus-logs" / LOG_STORE_KIND / "mac"
+MAC_STORE = MAC_MOUNT_POINT / "nedsnodes-logs" / LOG_STORE_KIND / "mac"
 LOG_STORE_HOSTNAME = "ned-box"
 MAC_MOUNT_FILESYSTEM_TYPE = "smbfs"
 
@@ -90,6 +93,10 @@ BASE_COMMIT_KEY = "base_commit"
 APPROVED_FILE_NAME = "approved"
 LOG_FILE_NAME = "log"
 DELETED = "deleted"
+SEAT_BRIEF_FILE_NAME = "CLAUDE.local.md"
+# The outside state's key, set once the agent-seat files' versions present when the outside
+# group began to check them were approved, so that only later changes are asked about.
+AGENT_SEAT_FILES_STOCKED_KEY = "agent_seat_files_stocked"
 COPY_MODE = 0o600
 APPROVAL_MARKER_NAME = ".walk-approved"
 # The obvious-fix marker's opening words, as instruction-file-guard.py's refusal gives them.
@@ -150,6 +157,7 @@ ASK_INSTRUCTIONS = (
     "If you are a subagent, and you wrote a `#pre_approved_change` marker and then made the change "
     "with a command other than Edit or Write, run once: python3 {program} --approve {pairs}, "
     "report nothing, and do none of the steps below.\n"
+    "{deletions}"
     "If you are any other subagent, stop: make no further edit, report the change to the agent "
     "that dispatched you instead of asking the user, and do none of the steps below.\n"
     "Show the user each change above and ask him whether he approves it.\n"
@@ -171,12 +179,20 @@ UNAPPROVED_VERSION_REMINDER_MESSAGE = (
     "If you are a subagent, and you wrote a `#pre_approved_change` marker and then made the change "
     "with a command other than Edit or Write, run once: python3 {program} --approve {path} {key}, "
     "and report nothing.\n"
+    "{deletions}"
     "If you are any other subagent, stop: make no further edit, and report the change to the "
     "agent that dispatched you instead of asking the user.\n"
     "Otherwise show the user the change and ask him, as this hook's earlier message said.\n"
     "If he approves, write his words into {marker} at the top of your session's checkout, then "
     "run: python3 {program} --approve {path} {key}\n"
     "If he declines, run: python3 {program} --restore {path} {key}")
+GUARDED_FILE_WITH_NO_APPROVED_VERSION_DELETE_WITHOUT_ASKING_INSTRUCTIONS = (
+    "Whether or not you are a subagent: if {path} should not exist, as when you made it by "
+    "mistake or only for your own notes, delete it without asking anyone, and do none of the "
+    "other steps for it: rm -- {quoted_path}\n"
+    "Deleting it needs no approval and loses nothing: no version of it was ever approved, "
+    "origin/main does not hold it, and this hook has kept a copy of it. After the rm, nothing "
+    "more is needed: this hook runs after the rm's own tool call and records the deletion.\n")
 STORE_FAILED = (
     "The guarded-file backup did not run, so a change to a guarded file is neither copied nor "
     "checked against the versions the user approved: {reason}.\n"
@@ -262,15 +278,26 @@ def loaded(name, path):
     return _loaded[name]
 
 
+GUARD_DECISION_FILE_NAMES = ("instruction-file-guard.py",
+                             "draft-document-place-directories-definition-and-membership-common.py")
+_guard_version = None
+
+
 def guard():
     """instruction-file-guard.py, whose functions decide what is guarded, so the two hooks
     cannot disagree."""
+    global _guard_version
+    if "instruction_file_guard" not in _loaded:
+        # Taken before the guard loads, so a file changed while this run goes on keys the saved
+        # decisions to the older version and the next run decides them again.
+        _guard_version = str([stat_data(str(GUARD_HOOKS_DIRECTORY / name))
+                              for name in GUARD_DECISION_FILE_NAMES])
     return loaded("instruction_file_guard", GUARD_HOOKS_DIRECTORY / "instruction-file-guard.py")
 
 
 def snapshots():
     return loaded("uncommitted_work_snapshots",
-                  CLONE_ROOT / "nc-systems" / "handoff" / "uncommitted-work-snapshots.py")
+                  CLONE_ROOT / "nn-systems" / "handoff" / "uncommitted-work-snapshots.py")
 
 
 # ---------------------------------------------------------------- hashes and checked lines
@@ -629,24 +656,24 @@ def versions_commit_holds(checkout, commit, versions):
     return held
 
 
-def versions_origin_main_holds(checkout, versions):
-    """The (path, blob id) pairs among versions that the checkout's origin/main holds at their
-    path; none when the repository has no origin/main. The local ref is read and never fetched,
-    so the run stays fast. Raises RuntimeError carrying git's stderr when git rev-parse --verify
-    fails with any exit other than 1, or git ls-tree fails."""
-    if all(blob_id == DELETED for _, blob_id in versions):
-        return set()
+def blobs_origin_main_holds(checkout, paths):
+    """{path: blob id} of those paths that the checkout's origin/main holds; none when the
+    repository has no origin/main. The local ref is read and never fetched, so the run stays
+    fast. Raises RuntimeError carrying git's stderr when git rev-parse --verify fails with any
+    exit other than 1, or git ls-tree fails."""
+    if not paths:
+        return {}
     # git rev-parse -q --verify exits 1, with nothing on stderr, when the ref does not exist.
     main_commit = subprocess.run(["git", "-C", str(checkout), "rev-parse", "-q", "--verify",
                                   ORIGIN_MAIN_REF + "^{commit}"],
                                  capture_output=True, timeout=60, check=False)
     if main_commit.returncode == 1:
-        return set()
+        return {}
     if main_commit.returncode != 0:
         raise RuntimeError(f"git rev-parse -q --verify {ORIGIN_MAIN_REF}^{{commit}} in {checkout} "
                            f"exited {main_commit.returncode}: "
                            f"{main_commit.stderr.decode(errors='replace').strip()}")
-    return versions_commit_holds(checkout, main_commit.stdout.decode().strip(), versions)
+    return blobs_at_commit(checkout, main_commit.stdout.decode().strip(), paths)
 
 
 def version_from_git(path: str, blob_id: str):
@@ -688,6 +715,14 @@ def log_seen(store, path, session, owner, key, copy_hash, how="", bytes_hash="")
 def seen_lines(log, key):
     return [fields for fields in log if fields[0] == "seen" and len(fields) >= 7
             and fields[4] == key]
+
+
+def last_seen_key(log, excluded):
+    """The key of the last version the log records as seen, other than excluded, or None."""
+    for fields in reversed(log):
+        if fields[0] == "seen" and len(fields) >= 7 and fields[4] != excluded:
+            return fields[4]
+    return None
 
 
 def first_seen_time(log, key):
@@ -767,9 +802,22 @@ def home_directory():
     return Path(os.environ.get("HOME") or Path.home())
 
 
-def outside_files():
+def agent_seat_files():
+    """Every agent-seat's seat-brief and .claude/settings.local.json. They are checked from any
+    directory, since an agent-seat can change another agent-seat's file, which that agent-seat's
+    own checkout sees only at its next agent-session."""
+    agents = Path(os.environ.get(AGENTS_DIRECTORY_VARIABLE) or home_directory() / "agents")
+    if not agents.is_dir():
+        return []
+    return sorted(str(path) for seat in agents.iterdir()
+                  for path in (seat / SEAT_BRIEF_FILE_NAME, seat / ".claude" / "settings.local.json")
+                  if path.is_file())
+
+
+def outside_files(seat_files=None):
     claude = home_directory() / ".claude"
-    return [str(claude / "CLAUDE.md"), str(claude / "settings.json")]
+    return ([str(claude / "CLAUDE.md"), str(claude / "settings.json")]
+            + (agent_seat_files() if seat_files is None else seat_files))
 
 
 def is_settings_file(path: str):
@@ -814,7 +862,7 @@ def checkout_files(checkout: Path, decisions: dict):
     and rewritten by Claude Code itself.
 
     decisions caches the guard's answer for each listed path between runs, since deciding takes
-    most of a run's time; it is dropped when instruction-file-guard.py changes."""
+    most of a run's time; it is dropped when a file the guard decides from changes."""
     listed = git_text(checkout, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
     # An ignored file can be an instruction only as CLAUDE.local.md or .claude/settings.local.json
     # (usually ignored); listing all ignored files under .claude/ would catch Claude Code's runtime
@@ -822,7 +870,8 @@ def checkout_files(checkout: Path, decisions: dict):
     ignored = git_text(checkout, "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
                        "--", ":(glob)**/CLAUDE.local.md",
                        ":(glob)**/.claude/settings.local.json")
-    guard_version = str(stat_data(str(GUARD_HOOKS_DIRECTORY / "instruction-file-guard.py")))
+    guard()
+    guard_version = _guard_version
     if decisions.get("") != guard_version:
         decisions.clear()
         decisions[""] = guard_version
@@ -993,14 +1042,17 @@ def approval_takes(store, path, key, rule):
             or not seen_lines(store.log(path), key))
 
 
-def store_phase(store, session, owner, checks, unsettled_unchanged, approvals, quiet):
-    """Everything that touches the store. Returns (asks, reminders, settled paths).
+def store_phase(store, session, owner, checks, unsettled_unchanged, approvals, quiet,
+                origin_main_paths):
+    """Everything that touches the store. Returns (asks, reminders, settled paths); each ask and
+    each reminder ends with whether its message offers to delete the file.
 
     approvals: [(path, key, how, rule)] git's own work and renames, recorded before the checks.
     checks: the files whose content changed, each copied unless its checkout's branch HEAD
     holds it.
     unsettled_unchanged: [(path, key)] files left unsettled by an earlier run. quiet: a rebase,
-    merge, cherry-pick or revert is stopped, so every version is copied and nothing is asked."""
+    merge, cherry-pick or revert is stopped, so every version is copied and nothing is asked.
+    origin_main_paths: the paths origin/main holds, in any version."""
     for path, key, how, rule in approvals:
         if key in store.approved(path) or not approval_takes(store, path, key, rule):
             continue
@@ -1016,8 +1068,14 @@ def store_phase(store, session, owner, checks, unsettled_unchanged, approvals, q
         log = store.log(check.path)
         approved = store.approved(check.path)
         reason = ""
-        if check.how == HOW_EDIT and check.previous not in (None, DELETED) \
-                and check.previous not in approved:
+        previous = check.previous
+        if check.how == HOW_EDIT and previous is None:
+            # A state that lost the file's entry, such as one an older hook's run rewrote, says
+            # nothing of the version the Edit was made on; the log's last one other than the
+            # Edit's result stands in for it.
+            previous = last_seen_key(log, check.key)
+        if check.how == HOW_EDIT and previous not in (None, DELETED) \
+                and previous not in approved:
             # The guard approved the Edit's change, not the unapproved text it was made on.
             check.how = ""
             reason = EDIT_ON_UNAPPROVED_VERSION
@@ -1061,7 +1119,21 @@ def store_phase(store, session, owner, checks, unsettled_unchanged, approvals, q
         elif not was_reminded(log, key, session):
             log_line(store, path, "reminded", session, key)
             reminders.append((path, key))
+    asks = [ask + (deletion_offered(store, ask[0], ask[1], origin_main_paths),)
+            for ask in asks]
+    reminders = [(path, key, deletion_offered(store, path, key, origin_main_paths))
+                 for path, key in reminders]
     return asks, reminders, settled
+
+
+def deletion_offered(store, path, key, origin_main_paths):
+    """Whether the message about version key of path offers to delete the file: deleting it
+    loses no version the user approved or origin/main holds, and the store keeps key's copy."""
+    if path in origin_main_paths:
+        return False
+    log = store.log(path)
+    return (newest_approved(store, path, log, key) is None
+            and store.copied_version(path, copy_of(log, key), log) is not None)
 
 
 def read_file(path):
@@ -1195,7 +1267,11 @@ def run_hook(payload):
     outside_state = read_state(outside_path)
     outside_stocking = outside_state is None
     outside_state = outside_state or {"files": {}}
-    groups.append(("outside", outside_path, outside_state, outside_files(), None, outside_stocking))
+    stock_agent_seat_files = not outside_state.get(AGENT_SEAT_FILES_STOCKED_KEY)
+    outside_state[AGENT_SEAT_FILES_STOCKED_KEY] = True
+    seat_files = agent_seat_files()
+    outside = outside_files(seat_files)
+    groups.append(("outside", outside_path, outside_state, outside, None, outside_stocking))
 
     checkout = guard().enclosing_repository_root(cwd) if cwd.is_dir() else None
     if checkout is not None:
@@ -1231,7 +1307,9 @@ def run_hook(payload):
                 == blob}
         decisions = checkout_state.setdefault("guarded", {})
         decisions_before = dict(decisions)
-        groups.append(("checkout", checkout_path, checkout_state, checkout_files(checkout, decisions),
+        # A file the outside group checks is left out here, so one change is not asked about twice.
+        groups.append(("checkout", checkout_path, checkout_state,
+                       sorted(set(checkout_files(checkout, decisions)) - set(outside)),
                        (checkout, git_directory), checkout_stocking))
 
     owner_cache = []
@@ -1285,26 +1363,27 @@ def run_hook(payload):
                 new_position = state.get("reflog")
             elif window:
                 approvals = git_own_work(checkout, window, state, changed)
-            on_main = versions_origin_main_holds(
-                checkout, [(path, value[2]) for path, value in changed.items()] + unsettled)
+            main_blobs = blobs_origin_main_holds(
+                checkout, [path for path, value in changed.items() if value[2] != DELETED]
+                + [path for path, key in unsettled if key != DELETED])
             # A changed file is approved through its check, which reads its approved set anyway.
             approvals = [(path, key, HOW_ORIGIN_MAIN, APPROVE_ALWAYS)
-                         for path, key in unsettled if (path, key) in on_main] + approvals
+                         for path, key in unsettled if main_blobs.get(path) == key] + approvals
         else:
-            on_main = set()
+            main_blobs = {}
         plans.append([kind, state_path, state, files, changed, unsettled, approvals, quiet,
                       new_position, stocking,
                       state["files"] != files_before,
-                      held, on_main,
+                      held, main_blobs,
                       repository, at_base, base_versions])
 
-    stocking_machine = outside_stocking
     nothing_to_do = all(not plan[4] and not plan[5] and not plan[6] and not plan[9]
                         for plan in plans)
     if nothing_to_do:
         for plan in plans:
             moved = plan[8] is not None and plan[2].get("reflog") != plan[8]
-            if moved or plan[10] or (plan[0] == "checkout"
+            if moved or plan[10] or (plan[0] == "outside" and stock_agent_seat_files) or (
+                    plan[0] == "checkout"
                                      and (migrated or plan[2].get("guarded") != decisions_before)):
                 if moved:
                     plan[2]["reflog"] = plan[8]
@@ -1313,17 +1392,9 @@ def run_hook(payload):
 
     def work(store):
         results = []
-        if stocking_machine:
-            for path in seat_briefs():
-                if not store.approved(path):
-                    data = read_file(path)
-                    key = blob_hash(data)
-                    store.copy(path, key, data)
-                    store.approve(path, key)
-                    log_seen(store, path, session, owner(), key, key, HOW_STOCK)
         for plan in plans:
             (kind, state_path, state, files, changed, unsettled, approvals, quiet, _, stocking, _,
-             held, on_main, repository, at_base, base_versions) = plan
+             held, main_blobs, repository, at_base, base_versions) = plan
             # Approved before git's own work and the change, so each of those is recorded after
             # it, and --restore and the diff go back to the newest of them, not to this one.
             first, unreadable = [], []
@@ -1357,9 +1428,13 @@ def run_hook(payload):
                         continue
                     os.close(directory)
                 how = ""
-                if (path, key) in on_main:
+                # The agent-seat files' first check stocks the version this run's scan read, so a
+                # write after the scan is not approved in its place.
+                seat_stocking = (kind == "outside" and stock_agent_seat_files
+                                 and path in seat_files and not store.approved(path))
+                if main_blobs.get(path) == key:
                     how = HOW_ORIGIN_MAIN
-                elif stocking:
+                elif stocking or seat_stocking:
                     log = store.log(path)
                     if not (key not in store.approved(path) and seen_lines(log, key)):
                         how = HOW_STOCK
@@ -1380,7 +1455,7 @@ def run_hook(payload):
                           for path, key in [(path, value[2]) for path, value in changed.items()]
                           + unsettled if key == DELETED]
             asks, reminders, settled = store_phase(store, session, owner(), checks, unsettled,
-                                                   approvals, quiet)
+                                                   approvals, quiet, set(main_blobs))
             settled.update({path: True for path in skipped})
             results.append((asks, reminders, settled, skipped, unreadable))
         return results
@@ -1423,16 +1498,6 @@ def run_hook(payload):
         reminders += plan_reminders
     return [FIRST_RUN_VERSION_LOST.format(path=path, blob=blob, program=HOOK_PATH)
             for path, blob in lost] + messages(asks, reminders)
-
-
-def seat_briefs():
-    """The seat-briefs, found as the transcript mirror finds them."""
-    agents = Path(os.environ.get(AGENTS_DIRECTORY_VARIABLE) or home_directory() / "agents")
-    if not agents.is_dir():
-        return []
-    mirror = loaded("transcript_mirror_to_log_store",
-                    CLONE_ROOT / "scripts" / "transcript-mirror-to-log-store.py")
-    return [str(agents / relative) for relative in mirror.seat_briefs_in(agents)]
 
 
 def renames(store, changed, state_files, approved_first):
@@ -1480,15 +1545,23 @@ def messages(asks, reminders):
     out = []
     if asks:
         program = str(HOOK_PATH)
-        pairs = " ".join(f"{path} {key}" for path, key, _, _ in asks)
+        pairs = " ".join(f"{path} {key}" for path, key, _, _, _ in asks)
         files = "\n\n".join(ASK_FILE.format(path=path, key=key, reason=reason, diff=diff)
-                            for path, key, diff, reason in asks)
+                            for path, key, diff, reason, _ in asks)
         out.append("\n\n".join([ASK_HEADER_LINE, files, ASK_INSTRUCTIONS.format(
-            marker=APPROVAL_MARKER_NAME, program=program, pairs=pairs)]))
-    for path, key in reminders:
-        out.append(UNAPPROVED_VERSION_REMINDER_MESSAGE.format(path=path, key=key, marker=APPROVAL_MARKER_NAME,
-                                   program=HOOK_PATH))
+            marker=APPROVAL_MARKER_NAME, program=program, pairs=pairs,
+            deletions=deletion_offers([path for path, _, _, _, offered in asks if offered]))]))
+    for path, key, offered in reminders:
+        out.append(UNAPPROVED_VERSION_REMINDER_MESSAGE.format(
+            path=path, key=key, marker=APPROVAL_MARKER_NAME, program=HOOK_PATH,
+            deletions=deletion_offers([path] if offered else [])))
     return out
+
+
+def deletion_offers(paths):
+    return "".join(GUARDED_FILE_WITH_NO_APPROVED_VERSION_DELETE_WITHOUT_ASKING_INSTRUCTIONS.format(
+        path=path, quoted_path=shlex.quote(path))
+                   for path in paths)
 
 
 # ---------------------------------------------------------------- --approve and --restore
@@ -1498,7 +1571,10 @@ def current_version(path: str):
     if stat_data(path) is None:
         return DELETED, DELETED, b""
     data = read_file(path)
-    checkout = guard().enclosing_repository_root(Path(path).parent)
+    # A file the outside group checks is keyed by its bytes there, so it is here too: git's
+    # filters, such as core.autocrlf, would give a hash the hook never printed.
+    checkout = (None if path in outside_files()
+                else guard().enclosing_repository_root(Path(path).parent))
     copy_hash = (hashes_in_checkout(checkout, [path]).get(path) if checkout is not None
                  else None) or blob_hash(data)
     key = settings_approval_key(data) if is_settings_file(path) else copy_hash

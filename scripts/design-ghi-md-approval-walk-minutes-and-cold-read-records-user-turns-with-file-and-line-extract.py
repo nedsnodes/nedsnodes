@@ -9,7 +9,7 @@ Usage:
   --repository-checkout  default the checkout this program is in; the checkout's docs/issues/*.md are read
                          as they stand in the working tree, and its git history gives each design's past
                          file names
-  --log-store            default /home/nedlern/nedschorus-logs; its walk/*-minutes.md and
+  --log-store            default /home/nedlern/nedsnodes-logs; its walk/*-minutes.md and
                          cold-read-records/*/ are read
   --agents-directory     default /home/nedlern/agents; its */docs/walk/*-minutes.md are read when the
                          log-store holds no walk-minutes of the same name
@@ -53,6 +53,7 @@ command stops it with git's error and a nonzero exit.
 """
 
 import argparse
+import importlib.util
 import json
 import re
 import socket
@@ -60,7 +61,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_LOG_STORE = Path("/home/nedlern/nedschorus-logs")
+DEFAULT_LOG_STORE = Path("/home/nedlern/nedsnodes-logs")
 DEFAULT_AGENTS_DIRECTORY = Path("/home/nedlern/agents")
 DESIGN_KIND_LINE = re.compile(r"^kind: design", re.MULTILINE)
 # Old walk-minutes quote him as `The user, <date>: "..."`, `Item 4 answer in full: "..."`, or under a bare
@@ -107,14 +108,19 @@ def past_file_names(checkout, relative):
     return {Path(line).name for line in logged.splitlines() if line.strip()} | {Path(relative).name}
 
 
+_record_shipper_spec = importlib.util.spec_from_file_location(
+    "cold_read_record_ship",
+    Path(__file__).resolve().parent.parent / "nn-systems" / "cold-read" / "cold-read-record-ship.py")
+record_shipper = importlib.util.module_from_spec(_record_shipper_spec)
+_record_shipper_spec.loader.exec_module(record_shipper)
+
 def cold_read_records_in(records_root):
     """{record name: set of the file names under its target/}."""
     records = {}
-    for record in sorted(records_root.iterdir()):
-        if record.is_dir():
-            target = record / "target"
-            records[record.name] = ({p.name for p in target.rglob("*") if p.is_file()}
-                                    if target.is_dir() else set())
+    for record in record_shipper.cold_read_record_directories_listed_without_shipment_staging_directories(records_root):
+        target = record / "target"
+        records[record.name] = ({p.name for p in target.rglob("*") if p.is_file()}
+                                if target.is_dir() else set())
     return records
 
 
