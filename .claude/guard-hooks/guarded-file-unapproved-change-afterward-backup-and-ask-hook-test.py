@@ -39,6 +39,13 @@ SETTINGS = Path(__file__).resolve().parents[2] / ".claude" / "settings.json"
 failures = 0
 
 
+
+def uncopied_hit_commands_heading_the_finder_prints(finder):
+    """The heading the finder prints before the commands for the hits it did not copy, read from its source."""
+    found = re.search(r'^DELETED_PATH_BACKUP_SEARCH_UNCOPIED_HIT_COMMANDS_HEADING = "([^"]+)"$', finder.read_text(),
+                      re.MULTILINE)
+    return found.group(1) if found else "<the finder defines no DELETED_PATH_BACKUP_SEARCH_UNCOPIED_HIT_COMMANDS_HEADING>"
+
 def check(name, condition, detail=None):
     global failures
     if condition:
@@ -669,12 +676,14 @@ def cases(scratch):
           and f"git hash-object -- <copy>` prints {approved_key}" in result.stderr
           and f"cp -- <copy> {claude}\n" in result.stderr
           and "If no copy is the approved version" in result.stderr, result.stderr)
-    check("and says which hits the search leaves unchecked, older Timeshift snapshots and Time "
-          "Machine's printed command, instead of claiming it saves every copy",
+    mark = uncopied_hit_commands_heading_the_finder_prints(finder)
+    check("and has every hit the search did not copy fetched and hashed, by the mark the finder "
+          "prints before them, naming no backup kind",
           "saves every copy" not in result.stderr
-          and "older Timeshift snapshot it lists, or a Time Machine hit whose command you have not run, "
-              "is unchecked" in result.stderr.replace("\n", " ")
-          and f"before you count {approved_key} as found nowhere" in result.stderr, result.stderr)
+          and f"lists every hit it did not copy after \"{mark}\"" in result.stderr
+          and f"as found nowhere, run every command listed after \"{mark}\", giving the user any "
+              "whose sudo asks for his password, then hash every copy in that folder" in result.stderr
+          and "Timeshift snapshot it lists" not in result.stderr, result.stderr)
     found_copy = world.scratch / "found-copy"
     found_copy.write_text("project v2, approved edit\n")
     run_found = subprocess.run(["/bin/sh", "-c", f"cp -- {found_copy} {claude}"], check=False)
@@ -1253,10 +1262,12 @@ def cases(scratch):
           and f"git hash-object -- <copy>` prints {rebased_away}" in message
           and f"put that copy back with: cp -- <copy> {claude}\n" in message
           and "If no copy is the version" in message, message)
-    check("and says which hits the search leaves unchecked, instead of claiming it saves every copy",
+    mark = uncopied_hit_commands_heading_the_finder_prints(finder)
+    check("and has every hit the search did not copy fetched and hashed, instead of claiming it "
+          "saves every copy",
           "saves every copy" not in message
-          and "or a Time Machine hit whose command you have not run, is unchecked" in message
-          and f"before you count {rebased_away} as found nowhere" in message, message)
+          and f"Before you count {rebased_away} as found nowhere, run every command listed after "
+              f"\"{mark}\"" in message, message)
     check("and stays recorded, so the next change reports it again",
           state.get("first_run_versions") == {str(claude): rebased_away}, state)
     found_copy = world.scratch / "found-copy"

@@ -203,16 +203,14 @@ STORE_FAILED = (
     "checked against the versions the user approved: {reason}.\n"
     "Tell the user what failed, with this remedy: {remedy}\n"
     "Once the store can be reached, the next tool call checks the files again.")
-# find-deleted-path-across-backups.py copies only the newest Timeshift hit and only prints a copy command for
-# Time Machine, so a message must not let the agent call a version lost from the saved folder alone.
+# The finder copies some hits and lists every other one after its "NOT COPIED:" mark, so a message must not let
+# the agent call a version lost from the saved folder alone.
 FINDER_COPIES_NOT_ALL_CHECKED = (
-    "The search copies most hits into a folder it names, but not all: for Timeshift it copies only the newest "
-    "snapshot's file and lists the older snapshots that also hold it, and for Time Machine it prints a command "
-    "that copies the file instead of copying it. A copy holds version {blob} when "
-    "`git hash-object -- <copy>` prints {blob}. An older Timeshift snapshot it lists, or a Time Machine hit whose "
-    "command you have not run, is unchecked: copy that file out, from the Mac with scp from nedlern@ned-box for "
-    "Timeshift and by running the printed command for Time Machine, and hash it, before you count {blob} as "
-    "found nowhere.\n")
+    "The search copies some hits into a folder it names, and lists every hit it did not copy after "
+    "\"NOT COPIED:\", each with a command that copies it into that folder. A copy holds version {blob} when "
+    "`git hash-object -- <copy>` prints {blob}. Before you count {blob} as found nowhere, run every command "
+    "listed after \"NOT COPIED:\", giving the user any whose sudo asks for his password, then hash every copy "
+    "in that folder.\n")
 FIRST_RUN_VERSION_LOST = (
     "[rule guarded-file-changed-without-approval-ask-user-afterward] "
     "The guarded-file backup could not approve version {blob} of {path}, the version this "

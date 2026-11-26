@@ -1007,6 +1007,12 @@ with tempfile.TemporaryDirectory() as tmp:
           report.status == FOUND and any(l.startswith("2 snapshot(s) still have it") for l in report.lines)
           and any(l.strip() == NEWEST for l in report.lines),
           "%s %s" % (report.status, report.lines))
+    check("local snapshots, real trees: each snapshot that has it, the newest too, is listed after NOT COPIED "
+          "with the mount and copy that fetch it, since this run copied none of them",
+          len(report.uncopied_hit_commands) == 2
+          and all(("-s %s " % name) in command and "cp -n " in command
+                  for name, command in zip((NEWEST, MIDDLE), report.uncopied_hit_commands)),
+          str(report.uncopied_hit_commands))
     check("local snapshots, real trees: the snapshot taken before it was written is searched, not skipped",
           any(l.startswith("3 local snapshot(s) retained, 3 searched") for l in report.lines), str(report.lines))
     check("local snapshots, real trees: the mount point is released after a hit",
@@ -2763,6 +2769,13 @@ check("with warm sudo, a hit is FOUND with the path inside the snapshot and a cp
       "%s %s %s" % (report.status, report.lines, report.recovery))
 check("... and its printed mount may ask for the password, since a warm credential can expire before it runs",
       report.copy_command_may_ask_password, str(report.copy_command_may_ask_password))
+tm_hit_snapshots = [l.split(" holds ", 1)[0] for l in report.lines if " holds " in l]
+check("... and every hit, the first one after too, is listed after NOT COPIED with its own mount and copy, "
+      "since this run copied none of them",
+      len(tm_hit_snapshots) == 2 and len(report.uncopied_hit_commands) == 2
+      and all(("sudo mount_apfs -o ro -s %s " % snapshot) in command and " cp -n " in command
+              for snapshot, command in zip(tm_hit_snapshots, report.uncopied_hit_commands)),
+      "%s %s" % (tm_hit_snapshots, report.uncopied_hit_commands))
 
 tm_find_fails = FakeRunner(WARM + [
     ("sudo -n mount_apfs", (0, "", "")),
@@ -4506,6 +4519,96 @@ for raised in ("RuntimeError('a case raised')", "KeyboardInterrupt()"):
         check("a run whose finder raises %s exits nonzero and leaves no found-copies scratch folder" % raised,
               completed.returncode != 0 and left == [] and raised.split("(")[0] in completed.stderr,
               "exit %s, left %s\n%s" % (completed.returncode, left, completed.stderr[-2000:]))
+
+# --------------------------------------------------------------------------
+# every hit a run does not copy is listed with the command that copies it, so
+# a version held only by an older snapshot or another copy is still hashed
+# --------------------------------------------------------------------------
+
+def hashes_of_files_in(directory):
+    return {finder.git_blob_id_of(Path(directory, name).read_bytes()) for name in os.listdir(directory)
+            if not name.startswith(".")}
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    previous_folder = finder.found_copies_folder()
+    folder = finder.FoundCopiesFolder(root=str(Path(tmp, "copies")), now=1792000500)
+    finder.use_found_copies_folder(folder)
+    try:
+        snapshots = Path(tmp, "timeshift", "snapshots")
+        held = set()
+        # Seven snapshots, more than the five the hit list shows, each holding another version of the file.
+        for day in range(1, 8):
+            inside = Path(snapshots, "2026-08-%02d_10-00-00" % day, "localhost", "seat-a", "docs")
+            inside.mkdir(parents=True)
+            content = ("version of day %d\n" % day).encode()
+            Path(inside, "lost.md").write_bytes(content)
+            held.add(finder.git_blob_id_of(content))
+
+        report = finder.search_timeshift("docs/lost.md", "nedlern@ned-box", str(snapshots), ("/seat-a",),
+                                         finder.run_command, on_ned_box=True)
+        finder.copy_found_versions(report)
+        check("uncopied hits, Timeshift on ned-box: the six hits after the newest each get a copy command",
+              report.status == FOUND and len(report.uncopied_hit_commands) == 6,
+              "%s %s" % (report.status, report.uncopied_hit_commands))
+        ran = [run_recovery_command(command) for command in report.uncopied_hit_commands]
+        check("... and running every listed command puts all seven versions in the found-copies folder",
+              all(r.returncode == 0 for r in ran) and hashes_of_files_in(folder.path) == held,
+              "%s %s" % ([(r.returncode, r.stderr) for r in ran], sorted(os.listdir(folder.path))))
+        rendered = report.render()
+        heading = finder.DELETED_PATH_BACKUP_SEARCH_UNCOPIED_HIT_COMMANDS_HEADING
+        check("... and the surface prints them after the NOT COPIED heading the guarded-file hook names",
+              ("    %s 6 hit(s) this run did not copy" % heading) in rendered
+              and all(("    $ " + command) in rendered for command in report.uncopied_hit_commands), rendered)
+        summary = finder.render_summary([report])
+        check("... and the summary counts them and says each must be hashed",
+              "6 hit(s) were not copied or hashed" in summary and heading in summary, summary)
+
+        # From the Mac the same hits are ned-box files: the command reads each over ssh.
+        fake_bin = Path(tmp, "fake-bin")
+        fake_bin.mkdir()
+        fake_ssh = Path(fake_bin, "ssh")
+        fake_ssh.write_text('#!/bin/sh\nfor last in "$@"; do :; done\nexec sh -c "$last"\n')
+        fake_ssh.chmod(0o755)
+        shutil.rmtree(folder.path)
+        report = finder.search_timeshift("docs/lost.md", "nedlern@ned-box", str(snapshots), ("/seat-a",),
+                                         LocalShellRunner([], Path(tmp)))
+        def fetch_through_fake_ssh(argv):
+            completed = subprocess.run(argv, capture_output=True, timeout=30, env=dict(
+                os.environ, PATH="%s%s%s" % (fake_bin, os.pathsep, os.environ["PATH"])))
+            return completed.returncode, completed.stdout, completed.stderr.decode("utf-8", "replace")
+        finder.copy_found_versions(report, fetch=fetch_through_fake_ssh)
+        ran = [run_recovery_command(command, str(fake_bin)) for command in report.uncopied_hit_commands]
+        check("uncopied hits, Timeshift from the Mac: each listed command copies its hit over ssh, so all seven "
+              "versions reach the found-copies folder",
+              len(report.uncopied_hit_commands) == 6
+              and all("ssh -o BatchMode=yes nedlern@ned-box" in c for c in report.uncopied_hit_commands)
+              and all(r.returncode == 0 for r in ran) and hashes_of_files_in(folder.path) == held,
+              "%s %s %s" % (report.uncopied_hit_commands, [(r.returncode, r.stderr) for r in ran],
+                            sorted(os.listdir(folder.path)) if os.path.isdir(folder.path) else "no folder"))
+
+        # Two log-store files at the wanted path, each another version: the older one is listed, not dropped.
+        shutil.rmtree(folder.path)
+        store = Path(tmp, "nedsnodes-logs")
+        store_versions = set()
+        for record, stamp in (("record-new", "2026-09-18 12:00"), ("record-old", "2026-09-01 09:00")):
+            inside = Path(store, "cold-read-records", record, "target", "docs")
+            inside.mkdir(parents=True)
+            content = ("log-store copy from %s\n" % record).encode()
+            Path(inside, "lost.md").write_bytes(content)
+            when = time.mktime(time.strptime(stamp, "%Y-%m-%d %H:%M"))
+            os.utime(Path(inside, "lost.md"), (when, when))
+            store_versions.add(finder.git_blob_id_of(content))
+        report = finder.search_log_store("docs/lost.md", str(store), "", RunsLocallyRefusesSsh([]))
+        finder.copy_found_versions(report)
+        ran = [run_recovery_command(command) for command in report.uncopied_hit_commands]
+        check("uncopied hits, log-store: the older file at the wanted path gets a copy command, and running it "
+              "puts both versions in the found-copies folder",
+              report.status == FOUND and len(report.uncopied_hit_commands) == 1
+              and all(r.returncode == 0 for r in ran) and hashes_of_files_in(folder.path) == store_versions,
+              "%s %s %s" % (report.status, report.uncopied_hit_commands, [(r.returncode, r.stderr) for r in ran]))
+    finally:
+        finder.use_found_copies_folder(previous_folder)
 
 # Removed here, before the exit status is decided, so a failed removal fails the suite; an atexit
 # callback that raises leaves the exit status 0.
