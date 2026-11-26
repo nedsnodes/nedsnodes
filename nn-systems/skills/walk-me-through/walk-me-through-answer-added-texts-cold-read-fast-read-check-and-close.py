@@ -1134,6 +1134,11 @@ CLOSE_ALREADY_RECORDED = (
     "Run `{command}` first, with the flag for the user's answer as `--help` lists it, then close.\n"
     "If check failed, fix what it printed before running close.")
 CLOSE_HELD_MINUTES = "{item}: answer held: {new_item}, raised by a fast-read finding, waits for the user's answer. <open>"
+# Every line close writes to record an answer; only these mark the answer closed.
+CLOSE_RECORD_TEMPLATES = (CLOSE_TOOK_EFFECT_MINUTES, CLOSE_PARTS_TOOK_EFFECT_MINUTES, CLOSE_DEFERRED_MINUTES,
+                          CLOSE_ALREADY_DECIDED_MINUTES, CLOSE_MOVED_ON_MINUTES, CLOSE_MOVED_ON_NO_DECISION_MINUTES,
+                          CLOSE_DEFERRED_AGAIN_MINUTES, CLOSE_DEFERRED_JUST_BEFORE_SUMMARY_MINUTES,
+                          CLOSE_HELD_MINUTES)
 HELD_ANSWER_LINE = re.compile(r"^(items?\s[^:]*): answer held: (items?\s.+?), raised by a fast-read finding", re.I)
 CLOSE_TOOK_EFFECT_LINES = (
     "{item}'s answer is recorded in the minutes, and its change may now be made.",
@@ -3653,16 +3658,24 @@ def no_answer_table_row_text_or_none_from_evidence_check_problems(case, problems
     return None
 
 
+def close_record_line(item, line):
+    """Whether line is one close writes to record item's answer, read from close's own templates: an agent's note
+    that only opens with item's label, as in `item 25 of 39: the user's words, not an answer yet`, is not one."""
+    return any(re.fullmatch(re.sub(r"\\\{[a-z_]+\\\}", ".*?",
+                                   re.escape(template.rstrip()).replace(re.escape("{item}"), re.escape(item))),
+                            line.rstrip())
+               for template in CLOSE_RECORD_TEMPLATES)
+
+
 def last_answer_line(walk_finder, minutes, parser):
     """Return (match, the lines after it, closed) for the walk-minutes' last answer line, or None when there is none.
-    closed compares the answer line's label with itself: every line close writes for an answer opens with that
-    label, so a re-plan that changes M cannot make the two differ."""
+    closed holds when a line close writes for that answer's label follows it."""
     lines = walk_finder.prose_lines(minutes.read_text(encoding="utf-8"), parser)
     for index in range(len(lines) - 1, -1, -1):
         match = ANSWER_LINE.match(lines[index])
         if match:
             after = lines[index + 1:]
-            return match, after, any(line.startswith(match["item"] + ": ") for line in after)
+            return match, after, any(close_record_line(match["item"], line) for line in after)
     return None
 
 

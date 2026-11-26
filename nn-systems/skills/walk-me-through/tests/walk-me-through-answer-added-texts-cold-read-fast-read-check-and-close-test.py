@@ -5329,6 +5329,26 @@ def test_a_settling_left_unclosed_is_not_settled_again_after_a_replan_changes_th
           described(closed) + case.minutes.read_text())
 
 
+def test_a_hand_written_note_on_the_item_is_no_close_for_check_or_close():
+    ruling = f"walk x's minutes, item 3 ({RECENT_RULING_DATE})"
+    note = f"item 3 of 9: the user's words ({RECENT_RULING_DATE}), not an answer yet: he asked what walk x said\n"
+    for second in SECOND_SETTLINGS:
+        case = Case(next_to_present="item 3 of 9")
+        settled = case.run("check", "--already-decided", ruling, "D")
+        case.minutes.write_text(case.minutes.read_text() + note)
+        before = case.minutes.read_text()
+        result = case.run("check", *second)
+        check(f"after an unclosed check --already-decided ... D and an agent's note opening `item 3 of 9: `, "
+              f"check {second[0]} is refused, writing nothing",
+              settled.returncode == 0 and result.returncode == 1 and "to item 3 of 9, has no close" in result.stderr
+              and case.minutes.read_text() == before, described(settled) + described(result))
+    closed = case.run("close")
+    check("close does not take the note for an earlier close, and records the cited disapproval as rejected",
+          closed.returncode == 0 and "already recorded by an earlier close" not in closed.stderr
+          and f"\nitem 3 of 9: already decided by `{ruling}`; the walk does not come back to it. <rejected>\n"
+          in case.minutes.read_text(), described(closed) + case.minutes.read_text())
+
+
 def test_an_unclosed_answer_to_another_item_refuses_every_settling_and_names_close():
     for second in SECOND_SETTLINGS:
         case = Case(next_to_present="item 3 of 9")
