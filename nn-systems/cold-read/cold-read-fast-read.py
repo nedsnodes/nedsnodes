@@ -822,9 +822,7 @@ def full_run_required_line(class_name: str) -> str:
     """The one sentence said on stderr and written into the report."""
     # The program sees only the path, not the change, so it cannot tell
     # whether step 2 exempts this change; the sentence leaves that to the reader.
-    return (f"unless step 2 of the /cold-read skill exempts this change (one "
-            f"that leaves unchanged what the document tells a program or an "
-            f"agent to do, and what it decides or plans), the "
+    return (f"unless step 2 of the /cold-read skill exempts this change, the "
             f"cold-read-full-run is required before this document lands "
             f"({class_name}); this fast read is its first step, not the whole "
             f"review. Run nn-systems/cold-read/cold-read-grid.py --target on it.")
