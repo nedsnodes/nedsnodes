@@ -10,7 +10,7 @@ Usage, from the agent-session's checkout:
   walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py check
       [--obvious | --after-advisor | --disapproved | --deferred | --option N
        | --part-answer N=ANSWER ... | --moved-on-no-decision
-       | --not-asked KIND|none|weak-cost-only|weak-alters-earlier-approved-text-only
+       | --not-asked KIND|adds-nothing|none|weak-cost-only|weak-alters-earlier-approved-text-only
        | --already-decided USER_RULING | --now-over-later-already-decided
        | --moved-on REASON]
       --user-reply-as-typed REPLY    (every answer but --not-asked, --already-decided,
@@ -40,8 +40,8 @@ leaves with no decision, REASON saying why, which changes nothing. When the
 walk-minutes hold an `#item_page` line for the item, a link or a failed
 publish, the user was shown it, so --moved-on writes its answer line opening
 `shown to the user,` in place of `settled without asking the user,`, and CLOSE
-says the item was shown in place of telling the agent to list it as settled
-without being shown.
+says the item was shown in place of saying it was settled without being
+shown.
 --bump ITEM, for the user's "bump" and the item he names, records no answer: it
 makes ITEM, an item not yet shown named by its heading's title, the next item
 shown, numbering it and moving it to stand right before the waiting item in the
@@ -162,7 +162,8 @@ names each one's walk-minutes and says which to close and how to merge them,
 since an agent-seat keeps at most one approval-walk open.
 
 CHECK finds the texts the answer adds: the item's lines whose first word,
-after any list or quotation marker, outside fenced code, is a mark the answer adds;
+after any list or quotation marker and a part's opening `Part N.`, outside
+fenced code, is a mark the answer adds;
 the text is the rest of the line, without one pair of surrounding quotation
 marks. Before it reads them, CHECK refuses, writing nothing, for every answer but
 --deferred, --moved-on-no-decision and --moved-on, which add no text, when
@@ -341,6 +342,11 @@ the new item approved, disapproved or already decided, it also writes the
 already-decided line, with the same outcome, for each item a held-answer line
 holds for it that no close line decides yet; after a deferral, a move on or
 answers to parts, the held item stays waiting, so the walk comes back to it.
+When the new item has sub-steps, and the minutes decide every sub-step so that
+the new item counts as approved or disapproved, the first CLOSE that finds the
+new item so decided, and does not itself record a new hold, writes the
+already-decided line, with that outcome, for the held item, whichever item that
+CLOSE itself records.
 When it holds or defers the answer, it prints the lines the agent's next
 message must include, the status lines among them. When an item waits, it
 prints the command that gives that item its cold-read-fast-read before it is
@@ -470,7 +476,7 @@ search said, and exits 1; any exit of the search but its found and nothing-found
 exits is a failure. The step saves what the search prints, a search with no
 hits too, once it has written it out, in
 `docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
-titles and numbers searched for as a JSON list on its first line, the agent-session id
+cache format's number and the titles and numbers searched for as a JSON list on its first line, the agent-session id
 being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
 agent-session prints only a line naming that file, unless the file is missing
 or the item's titles differ from the saved ones; then it searches, prints and
@@ -641,7 +647,10 @@ TOUCHES, TEST, SOURCE, UNUSED, RENAME, GLOSSARY_TERM, ADDED_HASHTAG_MARKER, SEAR
                                       "search"))
 NotAskedEvidence = collections.namedtuple("NotAskedEvidence",
                                           "value rating found touched tests lines marks top item")
-NoAnswerCase = collections.namedtuple("NoAnswerCase", "value label meaning ratings needed checks evidence ground flag")
+# unchecked: what the agent judges after settling by the row, when it differs from NOT_ASKED_UNCHECKED.
+NoAnswerCase = collections.namedtuple("NoAnswerCase",
+                                      "value label meaning ratings needed checks evidence ground flag unchecked",
+                                      defaults=(None,))
 
 
 class MissingEvidenceLine(str):
@@ -801,6 +810,8 @@ def dropped_proposal_search_problems(found):
 
 NOT_ASKED_FLAG, ALREADY_DECIDED_FLAG = "--not-asked", "--already-decided"
 NOT_ASKED_ANY_RATING = (NOT_ASKED_RATED_NONE, NOT_ASKED_RATED_WEAK)
+NOT_ASKED_ADDS_NOTHING = "adds-nothing"
+NOT_ASKED_ADDS_NOTHING_LABEL = "adds nothing"
 EVERY_RATING = ("none", "weak", "medium", "strong", "very strong")
 DROPPED_PROPOSAL_VALUE = "proposed-check-dropped-search-found-no-case"
 DROPPED_PROPOSAL_GROUND = "that the problem the dropped proposal guarded against may still come, at any rating"
@@ -846,7 +857,11 @@ NO_ANSWER_CASES = (
                  (rating_and_needed_lines_problems, touched_files_exist_problems, system_glossary_problems),
                  "touches; every touched file is a `*-glossary.md` git tracks, other than the project glossary",
                  None, NOT_ASKED_FLAG),
-    NoAnswerCase(8, "kind 8", "a project glossary entry changed only to meet the format the glossary states for its "
+    NoAnswerCase(8, "kind 8", "a simplification or deletion that leaves unchanged what the text tells its reader to do, "
+                 "or what the code does",
+                 NOT_ASKED_ANY_RATING, (TOUCHES,), (rating_and_needed_lines_problems, touched_files_exist_problems),
+                 "touches; every touched file exists", None, NOT_ASKED_FLAG),
+    NoAnswerCase(9, "kind 9", "a project glossary entry changed only to meet the format the glossary states for its "
                  "entries, with its meaning unchanged and every use of a changed term updated",
                  NOT_ASKED_ANY_RATING, (TOUCHES,),
                  (rating_and_needed_lines_problems, touched_files_exist_problems, project_glossary_format_problems),
@@ -854,6 +869,11 @@ NO_ANSWER_CASES = (
                  "spelling is a glossary entry's term and whose old spelling is in no file outside the touched ones "
                  "and docs/walk/; with no rename line, the project glossary is the only touched file", None,
                  NOT_ASKED_FLAG),
+    NoAnswerCase(NOT_ASKED_ADDS_NOTHING, NOT_ASKED_ADDS_NOTHING_LABEL,
+                 "an item whose recommendation adds and changes nothing, such as leaving out a definition, a check or "
+                 "a step that its alternative would add, whatever its case against is rated",
+                 EVERY_RATING, (), (), "none; any rating", None, NOT_ASKED_FLAG,
+                 "whether the item's recommendation adds and changes nothing"),
     NoAnswerCase(NOT_ASKED_RATED_NONE, "case against none",
                  "an item of none of these kinds whose case against is rated none, unless it adds words the user has "
                  "not approved to a file the instruction-file guard protects",
@@ -907,10 +927,9 @@ NO_ANSWER_TABLE_RULES = (
     "case against's rating, when a search of the last 30 days, of every place the problem would leave a trace, found "
     "no case of it.",
     "Every other item is shown, including any rated above none that adds a rule, instruction sentence, check, hook, "
-    "job, glossary term, design choice, setting or recurring expense, or that recommends doing nothing.",
+    "job, glossary term, design choice, setting or recurring expense.",
     "Before settling an item, run its row's command and ask the advisor whether a later ruling or another open item "
     "overtakes it; if the program refuses, the advisor objects or the advisor call fails, show the item.",
-    "After settling an item of no kind, say in your next message that you settled it, so that he can have it reversed.",
     "The minutes record a settled item as <accepted>, with \"not asked\" and its kind number, or \"case against none\"; "
     "it keeps its number and its place in the count M, and its change is made with the walk's other approved changes.",
 )
@@ -1416,10 +1435,10 @@ NOT_ASKED_NOT_SYSTEM_GLOSSARY_PROBLEM = (
     "checkout {top} other than the project glossary {project_glossary}; kind 7 changes only entries of system "
     "glossaries.")
 NOT_ASKED_PROJECT_GLOSSARY_NOT_TOUCHED_PROBLEM = (
-    "- `{touches}` does not name the project glossary {project_glossary}; kind 8 changes entries of the project "
+    "- `{touches}` does not name the project glossary {project_glossary}; kind 9 changes entries of the project "
     "glossary.")
 NOT_ASKED_GLOSSARY_FORMAT_OTHER_FILE_PROBLEM = (
-    "- `{touches}` names {path}, which is not the project glossary, and the item has no `{marker}` line; kind 8 "
+    "- `{touches}` names {path}, which is not the project glossary, and the item has no `{marker}` line; kind 9 "
     "touches another file only to update the uses of a term whose spelling a `{marker}` line changes.")
 NOT_ASKED_TERM_NOT_IN_GLOSSARY_PROBLEM = ("- the term `{term}` is the term of no entry, a line opening `- **{term}**` "
                                           "or `- **{term} (aka ...)**`, in a glossary file ({pattern}) in the "
@@ -1458,20 +1477,20 @@ NOT_ASKED_WHY = {
 NOT_ASKED_JUDGEMENT_LINES = (
     "{item} is recorded as settled without asking the user, {label}; the program checked only what code can.",
     "Before you run close, ask the advisor whether a later ruling or another open item overtakes {item}, and judge "
-    "what the program could not, such as whether the case against names nothing besides {grounds}, and whether a fix "
-    "matches its design.",
+    "what the program could not, such as {unchecked}.",
     "If the advisor objects, the advisor call fails, or your judgement is against settling, do not run close: "
     "present {item} to the user and run check with the flag for his answer, as `--help` lists it; that writes a new "
     "answer line, and close records only the last one, so this line is then set aside.",
 )
 # Code cannot see these in a change, so an item of no kind rated weak leaves them to the agent.
+NOT_ASKED_UNCHECKED = "whether the case against names nothing besides {grounds}, and whether a fix matches its design"
 # Code cannot tell from the item what was proposed, or where the problem would leave its trace.
 NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE = (
     "Judge also whether {item} proposes a check, test, guard, refusal or hook and recommends dropping it, and whether "
     "the problem that check guards against would have left a trace in the places its `#not_asked_search` line names. "
     "If {item} drops no such proposal, or the problem would leave no trace there, as for code too new to have run, do "
     "not run close: present {item} to the user.")
-# Code cannot tell a format change from a change of meaning, so kind 8 leaves that to the agent and the advisor.
+# Code cannot tell a format change from a change of meaning, so kind 9 leaves that to the agent and the advisor.
 NOT_ASKED_GLOSSARY_FORMAT_JUDGEMENT_LINE = (
     "Judge also, with the advisor, whether each entry {item} changes means exactly what it meant before, only now in "
     "the format the project glossary's opening paragraphs state for its entries. If any meaning changed, do not run "
@@ -1491,7 +1510,6 @@ GIT_GREP_FAILED = (GIT_GREP_FAILED_REASON + "\n"
                    "present {item} to the user and run check with the flag for his answer, as `--help` lists it.")
 CLOSE_NOT_SHOWN_LINES = (
     "{item} is recorded in the minutes as settled without being shown to the user.",
-    "List it, with its number, in one line of your next message to the user.",
 )
 CLOSE_ALREADY_DECIDED_CHANGE = "Its change may now be made."
 # Both line formats are agreed with merge-lane-2, whose hold command writes the first into its review and whose
@@ -1737,6 +1755,8 @@ APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED = (
     "Once the user says the cause is fixed, run `{command}` again.")
 TITLE_SEARCH_CACHE_DIRECTORY_NAME = "title-search-cache"
 TITLE_SEARCH_CACHE_FILE_NAME = "{walk}-item-{numbers}-{session}.md"
+# Raised whenever what a search can print changes, so that a file saved by an older search is searched again.
+TITLE_SEARCH_CACHE_FORMAT = 2
 TITLE_SEARCH_CACHE_PRINTED_BEFORE = (
     "The user's words where {item}'s title was named before were printed in full by an earlier run of this step in "
     "this agent-session, and are saved in {path}; read that file when they are no longer in your context.")
@@ -2365,8 +2385,8 @@ def not_asked_kind(value):
 
 
 def not_asked_label(kind):
-    """How the minutes and messages name a --not-asked value: `kind 3`, `case against none`, or the label of a
-    weak case against's ground, such as `case against weak, cost only`."""
+    """How the minutes and messages name a --not-asked value: `kind 3`, `adds nothing`, `case against none`, or the
+    label of a weak case against's ground, such as `case against weak, cost only`."""
     return no_answer_case(kind).label
 
 
@@ -2781,14 +2801,15 @@ def check(arguments):
     if had_to_be_run:
         output += [line.format(document=document, item=item) for line in CHECK_JUDGEMENT_LINES]
     if arguments.not_asked is not None:
-        output += [line.format(item=item, label=not_asked_label(arguments.not_asked),
-                               grounds=not_asked_grounds(arguments.not_asked))
+        unchecked = no_answer_case(arguments.not_asked).unchecked or NOT_ASKED_UNCHECKED.format(
+            grounds=not_asked_grounds(arguments.not_asked))
+        output += [line.format(item=item, label=not_asked_label(arguments.not_asked), unchecked=unchecked)
                    for line in NOT_ASKED_JUDGEMENT_LINES]
         if arguments.not_asked in NOT_ASKED_WEAK_GROUND_LABELS:
             output.append(NOT_ASKED_WEAK_JUDGEMENT_LINE.format(item=item))
         if arguments.not_asked == DROPPED_PROPOSAL_VALUE:
             output.append(NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE.format(item=item))
-        if arguments.not_asked == 8:
+        if arguments.not_asked == 9:
             output.append(NOT_ASKED_GLOSSARY_FORMAT_JUDGEMENT_LINE.format(item=item))
     output.append(CHECK_CLOSE_LINE.format(command=step_command_with_cwd(top, "close")))
     log = arguments.counts_log or (log_store_records.parent / COUNTS_LOG_FILE_NAME if log_store_records else None)
@@ -3676,8 +3697,8 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
     lines saved but never printed are never read."""
     if not groups:
         return [], lambda: []
-    # The groups' titles and numbers, as JSON lists, so a change to either searches again.
-    titles = [[group_titles, group_numbers] for group_titles, group_numbers in groups]
+    # The cache format and the groups' titles and numbers, as JSON lists, so a change to any of them searches again.
+    titles = [TITLE_SEARCH_CACHE_FORMAT, [[group_titles, group_numbers] for group_titles, group_numbers in groups]]
     variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
     session_id = os.environ.get(variable)
     cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
@@ -3697,11 +3718,13 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
         # Whatever a search that cannot load raises, it is a failed search, reported as the others are.
         except Exception as error:
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-                item=item, exit=result.returncode, command=command,
-                said="\n".join(filter(None, [result.stderr.strip(), f"FAILED: loading the title search here raised {error!r}."]))))
+                item=item, exit=result.returncode, command=command, said=title_search_failure_said(
+                    result.stderr, f"FAILED: loading the title search here raised {error!r}.")))
         if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-                item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
+                item=item, exit=result.returncode, command=command, said=title_search_failure_said(
+                    result.stderr, f"FAILED: the title search exited {result.returncode} without a FAILED line of "
+                                   f"its own, so it crashed or was stopped.")))
         lines += result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
     if not session_id:
         return lines, lambda: [TITLE_SEARCH_CACHE_NOT_SAVED.format(
@@ -3718,6 +3741,15 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
             return [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
         return []
     return lines, saved_lines
+
+
+def title_search_failure_said(stderr, summary):
+    """Return what a failed title search said: its stderr, with the FAILED line summary added when the search
+    printed no FAILED line itself, so that the agent always has a FAILED line to relay."""
+    said = stderr.strip()
+    if any(line.startswith("FAILED:") for line in said.split("\n")):
+        return said
+    return "\n".join(filter(None, [said, summary]))
 
 
 def lines_printed_with_title_search_saved_after(first, past_words, rest):
@@ -4554,25 +4586,38 @@ def item_a_bump_suspended(walk_finder, minutes, parser, decided_numbers, order, 
     return []
 
 
-def held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item, outcome):
-    """Return the close lines that give outcome to each item whose answer the minutes hold for the answered
-    items, directly or through a chain of held items, and that no close line decides yet."""
+def held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item, outcome, decided_through_sub_steps):
+    """Return [(close line, the text of the item whose outcome it records)], one close line for each item whose answer the
+    minutes hold, directly or through a chain of held items, and that no close line decides yet, giving it the
+    outcome of what it was held for: outcome for answered_numbers, when outcome is given, and, for an item
+    decided_through_sub_steps maps to approved or disapproved, as items_decided_through_sub_steps gives them, that
+    item's outcome."""
     text = minutes.read_text(encoding="utf-8")
     decided, _ = minutes_record(walk_finder, text, parser)
     holds = held_answers(walk_finder, text, parser)
+    # Each released number maps to (its outcome, the item whose outcome it carries), so a chain started by this
+    # close's answer still names the answered item.
+    released = {number: (outcome, item) for number in answered_numbers} if outcome else {}
+    for number, word in decided_through_sub_steps.items():
+        if word in RULING_GIVEN_WORDS.values():
+            released.setdefault(number, (next(key for key, value in RULING_GIVEN_WORDS.items() if value == word),
+                                         None))
     # An item held for an item this close decides is decided too, so it releases the items held for it in turn.
-    released, lines = set(answered_numbers), []
-    progress = True
+    lines, progress = [], True
     while progress:
         progress = False
         for held_text, held_numbers, new_text, new_numbers in holds:
-            if new_numbers <= released and not held_numbers <= decided:
-                decided.update(held_numbers)
-                released.update(held_numbers)
-                progress = True
-                ruled_by = item if new_numbers <= set(answered_numbers) else new_text
-                lines.append(CLOSE_ALREADY_DECIDED_MINUTES.format(
-                    item=held_text, ruling=HELD_RULING.format(new_item=ruled_by), outcome=outcome))
+            sources = {released.get(number) for number in new_numbers}
+            if None in sources or len({held_outcome for held_outcome, _ in sources}) != 1 or held_numbers <= decided:
+                continue
+            held_outcome, source = sources.pop()
+            source = source or new_text
+            decided.update(held_numbers)
+            released.update(dict.fromkeys(held_numbers, (held_outcome, source)))
+            progress = True
+            ruled_by = item if new_numbers <= set(answered_numbers) else new_text
+            lines.append((CLOSE_ALREADY_DECIDED_MINUTES.format(
+                item=held_text, ruling=HELD_RULING.format(new_item=ruled_by), outcome=held_outcome), source))
     return lines
 
 
@@ -4775,15 +4820,21 @@ def close(arguments):
     append_to_minutes(minutes, [recorded])
     word = RULING_GIVEN_WORDS[held_outcome] if held_outcome else word
     rulings = [(number, word) for number in answered_numbers]
-    if held_outcome:
-        held = held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item, held_outcome)
-        if held:
-            append_to_minutes(minutes, held)
-        for line in held:
-            deferred_item_heading_noted(walk_finder, minutes, walk_finder.parse_items(line.split(": ")[0])[0], total,
-                                        parser, noted=False)
-        output += [CLOSE_HELD_DECIDED.format(item=item, held=line.split(": ")[0]) for line in held]
-        rulings += [(number, word) for line in held
+    # A held answer is released by its new item's own answer, or by the last of its sub-steps, at this close or,
+    # for one an earlier close missed, at any close after it.
+    words, _ = minutes_ruling_words(walk_finder, minutes.read_text(encoding="utf-8"), parser)
+    held = held_items_decided_with(
+        walk_finder, minutes, parser, answered_numbers, item, held_outcome,
+        items_decided_through_sub_steps(order, words, sub_steps_of,
+                                        held_answers_unresolved(walk_finder, minutes.read_text(encoding="utf-8"),
+                                                                parser)))
+    if held:
+        append_to_minutes(minutes, [line for line, _ in held])
+    for line, ruled_by in held:
+        deferred_item_heading_noted(walk_finder, minutes, walk_finder.parse_items(line.split(": ")[0])[0], total,
+                                    parser, noted=False)
+        output.append(CLOSE_HELD_DECIDED.format(item=ruled_by, held=line.split(": ")[0]))
+        rulings += [(number, RULING_GIVEN_WORDS[line.rsplit(" ", 1)[-1]])
                     for number in walk_finder.parse_items(line.split(": ")[0])[0]]
     after = minutes.read_text(encoding="utf-8")
     words, _ = minutes_ruling_words(walk_finder, after, parser)

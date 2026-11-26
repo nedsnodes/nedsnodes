@@ -682,7 +682,7 @@ def run_cases_on_ned_box(workspace: Path):
         result = fixture.run(stand_in_runner_behaviour=behaviour, chmod_is_refused=True)
         record_lines = (fixture.record("ned-box") or "").splitlines()
         remedy = (f"chmod -R u+rwx {fixture.worktree} && rm -rf {fixture.worktree} && "
-                  f"git -C {fixture.clone} worktree prune")
+                  f"env -u GIT_DIR -u GIT_WORK_TREE git -C {fixture.clone} worktree prune")
         registered = fixture.worktree_is_registered()
         check(f"a worktree that was not removed, {registration}: the program exits 4, the "
               "record says the worktree was not removed, and stderr is what failed and the "
@@ -861,8 +861,8 @@ def run_cases_on_ned_box(workspace: Path):
     def another_run_fetches_after_this_ones_fetch(clone, *arguments):
         completed = real_git_for_overlap(clone, *arguments)
         if arguments[:1] == ("fetch",) and ref_of_other_run is not None:
-            real_git_for_overlap(clone, "update-ref", ref_of_other_run,
-                                 fixture.commit_the_clone_was_made_at)
+            fixture_git(clone, "update-ref", ref_of_other_run,
+                        fixture.commit_the_clone_was_made_at)
         return completed
 
     program.git = another_run_fetches_after_this_ones_fetch
@@ -923,8 +923,59 @@ def run_cases_on_ned_box(workspace: Path):
           result.code == 4 and len(result.runner_calls) == 1
           and f"git update-ref -d {ref} failed in {fixture.clone}: error: cannot lock ref "
               f"'{ref}': Permission denied" in record_lines
-          and f"delete the ref with: git -C {fixture.clone} update-ref -d {ref}\n" in result.stderr,
+          and f"delete the ref with: env -u GIT_DIR -u GIT_WORK_TREE git -C {fixture.clone} "
+              f"update-ref -d {ref}\n" in result.stderr,
           (repr(result), record_lines))
+
+    # The printed command is run as a reader would, from a shell whose GIT_DIR names
+    # another repository, which git would otherwise use in place of -C.
+    other_repository = workspace / "a-repository-the-readers-git-dir-names"
+    other_repository.mkdir()
+    fixture_git(other_repository, "init", "--quiet")
+    remedy = result.stderr.split("delete the ref with: ", 1)[-1].split("\n", 1)[0]
+    shell_with_a_git_dir = {**os.environ, "GIT_DIR": str(other_repository / ".git")}
+    ran = subprocess.run(["/bin/sh", "-c", remedy], env=shell_with_a_git_dir,
+                         capture_output=True, text=True, check=False)
+    check("the printed delete command deletes the ref in the clone from a shell whose "
+          "GIT_DIR names another repository",
+          ran.returncode == 0 and fixture_git(fixture.clone, "for-each-ref", ref) == "",
+          (remedy, ran))
+
+    git_calls = []
+
+    def git_recording_each_call(clone, *arguments):
+        git_calls.append(arguments[:2])
+        return real_git(clone, *arguments)
+
+    program.git = git_recording_each_call
+    try:
+        result = fixture.run()
+    finally:
+        program.git = real_git
+    check("the ref main was fetched into is deleted only after the worktree of its commit "
+          "is added, so a gc between the two cannot prune the commit",
+          result.code == 0 and ("worktree", "add") in git_calls
+          and ("update-ref", "-d") in git_calls
+          and git_calls.index(("worktree", "add")) < git_calls.index(("update-ref", "-d"))
+          and fixture_git(fixture.clone, "for-each-ref", ref) == "",
+          (repr(result), git_calls))
+
+    def interrupted_at_rev_parse(clone, *arguments):
+        if arguments[:1] == ("rev-parse",):
+            raise KeyboardInterrupt
+        return real_git(clone, *arguments)
+
+    program.git = interrupted_at_rev_parse
+    try:
+        fixture.run()
+        outcome = "returned"
+    except KeyboardInterrupt:
+        outcome = "interrupted"
+    finally:
+        program.git = real_git
+    check("an interrupt after the fetch still deletes the ref main was fetched into",
+          outcome == "interrupted" and fixture_git(fixture.clone, "for-each-ref", ref) == "",
+          outcome)
 
 
 def run_cases_on_the_mac(workspace: Path):

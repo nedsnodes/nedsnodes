@@ -395,15 +395,16 @@ whose prerequisites or blockedBy name the event, so the idle check raises it.
 - A standing rule, such as "from now on" or "Noted", is backed by the hook or test that enforces \
 it, or by a task to build one together with a proposal to the user; a memory never backs it.
 - A hold, such as "I'll hold", is backed by a task whose prerequisites name what releases the hold.
+- Whatever its kind, a sentence is also backed when the agent-seat, in the same turn or a later one, \
+tells the user in a text message that it will not do it, takes it back, or is no longer holding.
 
 Judge each sentence by the rule of the kind the JSON gives it, because the message that names an \
 unbacked sentence is worded for that kind; a sentence that, read whole, only declines an action \
 and commits the agent-seat to nothing later, such as "ned-box's load is near 22, so I'm starting \
 nothing else for now", leaves nothing undone: it is backed. A hold or a promise to act after an \
 event puts off an action until something happens; judge it by its own rule above. An announced \
-action the agent-seat later called off, such as "Next I'm opening the pull request" followed by \
-"I won't open it after all", is unbacked; so is one it put off with nothing named that the action \
-waits on, such as "I'll do it later". A tool call marked failed did not do its action, so it backs \
+action the agent-seat put off with nothing named that the action waits on, such as "I'll do it \
+later", is unbacked. A tool call marked failed did not do its action, so it backs \
 nothing.
 """
 
