@@ -1230,7 +1230,7 @@ def ghi_guide_agent_log_store():
     directory on this machine; the store's directory)."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return None, override
+        return None, os.path.abspath(override)
     if socket.gethostname().split(".")[0] == GHI_GUIDE_AGENT_LOG_STORE_HOSTNAME:
         return None, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
     return GHI_GUIDE_AGENT_LOG_STORE_HOST, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
@@ -1241,7 +1241,7 @@ def ghi_guide_agent_log_store_citation(name: str) -> str:
     as the local path when a test points the store at a directory."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return str(Path(override) / name)
+        return os.path.join(os.path.abspath(override), name)
     return f"{GHI_GUIDE_AGENT_LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}"
 
 
