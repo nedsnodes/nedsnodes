@@ -2533,7 +2533,8 @@ APPROVED_SENTENCE = (
 
 
 def context_lines(result):
-    return json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n") if result.stdout else []
+    return OutputLines(json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n")
+                       if result.stdout else [])
 
 
 def test_settled_line_holds_the_sentence_the_skill_holds_word_for_word():
@@ -2620,9 +2621,8 @@ def test_settled_line_unreadable_transcript_falls_back_to_the_prompts_opening():
           and "could not tell who wrote this prompt" in lines[1] and "the last line does not apply" in lines[1]
           and lines[2] == SETTLED_LINE, f"exit {result.returncode}, stdout {result.stdout!r}")
     check("the failed-read opening says a paused approval-walk has no item waiting",
-          bool(lines) and "unless an `#approval_walk_paused` line follows that line, which means no item is waiting"
-          in lines[0],
-          lines[0] if lines else "no lines")
+          "unless an `#approval_walk_paused` line follows that line, which means no item is waiting" in lines[0],
+          lines[0])
     result = case.run("<task-notification>a task ended</task-notification>", transcript_path=transcript)
     check("a task notice with an unreadable transcript prints nothing",
           result.returncode == 0 and result.stdout == "", f"stdout {result.stdout!r}")
