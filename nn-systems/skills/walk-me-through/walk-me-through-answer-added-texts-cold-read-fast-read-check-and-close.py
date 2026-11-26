@@ -471,15 +471,24 @@ paragraph finds, and a Withdrawn heading carries no title. It prints what that p
 names the read's report: each message the user typed
 in an agent-session whose saved dialog names a title, after the agent message
 it answers, and each walk-minutes line naming one, each with its file and line.
+After them, for each GitHub issue the item's text links, by an issue link or a
+link to a `docs/issues/<number>-*.md` file, each issue once, it prints the
+section headed "What is decided", or "What is decided:" and more, of each of
+the issue's GHI-MD files, the files named `<number>-*.md` directly in
+`docs/issues/` or in a system's directory under `nn-systems/`, each after a
+line naming its file and line; or one line saying that the issue's files have
+no such section, that it has no GHI-MD, or that a file could not be read, with
+the error, and the step goes on. An item that links no issue prints none.
 When the search fails, the step refuses, before any read, printing what the
 search said, and exits 1; any exit of the search but its found and nothing-found
 exits is a failure. The step saves what the search prints, a search with no
 hits too, once it has written it out, in
 `docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
-cache format's number and the titles and numbers searched for as a JSON list on its first line, the agent-session id
+cache format's number, the titles and numbers searched for and the linked
+issues' numbers as a JSON list on its first line, the agent-session id
 being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
 agent-session prints only a line naming that file, unless the file is missing
-or the item's titles differ from the saved ones; then it searches, prints and
+or the item's titles or linked issues differ from the saved ones; then it searches, prints and
 saves again. When the file cannot be written, or the agent-session id is not
 set, the step prints the search in full with a line saying why it was not
 saved. walk-files-ship.py does not ship this directory.
@@ -592,6 +601,8 @@ RECORD_NAMES_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-rec
 FINDING_OUTCOMES_COMMON_FILE = (REPOSITORY_TOP / "nn-systems" / "cold-read"
                                 / "cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py")
 TITLE_SEARCH_PROGRAM = HERE / "walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py"
+REPOSITORY_NAMES_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
+                         / "github-repository-name-and-name-before-project-rename-common.py")
 PATH_CONSTANTS_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
                        / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 COUNTS_LOG_FILE_NAME = "walk-me-through-answer-added-texts-cold-read-fast-read-already-done-or-had-to-run-counts-per-check.tsv"
@@ -1716,13 +1727,25 @@ APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED = (
 TITLE_SEARCH_CACHE_DIRECTORY_NAME = "title-search-cache"
 TITLE_SEARCH_CACHE_FILE_NAME = "{walk}-item-{numbers}-{session}.md"
 # Raised whenever what a search can print changes, so that a file saved by an older search is searched again.
-TITLE_SEARCH_CACHE_FORMAT = 2
+TITLE_SEARCH_CACHE_FORMAT = 3
 TITLE_SEARCH_CACHE_PRINTED_BEFORE = (
-    "The user's words where {item}'s title was named before were printed in full by an earlier run of this step in "
-    "this agent-session, and are saved in {path}; read that file when they are no longer in your context.")
+    "The user's words where {item}'s title was named before{sections} were printed in full by an earlier run of this "
+    "step in this agent-session, and are saved in {path}; read that file when they are no longer in your context.")
+TITLE_SEARCH_CACHE_PRINTED_BEFORE_SECTIONS = ", and the \"What is decided\" sections of the GHI-MDs it links,"
 TITLE_SEARCH_CACHE_NOT_SAVED = (
-    "The search for the user's words above was not saved in {path}, so the next run of this step prints it in full "
-    "again: {why}")
+    "The search for the user's words{sections} above was not saved in {path}, so the next run of this step prints it "
+    "in full again: {why}")
+TITLE_SEARCH_CACHE_NOT_SAVED_SECTIONS = " and the GHI-MD sections"
+GHI_MD_DIRECTORY = Path("docs") / "issues"
+SYSTEMS_DIRECTORY_NAME = "nn-systems"
+GHI_MD_WHAT_IS_DECIDED_HEADING = "What is decided"
+LINKED_GHI_MDS_WHAT_IS_DECIDED_HEADER = '"What is decided" in the GHI-MDs of the {count} GitHub issue(s) {item} links:'
+LINKED_GHI_MD_WHAT_IS_DECIDED_SECTION = "  GHI {number}, {path}:{line}"
+LINKED_GHI_MD_WITHOUT_WHAT_IS_DECIDED = '  GHI {number}: no "What is decided" section in its GHI-MD file(s): {paths}.'
+LINKED_GHI_MD_NOT_FOUND = ("  GHI {number}: no GHI-MD found, as no file named {number}-*.md is in {issues} or directly "
+                           "in a system's directory under {systems}.")
+LINKED_GHI_MD_UNREADABLE = ('  GHI {number}, {path}: could not be read, so read its "What is decided" section by '
+                            "hand: {error}")
 TITLE_SEARCH_CACHE_NO_AGENT_SESSION = "{variable} is not set, so the agent-session that ran the step is not known."
 ITEM_READ_FAILED_LINES = (
     "{item} has had no cold-read-fast-read of its text as it stands, so do not present it yet: the user is shown an "
@@ -3644,26 +3667,31 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
 
 
 def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, groups, numbers,
-                                                                         item, command):
+                                                                         item, command, top, linked_ghis):
     """Return (the lines TITLE_SEARCH_PROGRAM prints for each of groups, as approval_walk_item_title_search_groups
-    returns them, one search per group, a function that saves them and returns the lines to print after them);
-    raise Failure when a search failed.
+    returns them, one search per group, followed by the "What is decided" lines of the GHI numbers linked_ghis, as
+    linked_ghi_mds_what_is_decided_lines prints them from checkout top, a function that saves them and returns the
+    lines to print after them); raise Failure when a search failed.
 
     Print them with lines_printed_with_title_search_saved_after, which saves them only once they are printed: the
     lines are saved in the title search cache file for the item and this agent-session, and a later run for the
     same titles in the same agent-session prints only a line naming that file, since fix rounds rerun the step, so
     lines saved but never printed are never read."""
-    if not groups:
+    if not groups and not linked_ghis:
         return [], lambda: []
-    # The cache format and the groups' titles and numbers, as JSON lists, so a change to any of them searches again.
-    titles = [TITLE_SEARCH_CACHE_FORMAT, [[group_titles, group_numbers] for group_titles, group_numbers in groups]]
+    # The cache format, the groups' titles and numbers and the linked GHIs, as JSON lists, so a change to any of them
+    # searches again.
+    titles = [TITLE_SEARCH_CACHE_FORMAT, [[group_titles, group_numbers] for group_titles, group_numbers in groups],
+              linked_ghis]
     variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
     session_id = os.environ.get(variable)
     cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
              / TITLE_SEARCH_CACHE_FILE_NAME.format(walk=minutes.name[:-len(walk_finder.MINUTES_SUFFIX)],
                                                    numbers="-and-".join(numbers), session=session_id))
     if session_id and title_search_cache_titles(cache) == titles:
-        return [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)], lambda: []
+        printed_before = TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(
+            item=item, path=cache, sections=TITLE_SEARCH_CACHE_PRINTED_BEFORE_SECTIONS if linked_ghis else "")
+        return [printed_before], lambda: []
     lines = []
     for group_titles, group_numbers in groups:
         # In the `=` form, so that a title opening with `-` is not read as an option.
@@ -3684,9 +3712,11 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
                     result.stderr, f"FAILED: the title search exited {result.returncode} without a FAILED line of "
                                    f"its own, so it crashed or was stopped.")))
         lines += result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
+    lines += linked_ghi_mds_what_is_decided_lines(top, linked_ghis, item)
+    sections = TITLE_SEARCH_CACHE_NOT_SAVED_SECTIONS if linked_ghis else ""
     if not session_id:
         return lines, lambda: [TITLE_SEARCH_CACHE_NOT_SAVED.format(
-            path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,
+            path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME, sections=sections,
             why=TITLE_SEARCH_CACHE_NO_AGENT_SESSION.format(variable=variable))]
 
     def saved_lines():
@@ -3696,9 +3726,81 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
             temporary.write_text("\n".join([json.dumps(titles)] + lines) + "\n", encoding="utf-8")
             os.replace(temporary, cache)
         except OSError as error:
-            return [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
+            return [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, sections=sections, why=error)]
         return []
     return lines, saved_lines
+
+
+def approval_walk_item_linked_ghi_numbers(text, parser):
+    """Return the numbers of the GitHub issues of this repository that the item text links, by an issue link or a
+    link to a file `docs/issues/<number>-*.md`, each once, in the order first linked."""
+    repository = load_module("github_repository_names", REPOSITORY_NAMES_FILE)
+    issue_link = re.compile(rf"https?://github\.com/{repository.REPOSITORY_NAME_OR_NAME_BEFORE_PROJECT_RENAME_PATTERN}"
+                            rf"/issues/(\d+)(?:[/?#].*)?", re.IGNORECASE)
+    ghi_md_link = re.compile(rf"(?:.*/)?{re.escape(GHI_MD_DIRECTORY.as_posix())}/(\d+)-[^/?#]+\.md(?:[?#].*)?")
+    numbers = []
+    for token in parser.parse(text):
+        for child in token.children or []:
+            if child.type != "link_open":
+                continue
+            href = child.attrGet("href") or ""
+            match = issue_link.fullmatch(href) or ghi_md_link.fullmatch(href)
+            if match and int(match[1]) not in numbers:
+                numbers.append(int(match[1]))
+    return numbers
+
+
+def linked_ghi_mds_what_is_decided_lines(top, linked_ghis, item):
+    """Return, for each GHI number of linked_ghis, the "What is decided" sections of its GHI-MD files in checkout top,
+    each after a line naming its file and line, or one line saying that it has no such section, no GHI-MD, or a file
+    that could not be read; none when linked_ghis is empty."""
+    if not linked_ghis:
+        return []
+    parser = load_walk_finder().markdown_parser()
+    issues, systems = top / GHI_MD_DIRECTORY, top / SYSTEMS_DIRECTORY_NAME
+    lines = [LINKED_GHI_MDS_WHAT_IS_DECIDED_HEADER.format(count=len(linked_ghis), item=item)]
+    for number in linked_ghis:
+        # The two places a filed GHI-MD sits, as scripts/ghi-issue-write.py's ghi_md_paths_for_issue finds them.
+        paths = sorted(issues.glob(f"{number}-*.md")) + sorted(systems.glob(f"*/{number}-*.md"))
+        if not paths:
+            lines.append(LINKED_GHI_MD_NOT_FOUND.format(number=number, issues=issues, systems=systems))
+            continue
+        without = []
+        for path in paths:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as error:
+                lines.append(LINKED_GHI_MD_UNREADABLE.format(number=number, path=path, error=error))
+                continue
+            sections = ghi_md_what_is_decided_sections(text, parser)
+            if not sections:
+                without.append(str(path))
+            for start, section in sections:
+                lines.append(LINKED_GHI_MD_WHAT_IS_DECIDED_SECTION.format(number=number, path=path, line=start + 1))
+                lines += [f"    {line}".rstrip() for line in section]
+        if len(without) == len(paths):
+            lines.append(LINKED_GHI_MD_WITHOUT_WHAT_IS_DECIDED.format(number=number, paths=", ".join(without)))
+    return lines
+
+
+def ghi_md_what_is_decided_sections(text, parser):
+    """Return [(the 0-based line of its heading, its lines)] for each section of the GHI-MD text headed "What is
+    decided", or "What is decided:" and more, at any level: its heading and the lines up to the next heading of its
+    level or above, without trailing blank lines."""
+    lines = text.split("\n")
+    tokens = parser.parse(text)
+    headings = [(token.map[0], int(token.tag[1:]), tokens[index + 1].content.strip())
+                for index, token in enumerate(tokens) if token.type == "heading_open" and token.map]
+    sections = []
+    for position, (start, level, title) in enumerate(headings):
+        if title != GHI_MD_WHAT_IS_DECIDED_HEADING and not title.startswith(GHI_MD_WHAT_IS_DECIDED_HEADING + ":"):
+            continue
+        end = next((later for later, later_level, _ in headings[position + 1:] if later_level <= level), len(lines))
+        section = lines[start:end]
+        while section and not section[-1].strip():
+            section.pop()
+        sections.append((start, section))
+    return sections
 
 
 def title_search_failure_said(stderr, summary):
@@ -3808,7 +3910,8 @@ def waiting_item_read(arguments, sub_step_of=None):
             text, item, document, rerun, rechecked)
         past_words = approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(
             walk_finder, minutes, approval_walk_item_title_search_groups(
-                walk_finder, document, value, numbers, total, parser, earlier), numbers, item, rerun)
+                walk_finder, document, value, numbers, total, parser, earlier), numbers, item, rerun, top,
+            approval_walk_item_linked_ghi_numbers(text, parser))
     if sub_step_of:
         # An item read before it was split keeps that text, as an item revised after its read does.
         for above in sub_step_of[2]:

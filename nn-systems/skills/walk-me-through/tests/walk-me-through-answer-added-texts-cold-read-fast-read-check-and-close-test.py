@@ -894,7 +894,7 @@ def title_search_lines_printed(result):
     return lines[1:end + 1]
 
 
-TITLE_SEARCH_SAVED_TITLES_LINE = json.dumps([2, [[["the opening sentence"], ["3"]]]])
+TITLE_SEARCH_SAVED_TITLES_LINE = json.dumps([3, [[["the opening sentence"], ["3"]]], []])
 
 
 def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session_that_named_the_item_title():
@@ -990,6 +990,115 @@ def test_the_waiting_item_read_step_prints_the_title_search_in_full_and_why_when
               "prints it in full again: CLAUDE_CODE_SESSION_ID is not set, so the agent-session that ran the step is "
               "not known."),
           described(result))
+
+
+GHI_282_WHAT_IS_DECIDED = ["## What is decided", "", "Keep one poem per job.", "", "### Its one exception", "",
+                           "A job with no poem keeps none."]
+GHI_285_WHAT_IS_DECIDED = ["## What is decided: the refresh", "", "The refresh runs nightly."]
+LINKING_ITEM_BODY = (
+    "It follows [GHI 282, the poem rule](https://github.com/nedsnodes/nedsnodes/issues/282), "
+    "[GHI 283](https://github.com/nedsnodes/nedsnodes/issues/283#issuecomment-1), "
+    "[GHI 284](https://github.com/nedsnodes/nedsnodes/issues/284), "
+    "[its notes](https://github.com/nedsnodes/nedsnodes/blob/main/docs/issues/285-the-refresh.md), "
+    "[PR 4607](https://github.com/nedsnodes/nedsnodes/pull/4607) and, written before the project rename, "
+    "[GHI 282 again](https://github.com/nedschorus/nedschorus/issues/282).\n")
+
+
+def case_with_an_item_linking_ghi_mds():
+    """A Case whose item 3 links GHIs 282 and 285, whose GHI-MDs have a "What is decided" section, 283, whose GHI-MD
+    has none, and 284, which has no GHI-MD; return it and the GHI-MDs of 282, 283 and 285."""
+    case = Case(document=marks_document(LINKING_ITEM_BODY))
+    issues = case.checkout / "docs" / "issues"
+    issues.mkdir(parents=True)
+    ghi_282 = issues / "282-the-poem-rule.md"
+    ghi_282.write_text("\n".join(["# The poem rule", "", *GHI_282_WHAT_IS_DECIDED, "", "## Open questions", "",
+                                  "None."]) + "\n")
+    ghi_283 = issues / "283-a-plan.md"
+    ghi_283.write_text("# A plan\n\n## What is open\n\nEverything.\n")
+    system = case.checkout / "nn-systems" / "refresh"
+    system.mkdir(parents=True)
+    ghi_285 = system / "285-the-refresh.md"
+    ghi_285.write_text("\n".join(["# The refresh", "", *GHI_285_WHAT_IS_DECIDED]) + "\n")
+    return case, ghi_282, ghi_283, ghi_285
+
+
+def ghi_md_lines_printed(result):
+    """The lines the read step printed from its "What is decided" header line to its next-step lines."""
+    lines = result.stdout.split("\n")
+    start = next((index for index, line in enumerate(lines) if line.startswith('"What is decided" in the GHI-MDs')),
+                 None)
+    if start is None:
+        return []
+    end = next(index for index in range(start + 1, len(lines)) if lines[index] and not lines[index].startswith("  "))
+    return lines[start:end]
+
+
+def test_the_waiting_item_read_step_prints_the_what_is_decided_section_of_each_ghi_md_the_item_links():
+    case, ghi_282, ghi_283, ghi_285 = case_with_an_item_linking_ghi_mds()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    printed = ghi_md_lines_printed(result)
+    checkout = case.checkout
+    check("the read step prints, after the title search, the \"What is decided\" section of each GHI-MD the item "
+          "links, each GHI once and in the order first linked, a GHI-MD without that section and a GHI without a "
+          "GHI-MD each in one line, and no pull request",
+          result.returncode == 0
+          and printed == ['"What is decided" in the GHI-MDs of the 4 GitHub issue(s) item 3 of 9 links:',
+                          f"  GHI 282, {ghi_282}:3",
+                          *[f"    {line}".rstrip() for line in GHI_282_WHAT_IS_DECIDED],
+                          f'  GHI 283: no "What is decided" section in its GHI-MD file(s): {ghi_283}.',
+                          f"  GHI 284: no GHI-MD found, as no file named 284-*.md is in {checkout / 'docs' / 'issues'} "
+                          f"or directly in a system's directory under {checkout / 'nn-systems'}.",
+                          f"  GHI 285, {ghi_285}:3",
+                          *[f"    {line}".rstrip() for line in GHI_285_WHAT_IS_DECIDED]]
+          and result.stdout.index("Walk-minutes lines naming the title:") < result.stdout.index(printed[0])
+          if printed else False, described(result))
+    cache = title_search_cache_file(case)
+    check("the sections are saved with the title search, the linked GHIs' numbers in the saved key",
+          cache.is_file() and cache.read_text().split("\n")[0]
+          == json.dumps([3, [[["the opening sentence"], ["3"]]], [282, 283, 284, 285]])
+          and "\n".join(printed) in cache.read_text(), cache.read_text() if cache.is_file() else f"no {cache}")
+    again = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a second run in the same agent-session prints neither the search nor the sections, only a line naming the "
+          "saved file",
+          again.returncode == 0 and ghi_md_lines_printed(again) == []
+          and again.stdout.split("\n")[1] == (
+              f"The user's words where item 3 of 9's title was named before, and the \"What is decided\" sections of "
+              f"the GHI-MDs it links, were printed in full by an earlier run of this step in this agent-session, and "
+              f"are saved in {cache}; read that file when they are no longer in your context."),
+          described(again))
+    unsaved = case.run(WAITING_ITEM_READ_STEP_NAME, agent_session_id=None)
+    check("without an agent-session id, the line saying why nothing was saved names the sections too",
+          ghi_md_lines_printed(unsaved) == printed
+          and "The search for the user's words and the GHI-MD sections above was not saved in " in unsaved.stdout,
+          described(unsaved))
+
+
+def test_the_waiting_item_read_step_prints_no_ghi_md_lines_for_an_item_that_links_no_ghi():
+    case = Case(document=marks_document("It links [PR 4607](https://github.com/nedsnodes/nedsnodes/pull/4607).\n"))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("an item linking no GHI prints no GHI-MD lines and saves an empty list of GHI numbers",
+          result.returncode == 0 and ghi_md_lines_printed(result) == []
+          and title_search_cache_file(case).read_text().split("\n")[0] == TITLE_SEARCH_SAVED_TITLES_LINE,
+          described(result))
+
+
+def test_the_waiting_item_read_step_names_a_linked_ghi_md_it_cannot_read_and_goes_on():
+    case, ghi_282, _, _ = case_with_an_item_linking_ghi_mds()
+    ghi_282.unlink()
+    # A directory with a GHI-MD's name is found as one, and reading it raises IsADirectoryError.
+    ghi_282.mkdir()
+    ghi_283 = case.checkout / "docs" / "issues" / "283-a-plan.md"
+    ghi_283.write_bytes(b"# A plan\n\n## What is decided\n\n\xff\xfe not UTF-8\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    printed = ghi_md_lines_printed(result)
+    check("a GHI-MD that cannot be read, or is not UTF-8, is named with the error and the step goes on to the "
+          "next GHI and exits 0",
+          result.returncode == 0 and len(printed) > 3
+          and printed[1].startswith(f"  GHI 282, {ghi_282}: could not be read, so read its \"What is decided\" "
+                                    f"section by hand: [Errno 21] Is a directory")
+          and printed[2].startswith(f"  GHI 283, {ghi_283}: could not be read, so read its \"What is decided\" "
+                                    f"section by hand: 'utf-8' codec can't decode")
+          and printed[3].startswith("  GHI 284: no GHI-MD found"), described(result))
 
 
 def test_the_waiting_item_read_step_refuses_when_the_search_for_the_user_earlier_words_fails():
