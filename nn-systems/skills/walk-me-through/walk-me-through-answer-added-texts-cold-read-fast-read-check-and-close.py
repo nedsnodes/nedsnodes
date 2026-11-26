@@ -1200,6 +1200,7 @@ PLACEHOLDER_VALUES = {
     "parts": rf"{_PART_VALUE}(?:, {_PART_VALUE})*",
     "ruling": ".+",
     "reason": ".+",
+    "new_item": r"items?\s.+",
 }
 
 
@@ -1222,6 +1223,7 @@ DEFERRING_LINES = tuple(after_the_items_pattern(template)
                         for template in (CLOSE_DEFERRED_MINUTES, CLOSE_DEFERRED_AGAIN_MINUTES))
 # One such line takes its items out of the walk, as two deferral lines do.
 DEFERRING_OUT_OF_THE_WALK_LINE = after_the_items_pattern(CLOSE_DEFERRED_JUST_BEFORE_SUMMARY_MINUTES)
+CLOSE_RECORD_PATTERNS = tuple(after_the_items_pattern(template) for template in CLOSE_RECORD_TEMPLATES)
 # A one-item count as it stands in the heading's own line, after its heading or bold marks.
 HEADING_COUNT_IN_LINE = re.compile(r"items?\s+\d+(?:\.\d+)*\s+of\s+\d+\b", re.I)
 CLOSE_DEFERRED_HEADING_NOT_NOTED = ("Its heading in {document} names other items too, so it is not given the "
@@ -3679,11 +3681,11 @@ def no_answer_table_row_text_or_none_from_evidence_check_problems(case, problems
 
 def close_record_line(item, line):
     """Whether line is one close writes to record item's answer, read from close's own templates: an agent's note
-    that only opens with item's label, as in `item 25 of 39: the user's words, not an answer yet`, is not one."""
-    return any(re.fullmatch(re.sub(r"\\\{[a-z_]+\\\}", ".*?",
-                                   re.escape(template.rstrip()).replace(re.escape("{item}"), re.escape(item))),
-                            line.rstrip())
-               for template in CLOSE_RECORD_TEMPLATES)
+    that only opens with item's label, as in `item 25 of 39: the user's words, not an answer yet`, is not one, nor
+    is a line that copies a template's shape with a value close never fills in, such as `<open>` as an outcome."""
+    prefix = f"{item}: "
+    return line.startswith(prefix) and any(pattern.match(line[len(prefix):].rstrip())
+                                           for pattern in CLOSE_RECORD_PATTERNS)
 
 
 def last_answer_line(walk_finder, minutes, parser):
