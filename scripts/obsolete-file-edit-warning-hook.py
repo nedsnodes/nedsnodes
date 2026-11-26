@@ -244,6 +244,8 @@ MAIN_MOVED_FILE_PUSHED_LINE = (
 # git checkout -- <path> and git restore <path> would discard the file's other
 # uncommitted changes with the warned edit. Those changes block the git switch or
 # git rebase the next line names, so they are saved before the file is reset.
+# --binary: without it git diff saves a binary file's change as one
+# "Binary files ... differ" line, from which nothing can be restored.
 UNDO_ONLY_THIS_EDIT_LINES = (
     "Undo only the change you just made to {path}, by editing the file back to the "
     "text it had before that change. Do not run `git checkout -- {path}` or `git "
@@ -251,7 +253,7 @@ UNDO_ONLY_THIS_EDIT_LINES = (
     "file, not only the one this warning is about.\n"
     "If `git diff -- {path}` still prints changes after that, the file holds uncommitted "
     "work from before your change, which cannot stay at {path} either, and git refuses "
-    "to switch branch or rebase while it is there: save it with `git diff -- {path} > "
+    "to switch branch or rebase while it is there: save it with `git diff --binary -- {path} > "
     "<a file outside this checkout>`, and only then run `git checkout -- {path}`. "
     "Carry the saved changes along with your own in the step below, and tell the user "
     "about any you did not make."

@@ -126,7 +126,7 @@ def undo_only_this_edit_lines(path: str) -> str:
         f"file, not only the one this warning is about.\n"
         f"If `git diff -- {path}` still prints changes after that, the file holds uncommitted "
         f"work from before your change, which cannot stay at {path} either, and git refuses "
-        f"to switch branch or rebase while it is there: save it with `git diff -- {path} > "
+        f"to switch branch or rebase while it is there: save it with `git diff --binary -- {path} > "
         f"<a file outside this checkout>`, and only then run `git checkout -- {path}`. "
         f"Carry the saved changes along with your own in the step below, and tell the user "
         f"about any you did not make.")
@@ -1060,8 +1060,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           and "earlier work" in git(["diff", "--", "lib/drifted.py"], followed).stdout,
           refused_switch.stdout + refused_switch.stderr)
     saved_changes = tmp / "drifted-followed-advice-saved.patch"
-    saved_changes.write_text(git(["diff", "--", "lib/drifted.py"], followed).stdout,
-                             encoding="utf-8")
+    saved_changes.write_text(git(["diff", "--binary", "--", "lib/drifted.py"],
+                                 followed).stdout, encoding="utf-8")
     git(["checkout", "-q", "--", "lib/drifted.py"], followed)
     git(["switch", "-q", "-c", "drifted-followed-advice"], followed)
     followed_rebase = subprocess.run(["git", "rebase", "origin/main"], cwd=followed,
@@ -1085,6 +1085,30 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                              (followed, "drifted-followed-advice")):
         git(["worktree", "remove", "--force", str(worktree)], detached)
         git(["branch", "-q", "-D", branch], detached)
+    # The same save, of a file git treats as binary: the saved changes must be
+    # enough to bring the earlier work back after the checkout the line names.
+    binary_repository = tmp / "binary-earlier-work"
+    binary_repository.mkdir()
+    git(["init", "-q"], binary_repository)
+    configure_identity(binary_repository)
+    binary_file = binary_repository / "data.bin"
+    binary_file.write_bytes(b"committed\x00\n")
+    git(["add", "data.bin"], binary_repository)
+    git(["commit", "-q", "-m", "a binary file"], binary_repository)
+    binary_file.write_bytes(b"committed\x00\nearlier work\x00\n")
+    binary_saved = tmp / "binary-earlier-work-saved.patch"
+    binary_saved.write_bytes(subprocess.run(
+        ["git", "diff", "--binary", "--", "data.bin"], cwd=binary_repository,
+        capture_output=True, check=True).stdout)
+    git(["checkout", "-q", "--", "data.bin"], binary_repository)
+    applied = subprocess.run(["git", "apply", str(binary_saved)], cwd=binary_repository,
+                             capture_output=True, text=True)
+    check("the line saves earlier work with git diff --binary, and for a binary file "
+          "git apply of the saved changes brings that work back after the checkout",
+          "`git diff --binary -- data.bin > " in undo_only_this_edit_lines("data.bin")
+          and applied.returncode == 0
+          and binary_file.read_bytes() == b"committed\x00\nearlier work\x00\n",
+          applied.stdout + applied.stderr)
 
     moved_file = detached / "lib/moved.py"
     moved_file.write_text("".join(edited_far_away), encoding="utf-8")
