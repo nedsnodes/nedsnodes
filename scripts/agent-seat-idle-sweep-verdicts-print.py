@@ -254,7 +254,13 @@ def promise_phrase_kind(sentence):
 
 
 def sentence_kind(sentence):
-    """Return the kind of a sentence the phrase lists match, or None for a sentence they miss."""
+    """Return the kind of a sentence the phrase lists match, or None for a sentence they miss.
+
+    When neither a user condition nor a promise phrase sets the kind, an event word anywhere in the
+    sentence makes it a promise to act after an event, and so sets the wording of its reminder, even
+    when the word qualifies another action, as in "I'll merge it now without pushing the tag until
+    tomorrow".
+    """
     if sentence.endswith("?"):
         return None
     kind = promise_phrase_kind(sentence)
