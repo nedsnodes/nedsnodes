@@ -58,8 +58,9 @@ MARKER_FOUND_BY_HAND = (
     "the `.walk-approved` marker file at the root of the checkout your agent-session started in, "
     "which the instruction-file guard reads it from, not the topic-worktree's: the root git rev-parse --show-toplevel "
     "prints when run without the cd this brief puts before other commands")
-STEP_5_START = ("5. Fill in the answers file {path}, which this program wrote with a line \"<n>. \" for each finding "
-                "above: after each number, on the same line, write what you fixed, why the finding does not hold, or, "
+STEP_5_START = ("5. Fill in the answers file {path}, which this program wrote with a line \"<n>. (finding <comment ID>) "
+                "\" for each finding above, followed by any answer an earlier run kept for it: after each line's tag, "
+                "on the same line, write what you fixed, why the finding does not hold, or, "
                 "for a change moved as step 3 says, the new pull request; further lines of an entry may follow. "
                 "Never commit it: ")
 
@@ -380,6 +381,7 @@ def answers_file(root, text):
 # The flag the agent passes once the agent that dispatched it has checked the new shared names.
 CONFIRMED = "--confirm-dispatching-agent-checked-new-shared-names"
 HEADING = "New shared names: send these to the new-name-propose-and-check-fresh-agent subagent"
+BRIEF_ANSWERS = "1. (finding 1) \n2. (finding 3) \n"
 GOOD_ANSWERS = "1. Fixed: the error is raised,\n   and a case covers it.\n2. Added the timeout case.\n"
 
 
@@ -406,8 +408,8 @@ def brief_cases(root, repository, base, frozen_head):
     in_worktree = f"cd {repository} && "
     check("brief: step 5 names the answers file at the root of the pull request's topic-worktree, by its whole path",
           STEP_5_START.format(path=repository / ANSWERS_NAME) in out, out)
-    check("brief: writes the answers file with a line \"<n>. \" per finding and nothing else",
-          (repository / ANSWERS_NAME).read_text() == "1. \n2. \n", (repository / ANSWERS_NAME).read_text())
+    check("brief: writes the answers file with a line \"<n>. (finding <comment ID>) \" per finding and nothing else",
+          (repository / ANSWERS_NAME).read_text() == BRIEF_ANSWERS, (repository / ANSWERS_NAME).read_text())
     code, check_out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head)]), "--check")
     check("check: the answers file as the brief wrote it, with no answer filled in, refuses with exit 1, naming "
           "each finding without an entry",
@@ -979,25 +981,25 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     check("stopped round: with no fix-round commit, deleting the answers file and running the command that refusal "
           "names, its arguments copied from its line, where its cd goes, prints the brief",
           line == f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}" and code == 0
-          and answers.read_text() == "1. \n2. \n", line + err + out)
+          and answers.read_text() == BRIEF_ANSWERS, line + err + out)
     kept_directory = (Path(git(made, "rev-parse", "--path-format=absolute", "--git-common-dir"))
                       / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-review-11")
     shutil.rmtree(kept_directory, ignore_errors=True)
     write_answers(GOOD_ANSWERS, -60)
     code, out, err = run(root, repository, dated_routes)
     check("stopped round: with no fix-round commit, an answers file written before the review is replaced by the brief",
-          code == 0 and answers.read_text() == "1. \n2. \n", err + out)
+          code == 0 and answers.read_text() == BRIEF_ANSWERS, err + out)
     kept_copies = {path: path.read_text() for path in kept_directory.iterdir()}
     check("answers kept: the file the brief replaced is in a new copy that the brief names",
-          list(kept_copies.values()) == [GOOD_ANSWERS] and f"copied it unchanged to {next(iter(kept_copies))}" in out
-          and "Read that copy, and copy into the new file each answer that still answers a finding below, under that "
-              "finding's number." in " ".join(out.split()), f"{kept_copies}\n{out}")
+          list(kept_copies.values()) == [GOOD_ANSWERS]
+          and "The answers file held answers to other findings, so this program copied it unchanged to "
+              f"{next(iter(kept_copies))}." in out, f"{kept_copies}\n{out}")
     partial = "1. Fixed the lookup.\n2. \n"
     write_answers(partial, 60)
     code, out, err = run(root, repository, dated_routes)
     new_copies = [path for path in kept_directory.iterdir() if path not in kept_copies]
     check("answers kept: a partly answered file written after the review is in a second copy, the first unchanged",
-          code == 0 and answers.read_text() == "1. \n2. \n" and [path.read_text() for path in new_copies] == [partial]
+          code == 0 and answers.read_text() == BRIEF_ANSWERS and [path.read_text() for path in new_copies] == [partial]
           and all(path.read_text() == text for path, text in kept_copies.items()), err + out)
     check("answers kept: the brief names the earlier copy, then the copy it just made",
           len(new_copies) == 1
@@ -1095,14 +1097,14 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     answers.rmdir()
     code, out, err = run(root, repository, dated_routes)
     check("stopped round: the brief replaces a file the stopped subagent left with a line per finding",
-          code == 0 and answers.read_text() == "1. \n2. \n", err + out)
+          code == 0 and answers.read_text() == BRIEF_ANSWERS, err + out)
     unignoring = commit_file(made, ".gitignore", "", "a branch whose .gitignore does not name the answers file")
     unignoring_routes = routes_for(unignoring, [review(commit_id=unignoring)])
     run(root, repository, unignoring_routes)
     code, out, err = run(root, repository, unignoring_routes)
     check("stopped round: on a branch whose .gitignore does not name the answers file, the file the brief wrote "
           "does not stop the next brief",
-          code == 0 and "untracked files" not in err and answers.read_text() == "1. \n2. \n", err + out)
+          code == 0 and "untracked files" not in err and answers.read_text() == BRIEF_ANSWERS, err + out)
     git(made, "reset", "-q", "--hard", frozen_head)
 
 
@@ -1992,6 +1994,8 @@ def moved_into_body_cases(root, repository, base, frozen_head):
           and "setup.py:9" not in out.split("Blocking findings (1)")[1].split("For the author")[0]
           and "the reviewer's finding" not in out.split("Blocking findings (1)")[1].split("For the author")[0],
           err + out)
+    check("a Block moved into a review's body is keyed in the answers file by the review's ID and its place there",
+          (repository / ANSWERS_NAME).read_text() == "1. (finding 21-1) \n", (repository / ANSWERS_NAME).read_text())
 
     moved_fix_next = dict(routes, **{REVIEWS: {"stdout": lines([reviewer, dict(grading, body=grading_body.replace(
         "**Blocks** setup.py", "**fix-next** setup.py"))])}})
@@ -2025,6 +2029,64 @@ def moved_into_body_cases(root, repository, base, frozen_head):
           read_back == [{"path": "setup.py", "line": 3, "body": "**Blocks** the moved finding.\nits continuation."}],
           repr(read_back))
     del base
+
+
+def answers_put_back_cases(root, repository, _base, frozen_head):
+    routes = routes_for(frozen_head, [review(commit_id=frozen_head)])
+    answers = repository / ANSWERS_NAME
+    kept_directory = (Path(git(repository, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+                      / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-review-11")
+    partial = "1. (finding 1) Fixed the lookup,\n   and a case covers it.\n2. (finding 3) \n"
+    answers.write_text(partial)
+    code, out, err = run(root, repository, routes)
+    check("answers put back: a rerun for the same review puts each answer back under its finding, lines as written, "
+          "and makes no copy",
+          code == 0 and answers.read_text() == partial and not kept_directory.exists()
+          and "copied it unchanged" not in out, err + out)
+    reordered = "1. (finding 3) Added the timeout case.\n2. (finding 1) \n"
+    answers.write_text(reordered)
+    code, out, err = run(root, repository, routes)
+    check("answers put back: an answer is put back under the number of the finding its ID names, not the number it "
+          "had",
+          code == 0 and answers.read_text() == "1. (finding 1) \n2. (finding 3) Added the timeout case.\n"
+          and not kept_directory.exists(), err + out)
+    other = "1. (finding 99) An answer to a finding of another review.\n2. (finding 3) Added the timeout case.\n"
+    answers.write_text(other)
+    code, out, err = run(root, repository, routes)
+    copies = list(kept_directory.iterdir()) if kept_directory.exists() else []
+    check("answers put back: an answer to another review's finding is not put back; the file is copied unchanged, "
+          "the brief names the copy, and the answer to this review's finding is put back",
+          code == 0 and answers.read_text() == "1. (finding 1) \n2. (finding 3) Added the timeout case.\n"
+          and [copy.read_text() for copy in copies] == [other]
+          and f"The answers file held answers to other findings, so this program copied it unchanged to {copies[0]}."
+          in out, err + out)
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: --check reads an entry's answer after its finding tag, and names the one unanswered",
+          code == 1 and "no entry for finding 1;" in check_err and "finding 2" not in check_err,
+          check_out + check_err)
+
+    program = load_program()
+    directory = root / "put-back-unit"
+    directory.mkdir()
+    unit_answers = directory / "answers.md"
+    unit_kept = directory / "kept"
+    unit_answers.write_bytes(b"1. (finding 5) \xff\n")
+    copy = program.answers_file_with_one_line_per_finding_write(unit_answers, ["5"], unit_kept)
+    check("answers put back: a file that is not text is copied unchanged and nothing is put back",
+          unit_answers.read_text() == "1. (finding 5) \n" and copy.read_bytes() == b"1. (finding 5) \xff\n", str(copy))
+    unit_answers.write_text("A note above the first entry.\n1. (finding 5) Fixed.\n")
+    copy = program.answers_file_with_one_line_per_finding_write(unit_answers, ["5"], unit_kept)
+    check("answers put back: text above the first entry is kept in a copy, and the entry's answer is put back",
+          unit_answers.read_text() == "1. (finding 5) Fixed.\n" and copy is not None
+          and copy.read_text() == "A note above the first entry.\n1. (finding 5) Fixed.\n", str(copy))
+    unit_answers.write_text("1. Fixed, with no tag.\n")
+    copy = program.answers_file_with_one_line_per_finding_write(unit_answers, ["5"], unit_kept)
+    check("answers put back: an answer with no finding tag is kept in a copy, not put back",
+          unit_answers.read_text() == "1. (finding 5) \n" and copy.read_text() == "1. Fixed, with no tag.\n",
+          str(copy))
+    entries, repeated = program.answer_entries("1. (finding 5) \n1. Fixed below the brief's line.\n2.\n")
+    check("answers put back: the brief's unanswered line beside the agent's answer for the same number is one entry",
+          entries == {1: ["Fixed below the brief's line."]} and repeated == [], repr((entries, repeated)))
 
 
 def stated_count_position_cases(root, repository, base, frozen_head):
@@ -2376,7 +2438,7 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
         limit = resource.getrlimit(resource.RLIMIT_FSIZE)
         resource.setrlimit(resource.RLIMIT_FSIZE, (40, limit[1]))
         try:
-            program.answers_file_with_one_line_per_finding_write(answers, 30, kept_directory)
+            program.answers_file_with_one_line_per_finding_write(answers, [str(n) for n in range(30)], kept_directory)
             return None
         except program.StepFailed as error:
             return str(error)
@@ -2407,11 +2469,11 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
 
     program.tempfile.mkstemp = recording_mkstemp
     try:
-        program.answers_file_with_one_line_per_finding_write(answers, 2, kept_directory)
+        program.answers_file_with_one_line_per_finding_write(answers, ["21", "22"], kept_directory)
     finally:
         program.tempfile.mkstemp = real_mkstemp
     check("answers kept: the write goes through a unique file named so the ignore line covers it, beside the answers",
-          answers.read_text() == "1. \n2. \n"
+          answers.read_text() == "1. (finding 21) \n2. (finding 22) \n"
           and {"prefix": "answers-", "suffix": ".md", "dir": directory} in made, str(made))
 
     taken_directory = directory / "taken"
@@ -2428,7 +2490,7 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
     try:
         error = None
         try:
-            program.answers_file_with_one_line_per_finding_write(answers, 1, taken_directory)
+            program.answers_file_with_one_line_per_finding_write(answers, ["21"], taken_directory)
         except program.StepFailed as failure:
             error = str(failure)
     finally:
@@ -2445,7 +2507,7 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
         removed_worktree, NUMBER, 11
     )
     answers.write_text("1. An answer the worktree's removal must not delete.\n")
-    surviving = program.answers_file_text_kept_in_new_copy(answers, surviving_directory)
+    surviving, _put_back = program.answers_file_text_kept_in_new_copy(answers, surviving_directory)
     git(repository, "worktree", "remove", "--force", str(removed_worktree))
     check("answers kept: a copy outlives the removal of the linked worktree it was made for",
           surviving.read_text() == "1. An answer the worktree's removal must not delete.\n", str(surviving))
@@ -2473,14 +2535,14 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
     answers.write_text("1. \n")
     real_write = program.answers_file_with_one_line_per_finding_write
 
-    def write_after_other_run_copied(path, finding_count, kept_copies_directory):
+    def write_after_other_run_copied(path, finding_ids, kept_copies_directory):
         # The other run lists, copies and writes between this run's listing and its write.
         program.answers_file_text_kept_in_new_copy(other_run_answers, kept_copies_directory)
-        return real_write(path, finding_count, kept_copies_directory)
+        return real_write(path, finding_ids, kept_copies_directory)
 
     program.answers_file_with_one_line_per_finding_write = write_after_other_run_copied
     try:
-        named = program.fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers, 1, overlap_directory)
+        named = program.fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers, ["1"], overlap_directory)
     finally:
         program.answers_file_with_one_line_per_finding_write = real_write
     check("answers kept: a run that finds only placeholders still names the copy an overlapping run made after "
@@ -3509,6 +3571,7 @@ case("stated count position", stated_count_position_cases)
 case("moved into body", moved_into_body_cases)
 case("replaces", replaces_cases)
 case("answers write failure", answers_write_failure_cases)
+case("answers put back", answers_put_back_cases)
 case("move push time limit", move_push_time_limit_case)
 case("moved change git apply cannot start", moved_change_git_apply_cannot_start_case)
 print(f"{'FAILED' if failures else 'PASSED'}: {len(failures)} failed")
