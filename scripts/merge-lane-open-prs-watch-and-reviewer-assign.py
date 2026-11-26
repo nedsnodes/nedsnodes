@@ -716,7 +716,8 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
     line to report_stop each time its case differs from the last poll's, as state records.
     record_assigned_lines, when given, is called with those lines while the lock is held; when it
     raises OSError, the assignment file is put back as it was and the error raised again, so the
-    next poll deals those pull requests again. When putting it back fails too, the raised OSError
+    next poll deals those pull requests again, unless the error is EventLinesWrittenButNotSynced,
+    whose lines were recorded, so the deal stands. When putting it back fails too, the raised OSError
     names the pull requests the file keeps with no REVIEW-ASSIGNED line recorded."""
 
     def stop(case, message):
@@ -771,6 +772,10 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
         if record_assigned_lines is not None:
             try:
                 record_assigned_lines(assigned_lines)
+            except EventLinesWrittenButNotSynced:
+                # The lines reached the event file, so the deal stands; putting the file back
+                # would deal these pull requests again, perhaps to other agent-seats.
+                raise
             except OSError as error:
                 try:
                     merge_lane_pull_request_review_assignments_file_write(path, text)
@@ -876,7 +881,17 @@ def merge_lane_pull_request_review_assignments_list(path, lane, repo, token, opt
     """Print the lane's open pull requests that are not drafts, and whether each waits for its
     verdict. Return the exit status."""
     try:
-        assignments = merge_lane_pull_request_review_assignments_file_read(path)
+        # The lock keeps the read from seeing a deal that a failed append is about to put back.
+        lock = merge_lane_pull_request_review_assignments_file_lock(path)
+    except OSError as error:
+        warn(f"merge-lane-open-prs-watch-and-reviewer-assign: cannot list {lane}'s pull requests, because "
+             f"the lock file beside the assignment file {path} cannot be opened or locked ({error}).\n"
+             f"  Tell merge-lane-2, which runs the watcher, quoting this message.\n"
+             f"  If you are a subagent, report this message to the agent that dispatched you instead of acting on it.")
+        return 1
+    try:
+        with lock:
+            assignments = merge_lane_pull_request_review_assignments_file_read(path)
     except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
         warn(f"merge-lane-open-prs-watch-and-reviewer-assign: cannot list {lane}'s pull requests, because "
              f"{error}. merge-lane-2's open-pull-request watcher meets the same failure, and "
@@ -978,14 +993,39 @@ def event_file_line_count(path):
         return 0
 
 
+class EventLinesWrittenButNotSynced(OSError):
+    """The event file holds every line of the append, but the append then failed, such as at
+    fsync, so the lines are there yet may not survive a crash."""
+
+
 def event_lines_append(path, lines, now):
+    """Append the lines, each after the UTC time. Raises EventLinesWrittenButNotSynced when the
+    append fails after the event file already holds all of them, and OSError otherwise."""
     if not lines:
         return
     stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    with path.open("a", encoding="utf-8", errors="replace") as events:
-        events.write("".join(f"{stamp} {redact_secrets(line)}\n" for line in lines))
-        events.flush()
-        os.fsync(events.fileno())
+    payload = "".join(f"{stamp} {redact_secrets(line)}\n" for line in lines).encode("utf-8", errors="replace")
+    start = None
+    try:
+        with path.open("ab") as events:
+            start = events.tell()
+            events.write(payload)
+            events.flush()
+            os.fsync(events.fileno())
+    except OSError as error:
+        if start is not None and event_file_holds_payload_at_offset(path, start, payload):
+            raise EventLinesWrittenButNotSynced(
+                f"{error}, after the event file {path} already held every line of this append") from error
+        raise
+
+
+def event_file_holds_payload_at_offset(path, offset, payload):
+    try:
+        with path.open("rb") as events:
+            events.seek(offset)
+            return events.read(len(payload)) == payload
+    except OSError:
+        return False
 
 
 def open_task_with_subject_exists(task_list_directory, subject):
