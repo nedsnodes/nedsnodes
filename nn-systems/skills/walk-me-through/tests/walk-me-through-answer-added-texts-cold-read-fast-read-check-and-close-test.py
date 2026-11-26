@@ -1159,9 +1159,8 @@ def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
         check(f"`{line}` gives its item the title `{title}`: only `(revised)` and `revised:` are a label",
               found == title, repr(found))
     for line, title, why in (
-            ("## __Item 3 of 9 revised__: the first", "the first",
-             "the word `revised` ending at the closing `__` is the label, though `_` is a word character"),
-            ("**Item 3 of 9 revised**: the first", "the first", "the word `revised` ending at the closing `**` is the label"),
+            ("## __Item 3 of 9 revised__: the first", "revised: the first",
+             "the word `revised` ending at a closing emphasis is no label, so the title keeps it"),
             ("## Item 3 of 9: revised the first", "revised the first",
              "`revised` followed by a word is the title's, so the title search and the item finder agree"),
             ("## **Item 3 of 9: Keep this** (but not that)", "Keep this (but not that)",
@@ -1172,18 +1171,13 @@ def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
              "an opening under a shared heading that leaves out `of M` gives its title as the finder reads its label")):
         found = program.item_title(finder, line)
         check(f"`{line}` gives its item the title `{title}`: {why}", found == title, repr(found))
-    for content, revised in (("__Item 3 of 9 revised__: the first", True), ("Item 3 of 9: revised the first", False),
-                             ("**Item 3 of 9 revised**: the first", True), ("**Item 3 of 9: Revised** More detail.", False),
-                             ("Item 3 of 10 revised_estimates", False), ("Item 3 of 10 revised**", False)):
-        count = finder.HEADING_COUNT.match(content)
-        check(f"the item finder reads `{content}` as {'a' if revised else 'no'} `revised` label after its count: the "
-              f"bare word ends only at the emphasis opened before the count, as item_title reads it",
-              finder.approval_walk_item_heading_says_revised_right_after_its_item_count(content, count.end()) == revised, content)
-    document = "## Item 3 of 10: First version\n\nThe first.\n\n## Item 3 of 10 revised_estimates\n\nThe second.\n"
-    spans = finder.item_unit_spans(document, finder.markdown_parser())
-    check("a heading `## Item 3 of 10 revised_estimates`, with no emphasis opened before its count, does not "
-          "supersede the earlier heading for item 3 as a revision", [span[3] for span in spans if "3" in span[0]] == [0, 4],
-          repr(spans))
+    for later in ("## Item 3 of 10 revised_estimates", "## __Item 3 of 10 revised__estimates__: keep",
+                  "## __Item 3 of 10 revised__: keep"):
+        document = f"## Item 3 of 10: First version\n\nThe first.\n\n{later}\n\nThe second.\n"
+        spans = finder.item_unit_spans(document, finder.markdown_parser())
+        check(f"a heading `{later}`, whose `revised` is followed by `_` or an emphasis delimiter, does not supersede "
+              f"the earlier heading for item 3 as a revision, so the finder refuses the two loudly",
+              [span[3] for span in spans if "3" in span[0]] == [0, 4], repr(spans))
     for line, title in (("- __Item 3 of 9: Fix foo___ More detail.", "Fix foo"),
                         ("**Item 3 of 9: x ** 2 is small** More.", "x ** 2 is small")):
         found = program.item_title(finder, line)

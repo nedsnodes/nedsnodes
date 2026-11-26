@@ -3021,13 +3021,10 @@ def item_title(walk_finder, line, with_text_after_title=False):
     revised = walk_finder.APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX
     label = rf"(?:[\s,:;.\-\u2013\u2014]*{revised}[ :,.;\-\u2013\u2014]*)?"
     closer = re.escape(opener)
-    # The bare word may end at the closing emphasis only straight after the count, as the finder's REVISED reads it.
-    word = (walk_finder.APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX.format(closer=closer)
-            + rf"(?P<after_word>{closer}){separators}|") if opener else ""
-    opening = re.match(rf"{word}{separators}(?:(?P<before>{closer}){separators}{label}|{label}(?P<after>{closer})"
+    opening = re.match(rf"{separators}(?:(?P<before>{closer}){separators}{label}|{label}(?P<after>{closer})"
                        rf"{separators}|{label})", line[count.end():], re.I)
     title = line[count.end() + opening.end():]
-    closed = any(opening.groupdict().get(group) is not None for group in ("before", "after", "after_word"))
+    closed = any(opening.groupdict().get(group) is not None for group in ("before", "after"))
     if closed or not opener:
         return title.rstrip()
     found = emphasis_closer(walk_finder, title, opener)
