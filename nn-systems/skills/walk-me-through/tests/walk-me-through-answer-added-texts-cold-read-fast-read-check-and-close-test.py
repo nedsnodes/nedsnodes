@@ -2371,7 +2371,8 @@ def test_a_fast_read_whose_record_was_not_shipped_is_reported():
           and result.stdout.split("\n")[0].endswith(f"The fast read also said: {note}")
           and "The minutes record the answer, but the fast read of `#new` text 1 did not ship its record: "
               f"{note}" in result.stdout
-          and "cold-read-record-ship.py " in result.stdout
+          and Path(shlex.split(printed_command_with(result, "cold-read-record-ship.py"))[1]).name
+          == "cold-read-record-ship.py"
           and case.minutes.read_text().count(f"The fast read also said: {note}") == 2, described(result))
 
 
@@ -7737,6 +7738,25 @@ def check_every_printed_command_from_a_path_holding_a_space():
     ship = shlex.split(printed_command_with(not_shipped, "cold-read-record-ship.py"))
     check("from a path holding a space, the command that ships an unshipped record parses to the shipper and the "
           "record", len(ship) == 3 and Path(ship[1]).is_file() and Path(ship[2]).is_dir(), described(not_shipped))
+
+    deferred_case = Case()
+    deferred = deferred_case.run("check", "--deferred")
+    deferred_close = run_printed_command(deferred_case, printed_command_with(deferred, " close "))
+    deferred_case.wait_for_reads_ahead()
+    check("from a path holding a space, check on the route that records an answer with no change prints a close "
+          "command that runs",
+          deferred.returncode == 0 and each_printed_command_names_a_file(deferred) and deferred_close.returncode == 0,
+          described(deferred) + described(deferred_close))
+
+    silent_case = Case()
+    silent = silent_case.run("check", mode="silent-exit")
+    failed = re.search(r"FAILED: (.*) exited 3 without naming a report", silent.stdout)
+    ran = shlex.split(failed.group(1)) if failed else []
+    # The target was in the scratch directory the failed read removed, so only its parse can be checked.
+    check("from a path holding a space, the FAILED message of a fast read that names no report holds a command that "
+          "parses to the fast-read program, --target and one target path",
+          silent.returncode == 1 and len(ran) == 4 and Path(ran[0]).is_file() and ran[1] == "--target"
+          and ran[3] == "--without-question-4", described(silent))
 
 
 def check_read_step_retry_after_failed_scratch_removal_drops_only_the_after_fixes_flag():
