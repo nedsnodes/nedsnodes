@@ -834,11 +834,20 @@ with tempfile.TemporaryDirectory() as workspace:
         *ordinary_records(), enqueue_record(longer_tag_reply),
         enqueue_record("<task-notification-id> too"), enqueue_record("<cross-session-message-id> too"),
         enqueue_record('<agent-message from="a1">done</agent-message>'), enqueue_record("<task-notification>\ndone"),
-        enqueue_record('<cross-session-message\nfrom="a1">done</cross-session-message>'),
+        enqueue_record('<cross-session-message\nfrom="a1">done</cross-session-message>'), enqueue_record("<task-notification/>"),
+        enqueue_record("<task-notification/x> too"),
     ])
     check("only a sender tag whose name ends is left out, so a reply opening with a longer tag name is kept",
-          never_read(path) == [longer_tag_reply, "<task-notification-id> too", "<cross-session-message-id> too"],
+          never_read(path) == [longer_tag_reply, "<task-notification-id> too", "<cross-session-message-id> too",
+                               "<task-notification/x> too"],
           never_read(path))
+
+    path = write_transcript(workspace, "reply-opening-with-longer-tag-name-quoted-in-a-delivered-peer-wrapper.jsonl", [
+        *ordinary_records(), enqueue_record(longer_tag_reply),
+        user_record(f"Another Claude session sent a message:\n{longer_tag_reply}\n\nThis came from another Claude session."),
+    ])
+    check("a reply opening with a longer tag name is not read as delivered by a peer wrapper that quotes it",
+          never_read(path) == [longer_tag_reply], never_read(path))
 
     path = write_transcript(workspace, "reply-typed-before-the-first-shown-turn.jsonl", [
         user_record("the question the early reply answers"), assistant_record("Approve the early change?"),
@@ -849,9 +858,21 @@ with tempfile.TemporaryDirectory() as workspace:
     extractor.main(["--transcript-path", str(path), "--output", str(output)])
     tail = output.read_text(encoding="utf-8")
     before_tail_introduction = extractor.CONVERSATION_TAIL_UNREAD_QUEUED_USER_MESSAGE_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION_LINE_TEXT
-    check("a reply typed before the first shown turn says that what it answers is outside the tail",
-          "Approve the early change?" not in tail and f"{before_tail_introduction}\n\nearly reply" in tail
-          and INTRODUCTION not in tail, tail)
+    companion_introduction = before_tail_introduction.format(
+        where_that_dialog_is=f"the complete dialog, {output.with_name('seat-dialog-0007-complete.md')}")
+    check("a reply typed before the first shown turn says that what it answers is in the complete dialog",
+          "Approve the early change?" not in tail and f"{companion_introduction}\n\nearly reply" in tail
+          and INTRODUCTION not in tail and "The complete dialog, noise-free" in tail
+          and "treat it as a reply to the dialog that came before every turn in this file" in tail, tail)
+
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        extractor.main(["--transcript-path", str(path), "--last-turns", "2"])
+    transcript_introduction = before_tail_introduction.format(where_that_dialog_is=f"the full transcript, {path}")
+    check("a reply typed before the first shown turn of a printed tail, which writes no complete dialog, points to the transcript",
+          f"{transcript_introduction}\n\nearly reply" in printed.getvalue()
+          and f"the full transcript, {path}." in printed.getvalue()
+          and "the complete dialog, " not in printed.getvalue(), printed.getvalue())
 
     path = write_transcript(workspace, "delivered-to-agent-removal-then-equal-attachment.jsonl", [
         *ordinary_records(), enqueue_record("A"), remove_record("A", "delivered_to_agent"),

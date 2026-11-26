@@ -401,7 +401,7 @@ CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION = (
 )
 CONVERSATION_TAIL_UNREAD_QUEUED_USER_MESSAGE_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION_LINE_TEXT = (
     "Queued before the handoff and never read by your predecessor, whose turns below were written without it; "
-    "it was typed before the first turn shown here, so what it answers is in the complete dialog named at the end."
+    "treat it as a reply to the dialog that came before every turn in this file, which is in {where_that_dialog_is}."
 )
 QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS = ("<task-notification", "<cross-session-message", "<agent-message")
 PEER_MESSAGE_TAG_OPENINGS = ("<cross-session-message", "<agent-message")
@@ -437,7 +437,7 @@ def shown_text_is_queued_text(shown: str, queued: str) -> bool:
     """Match exactly, so that `A` is not read in any text containing it; a peer message may carry the harness's wrapper."""
     if shown == queued:
         return True
-    return (queued.startswith(PEER_MESSAGE_TAG_OPENINGS)
+    return (text_opens_with_tag(queued, PEER_MESSAGE_TAG_OPENINGS)
             and f"{shown}\n".startswith(f"{DELIVERED_PEER_MESSAGE_FIRST_LINE}\n{queued}\n"))
 
 
@@ -584,8 +584,8 @@ def text_opens_with_tag(text: str, tag_openings: tuple) -> bool:
     """Require the tag name to end, so that a user's `<agent-message-id> ...` is not taken for an `<agent-message`."""
     for opening in tag_openings:
         if text.startswith(opening):
-            character_after_name = text[len(opening):len(opening) + 1]
-            if character_after_name == ">" or character_after_name.isspace():
+            after_name = text[len(opening):]
+            if after_name[:1] == ">" or after_name[:1].isspace() or after_name.startswith("/>"):
                 return True
     return False
 
@@ -798,11 +798,14 @@ def render_extraction(turns, report: ExtractionReport) -> str:
     lines += ["", "---", ""]
 
     unread = list(report.queued_user_messages_never_read_by_agent)
+    before_tail_introduction = CONVERSATION_TAIL_UNREAD_QUEUED_USER_MESSAGE_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION_LINE_TEXT.format(
+        where_that_dialog_is=f"the complete dialog, {report.companion_path}" if report.companion_path
+        else f"the full transcript, {report.transcript_path}")
     for position, turn in enumerate(turns):
         typed_before_turn = [message for message in unread if message["enqueue_line"] < turn.get("line_index", -1)]
         lines += rendered_unread_queued_messages(
             typed_before_turn,
-            CONVERSATION_TAIL_UNREAD_QUEUED_USER_MESSAGE_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION_LINE_TEXT if position == 0
+            before_tail_introduction if position == 0
             else CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION)
         unread = unread[len(typed_before_turn):]
         lines += render_turn(turn)
