@@ -343,8 +343,9 @@ holds for it that no close line decides yet; after a deferral, a move on or
 answers to parts, the held item stays waiting, so the walk comes back to it.
 When the new item has sub-steps, and the minutes decide every sub-step so that
 the new item counts as approved or disapproved, the first CLOSE that finds the
-new item so decided writes the already-decided line, with that outcome, for the
-held item, whichever item that CLOSE itself records.
+new item so decided, and does not itself record a new hold, writes the
+already-decided line, with that outcome, for the held item, whichever item that
+CLOSE itself records.
 When it holds or defers the answer, it prints the lines the agent's next
 message must include, the status lines among them. When an item waits, it
 prints the command that gives that item its cold-read-fast-read before it is
