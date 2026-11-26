@@ -59,6 +59,8 @@ for call, lines in state.get("gh_queue_appends", {}).items():
             queue.writelines(line + "\n" for line in lines)
 if argv[:2] == ["pr", "view"]:
     print(json.dumps(state["prs"][argv[2]]))
+elif argv[:2] == ["pr", "comment"]:
+    print(f"https://github.com/nedsnodes/nedsnodes/pull/{argv[2]}#issuecomment-1")
 elif argv[:2] == ["pr", "list"] and "--label" in argv:
     print(json.dumps([{"number": n} for n in state.get("high_priority", [])]))
 elif argv[:2] == ["pr", "list"]:
@@ -158,7 +160,13 @@ class Case:
         self.merge_program.write_text(FAKE_MERGE_PROGRAM)
         self.follow_up = bin_directory / "follow-up.py"
         self.follow_up.write_text(FAKE_FOLLOW_UP)
-        self.environment = {"FAKE_STATE": str(self.state), "FAKE_QUEUE": str(self.queue)}
+        # HOME holds the task lists and agent-homes a conflict hold looks for, so no case
+        # writes a real agent-seat's task list.
+        self.home = self.directory / "home"
+        self.home.mkdir()
+        self.assignments = self.directory / "merge-lane-pr-review-assignments.txt"
+        self.environment = {"FAKE_STATE": str(self.state), "FAKE_QUEUE": str(self.queue),
+                            "HOME": str(self.home)}
 
     def argv(self, *subcommand):
         return ["--merge-queue-file", str(self.queue), "--merge-batches-directory",
@@ -170,6 +178,9 @@ class Case:
         saved = dict(os.environ)
         os.environ.update(self.environment, **(extra_environment or {}))
         output = io.StringIO()
+        watcher = program.open_pull_requests_watcher
+        real_assignments = watcher.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
+        watcher.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = self.assignments
         runner = program.MergeQueuePullRequestMergeBatchRunner
         real_check = getattr(runner, "changes_only_docs_prose", None)
         if self.prose_only_heads is not None:
@@ -183,6 +194,7 @@ class Case:
         finally:
             os.environ.clear()
             os.environ.update(saved)
+            watcher.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = real_assignments
             if self.prose_only_heads is not None:
                 if real_check is None:
                     del runner.changes_only_docs_prose
@@ -192,6 +204,16 @@ class Case:
 
     def queue_text(self):
         return self.queue.read_text()
+
+    def agent_seat_made(self, seat):
+        task_list = self.home / ".claude" / "tasks" / f"nedsnodes-{seat}-tasks"
+        task_list.mkdir(parents=True)
+        (self.home / "agents" / seat).mkdir(parents=True)
+        return task_list
+
+    def gh_calls(self):
+        log = Path(str(self.state) + ".gh-calls")
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
     def merge_calls(self):
         log = Path(str(self.state) + ".merge-calls")
@@ -405,8 +427,8 @@ def merging_cases(scratch):
                 merge_outcomes={"11": {"exit": 1, "output": "GATE REFUSED (#11): the approval covers x"}})
     real_held = program.MergeQueuePullRequestMergeBatchRunner.held
 
-    def held_then_a_lane_reapproves(self, number, *rest):
-        appended = real_held(self, number, *rest)
+    def held_then_a_lane_reapproves(self, number, *rest, **keywords):
+        appended = real_held(self, number, *rest, **keywords)
         with open(self.arguments.merge_queue_file, "a") as queue:
             queue.write(approved(number, B) + "\n")
         return appended
@@ -1146,10 +1168,100 @@ def starting_cases(scratch):
           exit_code == 1 and output.startswith("FAILED: "), output)
 
 
+DIRTY = {"exit": 1, "output": "STOP: not merged: mergeStateStatus is DIRTY"}
+
+
+def tasks_on(task_list):
+    return [json.loads(path.read_text()) for path in sorted(task_list.glob("*.json"))]
+
+
+def conflict_hold_cases(scratch):
+    case = Case(scratch, "conflict-hold-opens-author-task", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B)}, merge_outcomes={"10": DIRTY})
+    task_list = case.agent_seat_made("author-seat")
+    case.assignments.write_text("10 merge-lane-3\n")
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    tasks = tasks_on(task_list)
+    notice = case.notices().get("held-10.txt", "")
+    check("a pull request held for a conflict with main opens one task on its author agent-seat's "
+          "task list, saying to merge main in with no rebase, push once, and naming the lane "
+          "that reviews the new nn-head-commit; the held notice records it, and the batch goes on",
+          exit_code == 0 and len(tasks) == 1
+          and tasks[0]["subject"] == f"Pull request 10 is held: it conflicts with main at {A[:12]}"
+          and "merge origin/main into its branch, with no rebase" in tasks[0]["description"]
+          and "push once" in tasks[0]["description"]
+          and "merge-lane-3 reviews the new nn-head-commit" in tasks[0]["description"]
+          and "This program opened task #1 on author-seat's task list" in notice
+          and "SendMessage" not in notice and "MERGED 11" in case.queue_text()
+          and not any(call[:2] == ["pr", "comment"] for call in case.gh_calls()),
+          f"{tasks}\n{notice}\n{output}")
+
+    with open(case.queue, "a") as queue:
+        queue.write(approved(10, A) + "\n")
+    case.run("merge-batch-run-in-queue-order")
+    check("a second hold of the same pull request at the same nn-head-commit opens no second "
+          "task while the first is open, and the held notice says so",
+          len(tasks_on(task_list)) == 1
+          and any("already holds an open task" in text for text in case.notices().values()),
+          f"{tasks_on(task_list)}\n{case.notices()}")
+
+    case = Case(scratch, "conflict-hold-last-commit-author",
+                [approved(10, A, author="not-named")],
+                {"10": {**pr(A), "commits": [{"authors": [{"name": "someone-else"}]},
+                                             {"authors": [{"name": "author-seat"}]}]}},
+                merge_outcomes={"10": DIRTY})
+    task_list = case.agent_seat_made("author-seat")
+    case.assignments.write_text("10 merge-lane-1\n")
+    case.run("merge-batch-run-in-queue-order")
+    check("a queue line whose author is no agent-seat here gets the task on the agent-seat that "
+          "authored the pull request's last commit",
+          [task["subject"] for task in tasks_on(task_list)]
+          == [f"Pull request 10 is held: it conflicts with main at {A[:12]}"],
+          tasks_on(task_list))
+
+    case = Case(scratch, "conflict-hold-unknown-author", [approved(10, A, author="not-named")],
+                {"10": {**pr(A), "commits": [{"authors": [{"name": "retired-seat"}]}]}},
+                merge_outcomes={"10": DIRTY})
+    case.run("merge-batch-run-in-queue-order")
+    comments = [call for call in case.gh_calls() if call[:2] == ["pr", "comment"]]
+    body = comments[0][comments[0].index("--body") + 1] if comments else ""
+    notice = case.notices().get("held-10.txt", "")
+    check("a conflict hold whose author agent-seat cannot be found posts the message as a comment "
+          "on the pull request, and with no assignment file it names that file in place of the "
+          "lane and the held notice says the lane could not be read",
+          len(comments) == 1 and comments[0][2] == "10"
+          and body.startswith(f"Pull request 10 is held: it conflicts with main at {A[:12]}")
+          and f"The merge-lane agent-seat that {case.assignments} names for it reviews" in body
+          and "posted the message to its author as a comment" in notice
+          and "Its reviewing lane could not be read" in notice and "does not exist" in notice,
+          f"{comments}\n{notice}")
+
+    case = Case(scratch, "conflict-hold-task-write-fails", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B)}, merge_outcomes={"10": DIRTY})
+    task_list = case.agent_seat_made("author-seat")
+    case.assignments.write_text("10 merge-lane-3\n")
+    task_list.chmod(0o500)
+    try:
+        exit_code, output = case.run("merge-batch-run-in-queue-order")
+    finally:
+        task_list.chmod(0o700)
+    notice = case.notices().get("held-10.txt", "")
+    check("a task that cannot be written is reported in the held notice, with the message for "
+          "merge-lane-2 to send, and the batch goes on",
+          exit_code == 0 and tasks_on(task_list) == []
+          and "TELLING THE AUTHOR FAILED: " in notice
+          and "send that agent-seat the message below with Claude Code's SendMessage tool" in notice
+          and f"Pull request 10 is held: it conflicts with main at {A[:12]}" in notice
+          and "merge-lane-3 reviews the new nn-head-commit" in notice
+          and "telling its author of the conflict hold failed" in output
+          and "MERGED 11" in case.queue_text(), f"{notice}\n{output}")
+
+
 def main():
     scratch = Path(tempfile.mkdtemp(prefix="merge-queue-test-")).resolve()
     try:
         merging_cases(scratch)
+        conflict_hold_cases(scratch)
         merge_order_cases(scratch)
         stopping_cases(scratch)
         next_merge_decision_cases(scratch)
