@@ -1213,3 +1213,13 @@ The claim check's evidence:
 > - nn-systems/handoff/handoff-supervisor-launched-agent-session-environment-variable-names-common.py:17 `if not session_id or session_id != environment.get(HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE, ""):`
 > - The rest is supported: handoff-supervisor.py:2242-2244; handoff-write-and-check-supervisor.py:133-141; walk-me-through hook :222
 State: open
+
+## E104 — possible problem: an assertion of the overview is contradicted
+
+Claim: `scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py` gives an overview's path and reads its commit "for the handoff-supervisor's overview refresh reminder".
+Found by: the overview claim check of 2026-11-26 against commit 9191f6d9b5c34965bc7810df4c2dd54fbb10064b; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/6cd7f1f645a2991fade7d991ae844a3cb12c5765-2026-11-26T01-47-22-161551Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The supervisor is one consumer among several. A search for the module's file name in *.py found it loaded by scripts/pull-request-review-plan.py, scripts/md-drift-lint.py and nn-systems/skills/overview-write/overview-write-architecture-overview-claim-check-by-fresh-agent.py as well as nn-systems/handoff/handoff-supervisor.py:222-227. An editor relying on the sentence would think only the supervisor depends on it.
+State: open
