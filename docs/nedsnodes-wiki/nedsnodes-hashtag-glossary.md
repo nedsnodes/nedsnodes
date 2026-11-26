@@ -1,0 +1,67 @@
+# Hashtag glossary
+
+This page lists every hashtag in alphabetical order and is the one place a hashtag is defined, including a hashtag only one system uses. A hashtag is written `#`, then lowercase words joined by underscores, then a closing `#`, as in `#next_to_present#`. Until the one-time conversion that adds the closing `#` to every hashtag has run, the repository still writes most hashtags without it, as in `#next_to_present`, and every program that reads a hashtag accepts both forms. A one-word hashtag below was in use before hashtags took two or more words, and keeps its one word; no new hashtag is one word.
+
+`scripts/nedsnodes-hashtag-glossary-lists-every-hashtag-in-use-and-no-other-test.py` fails when a hashtag is used but not listed here, when one is listed here but used nowhere else, or when a one-word hashtag not listed today is added; a pull request that adds a hashtag adds its bullet in the same commit.
+
+- `#approval_walk_item_first_entered#` — the walk-document line under an approval-walk item that gives the date the item was first written, which the walk check program uses to order items not yet shown.
+- `#approval_walk_item_in_category_file_an_improvement_feature_or_change#` — the walk-document line that puts an approval-walk item in the category of an improvement, feature or change to file for later.
+- `#approval_walk_item_in_category_fix_during_maintenance#` — the walk-document line that puts an approval-walk item in the category of a fix to make during maintenance.
+- `#approval_walk_item_in_category_fix_next#` — the walk-document line that puts an approval-walk item in the category of a fix to make next.
+- `#approval_walk_item_in_category_must_fix_now#` — the walk-document line that puts an approval-walk item in the category of a fix that must be made now.
+- `#approval_walk_item_waits_on#` — the walk-document line under an approval-walk item that names, by its heading, an item it must be shown after.
+- `#approval_walk_paused#` — the walk-minutes line that pauses an approval-walk, with the user's words; until a later `#next_to_present#` line, the walk has no item waiting.
+- `#approved_after_advisor#` — written in the walk-minutes right after "approved" when the user answered Aa, approving after an advisor check.
+- `#approved_obvious#` — written in the walk-minutes right after "approved" when the user answered AO, approving an item he found obvious.
+- `#canary_fail#` — the last line an nn-canary-test prints, with exit 1, when the outside program it checks did not behave as the project relies on.
+- `#canary_no_answer#` — the last line an nn-canary-test prints, with exit 2, when it could not tell whether the outside program behaves as relied on.
+- `#canary_pass#` — the last line an nn-canary-test prints, with exit 0, when the outside program it checks behaved as the project relies on.
+- `#case_against#` — the approval-walk item line, just before the alternative, that states the strongest case against the recommendation with its rating: none, weak, medium, strong or very strong.
+- `#case_against_medium#` — written in the walk-minutes beside the user's answer when the item's case against was rated medium.
+- `#case_against_none#` — written in the walk-minutes beside the user's answer when the item's case against was rated none.
+- `#case_against_strong#` — written in the walk-minutes beside the user's answer when the item's case against was rated strong.
+- `#case_against_very_strong#` — written in the walk-minutes beside the user's answer when the item's case against was rated very strong.
+- `#case_against_weak#` — written in the walk-minutes beside the user's answer when the item's case against was rated weak.
+- `#code#` — a project glossary label: the term of the entry it ends covers code.
+- `#cold_read_fast_read_sonnet_backup_ran#` — the line a cold-read-fast-read report carries when the Sonnet backup wrote it in place of the first model, with the reason.
+- `#cold_read_target_changed_during_run#` — the line a cold-read program prints when the document changed while the reviewer read it, so the report is triaged against the copy the reviewer was given.
+- `#data#` — a project glossary label: the term of the entry it ends covers data.
+- `#declined_because#` — the cold-read approval-walk item line that gives the reason a finding was declined, opening with `cost` when cost is the only reason.
+- `#edit#` — a cold-read-fast-read finding tag: the finding is about sentences the edit added or changed, or a gap the removed text leaves.
+- `#emergency_stop_lift_handed_over#` — the emergency-stop file line that names the agent-seat that may lift the stop on the user's word; it does not lift the stop.
+- `#emergency_stop_lifted#` — the last line of an emergency-stop file once the stop is lifted, with the user's words.
+- `#follow_up#` — on a `#root_cause_not_fixed#` line of a pull request's description, marks the link to the GHI or pull request that will fix the root cause.
+- `#follow_up_request#` — the line `#follow_up_request pull request <number>` that opens merge-lane-2's list of non-blocking findings for the author to follow up after a merge.
+- `#frozen_copy_changed_during_run#` — the line a cold-read program prints when the frozen-copy the reviewers read changed during the run.
+- `#held_on_ruling#` — the pull request review line `#held_on_ruling <walk name> item <number>` that holds the pull request until the user rules on that approval-walk item.
+- `#item_page#` — the walk-minutes line `#item_page item N of M <link>`, or `#item_page item N of M publish failed: <reason>`, that records the published page of an approval-walk item or that its publish failed.
+- `#kept_text#` — a cold-read-fast-read finding tag: the finding is about sentences the edit did not change and did not cause.
+- `#nc_test_suite_could_not_run#` — the verdict line a test suite prints last, with exit 2, when it could not run.
+- `#nc_test_suite_fail#` — the verdict line a test suite prints last, with exit 1, when a test case failed.
+- `#nc_test_suite_pass#` — the verdict line a test suite prints last, with exit 0, when every test case passed.
+- `#new#` — the walk-document line that holds a text an approval-walk item's recommendation adds, which the walk check program gives a cold-read-fast-read when the user answers A.
+- `#new_if_d#` — the walk-document line that holds a text an approval-walk item's alternative adds, which the walk check program gives a cold-read-fast-read when the user answers D.
+- `#next_to_present#` — the walk-minutes line `#next_to_present item N of M` that names the approval-walk item the user has not yet answered; the last such line names it unless a later `#approval_walk_paused#` line pauses the walk, and `#next_to_present none, closed` closes the walk.
+- `#no_defect_fixed#` — the pull request description line saying the pull request fixes no defect.
+- `#not_asked_glossary_term#` — the approval-walk item evidence line that names the glossary term a change puts in place of other words, so the item can be settled without asking the user.
+- `#not_asked_hashtag_marker#` — the approval-walk item evidence line that names each hashtag marker a change adds, so the item can be settled without asking the user.
+- `#not_asked_rename#` — the approval-walk item evidence line that gives a rename's old and new names, so the item can be settled without asking the user.
+- `#not_asked_search#` — the approval-walk item evidence line that gives the first and last day of a search for a problem, its count of cases and the places searched.
+- `#not_asked_source#` — the approval-walk item evidence line that cites the ruling, merged code or command a change rests on.
+- `#not_asked_test#` — the approval-walk item evidence line that names the test that fails before a fix and passes after it.
+- `#not_asked_touches#` — the approval-walk item evidence line that lists every file a change edits or deletes; an item without it comes to the user.
+- `#not_asked_unused#` — the approval-walk item evidence line that names a thing a change removes because nothing uses it.
+- `#not_in_this_run#` — a design's Deferred-decisions line for a decision left out of this run of design-to-main, with its `#reason#`.
+- `#open_question#` — the line that opens an open question in a document.
+- `#pre_approved_change#` — the first line of `.walk-approved` when a change to a guarded-file needs no approval, with the exception it falls under on the second line.
+- `#prose#` — a project glossary label: the term of the entry it ends covers prose.
+- `#reason#` — on a design's Deferred-decisions line, marks the reason the decision was deferred or rejected.
+- `#rejected#` — a design's Deferred-decisions line for a choice the design rejects, with its `#reason#`.
+- `#replaces#` — the pull request description line `#replaces <link>` naming the pull request this one replaces, whose findings and review rounds carry over.
+- `#revisit_after#` — on a design's Deferred-decisions line, names the event the deferred work waits on.
+- `#revisit_before#` — on a design's Deferred-decisions line, names the event after which the deferred decision becomes expensive to change.
+- `#root_cause#` — the pull request description line that names the root cause of a defect that the change removes.
+- `#root_cause_not_fixed#` — the pull request description line that names the root cause that stays, or says none was found, and why, with a `#follow_up#` link.
+- `#ruling_given#` — the comment `#ruling_given <walk name> item <number> <approved or disapproved>` the walk check program posts on a pull request held on that ruling once the user rules.
+- `#user_alert#` — the walk-minutes line `#user_alert <id>` that records a user-alert inserted into the approval-walk as an item.
+- `#walk_minutes_hand_written_lines_converted#` — the walk-minutes line that `nn-systems/skills/walk-me-through/walk-me-through-open-walk-minutes-hand-written-decision-lines-to-program-lines-one-time-conversion-hack.py` writes after rewriting the hand-written decision lines, so it does not run twice on that file.

@@ -242,7 +242,7 @@ TRAILING_MARKS = "*_ )\"'”’"
 QUOTED = re.compile(r"\"[^\"\n]+\"|“[^”\n]+”")
 LINK = re.compile(r"\[([^\]\n]*)\]\([^)\n]*\)")
 LIST_ITEM = re.compile(r"^(?:[-+*]|\d+[.)])\s")
-HASHTAG_MARKER = re.compile(r"^#\w+\s+")
+HASHTAG_MARKER = re.compile(r"^#\w+#?\s+")
 EMPHASIS_AND_SPACING = re.compile(r"[\s*_#>`]+")
 ANSWER_LINE_START = "answer a to approve"
 

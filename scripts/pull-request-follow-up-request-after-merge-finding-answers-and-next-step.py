@@ -168,7 +168,7 @@ FOLLOW_UP_REQUEST_LINE_START = "#follow_up_request"
 FOLLOW_UP_REQUEST_BLOCK_SAVE_HOOK_PATH = ("nn-systems/general-tools/pull-request-follow-up-request-from-merge-lane-2-message-save-and-"
                   "forked-subagent-brief-hand-over-user-prompt-submit-hook.py")
 MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR = "the SendMessage message in which merge-lane-2 tells the pull request's author that the pull request merged"
-FOLLOW_UP_REQUEST_LINE_PATTERN = re.compile(r"^#follow_up_request pull request (\d+)[ \t]*$")
+FOLLOW_UP_REQUEST_LINE_PATTERN = re.compile(r"^#follow_up_request#? pull request (\d+)[ \t]*$")
 FINDING_LINE_PATTERN = re.compile(r"^(\d+)\.\s+(\S.*)$")
 ASCII_LINE_END_PATTERN = re.compile(r"\r\n|\r|\n")
 PULL_REQUEST_LINK_PATTERN = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")

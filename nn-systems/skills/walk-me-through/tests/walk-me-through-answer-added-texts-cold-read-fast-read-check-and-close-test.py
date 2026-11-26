@@ -1125,6 +1125,45 @@ def test_the_waiting_item_read_step_searches_an_item_under_a_shared_heading_by_i
           described(result))
 
 
+def test_every_walk_hashtag_is_read_in_its_closed_form_as_in_its_open_form():
+    program = load_program()
+    finder = program.load_walk_finder()
+    for form in ("#next_to_present", "#next_to_present#"):
+        found = finder.NEXT_MARKER.search(f"{form} item 3 of 9")
+        check(f"the walk marker `{form} item 3 of 9` gives the value `item 3 of 9`",
+              found is not None and found.group(2) == "item 3 of 9", repr(found and found.group(2)))
+        page = finder.ITEM_PAGE_LINE_PATTERN.search(f"{form.replace('next_to_present', 'item_page')} item 4 of 9 "
+                                                    "https://claude.ai/artifact/x")
+        check(f"an item page line opening `{form.replace('next_to_present', 'item_page')}` gives item 4 and its link",
+              page is not None and page.group(1) == "4" and page.group(4) == "https://claude.ai/artifact/x",
+              repr(page and page.groups()))
+    for form in ("#new", "#new#", "#new_if_d", "#new_if_d#"):
+        mark = finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(f"{form} Show every row.")
+        check(f"the mark line `{form} Show every row.` gives the mark and the text without the closing `#`",
+              mark is not None and mark.group(1) == form.rstrip("#") and mark.group(2) == "Show every row.",
+              repr(mark and mark.groups()))
+    for form in ("#case_against", "#case_against#"):
+        line = program.CASE_AGAINST_LINE.match(f"{form} weak: it costs an hour.")
+        check(f"the line `{form} weak: ...` gives its rating and reason",
+              line is not None and line.group(1) == "weak: it costs an hour.", repr(line and line.groups()))
+    for form in ("#not_asked_touches", "#not_asked_touches#"):
+        line = program.EVIDENCE_LINE.match(f"{form} scripts/a.py")
+        check(f"the evidence line `{form} scripts/a.py` gives the marker without the closing `#` and its files",
+              line is not None and line.groups() == ("#not_asked_touches", "scripts/a.py"), repr(line and line.groups()))
+    for form in ("#approval_walk_item_waits_on", "#approval_walk_item_waits_on#"):
+        line = program.WALK_WAITS_ON_LINE.match(f"{form} The first item")
+        check(f"the line `{form} The first item` gives the title waited on",
+              line is not None and line.group(1) == "The first item", repr(line and line.groups()))
+    answer = program.ANSWER_LINE.match("item 3 of 9: the user answered approved #approved_obvious# #case_against_weak# "
+                                       "(2026-11-26 01:00Z) in his words \"AO\", which makes its change. Fast reads:")
+    check("an answer line with closed hashtags gives the answer word alone",
+          answer is not None and answer.group("answered") == "approved", repr(answer and answer.groupdict()))
+    check("a held-on-ruling line in the closed form is read as the open form the program looks for",
+          program.held_on_ruling_line_without_closing_hash("#held_on_ruling# w item 3") == "#held_on_ruling w item 3"
+          and program.held_on_ruling_line_without_closing_hash("#held_on_ruling w item 3") == "#held_on_ruling w item 3",
+          program.held_on_ruling_line_without_closing_hash("#held_on_ruling# w item 3"))
+
+
 def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
     program = load_program()
     finder = program.load_walk_finder()

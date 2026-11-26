@@ -161,7 +161,7 @@ MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT = r"(?:(?:[-*+]|\d+[.)
 # The walk check program and the short-answer hook both read marks with this one pattern, so that a line one of them
 # takes for a mark the other cannot skip.
 APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN = re.compile(
-    rf"^\s*(?:{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}|Part \d+\.\s+)*(#new(?:_if_d)?)\b[:\s]*(.*)$")
+    rf"^\s*(?:{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}|Part \d+\.\s+)*(#new(?:_if_d)?)\b#?[:\s]*(.*)$")
 
 REPOSITORY_TOP = Path(__file__).resolve().parents[3]
 SUITE_RUNNER_FILE = REPOSITORY_TOP / "scripts" / "run-all-test-suites.py"
@@ -172,11 +172,12 @@ MARKDOWN_PARSER_MODULE_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
 WALK_DIRECTORY = Path("docs") / "walk"
 MINUTES_SUFFIX = "-minutes.md"
-# Group 1 is set only for the hashtag; the old form is read so that open walks it marks are migrated.
+# Group 1 is set only for the hashtag, read with or without its closing `#`; the old form is read so that open walks
+# it marks are migrated.
 # The value runs to the line's end, the next marker or a pause hashtag, so two markers on a line are read as two
 # and a pause on the marker's line is not read as part of the value.
 NEXT_MARKER = re.compile(
-    r"(?:(#next_to_present)\b|Next to present:)[*_`\s:]*"
+    r"(?:(#next_to_present)\b#?|Next to present:)[*_`\s:]*"
     r"((?:(?!#next_to_present\b|Next to present:|#approval_walk_paused\b)[^\n])*)",
     re.I)
 PAUSE_MARKER = re.compile(r"#approval_walk_paused\b", re.I)
@@ -226,7 +227,7 @@ NUMBER_OR_JOINER = re.compile(rf"{NUMBER}|\bto\b|-|\u2013", re.I)
 # `of M` is optional because only the item number is read, and the handoff-supervisor asks for a line without it
 # when no total is known.
 ITEM_PAGE_LINE_PATTERN = re.compile(
-    rf"^#item_page[ \t]+item[ \t]+({NUMBER})[ \t]+(?:of[ \t]+\d+[ \t]+)?"
+    rf"^#item_page#?[ \t]+item[ \t]+({NUMBER})[ \t]+(?:of[ \t]+\d+[ \t]+)?"
     rf"(?:(publish failed:[ \t]*\S.*?)|(?:version[ \t]+(\d+)[ \t]+)?(\S+)(?:[ \t]+\(([^\n]*)\))?)[ \t]*$",
     re.I | re.M)
 ITEM_PAGE_NOTE_VERSION = re.compile(r"\bversion[ \t]+(\d+)", re.I)
