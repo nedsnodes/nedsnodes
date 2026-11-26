@@ -29,6 +29,7 @@ would flake.
 """
 
 import contextlib
+import fcntl
 import importlib.util
 import io
 import json
@@ -1925,6 +1926,27 @@ class PollOnceMachine:
         self.assignments = scratch / "assignments.txt"
         self.assignments.write_text(EVERY_PULL_REQUEST_ASSIGNED_FILE.read_text(encoding="utf-8"),
                                     encoding="utf-8")
+        self.merge_queue_file = scratch / "merge-queue.txt"
+        self.merge_queue_file.write_text("", encoding="utf-8")
+        self.merge_batches = scratch / "merge-batches"
+        self.merge_outputs = scratch / "merge-outputs"
+        self.merge_queue_program = scratch / "fake-merge-queue-program.py"
+        self.merge_queue_program_calls = scratch / "fake-merge-queue-program-calls.txt"
+        self.merge_queue_program_exit = 0
+        self.merge_queue_program_output = ""
+        self.merge_queue_program_sleep = 0
+
+    def fake_merge_queue_program_write(self):
+        self.merge_queue_program.write_text(
+            "import sys, time\n"
+            f"open({str(self.merge_queue_program_calls)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            f"time.sleep({self.merge_queue_program_sleep})\n"
+            f"print({self.merge_queue_program_output!r}, end='')\n"
+            f"sys.exit({self.merge_queue_program_exit})\n", encoding="utf-8")
+
+    def merge_queue_program_call_lines(self):
+        return (self.merge_queue_program_calls.read_text(encoding="utf-8").splitlines()
+                if self.merge_queue_program_calls.exists() else [])
 
     def time(self):
         return self.now
@@ -1936,6 +1958,8 @@ class PollOnceMachine:
         watcher_module.fetch_open_pull_requests = lambda _repo, _token: (
             (None, self.poll) if isinstance(self.poll, str) else (self.poll, None))
         errors, output = io.StringIO(), io.StringIO()
+        if self.merge_queue_program.parent.is_dir() and self.merge_queue_program.name.startswith("fake-"):
+            self.fake_merge_queue_program_write()
         try:
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
                 code = watcher_module.main([
@@ -1943,6 +1967,10 @@ class PollOnceMachine:
                     "--poll-once-directory", str(self.directory),
                     "--task-list-directory", str(self.tasks),
                     "--needs-a-look-directory", str(self.notices),
+                    "--merge-queue-file", str(self.merge_queue_file),
+                    "--merge-queue-program", str(self.merge_queue_program),
+                    "--merge-batches-directory", str(self.merge_batches),
+                    "--merge-program-outputs-directory", str(self.merge_outputs),
                     *(["--merge-lane-pr-review-assignments-file", str(self.assignments)]
                       if assignment_options is None else assignment_options)])
         finally:
@@ -2345,6 +2373,94 @@ def run_poll_once_cases(scratch_root, token_file):
           code == 1 and "directory" in machine.tasks_read()[0]["subject"], machine.tasks_read())
 
 
+WAITING_MERGE_QUEUE_LINE = f"7 {'a' * 40} 2026-11-26T05:00:00Z nedlern (approved)"
+
+
+def run_poll_once_merge_batch_start_cases(scratch_root, token_file):
+    def machine_for(name, queue_text):
+        scratch = scratch_root / name
+        scratch.mkdir()
+        machine = PollOnceMachine(scratch, token_file)
+        machine.poll = [poll_once_pull_request(1)]
+        machine.run("--poll-once-write-baseline")
+        machine.merge_queue_file.write_text(queue_text, encoding="utf-8")
+        return machine
+
+    def silent(machine, code):
+        return (code == 0 and not machine.tasks_read() and not machine.event_lines()
+                and not machine.output and not machine.errors)
+
+    machine = machine_for("merge-batch-waiting", WAITING_MERGE_QUEUE_LINE + "\n")
+    code = machine.run()
+    calls = machine.merge_queue_program_call_lines()
+    check("--poll-once with a waiting merge queue line runs merge-batch-start --quiet on that queue "
+          "file once, and with no output writes no task and no event",
+          len(calls) == 1 and calls[0].endswith("merge-batch-start --quiet")
+          and f"--merge-queue-file {machine.merge_queue_file}" in calls[0] and silent(machine, code),
+          f"{code} {calls} {machine.tasks_read()} {machine.event_lines()} {machine.output!r} {machine.errors!r}")
+
+    machine = machine_for("merge-batch-nothing-waiting",
+                          f"MERGED 7 {'b' * 40}\n{'HOLD-why ' + WAITING_MERGE_QUEUE_LINE}\n# a comment\n")
+    code = machine.run()
+    check("--poll-once with no waiting line, only merged and held ones, starts nothing, writes no "
+          "task, no event and no output, so merge-lane-2 is not told anything",
+          not machine.merge_queue_program_call_lines() and silent(machine, code),
+          f"{code} {machine.merge_queue_program_call_lines()} {machine.tasks_read()} {machine.output!r}")
+
+    machine = machine_for("merge-batch-already-running", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program = watcher_module.MERGE_QUEUE_PROGRAM
+    machine.merge_batches.mkdir()
+    with open(machine.merge_batches / "merge-batch.lock", "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        code = machine.run()
+    check("--poll-once with a waiting line while a merge batch holds merge-batch.lock runs the real "
+          "merge queue program, which starts no second batch, and writes no task, no event and no output",
+          silent(machine, code) and not (machine.merge_batches / "merge-batch.log").exists(),
+          f"{code} {machine.tasks_read()} {machine.event_lines()} {machine.output!r} {machine.errors!r}")
+
+    machine = machine_for("merge-batch-stop-file", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program = watcher_module.MERGE_QUEUE_PROGRAM
+    machine.merge_outputs.mkdir()
+    (machine.merge_outputs / "merge-queue-stopped.txt").write_text("a test run failed\n", encoding="utf-8")
+    code = machine.run()
+    check("--poll-once with a waiting line and the stop file starts nothing and writes no task, no "
+          "event and no output, since merge-lane-2 already has the stopped notice",
+          silent(machine, code) and not (machine.merge_batches / "merge-batch.log").exists(),
+          f"{code} {machine.tasks_read()} {machine.output!r} {machine.errors!r}")
+
+    machine = machine_for("merge-batch-start-fails", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program_exit = 1
+    machine.merge_queue_program_output = "NOT STARTED: the merge batch could not be started: disk full\n"
+    code = machine.run()
+    tasks = machine.tasks_read()
+    check("a merge-batch-start that exits 1 makes --poll-once exit 1 and open one task quoting its output",
+          code == 1 and len(tasks) == 1 and "merge-batch-start failed" in tasks[0]["subject"]
+          and "disk full" in tasks[0]["description"], f"{code} {tasks}")
+    machine.run()
+    check("a second failing run opens no second task", len(machine.tasks_read()) == 1, machine.tasks_read())
+
+    machine = machine_for("merge-batch-start-hangs", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program_sleep = 5
+    saved_timeout = watcher_module.MERGE_BATCH_START_TIMEOUT_SECONDS
+    watcher_module.MERGE_BATCH_START_TIMEOUT_SECONDS = 1
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.MERGE_BATCH_START_TIMEOUT_SECONDS = saved_timeout
+    tasks = machine.tasks_read()
+    check("a merge-batch-start that runs over its timeout makes --poll-once exit 1 and open one task",
+          code == 1 and len(tasks) == 1 and "did not finish" in tasks[0]["subject"], f"{code} {tasks}")
+
+    machine = machine_for("merge-queue-unreadable", "this is no queue line\n")
+    code = machine.run()
+    tasks = machine.tasks_read()
+    check("a merge queue file holding a line of no known kind starts nothing, makes --poll-once exit "
+          "1 and opens one task naming the file",
+          code == 1 and not machine.merge_queue_program_call_lines() and len(tasks) == 1
+          and "cannot be read" in tasks[0]["subject"]
+          and str(machine.merge_queue_file) in tasks[0]["description"], f"{code} {tasks}")
+
+
 if __name__ == "__main__":
     run_unit_cases()
     run_merge_lane_pull_request_review_assignment_unit_cases()
@@ -2355,6 +2471,10 @@ if __name__ == "__main__":
         poll_once_token_file = Path(poll_once_scratch) / "token"
         poll_once_token_file.write_text(FIXTURE_TOKEN, encoding="utf-8")
         run_poll_once_cases(Path(poll_once_scratch), poll_once_token_file)
+    with tempfile.TemporaryDirectory() as merge_batch_scratch:
+        merge_batch_token_file = Path(merge_batch_scratch) / "token"
+        merge_batch_token_file.write_text(FIXTURE_TOKEN, encoding="utf-8")
+        run_poll_once_merge_batch_start_cases(Path(merge_batch_scratch), merge_batch_token_file)
     run_subprocess_cases()
     print()
     if failures:

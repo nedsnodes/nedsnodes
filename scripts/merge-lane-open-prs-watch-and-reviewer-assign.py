@@ -128,6 +128,12 @@ writing the task fails at that failed poll, the rest of the same outage, which
 opens no task; and a task list directory that does not exist, so that each
 failure reaches only the cron log. With another --repo, --poll-once needs its own
 --poll-once-directory, so that the default state is never another repository's.
+With the default --repo, each --poll-once run then starts the merge queue's merges:
+when the merge queue file holds a waiting line, it runs the merge queue program's
+merge-batch-start --quiet, which starts nothing while a merge batch runs or the stop
+file exists. A run with no waiting line, or whose merge-batch-start prints nothing,
+writes no task and sends no message; an unreadable queue file, or a merge-batch-start
+that fails or hangs, opens one task.
 A cron run, the loop watcher and the seed each hold a lock file
 beside the assignment file from reading it to replacing it.
 
@@ -224,6 +230,10 @@ MAC_CLAUDE_ACCOUNT = "mac-claude"
 
 # A short redaction pattern would corrupt ordinary output; reject invalid credentials at startup.
 MINIMUM_PLAUSIBLE_TOKEN_CHARS = 8
+
+MERGE_QUEUE_PROGRAM = Path(__file__).resolve().with_name(
+    "merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py")
+MERGE_BATCH_START_TIMEOUT_SECONDS = 60
 
 OPEN_PULL_REQUESTS_QUERY = """
 query($owner: String!, $name: String!, $cursor: String) {
@@ -1109,6 +1119,54 @@ def poll_once_write_baseline(arguments, token, state_path, events_path):
     return 0
 
 
+def merge_queue_program_module():
+    spec = importlib.util.spec_from_file_location("merge_lane_merge_queue_program", MERGE_QUEUE_PROGRAM)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def merge_batch_started_when_lines_wait(arguments, task_list_directory):
+    """Run the merge queue program's merge-batch-start --quiet when the merge queue file holds
+    a waiting line, and return the exit status. Nothing waiting, a merge batch already running
+    and a stop file all print nothing and write no task, so merge-lane-2 hears only of a
+    failure."""
+    queue = merge_queue_program_module()
+    runner = queue.MergeQueuePullRequestMergeBatchRunner(queue.parse_arguments(
+        ["--merge-queue-file", str(arguments.merge_queue_file), "merge-batch-list-waiting"]))
+    try:
+        waiting = runner.waiting(runner.queue_lines())
+    except (queue.Stop, OSError) as error:
+        return failure_reported(task_list_directory, "the merge queue file cannot be read",
+                                f"{arguments.merge_queue_file}: {error}. No merge batch starts "
+                                f"until it can be read; repair it, and the next run starts one.")
+    if not waiting:
+        return 0
+    command = [sys.executable, str(arguments.merge_queue_program),
+               "--merge-queue-file", str(arguments.merge_queue_file),
+               *(["--merge-batches-directory", str(arguments.merge_batches_directory)]
+                 if arguments.merge_batches_directory is not None else []),
+               *(["--merge-program-outputs-directory", str(arguments.merge_program_outputs_directory)]
+                 if arguments.merge_program_outputs_directory is not None else []),
+               "merge-batch-start", "--quiet"]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                   timeout=MERGE_BATCH_START_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return failure_reported(task_list_directory, "merge-batch-start did not finish",
+                                f"{shlex.join(command)} ran over {MERGE_BATCH_START_TIMEOUT_SECONDS} "
+                                f"seconds and was killed; it only checks files and starts a "
+                                f"process, so run it by hand to see where it hangs.")
+    output = (completed.stdout + completed.stderr).strip()
+    if output:
+        emit(f"merge-batch-start: {output}")
+    if completed.returncode != 0:
+        return failure_reported(task_list_directory, "merge-batch-start failed",
+                                f"{shlex.join(command)} exited {completed.returncode}: "
+                                f"{one_line_snippet(output or 'no output', FAILURE_REASON_SNIPPET_CHARS)}")
+    return 0
+
+
 def poll_once(arguments, assignments_file, options_in_use):
     """One cron run: see the module docstring. assignments_file is None when no review is
     assigned. Return the exit status."""
@@ -1176,8 +1234,10 @@ def poll_once(arguments, assignments_file, options_in_use):
                                     f"recorded its events, so the first run after this is repaired "
                                     f"finds this run's events again; lines already in "
                                     f"{events_path} reach a later events task.")
+        merge_batch_status = (merge_batch_started_when_lines_wait(arguments, task_list_directory)
+                              if arguments.merge_queue_file is not None else 0)
         if reason is None:
-            return 0
+            return merge_batch_status
         snippet = one_line_snippet(reason, FAILURE_REASON_SNIPPET_CHARS)
         if state["failed_polls"] == WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK:
             return failure_reported(
@@ -1250,6 +1310,17 @@ def parse_arguments(argv):
                              f"{MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE} with the "
                              "default --repo; with another --repo, none, and no review is "
                              "assigned)")
+    parser.add_argument("--merge-queue-file", type=Path,
+                        help="the merge queue file whose waiting lines make --poll-once start a "
+                             "merge batch (default: the merge queue program's own with the default "
+                             "--repo; with another --repo, none, and no merge batch is started)")
+    parser.add_argument("--merge-queue-program", type=Path, default=MERGE_QUEUE_PROGRAM,
+                        help="the merge queue program --poll-once runs merge-batch-start --quiet of "
+                             "(default: %(default)s)")
+    parser.add_argument("--merge-batches-directory", type=Path,
+                        help="passed to the merge queue program when given")
+    parser.add_argument("--merge-program-outputs-directory", type=Path,
+                        help="passed to the merge queue program when given")
     # Each of these exits instead of watching, so it shares the group of the ways to watch.
     when_to_exit.add_argument(
         "--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit",
@@ -1289,6 +1360,8 @@ def main(argv=None):
     # The default file holds the default repository's pull request numbers only.
     if assignments_file is None and repo_is_default:
         assignments_file = MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
+    if arguments.merge_queue_file is None and repo_is_default and arguments.poll_once:
+        arguments.merge_queue_file = merge_queue_program_module().DEFAULT_MERGE_QUEUE_FILE
     options_in_use = [*(["--repo", arguments.repo] if not repo_is_default else []),
                       *(["--token-file", arguments.token_file]
                         if arguments.token_file != DEFAULT_TOKEN_FILE else [])]
