@@ -7,7 +7,8 @@ answers only from this mirror, never from GitHub directly (the cold-start
 prompt's own rule). This script is what keeps the mirror true: it writes
 `<mirror-dir>/issues-open.md` (every open issue near-raw: number, title,
 labels, updated time, body, comments) and `issues-closed.md` (one line per
-closed issue: number, title, close reason, closed date), plus an internal
+closed issue: number, title, close reason, closed date, and any
+`Superseded-by: #<n>` marker in its body), plus an internal
 cache (`.mirror-cache.json`) that makes delta refreshes possible without
 re-parsing the rendered Markdown back into data.
 
@@ -67,6 +68,7 @@ not a partial mirror.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -77,6 +79,9 @@ DEFAULT_MIRROR_DIR = "ghi-mirror"
 CACHE_FILE_NAME = ".mirror-cache.json"
 OPEN_FILE_NAME = "issues-open.md"
 CLOSED_FILE_NAME = "issues-closed.md"
+# The design's supersession marker; ghi-guide-agent's drift notice sends it to a
+# closed issue's one line here to read it, since it never sees closed bodies.
+SUPERSEDED_BY_MARKER = re.compile(r"Superseded-by: #\d+")
 # GitHub's search connection allows at most 100 issues per page.
 PAGE_SIZE = 100
 # GitHub search returns at most 1000 results per query, regardless of pagination.
@@ -246,8 +251,11 @@ def render_closed(issues_by_number: dict) -> str:
         reason = (issue.get("stateReason") or "unknown").lower()
         closed_at = issue.get("closedAt") or ""
         closed_date = closed_at[:10] if closed_at else "?"
-        entries.append((int(number),
-                        f"#{number} — {issue['title']} — closed {closed_date} ({reason})"))
+        line = f"#{number} — {issue['title']} — closed {closed_date} ({reason})"
+        markers = SUPERSEDED_BY_MARKER.findall(issue.get("body") or "")
+        if markers:
+            line += " — " + ", ".join(dict.fromkeys(markers))
+        entries.append((int(number), line))
     for _, line in sorted(entries):
         lines.append(line)
     lines.append("")
