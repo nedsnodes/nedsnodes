@@ -4792,8 +4792,8 @@ def suites_selected_since_every_commit(top, suites, recordings, commits, differs
     if PROGRAM in differs[0]:
         # A pull request head test run runs main's copy of this program, never the pull
         # request's, so no suite has run under a changed copy before the after-merge test run.
-        # The later comparisons are not made, so a later commit they could not read stops
-        # nothing; differs already shows that each commit resolves.
+        # The later comparisons are not made, but main() has already diffed every commit, so a
+        # later commit whose tree git cannot diff still stops the run before this point.
         return [(suite, True, f"judged by the comparison with the first commit alone, "
                               f"{commits[0][:12]}, since a pull request head test run runs "
                               f"main's test runner, never a changed one: {why}")
