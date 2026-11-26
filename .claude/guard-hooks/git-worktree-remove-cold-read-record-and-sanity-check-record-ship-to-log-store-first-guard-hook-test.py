@@ -738,8 +738,8 @@ try:
             ("by a path relative to the cwd", "git worktree remove ../beingwritten-worktree", checkout, False),
             ("by the end of its path alone, as git allows", "git worktree remove beingwritten-worktree", checkout,
              False),
-            ("by a path relative to a -C directory", "git -C .. worktree remove ./beingwritten-worktree", checkout,
-             False),
+            ("by a path relative to a -C directory", "git -C checkout worktree remove ../beingwritten-worktree",
+             checkout.parent, False),
             ("with a comment after it", f"git worktree remove -f -- {worktree}  # done", checkout, True)):
         waiter_starts.clear()
         code, output = run_hook(payload_for(command, cwd))
@@ -836,12 +836,91 @@ check("a path suffix shared by two worktrees names neither by suffix",
       and hook.worktree_named_by_path_suffix("b/one", worktrees) == Path("/a/b/one"))
 check("a suffix must start at a directory boundary",
       hook.worktree_named_by_path_suffix("wo", worktrees) is None)
+
+
+def worktrees_listed(worktrees):
+    """A worktrees_of that gives the same worktrees for every directory."""
+    return lambda directory: (worktrees, None)
+
+
 check("two paths given to one removal leave the hook unable to tell",
-      hook.worktrees_removed_or_unresolved_reason("git worktree remove /a/b/one /a/b/two", "/", worktrees)
+      hook.worktrees_removed_or_unresolved_reason("git worktree remove /a/b/one /a/b/two", "/",
+                                                  worktrees_listed(worktrees))
       == (None, "`worktree remove` is given 2 paths"))
 check("a removal naming no worktree leaves the hook unable to tell, never removing none",
-      hook.worktrees_removed_or_unresolved_reason("git worktree remove /a/nowhere", "/", worktrees)
+      hook.worktrees_removed_or_unresolved_reason("git worktree remove /a/nowhere", "/", worktrees_listed(worktrees))
       == (None, "the path /a/nowhere names no worktree the hook can find from the command's directory"))
+# A path that names no worktree because a `git worktree add` earlier in the command adds one there is left out.
+new_names_no_worktree = (None, hook.PATH_NAMES_NO_WORKTREE_REASON_TEMPLATE.format(argument="/a/new"))
+new_by_name_names_no_worktree = (None, hook.PATH_NAMES_NO_WORKTREE_REASON_TEMPLATE.format(argument="new"))
+for label, command, cwd, expected in (
+        ("added first", "git worktree add /a/new && git worktree remove /a/new", "/", ({}, None)),
+        ("added first after --", "git worktree add -f -- /a/new && git worktree remove /a/new", "/", ({}, None)),
+        ("added first by a bash -c string", "bash -c 'git worktree add /a/new' && git worktree remove /a/new", "/",
+         ({}, None)),
+        ("added first at a path relative to a -C directory", "git -C /a worktree add new && git worktree remove /a/new",
+         "/", ({}, None)),
+        ("added first at an absolute path after cd", "cd /b && git worktree add /a/new && git worktree remove /a/new",
+         "/", ({}, None)),
+        ("added first, beside a removal of a worktree that exists",
+         "git worktree add /a/new && git worktree remove /a/new && git worktree remove /a/b/two", "/",
+         ({Path("/a/b/two"): False}, None)),
+        ("added first at a relative path after cd", "cd /a && git worktree add new && git worktree remove /a/new", "/",
+         new_names_no_worktree),
+        ("removed before it is added", "git worktree remove /a/new; git worktree add /a/new", "/", new_names_no_worktree),
+        ("added at another path", "git worktree add /a/other && git worktree remove /a/new", "/", new_names_no_worktree),
+        ("added at a path holding a variable", 'git worktree add "$P" && git worktree remove /a/new', "/",
+         new_names_no_worktree),
+        ("added with -- and no path", "git worktree add -f --; git worktree remove /a/new", "/", new_names_no_worktree),
+        ("added with options alone", "git worktree add -f; git worktree remove /a/new", "/", new_names_no_worktree),
+        ("added by a git whose -C holds a variable", "git -C $D worktree add /a/new; git worktree remove /a/new", "/",
+         new_names_no_worktree),
+        ("listed, not added", "git worktree list /a/new; git worktree remove /a/new", "/", new_names_no_worktree),
+        ("added at a path after -b, whose value is a branch", "git worktree add -b new /a/p; git worktree remove new",
+         "/a", new_by_name_names_no_worktree),
+        ("added at a path after -B, whose value is a branch", "git worktree add -B new /a/p; git worktree remove new",
+         "/a", new_by_name_names_no_worktree),
+        ("added at a path after --reason, whose value is a reason",
+         "git worktree add --lock --reason new /a/p; git worktree remove new", "/a", new_by_name_names_no_worktree)):
+    check(f"removing a path that names no worktree, {label}, gives {expected}",
+          hook.worktrees_removed_or_unresolved_reason(command, cwd, worktrees_listed(worktrees)) == expected,
+          hook.worktrees_removed_or_unresolved_reason(command, cwd, worktrees_listed(worktrees)))
+
+
+# A removal with -C is matched against the worktrees git lists in the -C directory, joined to the cwd.
+def worktrees_listed_in_r_alone(directory):
+    if directory == "/r":
+        return [Path("/r"), Path("/r/.claude/worktrees/A")], None
+    return None, "`git worktree list` exited 128: fatal: not a git repository"
+
+
+for label, command, cwd, expected in (
+        ("an absolute -C", "git -C /r worktree remove A", "/x", ({Path("/r/.claude/worktrees/A"): False}, None)),
+        ("a -C relative to the cwd", "git -C r worktree remove .claude/worktrees/A", "/",
+         ({Path("/r/.claude/worktrees/A"): False}, None)),
+        ("an absolute -C after cd", "cd /x && git -C /r worktree remove A", "/x",
+         ({Path("/r/.claude/worktrees/A"): False}, None)),
+        ("a relative -C after cd", "cd /x && git -C r worktree remove A", "/",
+         (None, "the command changes directory, and the -C directory r is a relative path")),
+        ("a -C where git lists no worktrees", "git -C x worktree remove A", "/r",
+         (None, "git could not list the worktrees of the directory the removal runs in: `git worktree list` "
+                "exited 128: fatal: not a git repository"))):
+    check(f"a removal with {label} gives {expected}",
+          hook.worktrees_removed_or_unresolved_reason(command, cwd, worktrees_listed_in_r_alone) == expected,
+          hook.worktrees_removed_or_unresolved_reason(command, cwd, worktrees_listed_in_r_alone))
+not_a_repository_checkout, not_a_repository_worktree = checkout_with_worktree("dashcnotarepository")
+not_a_repository = _scratch / "dashcnotarepository" / "not-a-repository"
+not_a_repository.mkdir()
+code, output, stderr = run_hook_process(f"git -C {not_a_repository} worktree remove x", not_a_repository_checkout)
+check("a removal with -C into a directory outside any repository, from a checkout, ships every worktree's records "
+      "of the checkout's repository",
+      code == 0 and output is None
+      and (STORE / "cold-read-records" / "dashcnotarepository-doc-2026-11-03" / "fast-read.md").is_file(),
+      (code, output, stderr))
+code, output, stderr = run_hook_process(f"git -C {not_a_repository} worktree remove x", not_a_repository)
+check("a removal with -C into a directory outside any repository, run there, ships nothing and says so",
+      code == 0 and output["hookSpecificOutput"]["additionalContext"].startswith(
+          hook.WORKTREE_LISTING_FAILED_NOTICE.split("({reason})")[0]), (code, output, stderr))
 unshipped = [(Path("/s/ship.py"), Path("/a/b/one"), Path("/a/b/one/cold-read-records/r"), "FAILED: no space")]
 for label, unresolved, instruction in (
         ("a written-out path that names no worktree",
@@ -855,17 +934,19 @@ for label, unresolved, instruction in (
           unresolved in reason and instruction in reason
           and ("written out in full" in reason) == ("written out in full" in instruction), reason)
 check("a removal naming no path in the command text, as through xargs, leaves the hook unable to tell",
-      hook.worktrees_removed_or_unresolved_reason("echo /a/b/two | xargs git worktree remove", "/", worktrees)
+      hook.worktrees_removed_or_unresolved_reason("echo /a/b/two | xargs git worktree remove", "/",
+                                                  worktrees_listed(worktrees))
       == (None, "`worktree remove` names no path in the command text, so the path reaches git only when "
                 "the command runs, as through xargs"))
 check("builtin cd before a relative path leaves the hook unable to tell",
       hook.worktrees_removed_or_unresolved_reason(
           "builtin cd .claude/worktrees && git worktree remove -f ./A", "/r",
-          [Path("/r"), Path("/r/.claude/worktrees/A")])
+          worktrees_listed([Path("/r"), Path("/r/.claude/worktrees/A")]))
       == (None, "the command changes directory, and the path ./A is relative"))
 check("a worktree removed twice, once with -f, is removed with -f",
       hook.worktrees_removed_or_unresolved_reason(
-          "git worktree remove /a/b/two; bash -c 'git worktree remove --force /a/b/two'", "/", worktrees)
+          "git worktree remove /a/b/two; bash -c 'git worktree remove --force /a/b/two'", "/",
+          worktrees_listed(worktrees))
       == ({Path("/a/b/two"): True}, None))
 
 # A removal the shell or a wrapper resolves in another directory than the hook's cwd is unresolved, not let through.
@@ -877,21 +958,88 @@ for label, command in (
         ("env -C with its directory attached", "env -C/a git worktree remove writer"),
         ("env --chdir=", "env --chdir=/a git worktree remove writer"),
         ("sudo -D", "sudo -D /a git worktree remove writer")):
-    removed, reason = hook.worktrees_removed_or_unresolved_reason(command, "/r", repository_worktrees)
+    removed, reason = hook.worktrees_removed_or_unresolved_reason(command, "/r", worktrees_listed(repository_worktrees))
     check(f"{label} leaves the hook unable to tell which worktree is removed",
           removed is None and reason is not None and "changes directory" in reason, (removed, reason))
 check("a bracket glob in the path leaves the hook unable to tell",
-      hook.worktrees_removed_or_unresolved_reason("git worktree remove /a/wri[t]er", "/", worktrees)
+      hook.worktrees_removed_or_unresolved_reason("git worktree remove /a/wri[t]er", "/", worktrees_listed(worktrees))
       == (None, "the path /a/wri[t]er holds a variable, a glob or a substitution"))
 check("env without a directory option still resolves the path against the cwd",
       hook.worktrees_removed_or_unresolved_reason("env -u X git worktree remove .claude/worktrees/A", "/r",
-                                                  repository_worktrees)
+                                                  worktrees_listed(repository_worktrees))
       == ({Path("/r/.claude/worktrees/A"): False}, None))
 check("builtin with no command after it changes no directory",
       hook.simple_command_changes_directory(["builtin"]) is False)
 code, output = run_hook(payload_for("git worktree remove /a/nowhere", "/"), runner_answering(0, b""))
 check("a removal when git lists no worktree whose directory exists, so there is nothing to ship, exits 0 silently",
       (code, output) == (0, None), (code, output))
+
+
+def store_holds_cold_read_record_of(name):
+    return (STORE / "cold-read-records" / f"{name}-doc-2026-11-03" / "fast-read.md").is_file()
+
+
+# A worktree that a `git worktree add` earlier in the same command adds is new and holds no records, so its
+# removal ships nothing, not every worktree's records.
+added_checkout, added_kept_worktree = checkout_with_worktree("addedfirst")
+added_path = added_checkout.parent / "addedfirst-added-worktree"
+code, output, stderr = run_hook_process(
+    f"git worktree add -q -b added {added_path} && git worktree remove {added_path}", added_checkout)
+check("removing the worktree the same command adds first ships no other worktree's records",
+      code == 0 and output is None and not store_holds_cold_read_record_of("addedfirst"), (code, output, stderr))
+
+# A removal with -C is matched against the worktrees of the repository -C names, from a checkout of another
+# repository, from a directory outside any repository, and by a -C relative to the working directory.
+outside_any_repository = _scratch / "outside-any-repository"
+outside_any_repository.mkdir()
+for name, label, cwd_of, directory_of in (
+        ("dashcother", "from a checkout of another repository", lambda checkout: added_checkout,
+         lambda checkout: checkout),
+        ("dashcoutside", "from a directory outside any repository", lambda checkout: outside_any_repository,
+         lambda checkout: checkout),
+        ("dashcrelative", "by a -C relative to the working directory", lambda checkout: checkout.parent,
+         lambda checkout: "checkout")):
+    dash_c_checkout, dash_c_worktree = checkout_with_worktree(name)
+    code, output, stderr = run_hook_process(
+        f"git -C {directory_of(dash_c_checkout)} worktree remove {dash_c_worktree.name}", cwd_of(dash_c_checkout))
+    check(f"a removal with -C into its repository, {label}, ships the records of the worktree it names",
+          code == 0 and output is None and store_holds_cold_read_record_of(name)
+          and not store_holds_cold_read_record_of("addedfirst"), (code, output, stderr))
+
+# A leading ~ in the path a `git worktree add` adds at, and in a -C directory, is expanded as bash expands it.
+# In-process, because a hook process given this HOME cannot find the shell parser installed under the real one.
+tilde_add_checkout, _ = checkout_with_worktree("tildeadd")
+tilde_dash_c_checkout, tilde_dash_c_worktree = checkout_with_worktree("tildedashc")
+real_home = os.environ["HOME"]
+os.environ["HOME"] = str(_scratch)
+try:
+    tilde_add_result = run_hook(payload_for(
+        "git worktree add -q --detach ~/tildeadd/added && git worktree remove ~/tildeadd/added", tilde_add_checkout))
+    tilde_dash_c_result = run_hook(payload_for(
+        f"git -C ~/tildedashc/checkout worktree remove {tilde_dash_c_worktree.name}", outside_any_repository))
+finally:
+    os.environ["HOME"] = real_home
+check("removing the worktree the same command adds first at a path with a leading ~ ships no other worktree's "
+      "records", tilde_add_result == (0, None) and not store_holds_cold_read_record_of("tildeadd"), tilde_add_result)
+check("a removal with -C into a directory with a leading ~ ships the records of the worktree it names",
+      tilde_dash_c_result == (0, None) and store_holds_cold_read_record_of("tildedashc"), tilde_dash_c_result)
+
+# A removal with -C whose worktree a record is being written in is deferred, with the waiter run from the main
+# checkout of the repository -C names.
+writing_checkout, writing_worktree = checkout_with_worktree("dashcwriting")
+writing_record = writing_worktree / "cold-read-records" / "dashcwriting-doc-2026-11-03"
+writer, held = record_writer_started(writing_record)
+try:
+    waiter_starts.clear()
+    code, output = run_hook(payload_for(f"git -C {writing_checkout} worktree remove {writing_worktree}",
+                                        outside_any_repository))
+    check("a removal with -C, from outside any repository, of the worktree a record is being written in is "
+          "refused and deferred, with the waiter run from that repository's main checkout",
+          held and code == 0 and (refusal(output) or "").startswith(removes_worktree_refusal_start)
+          and waiter_starts == [(writing_worktree, False, [writing_record], writing_checkout)],
+          (held, code, output, waiter_starts))
+finally:
+    writer.communicate("")
 
 
 # The deferred removal, end to end: the hook starts the real waiter, detached, which waits for the writer,

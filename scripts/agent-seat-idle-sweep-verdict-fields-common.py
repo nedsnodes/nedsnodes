@@ -2,9 +2,15 @@
 """The fields of one idle-sweep verdict, the JSON object scripts/agent-seat-idle-sweep-verdicts-print.py
 prints for each agent-seat, and the values its rule, decision and sentences may take.
 
-Not a program to run. The printing program's test checks every verdict it prints with
-verdict_field_problems(), and the program that judges and sends reads verdicts by the names here, so
-a field renamed in one place and not the other fails a test instead of being read as missing.
+Not a program to run. It holds each field name as a constant, the fields every verdict carries and
+those it may carry, and the values a rule, decision, sentence kind and code reading may take.
+verdict_field_problems() below says which fields a verdict must and may have. The printing program's
+test checks every verdict it prints with verdict_field_problems(), and the program that judges and
+sends reads verdicts by the names here, so a field renamed in one place and not the other fails a
+test instead of being read as missing. That holds for the verdict's top-level fields and for the
+nested fields verdict_field_problems() names, those of a sentence, of the usage limit and of the
+fallback decision; other nested keys, such as each running subagent entry's "id" and "started",
+are written as literals and no test catches a rename of one.
 """
 
 AGENT_SEAT = "agent_seat"
@@ -59,18 +65,23 @@ HANDOFF_DEFERRED_MARKER = "handoff_deferred_marker"  # path or null
 USAGE_LIMIT = "usage_limit"
 SENTENCES = "sentences"
 OPEN_TASKS_NOTHING_HOLDS = "open_tasks_nothing_holds"  # [{"id", "subject"}]
-# [{"kind", "number"}], once each, at rules 3 to 5, and at rule 2 when its fallback reached them: each prerequisite of an open task, such as
-# {"kind": "pr_merged", "number": 50}, that was not asked of GitHub because the due-task hook's
-# GitHubConditionChecker had spent its time budget, so the task it holds may be free; absent when none
+# [{"kind", "number"}], once each: each prerequisite of an open task, such as
+# {"kind": "pr_merged", "number": 50}, that the open-task scan did not ask GitHub about because the
+# due-task hook's GitHubConditionChecker had spent its time budget, so the task it holds may be free.
+# Set whenever the scan runs, even when a gh failure ends it; absent when the scan skipped none.
 GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET = "github_conditions_skipped_for_budget"
 TEXT = "text"                              # code's text to send as written, at rule 3
 IF_EVERY_SENTENCE_BACKED = "if_every_sentence_backed"  # {"rule", "decision", maybe "text"}
 # {"record_uuid", "time", "text"} or null, at rules 2 to 5
 LAST_TURN_ENDING_MESSAGE = "last_turn_ending_message"
-# [{"time", "name", "input"}]: each tool call from the start of the earliest turn holding a sentence
-# the judge decides, with its input cut to TOOL_CALL_INPUT_CHARACTERS_KEPT characters of JSON
+# [{"time", "name", "input", maybe "failed"}]: each tool call from the start of the earliest turn
+# holding a sentence the judge decides, with its input cut to TOOL_CALL_INPUT_CHARACTERS_KEPT
+# characters of JSON, and "failed": true when its result carried is_error
 TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE = (
     "tool_calls_since_start_of_earliest_turn_with_sentence_to_judge")
+# [{"time", "text"}]: each assistant text from the start of the same turn, whole
+ASSISTANT_TEXT_MESSAGES_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE = (
+    "assistant_text_messages_since_start_of_earliest_turn_with_sentence_to_judge")
 TOOL_CALL_INPUT_CHARACTERS_KEPT = 1500
 # [{"id", "subject", "prerequisites", "blockedBy"}]: every open task of the agent-seat that waits on
 # something, whenever it was created, at rule 2 when the judge decides
@@ -87,6 +98,7 @@ OPTIONAL = (DECISION, NOT_CHECKED, SUPERVISOR_LAST_POLL_AT, LAST_ACTIVITY, LAST_
             USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, TEXT, IF_EVERY_SENTENCE_BACKED,
             LAST_TURN_ENDING_MESSAGE,
             TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE,
+            ASSISTANT_TEXT_MESSAGES_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE,
             OPEN_TASKS_WITH_PREREQUISITES_OR_BLOCKED_BY)
 
 USAGE_LIMIT_FIELDS = ("record_uuid", "resets_at", "reset_time_passed", "account_now_logged_in")

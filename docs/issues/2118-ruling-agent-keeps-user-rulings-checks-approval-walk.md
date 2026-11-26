@@ -68,7 +68,7 @@ Once the planned `scripts/standing-user-rulings-edit-and-approval-walk-item-chec
 - **Rulings disagree:** show him both user-rulings in the item, and ask him which of item 5.2's three outcomes applies, and send his answer with `scripts/ruling-agent-ask.py`.
 - **Done:** no user-ruling bears on the item, or the item already says why it departs from one.
 
-The check is run by the agent, not by a hook, because it waits for `ruling-agent`'s judgment, which cannot fit a hook's budget; item 17.2 names it as a check that can wait. GHI 30's hook at the Write of `docs/walk/<name>.md` separately shows the newest matching quotes. A planned addition to the current-item Stop hook, `nn-systems/skills/walk-me-through/walk-me-through-current-item-shown-to-user-after-each-agent-message-stop-hook.py`, stops any reply that shows an item without a #rulings_checked block.
+The check is run by the agent, not by a hook, because it waits for `ruling-agent`'s judgment, which cannot fit a hook's budget; item 17.2 names it as a check that can wait. GHI 30's hook at the Write of `docs/walk/<name>.md` separately shows the newest matching quotes. A planned addition to the closing-line Stop hook, `nn-systems/skills/walk-me-through/walk-me-through-agent-reply-to-user-not-ending-with-waiting-item-closing-line-refusal-stop-hook.py`, stops any reply that shows an item without a #rulings_checked block.
 
 **When the lookup fails.** When the store cannot be read, ned-box cannot be reached or `ruling-agent` does not answer, the program writes a #rulings_checked block quoting the error, marks the item held, prints what failed, and exits nonzero. The agent tells the user what it printed, does not search by hand, and shows the item only after a later check prints one of the five outcomes above; open question 7 asks what the approval-walk does meanwhile.
 
@@ -123,7 +123,7 @@ Each part ships as its tests pass. Parts 1 to 4 ship in this order; part 5 needs
 
 ## Next action
 
-prime-intellect builds the build order's parts in turn. Part 1, the store and the index program, merged on 2026-11-03 in PR [Standing user-rulings store: the index program, its store, index file and anchor list, and the first load (GHI 2118 build step 1)](https://github.com/nedsnodes/nedsnodes/pull/2194). The job that runs the index program each minute is not running yet: on 2026-11-07 ned-box's crontab had no line naming `scripts/standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.py`, and `git grep` of that file name over origin/main found it only in the script itself and its test. Part 2 is next.
+prime-intellect builds the build order's parts in turn. Part 1, the store and the index program, merged on 2026-11-03 in PR [Standing user-rulings store: the index program, its store, index file and anchor list, and the first load (GHI 2118 build step 1)](https://github.com/nedsnodes/nedsnodes/pull/2194). The job that runs the index program each minute, with `--failures-only`, is the entry of that program in `nn-systems/general-tools/scheduled-jobs-on-each-machine.json`, which ned-box's reference-checkout installs when it pulls the merge that adds it. Part 2 is next.
 
 ## Open questions for the user
 
@@ -148,7 +148,7 @@ prime-intellect builds the build order's parts in turn. Part 1, the store and th
 - Whether the index program reads ned-box's own transcripts directly, so that a check that can wait is current to that moment on ned-box, rather than to the last mirror pass.
 - Where `ruling-agent` writes the background summary, and how it reaches the agent that triggered it.
 - The syntax and fields of the #rulings_checked block, where in the item it goes, and whether the Stop hook also stops a reply that shows a held item.
-- How the current-item Stop hook treats a reply that reports a held item instead of showing it.
+- How the closing-line Stop hook treats a reply that reports a held item instead of showing it.
 - Whether the check runs on items the /walk-me-through skill approves without asking, which are never shown.
 - The command-line interface of `scripts/ruling-agent-ask.py` for asks, new user-rulings, approved notes, his answers on pairs and missed-user-ruling reports.
 - How the index program picks a message's tags when the agent message he answered names several things, or when his message answers no agent message; how it maps a path outside `nn-systems/` to a system; and how tags name the repository a GHI or pull request number belongs to.

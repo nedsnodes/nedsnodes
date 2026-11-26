@@ -1867,7 +1867,8 @@ def run_completed_task_prune_cases(workspace: Path):
           and "Tell the user, in your first message:" in prune_warning
           and "last message before you wait" not in prune_warning, prune_warning)
     check("a high-water mark that could not be written leaves no partial file behind",
-          not (fixture.list_directory / ".highwatermark.partial").exists(), line)
+          not [path.name for path in fixture.list_directory.iterdir() if path.name.endswith(".partial")],
+          sorted(path.name for path in fixture.list_directory.iterdir()))
 
     fixture = PruneFixture(workspace, "read-only")
     (fixture.list_directory / ".highwatermark").write_text("30", encoding="utf-8")
