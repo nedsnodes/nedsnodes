@@ -394,8 +394,32 @@ def main():
               and not (helpers / "briefs" / "brief-14p-mac-claude.md").exists(),
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
+        saved_text_31 = saved_block_31.read_bytes()
+        saved_block_31.write_bytes(b"#follow_up_request pull request 31\n1. fix-next: \xff\xfe\n")
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14n"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"stdout": hand_written_31}})
+        saved_block_31.write_bytes(saved_text_31)
+        check("a saved block that is not UTF-8 exits 1, naming the file, and writes no brief",
+              completed.returncode == 1 and "brief not composed: StepFailed" in completed.stderr
+              and f"could not read {saved_block_31}" in completed.stderr
+              and not (helpers / "briefs" / "brief-14n-mac-claude.md").exists(),
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
         saved_block_31.unlink()
         saved_block_31.mkdir()
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14c", "claude_reviewer": False}],
+                                gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        brief_file = helpers / "briefs" / "brief-14c-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("an entry with no Claude reviewer is composed though its saved block cannot be read, with the "
+              "follow-up request facts left out and the follow-up request program not run",
+              completed.returncode == 0
+              and "- Follow-up request blocks: left out, because this pull request's review tier calls for no "
+                  "Claude reviewer.\n" in brief
+              and "merge-lane-2's follow-up request for pull request" not in brief
+              and not follow_up_calls(scratch),
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
         completed = run_program(scratch, helpers, [{**first_round, "tag": "14u"}], gh_routes=follow_up_gh_routes,
                                 follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
         saved_block_31.rmdir()

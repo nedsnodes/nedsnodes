@@ -33,7 +33,9 @@ print, they quote its refusal beside the saved block. An author on the Mac saves
 the block on the Mac, so the brief then says no block is saved and that the
 printed block may not be the one the author received. A saved block that cannot
 be read, or a printed block that is not a follow-up request block, is a failed
-step. The facts end with the pull request's description, which the brief
+step. An entry whose claude_reviewer is false gets none of these follow-up
+request facts, since no reviewer reads them and the Codex review and head tests
+wait on the brief. The facts end with the pull request's description, which the brief
 quotes as the author's claims. The reviewer runs with no GitHub login, so the
 brief is where it reads the description and the follow-up request blocks. The brief is written to
 briefs/brief-<tag>-mac-claude.md under the worktrees and outputs directory, and
@@ -335,7 +337,13 @@ def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pu
     closing_issues, description = pull_request_closing_issues_and_description(
         number, merged_pull_requests.gh_token)
     facts.append(follow_up_pull_requests_text(number, closing_issues, merged_pull_requests))
-    facts.extend(follow_up_request_blocks_text(description, review_tools_worktree, merged_pull_requests.gh_token))
+    if spec.get("claude_reviewer", True):
+        facts.extend(follow_up_request_blocks_text(description, review_tools_worktree, merged_pull_requests.gh_token))
+    else:
+        # Steps 3 and 4 of the run wait on this brief, so a saved block that cannot be read must not stop them
+        # when no reviewer reads the follow-up request facts.
+        facts.append("- Follow-up request blocks: left out, because this pull request's review tier calls for no "
+                     "Claude reviewer.")
     facts.append(f"- Hazards: {spec['hazards']}")
     facts.append("- The author's description of the pull request, quoted below. It is what "
                  "the author claims; check each claim against the repository yourself, "

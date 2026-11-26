@@ -364,7 +364,7 @@ def read_text_if_present(path):
         return path.read_text()
     except FileNotFoundError:
         return None
-    except OSError as error:
+    except (OSError, UnicodeDecodeError) as error:
         raise StepFailed(f"could not read {path}: {error}") from None
 
 
