@@ -1002,11 +1002,19 @@ def poll_state_read(path):
     return state
 
 
-def poll_state_write(path, state):
-    """Replace the state file whole, so that a run killed while writing leaves the last state."""
+def poll_state_write(path, state, only_when_absent=False):
+    """Replace the state file whole, so that a run killed while writing leaves the last state.
+    With only_when_absent, make it only when no file is at path, raising FileExistsError and
+    leaving the file there as it is otherwise."""
     partial = path.with_name(path.name + ".partial")
     partial.write_text(json.dumps(state), encoding="utf-8")
-    os.replace(partial, path)
+    if not only_when_absent:
+        os.replace(partial, path)
+        return
+    try:
+        os.link(partial, path)
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def event_file_line_count(path):
@@ -1178,12 +1186,21 @@ def poll_once_write_baseline(arguments, token, state_path, events_path):
         warn("merge-lane-open-prs-watch-and-reviewer-assign: the baseline poll failed: "
              + one_line_snippet(reason, FAILURE_REASON_SNIPPET_CHARS))
         return 1
-    poll_state_write(state_path, {
-        "pull_requests": {number: {"head_sha": seen["head_sha"], "is_draft": seen["is_draft"]}
-                          for number, seen in pull_requests_by_number(pull_requests).items()},
-        "notices": {}, "failed_polls": 0,
-        "event_lines_delivered": event_file_line_count(events_path),
-        "last_events_task_opened_at": None})
+    # The lock binds only the programs, so a state file put back by hand while GitHub was read
+    # is found by the write, which never replaces one.
+    try:
+        poll_state_write(state_path, {
+            "pull_requests": {number: {"head_sha": seen["head_sha"], "is_draft": seen["is_draft"]}
+                              for number, seen in pull_requests_by_number(pull_requests).items()},
+            "notices": {}, "failed_polls": 0,
+            "event_lines_delivered": event_file_line_count(events_path),
+            "last_events_task_opened_at": None}, only_when_absent=True)
+    except FileExistsError:
+        warn(f"merge-lane-open-prs-watch-and-reviewer-assign: no baseline was written, because {state_path} "
+             f"appeared while GitHub was read, and replacing it would drop the events since its "
+             f"last run. It is left as it is: run --poll-once, and move it aside first only if "
+             f"that says it is unusable.")
+        return 1
     emit(f"WATCH: wrote the baseline of {len(pull_requests)} open pull request(s) to {state_path}.\n"
          f"  The baseline raises no event, so list the open pull requests by hand once: a pull "
          f"request that opened, got a new head or was marked ready since the last good run, or "
@@ -1382,6 +1399,9 @@ def main(argv=None):
     options_in_use = [*(["--repo", arguments.repo] if not repo_is_default else []),
                       *(["--token-file", arguments.token_file]
                         if arguments.token_file != DEFAULT_TOKEN_FILE else [])]
+    # Author-supplied titles and paths must not kill a run on an unencodable character.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     if arguments.poll_once or arguments.poll_once_write_baseline:
         if arguments.poll_once_directory is None:
             if not repo_is_default:
@@ -1397,10 +1417,6 @@ def main(argv=None):
         warn(f"merge-lane-open-prs-watch-and-reviewer-assign: {reason}")
         return 2
     SECRETS_TO_REDACT.append(token)
-
-    # Author-supplied titles must not kill the watch on an unencodable character.
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="replace")
 
     seed_file = arguments.merge_lane_pr_review_assignments_file_write_from_seed_and_reviewed_prs_then_exit
     instead_of_watching = (seed_file is not None
