@@ -1229,9 +1229,9 @@ CLOSE_DEFERRED_HEADING_NOT_NOTED = ("Its heading in {document} names other items
 SUMMARY_HEADING = re.compile(r"\bof\s+\d+\b[*_\s:.\-\u2013\u2014]*summary\b|^\s*##\s+[*_\s]*summary\b", re.I)
 NEWLINE = "\n"
 UNNUMBERED_HEADING_PARTS = re.compile(r"^(\s*##[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$")
-# The four categories of section 2 of
+# The first four categories of section 2 of
 # docs/nedsnodes-wiki/queue/nedsnodes-goals-and-philosophy-founding-statement-and-agent-working-principles.md,
-# in the order their items are shown.
+# in the order their items are shown; its fifth, Declined, holds findings that get no walk item.
 WALK_CATEGORIES = ("must_fix_now", "fix_next", "fix_during_maintenance", "file_an_improvement_feature_or_change")
 WALK_CATEGORY_TAG = "#approval_walk_item_in_category_"
 WALK_WAITS_ON_TAG = "#approval_walk_item_waits_on"
