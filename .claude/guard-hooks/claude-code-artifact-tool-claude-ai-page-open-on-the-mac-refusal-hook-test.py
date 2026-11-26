@@ -63,7 +63,7 @@ def refusal(tool_input, platform=MAC, tool_name="Artifact"):
 
 reason = refusal({"action": "open", "url": PAGE_LINK})
 check("on the Mac, an open is refused", reason is not None and reason.startswith(
-    '[rule artifact-guard-claude-ai-page-open-on-the-mac] '
+    '[rule artifact-tool-claude-ai-page-open-on-the-mac-refusal-hook-rule] '
     'REFUSED on purpose: Artifact tool call with action "open", blocked by a PreToolUse hook on the Mac.'),
     reason)
 check("the refusal says why: the user does not want pages put on his screen, even one he asked for",
@@ -131,7 +131,7 @@ process = subprocess.run(
 process_reason = deny_reason_of(process.returncode, process.stdout.strip())
 if sys.platform == MAC:
     check("run as a process on the Mac, an open exits 0 with a deny", process_reason is not None
-          and process_reason.startswith("[rule artifact-guard-claude-ai-page-open-on-the-mac]"),
+          and process_reason.startswith("[rule artifact-tool-claude-ai-page-open-on-the-mac-refusal-hook-rule]"),
           f"exit {process.returncode}, stdout {process.stdout!r}, stderr {process.stderr!r}")
 else:
     check(f"run as a process on {sys.platform}, an open exits 0 with no output",

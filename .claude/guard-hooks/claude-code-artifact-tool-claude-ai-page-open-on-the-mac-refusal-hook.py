@@ -32,7 +32,7 @@ MAC_PLATFORM = "darwin"
 NO_LINK_TEXT = "(no link in the call: use the link the publish that made the page returned)"
 
 REFUSAL_TEMPLATE = (
-    '[rule artifact-guard-claude-ai-page-open-on-the-mac] '
+    '[rule artifact-tool-claude-ai-page-open-on-the-mac-refusal-hook-rule] '
     'REFUSED on purpose: Artifact tool call with action "open", blocked by a PreToolUse hook '
     "on the Mac. The user works at the Mac and does not want agents putting pages on his screen "
     "there, even a page he asked to see; he opens each page himself from its link. The open did "
