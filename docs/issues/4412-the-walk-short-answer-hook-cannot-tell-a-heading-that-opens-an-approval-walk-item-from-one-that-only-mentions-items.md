@@ -22,3 +22,7 @@ Search the transcripts under `nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent
 If no refusal has that cause, record the search in this GHI-MD and close the issue as not planned with `scripts/ghi-issue-write.py close`, because `CLAUDE.md`'s guard rule then supports no new parsing. If the search cannot be finished, record why and leave the issue open.
 
 If a refusal has that cause, fix the first form: pass the heading's level to `opens_another_item`, so that a heading deeper than the waiting item's heading does not end its text, and add a test with `### Items 13, 14, 15 are written`. A heading at the waiting item's level still ends its text. Leave the second form alone until it happens.
+
+## Outcome
+
+Fixed by [pull request 4491, Walk short-answer hook: stop comparing a revised item and stop calling a model](https://github.com/nedsnodes/nedsnodes/pull/4491), merged on 2026-11-25. It removed `opens_another_item` together with the comparison of a revised item that needed it, so the hook no longer ends an item's text at any heading, and neither form above can occur. A search of `nn-systems/skills/walk-me-through/` on main at 2026-11-26 finds no `opens_another_item`.
