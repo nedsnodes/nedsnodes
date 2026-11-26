@@ -367,9 +367,17 @@ class Case:
         Case.forked_runs += 1
         output_paths = [self.root / f"forked-run-{Case.forked_runs}-{stream}" for stream in ("stdout", "stderr")]
         # Opened here, not in the child, so that a failure to make them reaches the suite.
-        output_descriptors = [os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600) for path in output_paths]
+        output_descriptors = []
+        try:
+            for path in output_paths:
+                output_descriptors.append(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
+        except BaseException:
+            for opened in output_descriptors:
+                os.close(opened)
+            raise
         sys.stdout.flush()
         sys.stderr.flush()
+        child = None
         try:
             child = os.fork()
             if child == 0:
@@ -404,21 +412,24 @@ class Case:
                         traceback.print_exc()
                         exit_code = 1
                         # An interpreter flushes stdout on its way out; os._exit below would drop it.
-                        with contextlib.suppress(Exception):
+                        try:
                             sys.stdout.flush()
+                        except Exception:
+                            traceback.print_exc()
                     sys.stderr.flush()
                 finally:
                     # Never return: the child would run the rest of the suite and remove its scratch directory.
                     os._exit(exit_code & 0xFF if isinstance(exit_code, int) else 1)
-        finally:
-            for opened in output_descriptors:
-                os.close(opened)
-        try:
+            while output_descriptors:
+                os.close(output_descriptors.pop())
             _, status = os.waitpid(child, 0)
         except BaseException:
+            while output_descriptors:
+                os.close(output_descriptors.pop())
             # Such as the suite's SIGTERM handler: the child must not go on in the scratch directory the suite removes.
-            os.kill(child, signal.SIGKILL)
-            os.waitpid(child, 0)
+            if child:
+                os.kill(child, signal.SIGKILL)
+                os.waitpid(child, 0)
             raise
         stdout, stderr = (path.read_text(encoding="utf-8") for path in output_paths)
         for path in output_paths:
@@ -1081,6 +1092,82 @@ def test_the_waiting_item_read_step_searches_an_item_under_a_shared_heading_by_i
     check("an item under a heading several items share is searched by its own opening's title and number too",
           result.returncode == 0 and "First answer." in result.stdout and "Not item 3." not in result.stdout,
           described(result))
+
+
+def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
+    program = load_program()
+    finder = program.load_walk_finder()
+    for line in (" ## Item 3 of 9: the first", "- **Item 3 of 9**: the first", "**Item 3 of 9: the first** More detail.",
+                 "## Item 3 of 9 (revised): the first", "> ## Item 3 of 9 revised: the first",
+                 "**Item 3 of 9 (revised):** the first", "**Item 3 of 9 revised:** the first",
+                 "**Item 3 of 9**: (revised) the first"):
+        title = program.item_title(finder, line)
+        check(f"`{line}` gives its item the title `the first`", title == "the first", repr(title))
+    kept = program.item_title(finder, "**Item 3 of 9 revised:** New text.", with_text_after_title=True)
+    check("a bold opening closing after its `revised` label keeps its text after the title with no stray delimiter",
+          kept == "New text.", repr(kept))
+    kept = program.item_title(finder, "**Item 3 of 9 (revised):** Revised estimates are due Friday.",
+                              with_text_after_title=True)
+    check("a bold opening's `revised` label is taken off once, so a text opening with the word Revised keeps it",
+          kept == "Revised estimates are due Friday.", repr(kept))
+    earlier = program.heading_body(finder, "**Item 3 of 9 (revised):** estimates are due Friday.")
+    later = program.heading_body(finder, "**Item 3 of 9 (revised):** Revised estimates are due Friday.")
+    check("two versions of a bold-paragraph item differing only by an opening word Revised are different texts, so "
+          "the earlier one is kept as a withdrawn version", earlier != later, repr((earlier, later)))
+    earlier = program.heading_body(finder, "**Item 3 of 9:** estimates are due Friday.")
+    later = program.heading_body(finder, "**Item 3 of 9:** Revised estimates are due Friday.")
+    check("after a closed bold count, an opening word Revised is the item's text, not a `revised` label, so the "
+          "earlier version is kept as a withdrawn version", earlier != later, repr((earlier, later)))
+    for line, title in (("**Item 3 of 9:** Revised estimates", "Revised estimates"),
+                        ("**Item 3 of 9: Revised** More detail.", "Revised"),
+                        ("**Item 3 of 9: Revised estimates** More.", "Revised estimates"),
+                        ("## Item 3 of 9: Revised estimates", "Revised estimates"),
+                        ("**Item 3 of 9**: revised: the first", "the first"),
+                        ("## Item 3 of 9 revised: the first", "the first")):
+        found = program.item_title(finder, line)
+        check(f"`{line}` gives its item the title `{title}`: only `(revised)` and `revised:` are a label",
+              found == title, repr(found))
+
+
+def test_the_waiting_item_read_step_searches_a_bold_list_opening_by_its_title_alone():
+    document = ("# A walk\n\n## Items 3 and 4 of 9: two openings\n\n- **Item 3 of 9**: the first\n\n"
+                "The tests are still running.\n#case_against weak: the page grows.\n\nRecommendation: change it.\n\n"
+                "**Item 4 of 9: the second** More detail.\n\nThe page ends.\n#case_against weak: it is short.\n\n"
+                "Recommendation: keep it.\n")
+    case = Case(document=document)
+    session_dialog_with_its_transcript_write(case.log_store, "s11", ["Item 3 of 9: the first", "First answer."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("an item opening as a bold list line is searched by its title, not by the whole line",
+          result.returncode == 0 and "First answer." in result.stdout, described(result))
+
+
+def test_the_waiting_item_read_step_searches_a_revised_linked_title_without_its_label_or_escapes():
+    case = Case(document=marks_document("The tests are still running.\n").replace(
+        "## Item 3 of 9: the opening sentence",
+        "## Item 3 of 9 (revised): Keep [the opening](https://example.com/o) sentence *short* & plain"))
+    session_dialog_with_its_transcript_write(case.log_store, "s12", [
+        "Keep the opening sentence *short* & plain", "Shorter still."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a revised linked title is searched with its links dropped and its `revised` label, emphasis and `&` as "
+          "an earlier message writes them", result.returncode == 0 and "Shorter still." in result.stdout,
+          described(result))
+
+
+def test_title_search_groups_with_the_same_numbers_are_searched_once():
+    program = load_program()
+    finder = program.load_walk_finder()
+    parser = finder.markdown_parser()
+    root = SUITE_ROOT / "title-groups-merged"
+    root.mkdir(parents=True)
+    document = root / f"{WALK_NAME}.md"
+    document.write_text("# A walk\n\n## Items 3 and 4 of 9: two openings\n\n**Item 3 of 9: the first**\n\n"
+                        "The tests are still running.\n#case_against weak: the page grows.\n\n"
+                        "Recommendation: change it.\n\n**Item 4 of 9: the second**\n\nThe page ends.\n"
+                        "#case_against weak: it is short.\n\nRecommendation: keep it.\n")
+    groups = program.approval_walk_item_title_search_groups(finder, document, "item 3 of 9", ["3"], 9, parser, [])
+    check("the shared heading's title and the one waiting item's own opening title are one search, so no reply prints twice",
+          [numbers for _, numbers in groups] == [["3"]] and "two openings" in groups[0][0]
+          and "the first" in groups[0][0], repr(groups))
 
 
 def test_the_waiting_item_read_step_searches_a_title_that_opens_with_a_dash():
@@ -6075,6 +6162,20 @@ def rewritten_item_3(case, recommendation):
     return document
 
 
+def test_the_read_step_keeps_the_earlier_read_text_of_an_item_with_an_indented_heading():
+    case = item_read_case()
+    answered_and_closed(case)
+    document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+    document.write_text(document.read_text().replace(ITEM_3_HEADING, " " + ITEM_3_HEADING, 1))
+    case.run(WAITING_ITEM_READ)
+    rewritten_item_3(case, "drop it.")
+    result = case.run(WAITING_ITEM_READ)
+    check("an item whose heading is indented keeps the text its earlier read read as Withdrawn version 1",
+          result.returncode == 0
+          and ("Recommendation: drop it.\n\n#### Withdrawn version 1 of item 3\n\n" + ITEM_3_BODY.format("leave it."))
+          in document.read_text(), described(result) + document.read_text())
+
+
 def kept_line(case, document, version):
     report = case.records / f"{WALK_NAME}-item-3-of-5-2026-10-17" / "cold-read-fast-read.md"
     return (f"item 3 of 5: its earlier text, which the cold-read-fast-read {report} read, is now kept below its live "
@@ -7562,14 +7663,23 @@ def test_a_forked_run_runs_the_program_its_command_names_as_a_launch_would():
           (first.stdout.strip(), second.stdout.strip())
           == (str(case.root / "names-itself-first.py"), str(case.root / "names-itself-second.py")),
           described(second))
+    # A zone unlike the suite's own, so that a child keeping the suite's zone fails the check.
+    case_zone, offset = (("Etc/GMT+12", "-1200") if time.strftime("%z") == "+1400"
+                         else ("Pacific/Kiritimati", "+1400"))
     zone = forked_run_of(case, "prints-its-zone", "import time\ndef main():\n    print(time.strftime('%z'))\n",
-                         {**os.environ, "TZ": "Pacific/Kiritimati"})
-    check("a forked run takes the case's TZ, as a launched interpreter does", zone.stdout.strip() == "+1400",
+                         {**os.environ, "TZ": case_zone})
+    check("a forked run takes the case's TZ, as a launched interpreter does", zone.stdout.strip() == offset,
           described(zone))
     raised = forked_run_of(case, "prints-then-raises", "def main():\n    print('printed first')\n    raise ValueError\n")
     check("a forked run that raises keeps what it printed on stdout",
           raised.returncode == 1 and raised.stdout == "printed first\n" and "ValueError" in raised.stderr,
           described(raised))
+    unflushed = forked_run_of(case, "stdout-cannot-flush",
+                              "import sys\nclass Unflushable:\n    def write(self, text):\n        return len(text)\n"
+                              "    def flush(self):\n        raise OSError('stdout could not be flushed')\n"
+                              "def main():\n    sys.stdout = Unflushable()\n    raise ValueError\n")
+    check("a forked run that raises and then cannot flush stdout reports the failed flush",
+          unflushed.returncode == 1 and "stdout could not be flushed" in unflushed.stderr, described(unflushed))
 
 
 def test_a_forked_run_that_cannot_make_its_output_files_raises_the_error_that_stopped_it():
@@ -7595,6 +7705,73 @@ def test_a_forked_run_that_cannot_make_its_output_files_raises_the_error_that_st
         os.open = real_open
 
 
+def test_a_forked_run_whose_second_output_file_cannot_be_made_closes_the_first():
+    case = Case()
+    program = case.root / "never-runs.py"
+    program.write_text("def main():\n    pass\n")
+    real_open = os.open
+    opened = []
+
+    def second_disk_full(path, *arguments):
+        if "forked-run-" in str(path):
+            if opened:
+                raise OSError(errno.ENOSPC, "No space left on device", str(path))
+            opened.append(real_open(path, *arguments))
+            return opened[-1]
+        return real_open(path, *arguments)
+
+    os.open = second_disk_full
+    try:
+        case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
+    except OSError:
+        pass
+    finally:
+        os.open = real_open
+    try:
+        os.fstat(opened[0])
+        closed = False
+        os.close(opened[0])
+    except OSError:
+        closed = True
+    check("a forked run whose second output file cannot be made closes the first before the error goes on", closed)
+
+
+def test_a_forked_run_stopped_while_closing_its_copies_of_the_output_files_kills_and_reaps_its_child():
+    case = Case()
+    program = case.root / "sleeps-at-once.py"
+    program.write_text("import time\ndef main():\n    time.sleep(60)\n")
+    real_fork, real_close = os.fork, os.close
+    children = []
+
+    def recorded_fork():
+        child = real_fork()
+        if child:
+            children.append(child)
+        return child
+
+    def stopped_on_first_close(descriptor):
+        if children and not getattr(stopped_on_first_close, "done", False):
+            stopped_on_first_close.done = True
+            real_close(descriptor)
+            raise SystemExit(1)
+        return real_close(descriptor)
+
+    os.fork, os.close = recorded_fork, stopped_on_first_close
+    try:
+        case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
+    except SystemExit:
+        try:
+            os.kill(children[0], 0)
+            gone = False
+        except ProcessLookupError:
+            gone = True
+        check("a forked run stopped while closing its output files kills and reaps its child", gone)
+    else:
+        check("a forked run stopped while closing its output files lets the stop go on", False)
+    finally:
+        os.fork, os.close = real_fork, real_close
+
+
 def test_a_forked_run_stopped_while_waiting_kills_and_reaps_its_child():
     case = Case()
     pid_file = case.root / "forked-child-pid"
@@ -7602,10 +7779,14 @@ def test_a_forked_run_stopped_while_waiting_kills_and_reaps_its_child():
               "    time.sleep(60)\n")
 
     def stopped(*_):
+        # Stop only once the child is running, however slow the machine is to start it.
+        if not pid_file.exists() or not pid_file.read_text():
+            signal.setitimer(signal.ITIMER_REAL, 0.2)
+            return
         raise SystemExit(1)
 
     previous = signal.signal(signal.SIGALRM, stopped)
-    signal.setitimer(signal.ITIMER_REAL, 1.0)
+    signal.setitimer(signal.ITIMER_REAL, 0.2)
     try:
         forked_run_of(case, "sleeps", source)
     except SystemExit:

@@ -15,13 +15,16 @@ In an attended agent-session Claude Code also starts this hook for a background-
 agent-session's message. The transcript's newest record carrying `turnOrigin` decides, `human` for his own, when
 that record's text is the payload's prompt; Claude Code may not have written the prompt's record yet when this
 hook runs, and the newest record is then the previous turn's, or there is none. Otherwise the prompt itself
-decides: one that opens as NOT_TYPED_PROMPT_OPENINGS lists is not his.
+decides: one that opens as NOT_TYPED_PROMPT_OPENINGS lists is not his. Before either, a prompt the handoff-supervisor
+or crash recovery starts or resumes an agent-session with is not his, though Claude Code marks it `human`: the
+speaker test in SPEAKER_TEST_FILE recognizes it by those programs' own constants.
 
 ON A TYPED PROMPT the hook calls, from ALERTS_MODULE_FILE, user_alerts_claimed_delete_if_recorded_in_approval_walk_minutes_else_release_to_pending_after_30_minutes,
 then user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed, whose docstrings say what each moves.
-The agent-seat it claims for is the one the handoff-supervisor that started this agent-session names in the
-environment variable HANDOFF_SUPERVISOR_FILE defines; with none named, it claims nothing. When it claimed nothing
-it prints nothing.
+The agent-seat it claims for is the one the handoff-supervisor names in the environment of the agent-session it
+launched, which LAUNCHED_AGENT_SESSION_ENVIRONMENT_FILE reads only when the payload's session_id is that agent-session's;
+a child agent-session started from its shell inherits the environment, and claims nothing, as does an agent-session
+no handoff-supervisor launched. When it claimed nothing it prints nothing.
 Otherwise it finds the open approval-walk of the checkout the payload's cwd names with WALK_FINDER_FILE, the
 module the other walk-me-through hooks use, and its additionalContext tells the agent what it did or what to do:
 - with an approval-walk open: the hook runs INSERT_PROGRAM with the claimed ids itself, so each alert becomes
@@ -55,8 +58,10 @@ WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-docume
 INSERT_PROGRAM = HERE / "walk-me-through-user-alert-insert-as-unnumbered-item-after-waiting-item-and-record-in-walk-minutes.py"
 ALERTS_MODULE_FILE = (CHECKOUT / "nn-systems" / "general-tools"
                       / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
-HANDOFF_SUPERVISOR_FILE = CHECKOUT / "nn-systems" / "handoff" / "handoff-supervisor.py"
+LAUNCHED_AGENT_SESSION_ENVIRONMENT_FILE = (CHECKOUT / "nn-systems" / "handoff"
+                                           / "handoff-supervisor-launched-agent-session-environment-variable-names-common.py")
 TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude-code-session-transcript-records-read-backward-common.py"
+SPEAKER_TEST_FILE = CHECKOUT / "scripts" / "search-user-messages-in-transcripts.py"
 # At most half this hook's timeout in .claude/settings.json, so a stalled insert is reported, not killed with
 # the hook after the alerts are claimed; a test checks.
 INSERT_TIMEOUT_SECONDS = 5
@@ -145,6 +150,9 @@ def record_text(record):
 
 def typed_by_user(payload):
     prompt = payload.get("prompt") or ""
+    speaker_test = load_module("search_user_messages_in_transcripts", SPEAKER_TEST_FILE)
+    if speaker_test.user_turn_text_is_compaction_summary_or_launch_prompt(prompt):
+        return False
     transcript = payload.get("transcript_path")
     if transcript and Path(transcript).expanduser().is_file():
         reader = load_module("claude_code_session_transcript_records_read_backward_common", TRANSCRIPT_READER_FILE)
@@ -208,9 +216,10 @@ def headless(environment):
                        ATTENDANCE_CHECK_FILE).agent_session_unattended_by_user(environment)
 
 
-def agent_seat_of_agent_session(environment):
-    supervisor = load_module("handoff_supervisor", HANDOFF_SUPERVISOR_FILE)
-    return environment.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip() or None
+def agent_seat_of_agent_session(environment, session_id):
+    launched = load_module("handoff_supervisor_launched_agent_session_environment_variable_names_common",
+                           LAUNCHED_AGENT_SESSION_ENVIRONMENT_FILE)
+    return launched.handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session(environment, session_id) or None
 
 
 def output_for(payload, environment, user_alerts=None):
@@ -230,7 +239,7 @@ def output_for(payload, environment, user_alerts=None):
     try:
         user_alerts.user_alerts_claimed_delete_if_recorded_in_approval_walk_minutes_else_release_to_pending_after_30_minutes()
         alerts = user_alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(
-            agent_seat_of_agent_session(environment))
+            agent_seat_of_agent_session(environment, payload.get("session_id")))
     except Exception as error:  # noqa: BLE001 - a failed claim must reach the user
         user_sentence = CLAIM_FAILED_USER_SENTENCE.format(directory=directory, error=repr(error))
         context = "\n".join(line.format(directory=directory, error=repr(error), user_sentence=user_sentence)

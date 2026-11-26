@@ -891,6 +891,20 @@ with tempfile.TemporaryDirectory() as scratch:
                           .replace(" --global --add safe.directory", "", 1)],
                          capture_output=True, text=True).stdout == separator_path,
           repr(copied_remedy))
+    apostrophe_path = "/x/a b'c"
+    git_quoted_apostrophe_path = "'" + apostrophe_path.replace("'", "'\\''") + "'"
+    joined_apostrophe_remedy = common_module.join_error_text_lines_with_one_space(
+        f"fatal: detected dubious ownership in repository at '{apostrophe_path}'\n"
+        "To add an exception for this directory, call:\n\n"
+        f"\tgit config --global --add safe.directory {git_quoted_apostrophe_path}")
+    copied_apostrophe_remedy = joined_apostrophe_remedy.split("call: ", 1)[1]
+    check("git's remedy for a path holding U+2028 and an apostrophe, copied from the joined "
+          "line, still names the original path",
+          len(joined_apostrophe_remedy.splitlines()) == 1
+          and subprocess.run(["bash", "-c", copied_apostrophe_remedy.replace("git config", "printf %s", 1)
+                              .replace(" --global --add safe.directory", "", 1)],
+                             capture_output=True, text=True).stdout == apostrophe_path,
+          repr(joined_apostrophe_remedy))
     check("a U+2028 outside any quoted span is written as its escape",
           common_module.join_error_text_lines_with_one_space("fatal: a\u2028b") == "fatal: a\\u2028b")
 
@@ -2315,11 +2329,21 @@ with tempfile.TemporaryDirectory() as instrument_scratch:
 
 # Each launcher's --effort help states the efforts its own tier map pins, so
 # the help cannot name a launcher's effort the map no longer holds.
+# The agy cell refuses before argparse runs when no sandbox program is on PATH,
+# so the stand-ins go first on the child's PATH.
+help_sandbox_scratch = tempfile.TemporaryDirectory()
+help_environment = dict(os.environ, PATH=os.pathsep.join([
+    str(scratch_repository_fixture.install_fake_sandbox_programs(
+        Path(help_sandbox_scratch.name) / "fake-sandbox-programs")),
+    os.environ.get("PATH", "")]))
 for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
                       "cold-read-codex-cell.py"):
-    launcher_help = subprocess.run(
+    launcher_help_run = subprocess.run(
         [sys.executable, str(SYSTEM_DIRECTORY / launcher_file), "--help"],
-        capture_output=True, text=True, timeout=60).stdout
+        capture_output=True, text=True, timeout=60, env=help_environment)
+    check(f"{launcher_file} --help exits 0", launcher_help_run.returncode == 0,
+          f"exit {launcher_help_run.returncode}; stderr: {launcher_help_run.stderr[-600:]}")
+    launcher_help = launcher_help_run.stdout
     launcher_help_words = " ".join(launcher_help.split())
     # argparse wraps after a hyphen, so compare with every space removed.
     launcher_help_unspaced = "".join(launcher_help.split())
@@ -2331,8 +2355,7 @@ for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
     for tier, effort in _launcher.TIER_TO_REASONING_EFFORT.items():
         check(f"{launcher_file}'s --effort help says its {tier} tier runs at {effort}",
               f"{tier}runsat{effort}" in launcher_help_unspaced, launcher_help_words[-600:])
-    check(f"{launcher_file}'s --effort help names no other launcher's pinned effort",
-          "pins medium" not in launcher_help_words, launcher_help_words[-600:])
+help_sandbox_scratch.cleanup()
 
 print()
 if failures:

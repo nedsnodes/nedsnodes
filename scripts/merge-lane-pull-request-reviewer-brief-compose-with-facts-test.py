@@ -283,11 +283,29 @@ def main():
         completed = run_program(scratch, helpers, [{**first_round, "tag": "13"}], gh_routes=follow_up_gh_routes,
                                 follow_up_routes={"4": {"stdout": ""}, "31": {
                                     "exit": 1, "stderr": "ned-review-merge has no approving review of pull request 31\n"}})
-        check("the follow-up request program failing exits 1, naming its error, and writes no brief",
+        check("the follow-up request program failing without a refusal exits 1, naming its error, and writes no brief",
               completed.returncode == 1 and "brief not composed: StepFailed" in completed.stderr
               and "has no approving review of pull request 31" in completed.stderr
               and not (helpers / "briefs" / "brief-13-mac-claude.md").exists(),
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        refusal = ("REFUSED: ned-review-merge's review 2 of pull request 31 holds 2 fix-next finding(s) on "
+                   "scripts/a.py worded as 1 earlier finding(s) but with new Codex finding ids.\n"
+                   "Write the block by hand.\n")
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        brief_file = helpers / "briefs" / "brief-14-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("a follow-up request program that refuses to print a block puts its refusal in the brief in the "
+              "block's place, and the brief is composed",
+              completed.returncode == 0
+              and ("- merge-lane-2's follow-up request for pull request #31, which the description names: "
+                   + program_line.format(n=31).replace(" prints it from merge-lane-2's reviews", "")
+                   + " refused to print it from merge-lane-2's reviews, saying:\n\n"
+                   "> REFUSED: ned-review-merge's review 2 of pull request 31 holds 2 fix-next finding(s) on "
+                   "scripts/a.py worded as 1 earlier finding(s) but with new Codex finding ids.\n"
+                   "> Write the block by hand.\n") in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
 
         completed = run_program(scratch, helpers, [first_round, {**first_round, "tag": "7b"}],
                                 gh_routes=FOLLOW_UP_GH_ROUTES)

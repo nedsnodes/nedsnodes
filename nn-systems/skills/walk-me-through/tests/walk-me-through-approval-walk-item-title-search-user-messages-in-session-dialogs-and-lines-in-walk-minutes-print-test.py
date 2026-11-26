@@ -195,6 +195,17 @@ def test_a_short_title_closed_by_underscore_emphasis_names_the_item(root):
           result.stdout + result.stderr)
 
 
+def test_a_title_followed_by_an_underscore_and_a_letter_does_not_name_the_item(root):
+    store = Store(root)
+    longer = store.session("longer", [agent_record("Item 3 of 9: Fix foo_bar"), user_record("longer answer")])
+    closed = store.session("closed", [agent_record("Item 3 of 9: _Fix foo_"), user_record("closed answer")])
+    result = store.run("--title", "Fix foo", "--item-number", "3")
+    check("an underscore inside a longer word ends no title, while one that closes emphasis still does",
+          f"{closed}:{line_in(closed, 'closed answer')}  closed answer" in result.stdout
+          and "longer answer" not in result.stdout and longer.exists(),
+          result.stdout + result.stderr)
+
+
 def test_a_backward_range_is_ignored_and_a_valid_running_count_beside_it_still_names_the_item(root):
     store = Store(root)
     dialog = store.session("ranges", [agent_record("Items 9.3 to 9.1 of 35: The fix"), user_record("backward answer"),
