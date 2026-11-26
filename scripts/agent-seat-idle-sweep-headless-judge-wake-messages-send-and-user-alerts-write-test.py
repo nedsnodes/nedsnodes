@@ -3306,6 +3306,9 @@ class RealWatcher:
         # merge-lane-2's real one.
         self.assignments = self.root / "assignments.txt"
         self.assignments.write_text("1 merge-lane-1\n2 merge-lane-3\n")
+        # The default is merge-lane-2's real merge queue file, whose waiting lines would start merges.
+        self.merge_queue = self.root / "merge-queue.txt"
+        self.merge_queue.write_text("")
 
     def run(self, flag, *numbers):
         self.answer.write_text(github_answer(*numbers))
@@ -3316,7 +3319,8 @@ class RealWatcher:
              "--token-file", str(self.token), "--poll-once-directory", str(self.root / "state"),
              "--task-list-directory", str(self.tasks),
              "--needs-a-look-directory", str(self.root / "notices"),
-             "--merge-lane-pr-review-assignments-file", str(self.assignments)],
+             "--merge-lane-pr-review-assignments-file", str(self.assignments),
+             "--merge-queue-file", str(self.merge_queue)],
             env=environment, capture_output=True, text=True, check=False).returncode
 
     def complete_tasks(self):
