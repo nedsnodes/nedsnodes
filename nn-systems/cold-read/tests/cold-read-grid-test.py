@@ -2251,7 +2251,7 @@ try:
         (quoted_repository / neighbor).write_text("The agent's own edit.\n", encoding="utf-8")
     (quoted_repository / quoted_tracked).write_text("A reviewer's rewrite.\n", encoding="utf-8")
     (quoted_repository / quoted_untracked).write_text("A reviewer's notes.\n", encoding="utf-8")
-    fallback_commands = re.findall(r"`((?:rm|git) [^`]*<path>[^`]*)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
+    fallback_commands = re.findall(r"`((?:rm|git [^`]*restore) [^`]*<path>[^`]*)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
     for command in fallback_commands:
         quoted_path = quoted_untracked if command.startswith("rm ") else quoted_tracked
         subprocess.run(["bash", "-c", command.replace("<path>", shlex.quote(quoted_path))],
@@ -2264,6 +2264,47 @@ try:
           and all((quoted_repository / neighbor).read_text(encoding="utf-8") == "The agent's own edit.\n"
                   for neighbor in ("dont", "wont.md", "cant", "shant.md")),
           repr(fallback_commands))
+    # A new folder holding a reviewer's notes beside the agent's own untracked draft: plain
+    # `git status` lists only the folder, and `rm -r` on that entry would delete the draft too.
+    folder_repository, folder_git = repository_with_committed_file("fallback-undo-inside-an-untracked-folder")
+    (folder_repository / "notes").mkdir()
+    (folder_repository / "notes" / "reviewer-notes.md").write_text("A reviewer's notes.\n", encoding="utf-8")
+    (folder_repository / "notes" / "agent-draft.md").write_text("The agent's own draft.\n", encoding="utf-8")
+    plain_listing = folder_git("status", "--porcelain").stdout
+    listing_command = re.search(r"`(git status [^`]*)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
+    listed = (subprocess.run(["bash", "-c", listing_command.group(1) + " --porcelain"], cwd=folder_repository,
+                             capture_output=True, text=True).stdout if listing_command else "")
+    removal = re.search(r"`(rm [^`]*<path>[^`]*)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
+    if removal:
+        subprocess.run(["bash", "-c", removal.group(1).replace("<path>", shlex.quote("notes"))],
+                       cwd=folder_repository, capture_output=True, text=True)
+        subprocess.run(["bash", "-c", removal.group(1).replace("<path>", shlex.quote("notes/reviewer-notes.md"))],
+                       cwd=folder_repository, capture_output=True, text=True)
+    check("the fallback message lists each untracked file in a new folder, and its removal command "
+          "deletes the reviewer's file and keeps the agent's draft beside it",
+          "?? notes/\n" in plain_listing
+          and "notes/reviewer-notes.md" in listed and "notes/agent-draft.md" in listed
+          and not (folder_repository / "notes" / "reviewer-notes.md").exists()
+          and (folder_repository / "notes" / "agent-draft.md").read_text(encoding="utf-8") == "The agent's own draft.\n",
+          repr((plain_listing, listed, removal and removal.group(1))))
+
+    # A reviewer's writing staged in a file whose unstaged changes are the agent's: `git diff`
+    # alone does not show it, and editing the file would leave it staged.
+    staged_repository, staged_git = repository_with_committed_file("fallback-reviewer-writing-staged-beside-agent-edit")
+    (staged_repository / "tracked.md").write_text("Committed.\nA reviewer's note.\n", encoding="utf-8")
+    staged_git("add", "tracked.md")
+    (staged_repository / "tracked.md").write_text("Committed.\nA reviewer's note.\nThe agent's own edit.\n", encoding="utf-8")
+    read_commands = re.findall(r"`(git [^`]*diff [^`]*<path>)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
+    read_outputs = [subprocess.run(["bash", "-c", command.replace("<path>", "tracked.md")], cwd=staged_repository,
+                                   capture_output=True, text=True).stdout for command in read_commands]
+    check("the fallback message's reads show a reviewer's staged writing in a file the agent also edited, "
+          "and it says to ask the user then instead of editing the file",
+          len(read_commands) == 2
+          and any("+A reviewer's note." in output for output in read_outputs)
+          and any("+The agent's own edit." in output for output in read_outputs)
+          and "If its staged changes hold any of the reviewer's writing, ask the user" in grid_module.STOPPED_CELL_WRITE_CHECK_LINE,
+          repr((read_commands, read_outputs)))
+
     # The restore command resets the whole file, so a file that also holds edits that are not a
     # reviewer's is edited by hand; the Monitor tool shows only the line after the finding.
     fallback_next_step = grid_module.STOPPED_CELL_WRITE_CHECK_LINE.split("\n")
