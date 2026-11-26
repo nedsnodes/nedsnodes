@@ -235,6 +235,16 @@
       "on": {
         "ned-box": {"scheduler": "cron", "schedule": "* * * * *"}
       }
+    },
+    {
+      "name": "walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert",
+      "owner": "fleet-restart-at-login",
+      "program": "nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert.py",
+      "arguments": [],
+      "output": ".claude/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert.log",
+      "on": {
+        "ned-box": {"scheduler": "cron", "schedule": "15 6 * * 1"}
+      }
     }
   ]
 }

@@ -161,6 +161,11 @@ NED_BOX_FINDING_OUTCOMES_COUNT_LINE = (
     "cold-read-fast-read-finding-outcomes-count-as-user-alert-once-14-days-after-own-first-cron-run.py >> "
     "/home/nedlern/.claude/cold-read-fast-read-finding-outcomes-count-as-user-alert-once-14-days-after-own-first-"
     "cron-run.log 2>&1")
+# The question-check hook's weekly relabelling of its model's labels by Opus, on ned-box alone.
+NED_BOX_QUESTION_CHECK_WEEKLY_RELABEL_LINE = (
+    "15 6 * * 1 /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/skills/walk-me-through/"
+    "walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert.py >> "
+    "/home/nedlern/.claude/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert.log 2>&1")
 # The no-sandbox test suites' run on main in a quiet gap, on ned-box alone.
 NED_BOX_NO_SANDBOX_SUITES_LINE = (
     "*/10 * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
@@ -342,7 +347,8 @@ check("the table's jobs are the two typed by hand before this program, the workt
       "requests' check, approval and merge, the daily search for credential files no "
       "cold-read-cell is denied, the weekly count of each hook rule ID in both machines' "
       "transcripts, the one count of cold-read-fast-read finding outcomes, the deletion of "
-      "old agent-seat terminal captures, the open-pull-request watcher's poll, and no other",
+      "old agent-seat terminal captures, the open-pull-request watcher's poll, the question-check hook's weekly "
+      "relabelling, and no other",
       sorted(real_jobs) == ["agent-seat-idle-sweep-headless-judge-wake-messages-send-and-"
                             "user-alerts-write",
                             "agent-seat-terminal-captures-older-than-seven-days-delete",
@@ -367,7 +373,8 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "no-sandbox-test-suites-run-on-main-in-a-quiet-gap",
                             "scheduled-full-test-run-of-main",
                             "transcript-mirror-to-log-store",
-                            "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner"],
+                            "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner",
+                            "walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert"],
       sorted(real_jobs))
 watcher = real_jobs["handoff-agent-crash-watcher"]
 check("the crash restart watcher runs on ned-box only, every minute",
@@ -428,6 +435,17 @@ check("the weekly count of each hook rule ID runs on ned-box alone, Mondays at 0
       and "nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py"
       in (REPOSITORY_ROOT / hook_rule_ids_weekly_count["program"]).read_text(encoding="utf-8"),
       installer.cron_line(ned_box, hook_rule_ids_weekly_count, hook_rule_ids_weekly_count["on"]["ned-box"]))
+question_check_weekly_relabel = real_jobs["walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert"]
+check("the question-check hook's weekly relabelling runs on ned-box alone, Mondays at 06:15, and its program "
+      "documents the table's line and names this installer",
+      list(question_check_weekly_relabel["on"]) == ["ned-box"]
+      and installer.cron_line(ned_box, question_check_weekly_relabel, question_check_weekly_relabel["on"]["ned-box"])
+      == NED_BOX_QUESTION_CHECK_WEEKLY_RELABEL_LINE
+      and f"    {NED_BOX_QUESTION_CHECK_WEEKLY_RELABEL_LINE}\n"
+      in (REPOSITORY_ROOT / question_check_weekly_relabel["program"]).read_text(encoding="utf-8")
+      and "nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py"
+      in (REPOSITORY_ROOT / question_check_weekly_relabel["program"]).read_text(encoding="utf-8"),
+      installer.cron_line(ned_box, question_check_weekly_relabel, question_check_weekly_relabel["on"]["ned-box"]))
 finding_outcomes_count = real_jobs[
     "cold-read-fast-read-finding-outcomes-count-as-user-alert-once-14-days-after-own-first-cron-run"]
 check("the count of cold-read-fast-read finding outcomes runs on ned-box alone, daily at 08:15, and its program "
@@ -549,7 +567,8 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "agent-seat-terminal-captures-older-than-seven-days-delete — cron line:",
           NED_BOX_TERMINAL_CAPTURES_DELETE_LINE,
           "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job — cron line:",
-          NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE],
+          NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE,
+          "walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert — cron line:", NED_BOX_QUESTION_CHECK_WEEKLY_RELABEL_LINE],
       (exit_code, printed.getvalue(), errors.getvalue()))
 printed, errors = io.StringIO(), io.StringIO()
 with redirect_stdout(printed), redirect_stderr(errors):
