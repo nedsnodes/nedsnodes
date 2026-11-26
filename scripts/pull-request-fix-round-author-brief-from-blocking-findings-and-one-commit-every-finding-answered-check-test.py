@@ -3105,6 +3105,11 @@ def pushed_head_read_from_origin_cases(root, repository, _base, frozen_head):
           and f"\"The fix-round check of {URL} found no branch {BRANCH} on origin, so the round's commit is not "
           "pushed.\"" in err, err + out)
 
+    code, out, err = check_with_origin(f"{fix}\trefs/tags/refs/heads/{BRANCH}\n")
+    check("pushed head: origin with only a tag whose name ends in the branch's ref, a name sorting after the "
+          "ref, fails with exit 2, naming the branch",
+          code == 2 and out == "" and f"found no branch {BRANCH} on origin" in err, err + out)
+
     code, out, err = check_with_origin("", exit_code="128", stderr="fatal: Could not read from remote repository.\n")
     check("pushed head: git ls-remote that fails fails the check with exit 2, passing git's message on",
           code == 2 and out == "" and f"git ls-remote origin refs/heads/{BRANCH} failed: fatal: Could not read "
