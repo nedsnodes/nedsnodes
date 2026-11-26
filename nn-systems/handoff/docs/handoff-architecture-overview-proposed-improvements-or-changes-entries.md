@@ -1167,3 +1167,23 @@ The claim check's evidence:
 > - `nn-systems/handoff/handoff-supervisor.py:2932-2933` `conversation_tail_last_lines_display_file_write(settings.handoff_directory, session_id, conversation_tail_path_for_next_launch)`. This file is `<session id>-conversation-tail-last-lines-for-first-message-display.md` in `~/.claude/handoffs/` (hook docstring, line 7).
 > - The post-compaction hook, which the Components section does list, is also missing from this sentence.
 State: open
+
+## E100 — possible problem: an assertion of the overview is contradicted
+
+Claim: For agent-instructions-editor alone, they carry an overview refresh reminder for each system whose code has moved past the commit its nn-architecture-overview names, except one an open pull request changes.
+Found by: the overview claim check of 2026-11-26 against commit a657b0fb67c1d98c7b6bda494dfd5e2713b141b2; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/d8edd79c57e872b74173b911f371eeb28b01990c-2026-11-26T00-21-29-490925Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> "Whose code has moved" is wider than what the check counts. handoff-supervisor.py:1758 `pathspecs = [f"nn-systems/{system}/", f":(exclude)nn-systems/{system}/*.md"]` counts only commits under `nn-systems/<system>/`. A system's code outside that directory triggers no reminder, and most of this system's code is outside it: `scripts/recover-crashed-seats.py`, `scripts/handoff-extract-conversation.py`, `scripts/clean-worktrees.py`, the launchers. The agent-seat restriction and the pull-request exception are supported: :534 `AGENT_SEAT_GIVEN_OVERVIEW_REFRESH_LINES = "agent-instructions-editor"`, :1813-1819.
+State: open
+
+## E101 — possible problem: an assertion of the overview is contradicted
+
+Claim: `<seat>-dialog-NNNN.md` and `-complete.md` are written by the extractor and read by the successor, and by recovery when no transcript is worth resuming.
+Found by: the overview claim check of 2026-11-26 against commit a657b0fb67c1d98c7b6bda494dfd5e2713b141b2; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/d8edd79c57e872b74173b911f371eeb28b01990c-2026-11-26T00-21-29-490925Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> The handoff-supervisor also reads the conversation-tail: handoff-supervisor.py:1410-1411 `with conversation_tail_path.open(encoding="utf-8", newline="") as conversation_tail: text = conversation_tail.read()`. It writes its last lines to a display file in the handoff directory (:1405-1406) for the MessageDisplay hook (.claude/settings.json:43). That display file appears in no Shared state row.
+State: open
