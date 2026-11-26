@@ -1082,10 +1082,46 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
                 return open_at_seed
 
         exit_code, lines, errors = seed_with(PutBackByHandWhileGitHubIsRead())
-        check("a seed run whose assignment file is put back while GitHub is read exits 1 and keeps "
-              "that file",
-              exit_code == 1 and "appeared while the open pull requests were read" in errors
-              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n", errors)
+        check("a seed run whose assignment file is put back whole while GitHub is read keeps that "
+              "file and says so, exiting 0 with nothing to rerun",
+              exit_code == 0 and "exists and every line of it reads correctly" in "\n".join(lines)
+              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n", f"{lines} {errors}")
+        seeded.unlink()
+
+        class PutBackDamagedWhileGitHubIsRead(PutBackByHandWhileGitHubIsRead):
+            def __getitem__(self, _index):
+                seeded.write_text("4028 lane-one\n", encoding="utf-8")
+                return open_at_seed
+
+        exit_code, lines, errors = seed_with(PutBackDamagedWhileGitHubIsRead())
+        check("a seed run whose assignment file is put back damaged while GitHub is read exits 1, "
+              "keeps that file and says how to repair it",
+              exit_code == 1 and "The file is damaged" in errors
+              and seeded.read_text(encoding="utf-8") == "4028 lane-one\n", errors)
+        seeded.unlink()
+
+        real_unlink = watcher_module.Path.unlink
+
+        def unlink_failing_for_the_temporary_file(self, *args, **kwargs):
+            if self.name.endswith(".partial") and seeded.exists():
+                raise OSError(5, "Input/output error")
+            return real_unlink(self, *args, **kwargs)
+
+        watcher_module.Path.unlink = unlink_failing_for_the_temporary_file
+        try:
+            exit_code, lines, errors = seed_with([open_at_seed])
+        finally:
+            watcher_module.Path.unlink = real_unlink
+        leftovers = list(scratch.glob("seeded.txt.*.partial"))
+        check("a seed run whose assignment file is made but whose temporary file cannot then be "
+              "removed exits 0, says the file was made, and names the temporary file left behind",
+              exit_code == 0 and seeded.read_text(encoding="utf-8").startswith("4028 merge-lane-1\n")
+              and "was made, but its temporary file" in errors and "Input/output error" in errors
+              and "No assignment file was made" not in errors
+              and len(leftovers) == 1 and str(leftovers[0].resolve()) in errors,
+              f"exit {exit_code!r} {errors}")
+        for leftover in leftovers:
+            leftover.unlink()
         seeded.unlink()
         seed.write_text("4028 lane-one\n", encoding="utf-8")
         exit_code, lines, errors = seed_with([open_at_seed])
