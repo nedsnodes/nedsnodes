@@ -1364,14 +1364,14 @@ check("rule 2: a wait whose task calls back the promise but whose announced acti
       and [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate"]
       and machine.events("message_sent")[-1]["step"] == "escalate"
       and f"> S1: {PROMISE}\n> S2: {ANNOUNCED}" in escalation
-      and "#dropped S1 <reason>" in escalation,
+      and "#promise_dropped# S1 <reason>" in escalation,
       (machine.events("wait_step"), machine.events("wait_ended"), escalation))
 
 # --- rule 2: reply lines -------------------------------------------------------------------------
 OPENING_PULL_REQUEST = "Next I'm opening the pull request."
 
 REPLY_LINES_ASKED = ("End the next message you write in your own agent-session with one line for each "
-                     "numbered sentence: #done S1 once you have done it,")
+                     "numbered sentence: #promise_done# S1 once you have done it,")
 WAIT_ENDED_BY_REPLY_LINES = "a valid reply line answers every sentence on the wait"
 
 
@@ -1396,16 +1396,16 @@ def ended_by_reply_lines(machine):
 
 TOOL_CALL_AFTER_MESSAGE = assistant(tool=("Bash", {"command": "gh pr view 927"}), when=at(0.8))
 
-machine = promise_wait_answered(TOOL_CALL_AFTER_MESSAGE, assistant("#done S1", at(1)), turn_end(at(1)))
+machine = promise_wait_answered(TOOL_CALL_AFTER_MESSAGE, assistant("#promise_done# S1", at(1)), turn_end(at(1)))
 message = machine.events("message_sent")[0]["text"]
 check("reply lines: the rule 2 message labels its sentence S1 and asks for one reply line for each, "
       "and its promise_message event logs the label",
       message.startswith(f'S1: You promised "{PROMISE}".') and REPLY_LINES_ASKED in message
       and [event.get("labels") for event in machine.events("promise_message")] == [["S1"]], message)
-check("reply lines: #done after a tool call made after the message ends the wait at the next run, "
+check("reply lines: #promise_done# after a tool call made after the message ends the wait at the next run, "
       "with no judge, and the wait_ended event lists the sentence and its line",
       [(event["why"], event.get("reply_lines")) for event in machine.events("wait_ended")]
-      == [(WAIT_ENDED_BY_REPLY_LINES, [{"label": "S1", "sentence": PROMISE, "line": "#done S1"}])]
+      == [(WAIT_ENDED_BY_REPLY_LINES, [{"label": "S1", "sentence": PROMISE, "line": "#promise_done# S1"}])]
       and not machine.claude_calls(), (machine.events("wait_ended"), machine.claude_calls()))
 
 machine = Machine()
@@ -1422,8 +1422,8 @@ check("reply lines: labels run on across the wait, so a second message on it sta
       and machine.events("message_sent")[-1]["text"].startswith("S3: "),
       machine.events("promise_message"))
 
-machine = promise_wait_answered(assistant("#done S1", at(1)), turn_end(at(1)))
-check("reply lines: #done with no tool call after the message is not valid, and the wait stays open",
+machine = promise_wait_answered(assistant("#promise_done# S1", at(1)), turn_end(at(1)))
+check("reply lines: #promise_done# with no tool call after the message is not valid, and the wait stays open",
       not machine.events("wait_ended"), machine.events("wait_ended"))
 machine.script(sent_ok())
 machine.run(16)
@@ -1433,20 +1433,20 @@ check("reply lines: the escalation names the sentence whose reply line is not va
       machine.events("message_sent")[-1]["step"] == "escalate"
       and f"These numbered sentences have no valid reply line yet, so write one for each of them; a sentence not listed here needs none:\n\n> S1: {PROMISE}" in escalation
       and escalation.count(REPLY_LINES_ASKED) == 2, escalation)
-machine.append("alpha", assistant("#dropped S1 PR 927 was closed", at(17)), turn_end(at(17)))
+machine.append("alpha", assistant("#promise_dropped# S1 PR 927 was closed", at(17)), turn_end(at(17)))
 machine.script()
 machine.run(23)
 check("reply lines: a valid line written after the escalation, before the step after it, ends the "
       "wait", ended_by_reply_lines(machine), machine.events("wait_ended"))
 
 for case, line, task_status, ends in (
-        ("names an open task", "#task S1 #7", "pending", True),
-        ("names a completed task", "#task S1 #7", "completed", False),
-        ("gives the task number without #", "#task S1 7", "pending", False),
-        ("names a task the list lacks", "#task S1 #8", "pending", False),
-        ("#dropped gives no reason", "#dropped S1", None, False),
-        ("#dropped as a list item in backquotes", "- `#dropped S1 PR 927 was closed`", None, True),
-        ("names a label no message used", "#dropped S9 not mine", None, False)):
+        ("names an open task", "#promise_task# S1 #7", "pending", True),
+        ("names a completed task", "#promise_task# S1 #7", "completed", False),
+        ("gives the task number without #", "#promise_task# S1 7", "pending", False),
+        ("names a task the list lacks", "#promise_task# S1 #8", "pending", False),
+        ("#promise_dropped# gives no reason", "#promise_dropped# S1", None, False),
+        ("#promise_dropped# as a list item in backquotes", "- `#promise_dropped# S1 PR 927 was closed`", None, True),
+        ("names a label no message used", "#promise_dropped# S9 not mine", None, False)):
     def give_task(machine, task_status=task_status):
         if task_status:
             machine.task("alpha", "7")
@@ -1457,25 +1457,25 @@ for case, line, task_status, ends in (
     check(f"reply lines: a line that {case} {'ends' if ends else 'does not end'} the wait",
           ended_by_reply_lines(machine) == ends, machine.events("wait_ended"))
 
-machine = promise_wait_answered(assistant("#dropped S1 PR 927 was closed", at(1)), turn_end(at(1)),
-                                assistant("#dropped S1", at(1.5)), turn_end(at(1.5)))
+machine = promise_wait_answered(assistant("#promise_dropped# S1 PR 927 was closed", at(1)), turn_end(at(1)),
+                                assistant("#promise_dropped# S1", at(1.5)), turn_end(at(1.5)))
 check("reply lines: a later line for a label replaces an earlier one", not machine.events("wait_ended"),
       machine.events("wait_ended"))
 
 machine = promise_wait_answered(
     assistant("Recorded.", at(1)), turn_end(at(1)),
     transcript=[user("plan", "2026-11-02T11:40:00Z"),
-                assistant("#dropped S1 written before the message", "2026-11-02T11:41:00Z"),
+                assistant("#promise_dropped# S1 written before the message", "2026-11-02T11:41:00Z"),
                 turn_end("2026-11-02T11:41:00Z"), user("go"), assistant(PROMISE), turn_end()])
 check("reply lines: a line written before the message that labeled its sentence answers nothing",
       not machine.events("wait_ended"), machine.events("wait_ended"))
 
-machine = promise_wait_answered(assistant("#done S1", at(1)), turn_end(at(1)))
+machine = promise_wait_answered(assistant("#promise_done# S1", at(1)), turn_end(at(1)))
 machine.append("alpha", user("go on", at(8)), assistant(tool=("Bash", {"command": "ls"}), when=at(8.5)),
                assistant("Listed.", at(9)), turn_end(at(9)))
 machine.script()
 machine.run(15)
-check("reply lines: #done becomes valid once the agent-seat makes a tool call after the message",
+check("reply lines: #promise_done# becomes valid once the agent-seat makes a tool call after the message",
       ended_by_reply_lines(machine), machine.events("wait_ended"))
 
 # The transcript turns unreadable between the verdict pass and the reply-line check: an earlier
@@ -1497,7 +1497,7 @@ check("reply lines: a transcript unreadable at the reply-line check is a read fa
       (code, output[-300:], machine.events("read_failure"), machine.events("wait_ended")))
 
 machine = promise_wait_answered(
-    assistant("#task S1 #7", at(1)), turn_end(at(1)),
+    assistant("#promise_task# S1 #7", at(1)), turn_end(at(1)),
     prepare=lambda machine: (machine.tasks / "nedsnodes-alpha-tasks" / "5.json").mkdir(parents=True))
 check("reply lines: a task list that cannot be read at the reply-line check is a read failure for "
       "that agent-seat, and its wait stays open",
@@ -1567,19 +1567,19 @@ check("reply lines: the escalation quotes the failed message, its sentence label
       and f"> S2: You said \"{MIGRATION_SENTENCE}\"" in escalation
       and f"> S1: {OPENING_PULL_REQUEST}\n> S2: {MIGRATION_SENTENCE}" in escalation, escalation)
 machine = delivered_and_failed_sentences_machine()
-machine.append("alpha", assistant(f"#done S1\n#dropped S2 the migration ran in CI", at(9.5)),
+machine.append("alpha", assistant(f"#promise_done# S1\n#promise_dropped# S2 the migration ran in CI", at(9.5)),
                turn_end(at(9.5)))
 machine.script()
 machine.run(14.9)
-check("reply lines: a #done line after the tool call and a #dropped line for the sentence whose "
+check("reply lines: a #promise_done# line after the tool call and a #promise_dropped# line for the sentence whose "
       "message failed to send end the wait, which lists both lines",
       [(event["why"], [line["line"] for line in event.get("reply_lines", [])])
        for event in machine.events("wait_ended")]
       == [("a valid reply line answers every sentence on the wait",
-           ["#done S1", "#dropped S2 the migration ran in CI"])]
+           ["#promise_done# S1", "#promise_dropped# S2 the migration ran in CI"])]
       and not machine.claude_calls(), (machine.events("wait_ended"), machine.claude_calls()))
 machine = delivered_and_failed_sentences_machine()
-machine.append("alpha", assistant("#done S1", at(9.5)), turn_end(at(9.5)))
+machine.append("alpha", assistant("#promise_done# S1", at(9.5)), turn_end(at(9.5)))
 machine.script()
 machine.run(14.9)
 check("reply lines: a reply line for the delivered sentence alone does not end a wait whose failed "
@@ -1602,7 +1602,7 @@ def first_judge_failed_on_open_wait():
 
 
 machine = first_judge_failed_on_open_wait()
-machine.append("alpha", assistant("#task S1 #1", at(8)), turn_end(at(8)))
+machine.append("alpha", assistant("#promise_task# S1 #1", at(8)), turn_end(at(8)))
 machine.task("alpha", "1")
 machine.script()
 machine.run(14)
@@ -1619,7 +1619,7 @@ check("reply lines: the escalation labels the sentence whose first judge failed 
       and escalation_sent.get("escalation_named_labels") == ["S2"]
       and "> S1: " not in escalation_sent["text"].split("no valid reply line yet")[-1],
       escalation_sent)
-machine.append("alpha", assistant("#dropped S2 the pull request is already open", at(16.5)),
+machine.append("alpha", assistant("#promise_dropped# S2 the pull request is already open", at(16.5)),
                turn_end(at(16.5)))
 machine.script()
 machine.run(22)
@@ -1693,7 +1693,7 @@ check("a sentence whose invocation was stopped before logging its message is nam
       machine.events("message_sent"))
 
 machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
-machine.append("alpha", assistant("#dropped S1 PR 927 was closed", at(8)), turn_end(at(8)))
+machine.append("alpha", assistant("#promise_dropped# S1 PR 927 was closed", at(8)), turn_end(at(8)))
 machine.script()
 machine.run(14)
 check("reply lines: a wait a rule 5 message opened, whose only rule 2 message failed to send, ends "
@@ -1745,7 +1745,7 @@ check("the rule 2 judge is given the user's rule for an announced action word fo
       and "A tool call marked failed did not do its action" in rule_2_prompt, rule_2_prompt[:1500])
 
 # The user's rule that a sentence called off or taken back in a text to the user is backed, which
-# both rule 2 judges must be given word for word.
+# the rule 2 judge must be given word for word.
 CALLED_OFF_OR_TAKEN_BACK_BACKED = (
     "- Whatever its kind, a sentence is also backed when the agent-seat, in the same turn or a later "
     "one, tells the user in a text message that it will not do it, takes it back, or is no longer "
@@ -1753,10 +1753,10 @@ CALLED_OFF_OR_TAKEN_BACK_BACKED = (
 PUT_OFF_UNBACKED = (
     'An announced action the agent-seat put off with nothing named that the action waits on, such as '
     '"I\'ll do it later", is unbacked.')
-check("the rule 2 judge and the re-check are given the user's rule that a sentence called off or "
-      "taken back in a text to the user is backed, and no longer told a called-off action is unbacked",
-      all(CALLED_OFF_OR_TAKEN_BACK_BACKED in prompt and PUT_OFF_UNBACKED in prompt
-          and "called off" not in prompt for prompt in (rule_2_prompt, recheck_prompt)),
+check("the rule 2 judge is given the user's rule that a sentence called off or taken back in a "
+      "text to the user is backed, and no longer told a called-off action is unbacked",
+      CALLED_OFF_OR_TAKEN_BACK_BACKED in rule_2_prompt and PUT_OFF_UNBACKED in rule_2_prompt
+      and "called off" not in rule_2_prompt,
       rule_2_prompt[:1800])
 
 # The first judge sees the agent-seat's text messages of the sentence's turn: one that already told

@@ -50,7 +50,7 @@ Each invocation, under a lock that keeps two from overlapping:
    message due on a wait whose escalation is due goes on the wait first, so that the escalation
    names its sentences instead of the message. Each rule 2 message labels the sentences it names
    S1, S2 and so on, the labels running on across the wait, and asks for one reply line for each:
-   `#done S1`, `#task S1 #<task number>` or `#dropped S1 <reason>`. At every run while the wait is
+   `#promise_done# S1`, `#promise_task# S1 #<task number>` or `#promise_dropped# S1 <reason>`. At every run while the wait is
    open, code reads the reply lines in the agent-seat's text messages written after the message
    that labeled each sentence, and ends the wait once every sentence the wait answers for has a
    label and a valid reply line, as reply_line_answers says; no model judges a reply line. The
@@ -293,7 +293,7 @@ LABELED_SENTENCES = "labeled_sentences"
 UNLABELED_SENTENCES = "unlabeled_sentences"
 # The three reply-line hashtags and the label each sentence gets; every text and the pattern below
 # are built from these, so that a rename is made here alone.
-REPLY_LINE_DONE, REPLY_LINE_TASK, REPLY_LINE_DROPPED = "#done", "#task", "#dropped"
+REPLY_LINE_DONE, REPLY_LINE_TASK, REPLY_LINE_DROPPED = "#promise_done#", "#promise_task#", "#promise_dropped#"
 SENTENCE_LABEL_PREFIX = "S"
 REPLY_LINES_REQUEST = (
     "End the next message you write in your own agent-session with one line for each numbered "
@@ -1865,9 +1865,9 @@ def open_task_ids(seat, tasks_root):
 def reply_line_answers(labeled_sentences, texts, last_tool_call_at, open_ids):
     """{label: {"sentence", "line", "valid"}} for each labeled sentence: its latest reply line,
     None when it has none, and whether that line is valid. A line counts only in a text written
-    after the message that labeled its sentence. #done is valid when the agent-seat's last tool
-    call came after that message, and one call answers every such sentence; #task when it names an
-    open task, whatever the task records; #dropped when a reason follows the label. Code cannot
+    after the message that labeled its sentence. #promise_done# is valid when the agent-seat's last tool
+    call came after that message, and one call answers every such sentence; #promise_task# when it names an
+    open task, whatever the task records; #promise_dropped# when a reason follows the label. Code cannot
     tell whether a call did what the sentence said: the wait_ended event lists the lines for a
     reader to check."""
     answers = {item["label"]: {"sentence": item["sentence"], "line": None, "valid": False}
