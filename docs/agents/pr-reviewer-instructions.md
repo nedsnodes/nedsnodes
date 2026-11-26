@@ -16,7 +16,7 @@ End each finding on code with these four lines, in this order, each starting wit
 
 - `#defect_already_on_main` `yes` when main's code at the merge base, `git merge-base origin/main <nn-head-commit>`, has the same defect; `no`; or `not checked`.
 - `#pull_request_triggers_the_defect` `yes` when running the code as the pull request leaves it hits the defect where running main does not, such as by calling code that was already broken in a new way; `no`; or `not checked`.
-- `#false_report_of_success_on_failure` `yes` when a step whose result someone relies on, such as a write, a copy, a post or a merge, can fail while the code reports success, reports nothing, or reports a failure without saying what the step changed; otherwise `no`. A guard, hook or validation that gets a case wrong is `no` unless it reports a failed step as success.
+- `#false_report_of_success_on_failure` `yes` when a step whose result someone relies on, such as a write, a copy, a post or a merge, can fail while the code says it succeeded, by exiting 0 or printing a line a reader would take for success, or says nothing; otherwise `no`. A `yes` names that exit status or printed line, or that the code says nothing. A test, test selection, search, guard, hook or validation that passes, picks or refuses wrongly is `no` unless it hides a failed step or reports one as success.
 - `#defect_evidence` `record`, then the log line, transcript or earlier run that shows the failure happening; `reproduction`, then the command you ran and what it printed; or `judged from the code only`.
 
 On the first two lines, answer `not checked` rather than guess. Report a finding on main's code with these lines too.
