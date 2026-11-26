@@ -1142,6 +1142,7 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
         real_unlink = pathlib.Path.unlink
 
         lookups_of_replaced = []
+        unlink_attempts_on_replaced = []
 
         def lstat_seeing_a_file_where_a_directory_now_is(path, *arguments, **keywords):
             if pathlib.Path(path) == replaced and not lookups_of_replaced:
@@ -1153,6 +1154,7 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
         # swallow.
         def unlink_refusing_a_directory_as_linux_does(self, *arguments, **keywords):
             if self == replaced:
+                unlink_attempts_on_replaced.append(self)
                 raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(self))
             return real_unlink(self, *arguments, **keywords)
 
@@ -1171,6 +1173,9 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
               "file",
               raised is None and (replaced / "kept.txt").exists()
               and str(replaced) not in replaced_removed, (raised, replaced_removed))
+        check("the next run tries to unlink the probe file it found and passes over the "
+              "directory unlink refuses",
+              len(unlink_attempts_on_replaced) == 1, unlink_attempts_on_replaced)
 
         # The sweep cannot remove a stale directory a killed run left.
         unremovable = cache / f"{killed}-log"
@@ -1206,7 +1211,6 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
         check("the next run fails when a stale directory's removal stops partway",
               raised is not None, raised)
         real_rmtree(unremovable)
-        shutil.rmtree(replaced, ignore_errors=True)
 
         # The map is built as run_probe builds it, from a simulated writable-directory scan.
         scan_found = scratch / "scan-found"

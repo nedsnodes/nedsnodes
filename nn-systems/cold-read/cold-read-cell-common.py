@@ -1165,20 +1165,35 @@ def path_shown_on_one_line(path: str) -> str:
     return shell_quoted_on_one_line(path) if holds_a_line_breaking_character(path) else path
 
 
+# When git's safe.directory remedy comes out wrong in a new way, fix it by building the remedy from the repository path, not by patching this copying again.
 def join_error_text_lines_with_one_space(text) -> str:
     """`text`'s lines joined by one space, each line's own spaces kept: a path in a git
     message may hold two spaces in a row. Only a newline or carriage return ends a line
     here; any other character str.splitlines splits at, such as a U+2028 inside a path in
     the message, is escaped, so the printed line stays one line for the grid, which reads
-    the cell log with str.splitlines. Inside a single-quoted span, such as the path in git's
-    `safe.directory '<path>'` remedy, the span becomes its `$'...'` form, so a copied command
-    still names the same path; elsewhere the character is written as `\\u2028`."""
-    joined = " ".join(line.strip() for line in re.split(r"\r\n|\r|\n", str(text)) if line.strip())
-    joined = re.sub(r"'([^']*)'", lambda quoted: shell_quoted_on_one_line(quoted[1])
-                    if any(splits_a_line(character) for character in quoted[1]) else quoted[0], joined)
-    return "".join(
-        character.encode("unicode_escape").decode("ascii")
-        if splits_a_line(character) else character for character in joined)
+    the cell log with str.splitlines. In a line that is a git command, such as git's
+    `git config --global --add safe.directory '<path>'` remedy, each argument holding such a
+    character becomes its `$'...'` form, so a copied command still names the same path;
+    elsewhere the character is written as `\\u2028`."""
+    lines = [line.strip() for line in re.split(r"\r\n|\r|\n", str(text)) if line.strip()]
+    return " ".join(map(git_command_requoted_on_one_line, lines))
+
+
+def escaped_where_it_splits_a_line(text: str) -> str:
+    return "".join(character.encode("unicode_escape").decode("ascii")
+                   if splits_a_line(character) else character for character in text)
+
+
+def git_command_requoted_on_one_line(line: str) -> str:
+    # Parsed one line at a time: git's prose prints a path's apostrophe bare, while its
+    # remedy command escapes it as '\'', so quotes paired across lines would mismatch.
+    if not line.startswith("git ") or not any(splits_a_line(character) for character in line):
+        return escaped_where_it_splits_a_line(line)
+    try:
+        arguments = shlex.split(line)
+    except ValueError:
+        return escaped_where_it_splits_a_line(line)
+    return " ".join(map(shell_quoted_on_one_line, arguments))
 
 
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:

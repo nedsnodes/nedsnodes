@@ -10,7 +10,7 @@ Usage, from the agent-session's checkout:
   walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py check
       [--obvious | --after-advisor | --disapproved | --deferred | --option N
        | --part-answer N=ANSWER ... | --moved-on-no-decision
-       | --not-asked KIND|none|weak-cost-only|weak-alters-earlier-approved-text-only
+       | --not-asked KIND|adds-nothing|none|weak-cost-only|weak-alters-earlier-approved-text-only
        | --already-decided USER_RULING | --now-over-later-already-decided
        | --moved-on REASON]
       --user-reply-as-typed REPLY    (every answer but --not-asked, --already-decided,
@@ -40,8 +40,8 @@ leaves with no decision, REASON saying why, which changes nothing. When the
 walk-minutes hold an `#item_page` line for the item, a link or a failed
 publish, the user was shown it, so --moved-on writes its answer line opening
 `shown to the user,` in place of `settled without asking the user,`, and CLOSE
-says the item was shown in place of telling the agent to list it as settled
-without being shown.
+says the item was shown in place of saying it was settled without being
+shown.
 --bump ITEM, for the user's "bump" and the item he names, records no answer: it
 makes ITEM, an item not yet shown named by its heading's title, the next item
 shown, numbering it and moving it to stand right before the waiting item in the
@@ -139,6 +139,20 @@ Given `none` for an item rated weak, or a `weak-` value for one rated none, it
 writes nothing and names the values that fit the rating. The minutes write the
 answer as `not asked, ` and the row's label.
 
+--already-decided refuses, writing nothing, a USER_RULING found only in
+walk-minutes or a handoff dialog and dated more than RULING_DAYS_APPLIED, 90,
+days before today, since the walk-me-through skill applies such a ruling only
+that long. A citation that names a standing document with a line or section
+in it, as STANDING_DOCUMENT_PLACE_CITED finds one, such as `GHI-MD 2118 line 63`,
+is taken at any age; a standing document only mentioned, or named inside a
+quotation, does not count. Any other citation's ruling is dated by the earliest
+YYYY-MM-DD date in it that is not part of a name, since dates after the ruling's,
+such as a merge's, often follow it; the date in `foo-2026-10-14-minutes.md` is
+not read. A citation holding no such date is refused too: its ruling is taken
+as too old, and the user is asked again unless the cited line holds the date.
+Today is the local date. The now-over-later citation the program
+supplies is not checked, since the program itself records that ruling.
+
 `--now-over-later-already-decided` is --already-decided with the citation
 supplied by the program, NOW_OVER_LATER_USER_RULING_CITATION, the user-ruling
 that he is always for building now when the agents recommend now over later;
@@ -162,7 +176,8 @@ names each one's walk-minutes and says which to close and how to merge them,
 since an agent-seat keeps at most one approval-walk open.
 
 CHECK finds the texts the answer adds: the item's lines whose first word,
-after any list or quotation marker, outside fenced code, is a mark the answer adds;
+after any list or quotation marker and a part's opening `Part N.`, outside
+fenced code, is a mark the answer adds;
 the text is the rest of the line, without one pair of surrounding quotation
 marks. Before it reads them, CHECK refuses, writing nothing, for every answer but
 --deferred, --moved-on-no-decision and --moved-on, which add no text, when
@@ -341,6 +356,11 @@ the new item approved, disapproved or already decided, it also writes the
 already-decided line, with the same outcome, for each item a held-answer line
 holds for it that no close line decides yet; after a deferral, a move on or
 answers to parts, the held item stays waiting, so the walk comes back to it.
+When the new item has sub-steps, and the minutes decide every sub-step so that
+the new item counts as approved or disapproved, the first CLOSE that finds the
+new item so decided, and does not itself record a new hold, writes the
+already-decided line, with that outcome, for the held item, whichever item that
+CLOSE itself records.
 When it holds or defers the answer, it prints the lines the agent's next
 message must include, the status lines among them. When an item waits, it
 prints the command that gives that item its cold-read-fast-read before it is
@@ -470,7 +490,7 @@ search said, and exits 1; any exit of the search but its found and nothing-found
 exits is a failure. The step saves what the search prints, a search with no
 hits too, once it has written it out, in
 `docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
-titles and numbers searched for as a JSON list on its first line, the agent-session id
+cache format's number and the titles and numbers searched for as a JSON list on its first line, the agent-session id
 being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
 agent-session prints only a line naming that file, unless the file is missing
 or the item's titles differ from the saved ones; then it searches, prints and
@@ -641,7 +661,10 @@ TOUCHES, TEST, SOURCE, UNUSED, RENAME, GLOSSARY_TERM, ADDED_HASHTAG_MARKER, SEAR
                                       "search"))
 NotAskedEvidence = collections.namedtuple("NotAskedEvidence",
                                           "value rating found touched tests lines marks top item")
-NoAnswerCase = collections.namedtuple("NoAnswerCase", "value label meaning ratings needed checks evidence ground flag")
+# unchecked: what the agent judges after settling by the row, when it differs from NOT_ASKED_UNCHECKED.
+NoAnswerCase = collections.namedtuple("NoAnswerCase",
+                                      "value label meaning ratings needed checks evidence ground flag unchecked",
+                                      defaults=(None,))
 
 
 class MissingEvidenceLine(str):
@@ -684,6 +707,11 @@ def no_kind_problems(found):
 
 def has_new_text_problems(found):
     return [] if proposed_texts(found.marks, {NEW_MARK}) else [MissingEvidenceLine(NOT_ASKED_NO_NEW_TEXT_PROBLEM)]
+
+
+def adds_nothing_problems(found):
+    # A `#new_if_d` text is what the alternative would add, so it stays; a `#new` text is what approving adds.
+    return [NOT_ASKED_ADDS_NOTHING_NEW_TEXT_PROBLEM] if proposed_texts(found.marks, {NEW_MARK}) else []
 
 
 def touched_files_exist_problems(found):
@@ -778,11 +806,14 @@ def dropped_proposal_search_problems(found):
 
 NOT_ASKED_FLAG, ALREADY_DECIDED_FLAG = "--not-asked", "--already-decided"
 NOT_ASKED_ANY_RATING = (NOT_ASKED_RATED_NONE, NOT_ASKED_RATED_WEAK)
+NOT_ASKED_ADDS_NOTHING = "adds-nothing"
+NOT_ASKED_ADDS_NOTHING_LABEL = "adds nothing"
 EVERY_RATING = ("none", "weak", "medium", "strong", "very strong")
 DROPPED_PROPOSAL_VALUE = "proposed-check-dropped-search-found-no-case"
 DROPPED_PROPOSAL_GROUND = "that the problem the dropped proposal guarded against may still come, at any rating"
 HANDOFF_INTERNALS_VALUE = "handoff-internals"
-HANDOFF_INTERNALS_CITATION = "the user-ruling on the handoff's internals in nn-systems/handoff/handoff.system.design.md"
+HANDOFF_INTERNALS_CITATION = ("the user-ruling on the handoff's internals in nn-systems/handoff/handoff.system.design.md, "
+                              "section User-rulings")
 HANDOFF_INTERNALS_NAMED = re.compile(r"handoff|initial-agent-instructions", re.I)
 # The one list of what needs no answer from the user: a new kind is one new row here.
 NO_ANSWER_CASES = (
@@ -823,6 +854,15 @@ NO_ANSWER_CASES = (
                  (rating_and_needed_lines_problems, touched_files_exist_problems, system_glossary_problems),
                  "touches; every touched file is a `*-glossary.md` git tracks, other than the project glossary",
                  None, NOT_ASKED_FLAG),
+    NoAnswerCase(8, "kind 8", "a simplification or deletion that leaves unchanged what the text tells its reader to do, "
+                 "or what the code does",
+                 NOT_ASKED_ANY_RATING, (TOUCHES,), (rating_and_needed_lines_problems, touched_files_exist_problems),
+                 "touches; every touched file exists", None, NOT_ASKED_FLAG),
+    NoAnswerCase(NOT_ASKED_ADDS_NOTHING, NOT_ASKED_ADDS_NOTHING_LABEL,
+                 "an item whose recommendation adds and changes nothing, such as leaving out a definition, a check or "
+                 "a step that its alternative would add, whatever its case against is rated",
+                 EVERY_RATING, (), (adds_nothing_problems,), "no `#new` text; any rating", None, NOT_ASKED_FLAG,
+                 "whether the item's recommendation adds and changes nothing"),
     NoAnswerCase(NOT_ASKED_RATED_NONE, "case against none",
                  "an item of none of these kinds whose case against is rated none, unless it adds words the user has "
                  "not approved to a file the instruction-file guard protects",
@@ -876,10 +916,9 @@ NO_ANSWER_TABLE_RULES = (
     "case against's rating, when a search of the last 30 days, of every place the problem would leave a trace, found "
     "no case of it.",
     "Every other item is shown, including any rated above none that adds a rule, instruction sentence, check, hook, "
-    "job, glossary term, design choice, setting or recurring expense, or that recommends doing nothing.",
+    "job, glossary term, design choice, setting or recurring expense.",
     "Before settling an item, run its row's command and ask the advisor whether a later ruling or another open item "
     "overtakes it; if the program refuses, the advisor objects or the advisor call fails, show the item.",
-    "After settling an item of no kind, say in your next message that you settled it, so that he can have it reversed.",
     "The minutes record a settled item as <accepted>, with \"not asked\" and its kind number, or \"case against none\"; "
     "it keeps its number and its place in the count M, and its change is made with the walk's other approved changes.",
 )
@@ -1402,6 +1441,8 @@ NOT_ASKED_SEARCH_WINDOW_FUTURE_PROBLEM = ("- its `{marker}` line's search ends o
                                           "the last day actually searched.")
 NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM = ("- its `{marker}` line found {count} cases; a case found is the failure that "
                                         "has happened, so the proposal is shown to the user with those cases cited.")
+NOT_ASKED_ADDS_NOTHING_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add, so its recommendation adds "
+                                          "something and it is shown.")
 NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add; an item that drops a "
                                                "proposal adds no text, so it recommends something else and is shown.")
 # Fixed fields, not prose: a tally phrase such as `0 cases in total; will look in ...` holds an `in` that names no
@@ -1421,13 +1462,13 @@ NOT_ASKED_WHY = {
 NOT_ASKED_JUDGEMENT_LINES = (
     "{item} is recorded as settled without asking the user, {label}; the program checked only what code can.",
     "Before you run close, ask the advisor whether a later ruling or another open item overtakes {item}, and judge "
-    "what the program could not, such as whether the case against names nothing besides {grounds}, and whether a fix "
-    "matches its design.",
+    "what the program could not, such as {unchecked}.",
     "If the advisor objects, the advisor call fails, or your judgement is against settling, do not run close: "
     "present {item} to the user and run check with the flag for his answer, as `--help` lists it; that writes a new "
     "answer line, and close records only the last one, so this line is then set aside.",
 )
 # Code cannot see these in a change, so an item of no kind rated weak leaves them to the agent.
+NOT_ASKED_UNCHECKED = "whether the case against names nothing besides {grounds}, and whether a fix matches its design"
 # Code cannot tell from the item what was proposed, or where the problem would leave its trace.
 NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE = (
     "Judge also whether {item} proposes a check, test, guard, refusal or hook and recommends dropping it, and whether "
@@ -1449,7 +1490,6 @@ GIT_GREP_FAILED = (GIT_GREP_FAILED_REASON + "\n"
                    "present {item} to the user and run check with the flag for his answer, as `--help` lists it.")
 CLOSE_NOT_SHOWN_LINES = (
     "{item} is recorded in the minutes as settled without being shown to the user.",
-    "List it, with its number, in one line of your next message to the user.",
 )
 CLOSE_ALREADY_DECIDED_CHANGE = "Its change may now be made."
 # Both line formats are agreed with merge-lane-2, whose hold command writes the first into its review and whose
@@ -1509,6 +1549,34 @@ ITEM_READ_RUN_FACTS = ", because your changes since its last cold-read-fast-read
 ITEM_READ_NOT_RUN = ("{item}: no new cold-read-fast-read: your changes since its last one ({report}) touch no "
                      "number, path, file or program name, link, or line holding \"Recommendation:\", "
                      "\"The alternative:\" or `#case_against`.")
+RULING_DAYS_APPLIED = 90
+STANDING_DOCUMENT_PLACE_CITED = re.compile(
+    r"(?:GHI-MD\s*\d+|[\w./-]*(?:CLAUDE|AGENTS|SKILL)\.md|docs/nedsnodes-wiki/[\w./&-]+|docs/issues/[\w./-]+"
+    r"|[\w./-]*design\.md|[\w./-]+-instructions\.md)`?(?:'s)?,?\s+(?:at\s+)?(?:lines?\s+\d+|section\b)")
+# A standing document named inside the user's quoted words is not what the citation cites.
+QUOTATION = re.compile(r'"[^"]*"|“[^”]*”')
+# A date glued to a hyphen, a letter or a slash is part of a name, such as a walk-minutes file's.
+RULING_DATE = re.compile(r"(?<![\w./-])(\d{4}-\d\d-\d\d)(?=T\d|[^\w-]|$)")
+RULING_TOO_OLD = (
+    "nothing written: --already-decided was refused for {item}, because its citation {citation} names no standing "
+    "document with a line or section in it, such as `GHI-MD 2118 line 63`, and the earliest date in it, {date}, is "
+    "{days} days before today; the walk-me-through skill applies a ruling found only in walk-minutes or a "
+    "handoff dialog for {limit} days.\n"
+    "If the ruling bears on {item}, quote it in the item with its date, show the item to the user, ask whether the "
+    "ruling still holds, and run check with the flag for his answer.\n"
+    "If a standing document records the same ruling, run check again citing that document and the line or section "
+    "that records it.")
+RULING_UNDATED = (
+    "nothing written: --already-decided was refused for {item}, because its citation {citation} names no standing "
+    "document with a line or section in it, such as `GHI-MD 2118 line 63`, and holds no date written "
+    "YYYY-MM-DD outside a name, so it is taken as too old; the walk-me-through skill applies a ruling found only in "
+    "walk-minutes or a handoff dialog for {limit} days.\n"
+    "If the walk-minutes line or session dialog line that records the ruling holds its date, add that date to the "
+    "citation, as in \"(2026-11-20)\", and run check again.\n"
+    "If the ruling has no date and bears on {item}, quote it in the item, show the item to the user, ask whether the "
+    "ruling still holds, and run check with the flag for his answer.\n"
+    "If a standing document records the same ruling, run check again citing that document and the line or section "
+    "that records it.")
 NOW_OVER_LATER_FLAG = "--now-over-later-already-decided"
 NOW_OVER_LATER_USER_RULING_CITATION = (
     "the user-ruling at line 361 of nedlern@ned-box:/home/nedlern/agents/cold-read-improvement/docs/walk/"
@@ -1695,6 +1763,8 @@ APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED = (
     "Once the user says the cause is fixed, run `{command}` again.")
 TITLE_SEARCH_CACHE_DIRECTORY_NAME = "title-search-cache"
 TITLE_SEARCH_CACHE_FILE_NAME = "{walk}-item-{numbers}-{session}.md"
+# Raised whenever what a search can print changes, so that a file saved by an older search is searched again.
+TITLE_SEARCH_CACHE_FORMAT = 2
 TITLE_SEARCH_CACHE_PRINTED_BEFORE = (
     "The user's words where {item}'s title was named before were printed in full by an earlier run of this step in "
     "this agent-session, and are saved in {path}; read that file when they are no longer in your context.")
@@ -2323,8 +2393,8 @@ def not_asked_kind(value):
 
 
 def not_asked_label(kind):
-    """How the minutes and messages name a --not-asked value: `kind 3`, `case against none`, or the label of a
-    weak case against's ground, such as `case against weak, cost only`."""
+    """How the minutes and messages name a --not-asked value: `kind 3`, `adds nothing`, `case against none`, or the
+    label of a weak case against's ground, such as `case against weak, cost only`."""
     return no_answer_case(kind).label
 
 
@@ -2610,6 +2680,25 @@ def now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
                       for problem, numbers in found.items() if numbers]
 
 
+def refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(citation, item, walk_finder):
+    """Raise Failure for an --already-decided citation that cites no place in a standing document and whose ruling
+    is older than RULING_DAYS_APPLIED days, or has no date this function can read."""
+    if STANDING_DOCUMENT_PLACE_CITED.search(QUOTATION.sub("", citation)):
+        return
+    dates = []
+    for text in RULING_DATE.findall(citation):
+        with contextlib.suppress(ValueError):
+            dates.append(datetime.date.fromisoformat(text))
+    spanned = walk_finder.text_wrapped_as_markdown_code_span(citation)
+    if not dates:
+        raise Failure(RULING_UNDATED.format(item=item, citation=spanned, limit=RULING_DAYS_APPLIED))
+    earliest = min(dates)
+    days = (datetime.date.today() - earliest).days
+    if days > RULING_DAYS_APPLIED:
+        raise Failure(RULING_TOO_OLD.format(item=item, citation=spanned, date=earliest.isoformat(), days=days,
+                                            limit=RULING_DAYS_APPLIED))
+
+
 def check(arguments):
     if arguments.bump is not None:
         return bump(arguments)
@@ -2640,6 +2729,9 @@ def check(arguments):
         raise Failure(NAVIGATION_WORD_REFUSED.format(words=words, item=item,
                                                      answered=answered_word(arguments, walk_finder),
                                                      command=moved_on_no_decision_command))
+    if arguments.already_decided is not None and not arguments.now_over_later_already_decided:
+        refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(arguments.already_decided, item,
+                                                                                    walk_finder)
     if arguments.now_over_later_already_decided:
         document, problems = now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
         if problems:
@@ -2739,8 +2831,9 @@ def check(arguments):
     if had_to_be_run:
         output += [line.format(document=document, item=item) for line in CHECK_JUDGEMENT_LINES]
     if arguments.not_asked is not None:
-        output += [line.format(item=item, label=not_asked_label(arguments.not_asked),
-                               grounds=not_asked_grounds(arguments.not_asked))
+        unchecked = no_answer_case(arguments.not_asked).unchecked or NOT_ASKED_UNCHECKED.format(
+            grounds=not_asked_grounds(arguments.not_asked))
+        output += [line.format(item=item, label=not_asked_label(arguments.not_asked), unchecked=unchecked)
                    for line in NOT_ASKED_JUDGEMENT_LINES]
         if arguments.not_asked in NOT_ASKED_WEAK_GROUND_LABELS:
             output.append(NOT_ASKED_WEAK_JUDGEMENT_LINE.format(item=item))
@@ -2965,7 +3058,7 @@ def heading_body(walk_finder, text):
     first, _, rest = text.partition("\n")
     if first.lstrip().startswith("#"):
         return blank_lines_stripped(rest)
-    return blank_lines_stripped(item_title(walk_finder, first) + "\n" + rest)
+    return blank_lines_stripped(item_title(walk_finder, first, with_text_after_title=True) + "\n" + rest)
 
 
 def blank_lines_stripped(text):
@@ -2979,26 +3072,58 @@ def blank_lines_stripped(text):
     return "\n".join(lines)
 
 
-def item_title(walk_finder, line):
-    """The text of an item's heading line without its `#` marks, running count, deferred note and the emphasis
-    delimiters around the count, which renumbering the item does not change; every other character stays."""
-    line = walk_finder.approval_walk_item_heading_with_deferred_note_removed(line).lstrip("#").strip()
+def item_title(walk_finder, line, with_text_after_title=False):
+    """The title an item's heading or opening line gives it: without its indentation, list or quotation mark, `#`
+    marks, running count, deferred note, `revised` label and the emphasis delimiters around the count, which
+    renumbering or revising the item does not change. A bold opening's title ends where its emphasis closes, as in
+    `**Item 3 of 9: the first** More detail.`; with_text_after_title keeps the text after it, without the closing
+    delimiter."""
+    line = walk_finder.approval_walk_item_heading_with_deferred_note_removed(line)
+    line = re.sub(rf"^\s*{walk_finder.MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*", "", line)
+    line = line.lstrip("#").strip()
     count = walk_finder.HEADING_COUNT.match(line)
     if not count:
         return line
     opener = re.match(r"[*_]*", line)[0]
-    title = line[count.end():].lstrip(" :,.;")
-    if opener and title.startswith(opener):
-        return title[len(opener):].lstrip(" :,.;").rstrip()
+    # One match reads the label at most once; the emphasis can close before the label, as in `**Item 3 of 9**:
+    # (revised) x`, or after it, as in `**Item 3 of 9 (revised):** x`. The label is only `(revised)` or `revised:`,
+    # so a title opening with the word, as in `**Item 3 of 9:** Revised estimates`, keeps it.
+    separators = r"[ :,.;]*"
+    label = r"(?:[\s,:;.\-\u2013\u2014]*(?:\(revised\)|revised:)[ :,.;]*)?"
+    closer = re.escape(opener)
+    opening = re.match(rf"{separators}(?:(?P<before>{closer}){separators}{label}|{label}(?P<after>{closer})"
+                       rf"{separators}|{label})", line[count.end():], re.I)
+    title = line[count.end() + opening.end():]
+    closed = opening["before"] is not None or opening["after"] is not None
+    if closed or not opener:
+        return title.rstrip()
     # The emphasis that opened before the count closes after the title; a delimiter inside a code span, or with
     # a space before it, as in `x ** 2`, closes nothing.
     code = [span.span() for span in walk_finder.CODE_SPAN.finditer(title)]
-    closer = next((found.start() for found in re.finditer(re.escape(opener), title) if opener
-                   and found.start() > 0 and not title[found.start() - 1].isspace()  # pragma: no mutate, the return above leaves no opener at position 0, so > 0, > -1 and >= 0 agree
+    closer = next((found.start() for found in re.finditer(re.escape(opener), title)
+                   if found.start() > 0 and not title[found.start() - 1].isspace()  # pragma: no mutate, the opener was taken off position 0 above, so > 0, > -1 and >= 0 agree
                    and not any(start <= found.start() < end for start, end in code)), None)
     if closer is not None:
-        title = title[:closer] + title[closer + len(opener):]
+        after = title[closer + len(opener):]
+        title = title[:closer] + (after if with_text_after_title else "")
     return title.rstrip()
+
+
+def markdown_with_link_syntax_dropped(markdown, parser):
+    """The inline Markdown with each link's text kept, its link syntax gone and the rest's emphasis and code spans as
+    written, as an earlier message quoting the title would give it; unlike the closing line's point, nothing is
+    escaped."""
+    pieces = []
+    for token in parser.parseInline(markdown)[0].children:
+        if token.type in ("link_open", "link_close"):
+            continue
+        if token.type == "code_inline":
+            pieces.append(token.markup + token.content + token.markup)
+        elif token.type in ("softbreak", "hardbreak"):
+            pieces.append(" ")
+        else:
+            pieces.append(token.markup or token.content)
+    return "".join(pieces)
 
 
 def earlier_read_texts_of_item(walk_finder, minutes, value, numbers, total, parser, reads, command):
@@ -3534,12 +3659,15 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
 
 
 def approval_walk_item_title_search_groups(walk_finder, document, value, numbers, total, parser, earlier):
-    """Return [(titles, item numbers)] for each heading in document that names waiting items, in its order: its
-    title, in the closing line's form too when that differs, as when the title holds a link, with the numbers of
-    the waiting items it names, so that a short title is matched only after its own numbers. A lone waiting item's
-    titles also hold the title of each earlier read text of it, as earlier_read_texts_of_item returns them; a
-    Withdrawn version heading carries no title, so those read texts are its only earlier titles the program can
-    know."""
+    """Return [(titles, item numbers)], one group for each distinct set of waiting item numbers that a heading in
+    document names or that a waiting item's own titled opening under a shared heading names, such as [3] and [4] for
+    items 3 and 4 under one heading: the titles of those headings and openings, each in the closing line's form too
+    when that differs, as when the title holds a link, so that a short title is matched only after its own numbers.
+    Groups come in the order the `#next_to_present` line names the items, a heading's group before the groups of the
+    openings under it, so items 4 and 3, named in that order, give [4] before [3] whichever opening comes first. A
+    lone waiting item's titles also hold the title of each earlier read text of it, as earlier_read_texts_of_item
+    returns them; a Withdrawn version heading carries no title, so those read texts are its only earlier titles the
+    program can know."""
     text = document.read_text(encoding="utf-8")
     lines = text.split("\n")
     _, units = walk_finder.waiting_item_units(document, value, numbers, total, parser)
@@ -3547,15 +3675,15 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
     openings = walk_finder.item_opening_lines(text, parser)
 
     def search_forms(line):
-        # An indented heading is still a heading, and item_title strips `#` only from the line's start.
-        line = line.strip()
         title = item_title(walk_finder, line)
         if not title:
             return []
-        # The closing line's point, as the hook reads it, so that `## Item 4 of 9 (revised): a [filter](url)` is
-        # also searched as `a filter`; and the title with only its links dropped, which keeps its emphasis.
-        unlinked = hook.without_links(title, parser)
-        return [title, hook.approval_walk_item_heading_point_without_links(line, parser) or unlinked, unlinked]
+        # The closing line's point, as the hook shows it, so that `## Item 4 of 9 (revised): a [filter](url)` is
+        # also searched as `a filter`; and the title with only its link syntax dropped, as an earlier message
+        # quoting it would write it.
+        forms = [title, hook.approval_walk_item_heading_point_without_links(line.strip(), parser),
+                 markdown_with_link_syntax_dropped(title, parser)]
+        return list(dict.fromkeys(form for form in forms if form))
 
     groups = []
     for unit in units:
@@ -3575,8 +3703,14 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
                 openings, unit[3], unit[4], number, unit[0], unit[1])
             own = [form for form in search_forms(lines[start]) if form not in titles] if start != unit[3] else []
             if own:
-                groups.append((list(dict.fromkeys(own)), [number]))
-    return groups
+                groups.append((own, [number]))
+    # Groups with the same numbers search the same records, so each is searched once, with every title, or a
+    # message naming two of its titles is printed twice.
+    merged = {}
+    for titles, waiting in groups:
+        kept = merged.setdefault(tuple(waiting), [])
+        kept.extend(title for title in titles if title not in kept)
+    return [(titles, list(waiting)) for waiting, titles in merged.items()]
 
 
 def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, groups, numbers,
@@ -3591,8 +3725,8 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
     lines saved but never printed are never read."""
     if not groups:
         return [], lambda: []
-    # The groups' titles and numbers, as JSON lists, so a change to either searches again.
-    titles = [[group_titles, group_numbers] for group_titles, group_numbers in groups]
+    # The cache format and the groups' titles and numbers, as JSON lists, so a change to any of them searches again.
+    titles = [TITLE_SEARCH_CACHE_FORMAT, [[group_titles, group_numbers] for group_titles, group_numbers in groups]]
     variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
     session_id = os.environ.get(variable)
     cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
@@ -3612,11 +3746,13 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
         # Whatever a search that cannot load raises, it is a failed search, reported as the others are.
         except Exception as error:
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-                item=item, exit=result.returncode, command=command,
-                said="\n".join(filter(None, [result.stderr.strip(), f"FAILED: loading the title search here raised {error!r}."]))))
+                item=item, exit=result.returncode, command=command, said=title_search_failure_said(
+                    result.stderr, f"FAILED: loading the title search here raised {error!r}.")))
         if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-                item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
+                item=item, exit=result.returncode, command=command, said=title_search_failure_said(
+                    result.stderr, f"FAILED: the title search exited {result.returncode} without a FAILED line of "
+                                   f"its own, so it crashed or was stopped.")))
         lines += result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
     if not session_id:
         return lines, lambda: [TITLE_SEARCH_CACHE_NOT_SAVED.format(
@@ -3633,6 +3769,15 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
             return [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
         return []
     return lines, saved_lines
+
+
+def title_search_failure_said(stderr, summary):
+    """Return what a failed title search said: its stderr, with the FAILED line summary added when the search
+    printed no FAILED line itself, so that the agent always has a FAILED line to relay."""
+    said = stderr.strip()
+    if any(line.startswith("FAILED:") for line in said.split("\n")):
+        return said
+    return "\n".join(filter(None, [said, summary]))
 
 
 def lines_printed_with_title_search_saved_after(first, past_words, rest):
@@ -4469,25 +4614,38 @@ def item_a_bump_suspended(walk_finder, minutes, parser, decided_numbers, order, 
     return []
 
 
-def held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item, outcome):
-    """Return the close lines that give outcome to each item whose answer the minutes hold for the answered
-    items, directly or through a chain of held items, and that no close line decides yet."""
+def held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item, outcome, decided_through_sub_steps):
+    """Return [(close line, the text of the item whose outcome it records)], one close line for each item whose answer the
+    minutes hold, directly or through a chain of held items, and that no close line decides yet, giving it the
+    outcome of what it was held for: outcome for answered_numbers, when outcome is given, and, for an item
+    decided_through_sub_steps maps to approved or disapproved, as items_decided_through_sub_steps gives them, that
+    item's outcome."""
     text = minutes.read_text(encoding="utf-8")
     decided, _ = minutes_record(walk_finder, text, parser)
     holds = held_answers(walk_finder, text, parser)
+    # Each released number maps to (its outcome, the item whose outcome it carries), so a chain started by this
+    # close's answer still names the answered item.
+    released = {number: (outcome, item) for number in answered_numbers} if outcome else {}
+    for number, word in decided_through_sub_steps.items():
+        if word in RULING_GIVEN_WORDS.values():
+            released.setdefault(number, (next(key for key, value in RULING_GIVEN_WORDS.items() if value == word),
+                                         None))
     # An item held for an item this close decides is decided too, so it releases the items held for it in turn.
-    released, lines = set(answered_numbers), []
-    progress = True
+    lines, progress = [], True
     while progress:
         progress = False
         for held_text, held_numbers, new_text, new_numbers in holds:
-            if new_numbers <= released and not held_numbers <= decided:
-                decided.update(held_numbers)
-                released.update(held_numbers)
-                progress = True
-                ruled_by = item if new_numbers <= set(answered_numbers) else new_text
-                lines.append(CLOSE_ALREADY_DECIDED_MINUTES.format(
-                    item=held_text, ruling=HELD_RULING.format(new_item=ruled_by), outcome=outcome))
+            sources = {released.get(number) for number in new_numbers}
+            if None in sources or len({held_outcome for held_outcome, _ in sources}) != 1 or held_numbers <= decided:
+                continue
+            held_outcome, source = sources.pop()
+            source = source or new_text
+            decided.update(held_numbers)
+            released.update(dict.fromkeys(held_numbers, (held_outcome, source)))
+            progress = True
+            ruled_by = item if new_numbers <= set(answered_numbers) else new_text
+            lines.append((CLOSE_ALREADY_DECIDED_MINUTES.format(
+                item=held_text, ruling=HELD_RULING.format(new_item=ruled_by), outcome=held_outcome), source))
     return lines
 
 
@@ -4690,15 +4848,21 @@ def close(arguments):
     append_to_minutes(minutes, [recorded])
     word = RULING_GIVEN_WORDS[held_outcome] if held_outcome else word
     rulings = [(number, word) for number in answered_numbers]
-    if held_outcome:
-        held = held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item, held_outcome)
-        if held:
-            append_to_minutes(minutes, held)
-        for line in held:
-            deferred_item_heading_noted(walk_finder, minutes, walk_finder.parse_items(line.split(": ")[0])[0], total,
-                                        parser, noted=False)
-        output += [CLOSE_HELD_DECIDED.format(item=item, held=line.split(": ")[0]) for line in held]
-        rulings += [(number, word) for line in held
+    # A held answer is released by its new item's own answer, or by the last of its sub-steps, at this close or,
+    # for one an earlier close missed, at any close after it.
+    words, _ = minutes_ruling_words(walk_finder, minutes.read_text(encoding="utf-8"), parser)
+    held = held_items_decided_with(
+        walk_finder, minutes, parser, answered_numbers, item, held_outcome,
+        items_decided_through_sub_steps(order, words, sub_steps_of,
+                                        held_answers_unresolved(walk_finder, minutes.read_text(encoding="utf-8"),
+                                                                parser)))
+    if held:
+        append_to_minutes(minutes, [line for line, _ in held])
+    for line, ruled_by in held:
+        deferred_item_heading_noted(walk_finder, minutes, walk_finder.parse_items(line.split(": ")[0])[0], total,
+                                    parser, noted=False)
+        output.append(CLOSE_HELD_DECIDED.format(item=ruled_by, held=line.split(": ")[0]))
+        rulings += [(number, RULING_GIVEN_WORDS[line.rsplit(" ", 1)[-1]])
                     for number in walk_finder.parse_items(line.split(": ")[0])[0]]
     after = minutes.read_text(encoding="utf-8")
     words, _ = minutes_ruling_words(walk_finder, after, parser)
@@ -4760,7 +4924,9 @@ def main(argv=None):
                         help="check: the answer was O2 or O3, approving the item's \"Option N\" paragraph")
     answer.add_argument("--already-decided", metavar="USER_RULING",
                         help="check: not shown, since an earlier user-ruling decides the item as it recommends; "
-                             "USER_RULING cites it")
+                             "USER_RULING cites it; refused when it cites no line or section of a standing document, such "
+                             "as a GHI-MD, and its earliest YYYY-MM-DD date is missing or more than 90 days before "
+                             "today")
     answer.add_argument(NOW_OVER_LATER_FLAG, action="store_true",
                         help="check: not shown, since its only choice is whether to build something now or later "
                              "and it recommends now; records it as already decided by the user's answer to item 42 "

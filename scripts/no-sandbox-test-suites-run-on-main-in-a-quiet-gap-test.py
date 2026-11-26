@@ -595,6 +595,21 @@ with tempfile.TemporaryDirectory() as directory:
         program.main(gate_call[:1])
     check("the notice flag alone goes to parse_arguments; only merge-gate.sh's exact call skips it",
           bare_flag_parsed == [gate_call[:1]], bare_flag_parsed)
+    real_gettempdir = tempfile.gettempdir
+
+    def no_writable_temporary_directory():
+        raise FileNotFoundError("No usable temporary directory found")
+
+    tempfile.gettempdir = no_writable_temporary_directory
+    try:
+        with constants(DEFAULT_STATE_FILE=s.state_file), \
+                contextlib.redirect_stdout(io.StringIO()) as unwritable_out:
+            unwritable_code = program.main(gate_call[:1])
+    finally:
+        tempfile.gettempdir = real_gettempdir
+    check("with no writable temporary directory, the notice flag alone still prints the notice",
+          unwritable_code == program.EXIT_DONE and unwritable_out.getvalue() == s.notice(),
+          (unwritable_code, unwritable_out.getvalue()))
     with contextlib.redirect_stderr(io.StringIO()):
         try:
             program.main(gate_call[:2])

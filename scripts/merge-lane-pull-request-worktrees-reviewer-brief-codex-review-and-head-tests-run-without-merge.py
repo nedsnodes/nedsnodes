@@ -45,7 +45,7 @@ the pull request's, with those commits and all three directory options:
   1. merge-lane-pull-request-head-and-merged-worktrees-rebuild.py <n> <head> <main>
   2. merge-lane-pull-request-reviewer-brief-compose-with-facts.py <the filled-in copy>
   3. merge-lane-code-review-codex-cell-run-on-pull-request-head.py <n> <base>
-     --expected-head-commit <head>
+     --expected-head-commit <head> --main-commit <main>
   4. merge-lane-pull-request-head-test-run-on-merged-worktree.py <n> --head-commit <head>
      --main-commit <main>
   5. merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py <n> <tag> <head>,
@@ -439,7 +439,8 @@ def main(argv=None):
           f"({base_kind})", flush=True)
     steps = ((WORKTREES_REBUILD_STEP, [str(number), head_commit, main_commit]),
              (REVIEWER_BRIEF_STEP, [str(filled_in_specifications_file)]),
-             (CODEX_REVIEW_STEP, [str(number), base, "--expected-head-commit", head_commit]),
+             (CODEX_REVIEW_STEP, [str(number), base, "--expected-head-commit", head_commit,
+                                 "--main-commit", main_commit]),
              (HEAD_TEST_RUN_STEP, [str(number), "--head-commit", head_commit,
                                   "--main-commit", main_commit]),
              (CLAUDE_REVIEWER_STEP, [str(number), str(specifications[0]["tag"]), head_commit]))

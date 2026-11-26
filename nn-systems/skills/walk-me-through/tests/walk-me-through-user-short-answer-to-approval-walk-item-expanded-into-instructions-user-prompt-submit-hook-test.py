@@ -4,7 +4,9 @@ A, `approved`, `37.4 r` or `1 a 2 d`, into context naming what the answer
 means and the approval-walk item it answers.
 
 Each case runs the hook as a subprocess, its real stdin-to-stdout path, in a
-scratch checkout this suite made. The exit code is asserted on every case. The
+scratch checkout this suite made, started through
+nn-systems/general-tools/python-program-run-as-main-from-cached-bytecode-test-launcher.py so it is compiled
+once; the case that runs it from outside the checkout starts it directly. The exit code is asserted on every case. The
 hook must call no model: a fake `claude` first on PATH records each call and
 exits 1, and the cases that assert no model call read its log.
 """
@@ -32,6 +34,10 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 HOOK_SCRIPT = (Path(__file__).resolve().parents[1]
                / "walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py")
+# Every case starts the hook; through this launcher its 1,900 lines are compiled once, not at every start.
+HOOK_START = [sys.executable, str(Path(__file__).resolve().parents[3] / "general-tools"
+                                  / "python-program-run-as-main-from-cached-bytecode-test-launcher.py"),
+              str(HOOK_SCRIPT)]
 SUITE_ROOT = Path(tempfile.mkdtemp(prefix="short-answer-expansion-hook-test-")).resolve()
 WALK_NAME = "reboot-test-older-open-items-2026-10-15"
 EXPANDED_RULE_ID_OPENING = "[rule walk-me-through-short-answer-expanded-into-instructions] "
@@ -136,6 +142,19 @@ class OutputLines(list):
         return super().__getitem__(index)
 
 
+
+def is_at_most_the_own_words_message(result):
+    """Whether the hook exited 0 with no stderr, and printed nothing or only its message for a reply in the user's
+    own words, so that a crash, or a reply read as an answer, fails."""
+    if result.returncode != 0 or result.stderr:
+        return False
+    if not result.stdout.strip():
+        return True
+    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+    return context.startswith("[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-"
+                              "settled-on-non-recommended-option] ")
+
+
 class Case:
     """One case's own checkout and walk files."""
 
@@ -179,7 +198,7 @@ class Case:
         payload = {"hook_event_name": "UserPromptSubmit", "session_id": "test-session",
                    "cwd": str(self.checkout), "prompt": prompt, "transcript_path": str(transcript_path)}
         return subprocess.run(
-            [sys.executable, str(HOOK_SCRIPT)],
+            HOOK_START,
             input=json.dumps(payload) if stdin_text is None else stdin_text,
             capture_output=True, text=True, cwd=self.checkout if process_cwd is None else process_cwd,
             env={**ATTENDANCE_CHECK.environment_without_agent_session_attendance_variables(os.environ),
@@ -461,11 +480,34 @@ def test_m_shows_the_responses_the_closing_line_leaves_out_and_records_nothing()
               result.returncode == 0 and result.stdout and "--user-reply-as-typed" not in result.stdout
               and "check step" not in result.stdout, f"stdout {result.stdout!r}")
     for prompt in ("more responses 4", "more responses item 4", "More responses 4."):
-        lines = case.lines(prompt)
-        check(f"{prompt!r} is not read as a numbered answer, so nothing tells the agent to record it",
-              lines is None or not any("check step" in line or "--user-reply-as-typed" in line
-                                       or line.startswith("The answer gives each item") for line in lines),
-              f"lines {lines!r}")
+        result = case.run(prompt)
+        check(f"{prompt!r} is not read as a numbered answer, so the hook exits 0 with at most its own-words message",
+              is_at_most_the_own_words_message(result),
+              f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    several = Case(next_to_present="items 5 and 6 of 9")
+    several.minutes("#item_page item 5 of 9 https://claude.ai/artifact/PageOfItem5\n\n"
+                    "#item_page item 6 of 9 https://claude.ai/artifact/PageOfItem6\n\n"
+                    "#next_to_present items 5 and 6 of 9")
+    lines = several.lines("m")
+    check("M on two waiting items hands the agent each item's own closing line",
+          lines is not None and lines[2].endswith(": " + MORE_RESPONSES)
+          and lines[3:5] == [
+              "item 5 of 9's closing line: [Item 5 of 9, two small corrections]"
+              "(https://claude.ai/artifact/PageOfItem5) · A approve · D disapprove · M more responses",
+              "item 6 of 9's closing line: [Item 6 of 9, two small corrections]"
+              "(https://claude.ai/artifact/PageOfItem6) · A approve · D disapprove · M more responses"],
+          f"lines {lines!r}")
+    several.minutes("#item_page item 5 of 9 https://claude.ai/artifact/PageOfItem5\n\n"
+                    "#next_to_present items 5 and 6 of 9")
+    lines = several.lines("m")
+    check("M on two waiting items says to publish the one with no page, and gives its closing line to fill in",
+          lines is not None and lines[3].startswith("item 5 of 9's closing line: ")
+          and lines[4] == "The hook found no `#item_page` line for item 6 of 9 in the walk-minutes <minutes>."
+          and "`#item_page item 6 of 9 <page link>`" in lines[5]
+          and "`#item_page item 6 of 9 publish failed: <what the Artifact tool said>`" in lines[6]
+          and lines[7].startswith("Then give this closing line for item 6 of 9 in your reply")
+          and lines[7].endswith("[Item 6 of 9, two small corrections](<page link>) · A approve · D disapprove · "
+                                "M more responses"), f"lines {lines!r}")
     check("every response is on the closing line or in M's list, once",
           sorted((LETTERS_AFTER_LINK + " · " + MORE_RESPONSES).split(" · "))
           == sorted(["A approve", "AO approve as obvious", "Aa approve after an advisor check", "D disapprove",
@@ -2527,7 +2569,8 @@ APPROVED_SENTENCE = (
 
 
 def context_lines(result):
-    return json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n") if result.stdout else []
+    return OutputLines(json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n")
+                       if result.stdout else [])
 
 
 def test_settled_line_holds_the_sentence_the_skill_holds_word_for_word():
@@ -2614,9 +2657,8 @@ def test_settled_line_unreadable_transcript_falls_back_to_the_prompts_opening():
           and "could not tell who wrote this prompt" in lines[1] and "the last line does not apply" in lines[1]
           and lines[2] == SETTLED_LINE, f"exit {result.returncode}, stdout {result.stdout!r}")
     check("the failed-read opening says a paused approval-walk has no item waiting",
-          bool(lines) and "unless an `#approval_walk_paused` line follows that line, which means no item is waiting"
-          in lines[0],
-          lines[0] if lines else "no lines")
+          "unless an `#approval_walk_paused` line follows that line, which means no item is waiting" in lines[0],
+          lines[0])
     result = case.run("<task-notification>a task ended</task-notification>", transcript_path=transcript)
     check("a task notice with an unreadable transcript prints nothing",
           result.returncode == 0 and result.stdout == "", f"stdout {result.stdout!r}")
@@ -2758,6 +2800,25 @@ def test_a_reply_in_his_own_words_is_recorded_in_the_walk_minutes_against_the_wa
     paused.run("take the other option")
     check("a reply while the approval-walk is paused adds nothing to the walk-minutes",
           paused_minutes.read_text() == paused_before, paused_minutes.read_text())
+
+
+def test_a_handoff_supervisor_first_prompt_marked_human_is_not_recorded_as_his_reply():
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.walk / f"{WALK_NAME}-minutes.md"
+    before = minutes.read_text()
+    prompt = ("Read /home/nedlern/.claude/handoffs/ned-box-helper-dialog-0058.md — the dialog from the session you are "
+              "continuing, written at 2026-11-25T20:32:08Z. Then take the next step.")
+    document = (case.walk / f"{WALK_NAME}.md").read_text()
+    transcript = case.transcript(document, records=[
+        {"type": "user", "turnOrigin": "human", "origin": {"kind": "human"},
+         "message": {"role": "user", "content": prompt}}])
+    lines = [line for line in transcript.read_text().splitlines()]
+    transcript.write_text("\n".join(lines[1:] + lines[:1]) + "\n")
+    result = case.run(prompt, transcript_path=transcript)
+    check("the handoff-supervisor's first prompt, which Claude Code marks human, gets no own-words message and adds "
+          "nothing to the walk-minutes",
+          result.returncode == 0 and not result.stdout.strip() and minutes.read_text() == before,
+          f"exit {result.returncode}, stdout {result.stdout!r}, minutes {minutes.read_text()!r}")
 
 
 def test_a_recorded_reply_is_a_paragraph_of_its_own_so_an_html_comment_above_cannot_swallow_its_code_span():

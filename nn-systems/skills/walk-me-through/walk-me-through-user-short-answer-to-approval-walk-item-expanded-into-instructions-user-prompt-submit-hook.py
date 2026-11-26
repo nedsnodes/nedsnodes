@@ -71,8 +71,9 @@ CHECK_PROGRAM's check step, with --obvious for AO and --after-advisor for Aa.
 O asks the agent to show the item again with an "Option 2" and an "Option 3"
 paragraph; O2 and O3 approve one of them, through the check step with
 --option. M asks the agent to show MORE_RESPONSES_TEXT, the responses the
-closing line leaves out, or, with no approval-walk open, every response but
-M; it records nothing, so it takes no item number and gets no
+closing line leaves out, with each waiting item's closing line, or, with no
+approval-walk open, the entries of RESPONSE_LABELS but M, though the hook
+also accepts R, O2 and O3; it records nothing, so it takes no item number and gets no
 --user-reply-as-typed line.
 
 THE OPEN APPROVAL-WALK is found with WALK_FINDER_FILE, the module the
@@ -442,6 +443,17 @@ REPEAT_UNPUBLISHED_LINES = (
     "Then reply with only the item's closing line, with the page's link in place of `<page link>`, or without "
     "the link if the publish failed, and wait for his answer: {closing_line}")
 NUMBERED_R_WAITING_ITEM_LINE = "Then end your message naming the item waiting for his answer, {item}."
+# The closing-line Stop hook wants each waiting item's own link, so M on several items hands over each closing line.
+MORE_RESPONSES_SEVERAL_ITEMS_LINE = (
+    "Reply with only the responses after this colon, word for word, then, each on a line of its own, the closing "
+    "lines this message gives next, and wait for the user's answer; record nothing in the walk-minutes: "
+    + MORE_RESPONSES_TEXT)
+MORE_RESPONSES_CLOSING_LINE = "{item}'s closing line: {closing_line}"
+MORE_RESPONSES_UNPUBLISHED_LINES = (
+    "The hook found no `#item_page` line for {item} in the walk-minutes{minutes}.",
+    *REPEAT_UNPUBLISHED_LINES[1:3],
+    "Then give this closing line for {item} in your reply, with the page's link in place of `<page link>`, or, if "
+    "the publish failed, with the link left out as the line above says: {closing_line}")
 # Check records one answer for every item the `#next_to_present` line names, and close moves that line on.
 ONE_ITEM_AT_A_TIME_LINE = (
     "Before each check run, if the minutes' last `#next_to_present` line does not name that item alone, add "
@@ -985,6 +997,9 @@ def meaning_lines(answer, walk, in_walk):
                   recommended=f" ({recommendation})" if recommendation else "")
     if code == "R" and walk and numbers:
         return [repeat_line(values["word"], number, walk) for number in numbers]
+    if code == "M" and walk and len(numbers) > 1:
+        return [MEANINGS["M"][0][0].format(**values), MORE_RESPONSES_SEVERAL_ITEMS_LINE,
+                *(more_responses_closing_line(number, walk) for number in numbers)]
     lines = [line.format(**values) for line in MEANINGS[code][branch]]
     return lines + recommendation_unknown_lines(code, numbers, walk)
 
@@ -999,6 +1014,17 @@ def repeat_line(answer, number, walk):
             minutes=f" {walk.minutes}" if walk.minutes else "",
             closing_line=closing_line(number, walk, "<page link>"))
     return REPEAT_PAGE_LINE.format(answer=answer, item=item_name(number, walk), closing_line=line)
+
+
+def more_responses_closing_line(number, walk):
+    """The line giving an M answer the waiting item's closing line, or how to publish its page first."""
+    line = closing_line(number, walk)
+    if line is not None:
+        return MORE_RESPONSES_CLOSING_LINE.format(item=item_name(number, walk), closing_line=line)
+    return "\n".join(MORE_RESPONSES_UNPUBLISHED_LINES).format(
+        item=item_name(number, walk), item_count=item_count(number, walk),
+        minutes=f" {walk.minutes}" if walk.minutes else "",
+        closing_line=closing_line(number, walk, "<page link>"))
 
 
 def checked_item_numbers(answer, walk):
@@ -1043,12 +1069,16 @@ def shown_words(markdown, parser, env=None):
 
 def new_text_as_shown(line):
     """A `#new` or `#new_if_d` source line, as the walk check program reads its mark, as an agent shows it to the
-    user: its mark replaced by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text
-    without a `The new text:` label; None for any other line."""
-    mark = load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(line.strip())
+    user: a part's opening `Part N.` kept, its mark replaced by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK
+    gives its kind, and its text without a `The new text:` label; None for any other line."""
+    walk_finder = load_walk_finder()
+    mark = walk_finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(line.strip())
     if not mark:
         return None
-    return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1]}` line']} {NEW_TEXT_LABEL.sub('', mark[2])}"
+    part = re.match(rf"^{walk_finder.MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*(Part \d+)\.\s",
+                    line.strip())
+    lead_in = LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f"`{mark[1]}` line"]
+    return f"{f'{part[1]}. ' if part else ''}{lead_in} {NEW_TEXT_LABEL.sub('', mark[2])}"
 
 
 def shown_text_parser(walk_finder):

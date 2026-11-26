@@ -21,9 +21,10 @@ the category and waits-on tags the refusal's step 1 names, which that
 program's close step reads to choose when the new item is shown.
 
 EVERY TURN is checked, whoever started it: the user, another agent-seat, a
-background-task notice. THE REPLY is the text of every assistant message
-since the turn's start, a prompt the user typed into the turn included, plus
-the Stop payload's `last_assistant_message`, because Claude Code can start
+background-task notice, a scheduled prompt. THE REPLY is the text of every
+assistant message since the turn's start, a prompt the user typed into the
+turn included, plus the Stop payload's `last_assistant_message` unless it
+equals the transcript's last assistant text, because Claude Code can start
 the Stop hook before it has written the final message to the transcript.
 
 THE TEXT CHECKED is the reply, line by line, without:
@@ -42,8 +43,9 @@ THE TEXT CHECKED is the reply, line by line, without:
   be told from the other items'. So is a reply line matching
   the answer line's first sentence, the walk-me-through skill's
   answer line without what the item adds after it, such as ` D: <the
-  alternative>`; and one showing a line of the item that opens with the
-  mark `#new` or `#new_if_d` as the agent shows it, the mark replaced by
+  alternative>`; and one showing a line of the item that opens, after any
+  list or quotation mark and a part's opening `Part N.`, with the mark
+  `#new` or `#new_if_d` as the agent shows it, the mark replaced by
   `If you approve, the new text:` or `If you disapprove, the new text:` and
   a `The new text:` just after the mark dropped; lines match when they are
   equal once markdown emphasis, heading and list marks, a hashtag marker
@@ -92,11 +94,12 @@ Every other line passes, and a reply with no question-like line never waits
 for the model.
 When some lines are question-like, each goes to the model MODEL in a headless
 `claude -p` call of its own, the calls running at the same time, with
-MODEL_PROMPT: the line, the reply's text checked, the text of every waiting
-item as its unit of the walk-document holds it, and the message that started
-the turn with who sent it. The model answers whether the line is an ask, as
-MODEL_PROMPT defines one. The hook blocks on the first question-like line, in
-the reply's order, that the model calls an ask or whose call fails. The
+QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT: the line, the reply's text
+checked cut around the line, the text of every waiting item as its unit of
+the walk-document holds it, and the message that started the turn with who
+sent it. The model answers whether the line is an ask, as that prompt
+defines one. The hook blocks on the first question-like line, in the reply's
+order, that the model calls an ask or whose call fails. The
 children run with every hook disabled, so this hook cannot run inside them,
 no session file, no tools, and a cwd outside any checkout. A call fails when
 it cannot run, runs past MODEL_TIMEOUT_SECONDS, or answers without exactly
@@ -137,6 +140,16 @@ to LOG_FILE_NAME at the top of the log-store, as ned-box reaches it or as
 the Mac's mount of ned-box's home reaches it; LOG_PATH_VARIABLE overrides the
 path. When neither is reachable, or the write fails, the block's reason says
 the block was not logged.
+
+EVERY LINE SENT TO THE MODEL is logged too, as one JSON line each, with the
+time, session, walk, MODEL, the entry the call was sent, and the verdict: `ask`
+true or false with the model's `reason`, or null with the call's `failure`. The lines go to
+REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_FILE_NAME beside the refusal log, found the same way;
+REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_PATH_VARIABLE overrides the path. The program
+walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert.py
+samples them. Logging never changes whether the hook blocks: when these lines
+cannot be logged, a block's reason says so, and a reply that passes still
+passes, the hook printing why on stderr and exiting 1.
 
 NO WALK IN THE CHECKOUT: when the cwd's checkout has no open or paused
 approval-walk in its `docs/walk/`, a missing `docs/walk/` counting as empty,
@@ -209,6 +222,9 @@ MODEL_TIMEOUT_SECONDS = 25
 LOG_STORE_DIRECTORY_NAME = "nedsnodes-logs"
 LOG_FILE_NAME = "walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-refusals.jsonl"
 LOG_PATH_VARIABLE = "NEDSNODES_WALK_ME_THROUGH_AGENT_QUESTION_REFUSAL_LOG"
+REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_FILE_NAME = (
+    "walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-reply-line-sent-to-model-and-its-ask-or-not-label.jsonl")
+REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_PATH_VARIABLE = "NEDSNODES_WALK_ME_THROUGH_AGENT_QUESTION_REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG"
 
 NUMBER_LIST = r"\d+(?:\.\d+)*(?:\s*(?:,|&|\band\b|\bto\b|-|–)\s*\d+(?:\.\d+)*)*"
 WAITING_REMINDER = re.compile(
@@ -248,7 +264,8 @@ MODEL_SCHEMA = {"type": "object", "required": ["labels"], "properties": {"labels
     "type": "object", "required": ["id", "ask", "reason"],
     "properties": {"id": {"type": "string"}, "ask": {"type": "boolean"}, "reason": {"type": "string"}}}}}}
 MODEL_SYSTEM_PROMPT = "You classify text. Answer only through the structured output."
-MODEL_PROMPT = (
+AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE, AGENT_MESSAGE_CHARACTERS_KEPT_AFTER_THE_LINE = 5000, 2500
+QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT = (
     'You are judging lines that AI coding agents wrote to their user, a software developer who directs '
     'several agents at once. While these lines were written the agent was often running an approval-walk:'
     ' it puts decisions to the user one item at a time, each with a recommendation and a closing line '
@@ -307,6 +324,8 @@ REFUSAL_INSTRUCTIONS = (
     "question only when the item in the walk-document holds every flagged line that way, and refuses again until "
     "it does; it ignores a `>` quote mark or a list mark such as `-` or `1.` at the start of a line, bold, italic "
     "and code marks, and letter case, so you may add or drop those. "
+    "Just before the alternative, state the strongest case against the recommendation on one line that opens with "
+    "`#case_against` and a rating, none, weak, medium, strong or very strong. "
     "Give the item one recommendation and one alternative, and end it with the recommendation stated as an "
     "action, as in `Recommendation: <what you recommend doing>.` State the alternative before it, as in "
     "`The alternative: <what D does instead>.`",
@@ -347,6 +366,15 @@ NO_WALK_REFUSAL_INSTRUCTIONS = (
 )
 NOT_LOGGED_NOTICE = ("This refusal was not logged, {problem}. If that is because ned-box cannot be reached, tell "
                      "the user that this hook could not log to the log-store on ned-box; otherwise you need not act on it.")
+REPLY_LINE_MODEL_ASK_OR_NOT_LABELS_NOT_LOGGED_NOTICE = (
+    "This hook's model's ask-or-not label for each line of this reply was not logged, {problem}. If the log-store is "
+    "reachable at neither path because ned-box cannot be reached, tell the user, in one plain sentence, that the "
+    "question-check Stop hook could not log to the log-store on ned-box; otherwise the missing log entries need no "
+    "action. Either way, act on the rest of this message.")
+
+
+class ModelLineVerdictsNotLogged(Exception):
+    """A reply passed, but the model's verdicts on its lines could not be logged."""
 
 
 def load_module(name, path):
@@ -401,9 +429,18 @@ def answer_sentence(line):
     return SENTENCE_END.split(LINE_MARKS.sub("", line.strip()))[0]
 
 
+def turn_opening_index(records):
+    """The index of the record that opened the transcript's last turn, or None: the later of the current-item Stop
+    hook's turn start and the last record carrying a `turnOrigin`, because a scheduled turn's opening record is
+    marked isMeta with no `origin`, so that turn start skips it."""
+    starts = [current_item_hook.turn_start(records)] + [
+        next((index for index in range(len(records) - 1, -1, -1) if "turnOrigin" in records[index]), None)]
+    return max((start for start in starts if start is not None), default=None)
+
+
 def turn_assistant_texts(records):
     """Every assistant text since the transcript's last turn start."""
-    start = current_item_hook.turn_start(records)
+    start = turn_opening_index(records)
     texts = []
     for record in records[0 if start is None else start + 1:]:
         content = record.get("message", {}).get("content") if record.get("type") == "assistant" else None
@@ -527,14 +564,15 @@ def checked_lines(reply, document_text, units, parser, waiting_numbers, pages):
 
 
 def turn_opening(records):
-    """(who started the transcript's last turn, as its origin's kind, or the user's own when it names none; the text
+    """(who started the transcript's last turn, as its origin's kind, else its `turnOrigin`, else the user; the text
     of the message that started it)."""
-    start = current_item_hook.turn_start(records)
+    start = turn_opening_index(records)
     record = {} if start is None else records[start]
     content = record.get("message", {}).get("content", "")
     text = content if isinstance(content, str) else "\n".join(
         block.get("text", "") for block in content if isinstance(block, dict) and block.get("type") == "text")
-    return (record.get("origin") or {}).get("kind") or current_item_hook.USER_TURN_ORIGIN, text
+    return ((record.get("origin") or {}).get("kind") or record.get("turnOrigin")
+            or current_item_hook.USER_TURN_ORIGIN), text
 
 
 def is_question_like(line):
@@ -542,32 +580,49 @@ def is_question_like(line):
     return "?" in line or ASK_PHRASE.search(line) is not None
 
 
-def model_judgement(message_lines, question_like_lines, waiting_items_text, turn_started_by, turn_start_text,
+def model_judgement(message_lines, question_like_indexes, waiting_items_text, turn_started_by, turn_start_text,
                     timeout_seconds=MODEL_TIMEOUT_SECONDS):
-    """Return (the first question-like line the model calls an ask or whose call fails, or None; None, or why that
-    line's call failed), judging each line in a call of its own, the calls running at the same time."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(question_like_lines)) as pool:
-        verdicts = list(pool.map(
-            lambda numbered: line_is_ask(*numbered, message_lines, waiting_items_text, turn_started_by,
-                                         turn_start_text, timeout_seconds),
-            enumerate(question_like_lines, 1)))
-    for line, (ask, failure) in zip(question_like_lines, verdicts):
+    """Return (the index in message_lines of the first question-like line the model calls an ask or whose call
+    fails, or None; None, or why that line's call failed; one (entry sent, ask, reason, failure) per line judged, in the
+    reply's order), judging each line in a call of its own, the calls running at the same time."""
+    entries = [reply_line_model_ask_or_not_label_prompt_entry_with_context_build(number, index, message_lines, waiting_items_text, turn_started_by, turn_start_text)
+               for number, index in enumerate(question_like_indexes, 1)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(question_like_indexes)) as pool:
+        verdicts = list(pool.map(lambda entry: reply_line_model_ask_or_not_label_from_claude_call(entry, timeout_seconds), entries))
+    judged = [(entry, ask, reason, failure) for entry, (ask, reason, failure) in zip(entries, verdicts)]
+    for index, (ask, _, failure) in zip(question_like_indexes, verdicts):
         if failure is not None or ask:
-            return line, failure
-    return None, None
+            return index, failure, judged
+    return None, None, judged
 
 
-def line_is_ask(number, line, message_lines, waiting_items_text, turn_started_by, turn_start_text, timeout_seconds):
-    """Return (whether the model calls line, the number-th question-like line, an ask, None), or (None, why the call
-    failed)."""
-    entry = {"id": f"L{number}", "line": line, "turn_started_by": turn_started_by,
-             "message_that_started_the_turn": turn_start_text,
-             "agent_message_holding_the_line": "\n".join(message_lines),
-             "waiting_walk_item_text": waiting_items_text}
-    prompt = MODEL_PROMPT + json.dumps([entry], ensure_ascii=False, indent=1) + "\n"
+def message_window(message_lines, index):
+    """The message cut around its index-th line, as the benchmark the user approved cut it."""
+    message = "\n".join(message_lines)
+    line = message_lines[index]
+    at = sum(len(earlier) + 1 for earlier in message_lines[:index])
+    start = max(at - AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE, 0)
+    end = min(at + len(line) + AGENT_MESSAGE_CHARACTERS_KEPT_AFTER_THE_LINE, len(message))
+    return ("[...] " if start else "") + message[start:end] + (" [...]" if end < len(message) else "")
+
+
+def reply_line_model_ask_or_not_label_prompt_entry_with_context_build(number, index, message_lines, waiting_items_text, turn_started_by, turn_start_text):
+    """The JSON entry the model is sent for message_lines[index], the number-th question-like line."""
+    return {"id": f"L{number}", "line": message_lines[index], "turn_started_by": turn_started_by,
+            "message_that_started_the_turn": turn_start_text,
+            "agent_message_holding_the_line": message_window(message_lines, index),
+            "waiting_walk_item_text": waiting_items_text}
+
+
+def reply_line_model_ask_or_not_label_from_claude_call(entry, timeout_seconds, model=MODEL, program=None, prompt=QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT):
+    """Return (whether model, sent prompt and then entry, as reply_line_model_ask_or_not_label_prompt_entry_with_context_build builds it, calls the entry's line an ask; the
+    model's reason; None), or (None, None, why the call failed); program, by default `claude` found on PATH, is the
+    Claude Code program run."""
+    prompt = prompt + json.dumps([entry], ensure_ascii=False, indent=1) + "\n"
     command = [*command_line_prefix.claude_code_headless_run_command_line_prefix_build(
-                   "dontAsk", caller_claude_code_session_settings={"disableAllHooks": True}),
-               "--model", MODEL, "--output-format", "json",
+                   "dontAsk", program=program or command_line_prefix.CLAUDE_CODE_PROGRAM,
+                   caller_claude_code_session_settings={"disableAllHooks": True}),
+               "--model", model, "--output-format", "json",
                "--json-schema", json.dumps(MODEL_SCHEMA), "--system-prompt", MODEL_SYSTEM_PROMPT,
                "--tools", "",
                # Without this every check would leave a session file behind.
@@ -576,29 +631,30 @@ def line_is_ask(number, line, message_lines, waiting_items_text, turn_started_by
         completed = subprocess.run(command, input=prompt, capture_output=True, text=True,
                                    timeout=timeout_seconds, cwd=tempfile.gettempdir(), check=False)
     except subprocess.TimeoutExpired:
-        return None, f"claude gave no answer within {timeout_seconds} seconds"
+        return None, None, f"claude gave no answer within {timeout_seconds} seconds"
     except OSError as error:
-        return None, f"claude could not be run: {error}"
+        return None, None, f"claude could not be run: {error}"
     try:
         result = json.loads(completed.stdout)
         verdict = result["structured_output"]
         labels = verdict["labels"]
     except (ValueError, TypeError, KeyError) as error:
         detail = (completed.stderr or completed.stdout or "no output").strip()[:300]
-        return None, f"claude exited {completed.returncode} without a verdict ({error!r}): {detail}"
+        return None, None, f"claude exited {completed.returncode} without a verdict ({error!r}): {detail}"
     if completed.returncode != 0 or result.get("is_error"):
-        return None, f"claude exited {completed.returncode} reporting an error: {str(result.get('result'))[:300]}"
+        return None, None, f"claude exited {completed.returncode} reporting an error: {str(result.get('result'))[:300]}"
     if not (isinstance(labels, list) and len(labels) == 1 and isinstance(labels[0], dict)
             and type(labels[0].get("ask")) is bool):
-        return None, ("claude's verdict does not give the line exactly one label with a true or false ask: "
-                      f"{json.dumps(verdict)[:300]}")
-    return labels[0]["ask"], None
+        return None, None, ("claude's verdict does not give the line exactly one label with a true or false ask: "
+                            f"{json.dumps(verdict)[:300]}")
+    return labels[0]["ask"], labels[0].get("reason"), None
 
 
-def log_path(environment, log_store_homes=None):
-    """Return (the refusal log's path, None), or (None, why the log-store cannot be reached); log_store_homes are
-    the directories that may hold the log-store, by default ned-box's home and the Mac's mount of it."""
-    override = environment.get(LOG_PATH_VARIABLE)
+def log_path(environment, log_store_homes=None, variable=LOG_PATH_VARIABLE, file_name=LOG_FILE_NAME):
+    """Return (the path of the log file_name, by default the refusal log, None), or (None, why the log-store cannot be
+    reached); the environment's variable overrides the path; log_store_homes are the directories that may hold the
+    log-store, by default ned-box's home and the Mac's mount of it."""
+    override = environment.get(variable)
     if override:
         return Path(override), None
     if log_store_homes is None:
@@ -608,21 +664,43 @@ def log_path(environment, log_store_homes=None):
     candidates = [Path(home) / LOG_STORE_DIRECTORY_NAME for home in log_store_homes]
     for directory in candidates:
         if directory.is_dir():
-            return directory / LOG_FILE_NAME, None
+            return directory / file_name, None
     return None, "because the log-store is reachable at neither " + " nor ".join(map(str, candidates))
 
 
-def log_refusal(environment, entry):
-    """Append entry to the refusal log; return None, or why it was not logged."""
-    path, problem = log_path(environment)
+def reply_line_model_ask_or_not_label_log_path(environment, log_store_homes=None):
+    """Return (the path of the log of every line sent to the model, None), or (None, why the log-store cannot be
+    reached), as log_path finds it."""
+    return log_path(environment, log_store_homes, REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_PATH_VARIABLE,
+                    REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_FILE_NAME)
+
+
+def log_append(path_and_problem, entries):
+    """Append each of entries as a JSON line, in one write, to the path of path_and_problem, a pair log_path returns;
+    return None, or why they were not logged."""
+    path, problem = path_and_problem
     if path is None:
         return problem
     try:
         with open(path, "a", encoding="utf-8") as log:
-            log.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            log.write("".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries))
     except OSError as error:
         return f"because {path} could not be written: {error}"
     return None
+
+
+def log_refusal(environment, entry):
+    """Append entry to the refusal log; return None, or why it was not logged."""
+    return log_append(log_path(environment), [entry])
+
+
+def log_model_line_verdicts(environment, payload, walk, judged):
+    """Append one entry per line the model judged, judged as model_judgement returns it, to the line-verdict log;
+    return None, or why they were not logged."""
+    time = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    return log_append(reply_line_model_ask_or_not_label_log_path(environment), [
+        {"time": time, "session": payload.get("session_id"), "walk": walk, "model": MODEL, **entry, "ask": ask,
+         "reason": reason, "failure": failure} for entry, ask, reason, failure in judged])
 
 
 def closing_lines(pages, name, document_text, units, waiting_units, parser, numbers, new_total):
@@ -707,7 +785,8 @@ def output_for(payload, environment, model=model_judgement):
         return None
     records = current_item_hook.transcript_records(Path(transcript_path).expanduser())
     texts = turn_assistant_texts(records)
-    reply = "\n".join(texts + [payload.get("last_assistant_message") or ""])
+    final_message = payload.get("last_assistant_message") or ""
+    reply = "\n".join(texts + ([] if texts and texts[-1] == final_message else [final_message]))
     if not reply.strip():
         return None
     name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
@@ -723,22 +802,25 @@ def output_for(payload, environment, model=model_judgement):
     pages = walk_finder.newest_item_page_link_per_item_from_walk_minutes(minutes.read_text(encoding="utf-8"), parser)
     checked = checked_lines(reply, document_text, units, parser, numbers, pages)
     lines = [line for line, _ in checked]
-    question_like = [line for line in lines if is_question_like(line)]
+    question_like = [index for index, line in enumerate(lines) if is_question_like(line)]
     if not question_like:
         return None
     document_lines = document_text.split("\n")
     waiting_items_text = "\n\n".join("\n".join(document_lines[first:end]).strip()
                                      for _, _, _, first, end in waiting_units)
     turn_started_by, turn_start_text = turn_opening(records)
-    sentence, failure = model(lines, question_like, waiting_items_text, turn_started_by, turn_start_text)
+    flagged, failure, judged = model(lines, question_like, waiting_items_text, turn_started_by, turn_start_text)
+    verdicts_problem = log_model_line_verdicts(environment, payload, name, judged)
     if failure is not None:
         decided, decided_by = MODEL_CHECK_FAILED_NOTICE.format(failure=failure), "model-check-failed"
-    elif sentence is None:
+    elif flagged is None:
+        if verdicts_problem is not None:
+            raise ModelLineVerdictsNotLogged(verdicts_problem)
         return None
     else:
         decided, decided_by = DECIDED_BY_MODEL_NOTICE, "model"
     # The agent copies the flagged text into the item, so it is named as written, not as checked.
-    sentence = "\n".join(next(written for line, written in checked if line == sentence))
+    sentence = "\n".join(checked[flagged][1])
     waiting = numbers[-1]
     waiting_label = " and ".join(numbers)
     new_total = str(int(total) + 1)
@@ -766,12 +848,19 @@ def output_for(payload, environment, model=model_judgement):
         "session": payload.get("session_id"), "walk": name, "sentence": sentence, "decided_by": decided_by})
     if problem is not None:
         lines_out.append(NOT_LOGGED_NOTICE.format(problem=problem))
+    if verdicts_problem is not None:
+        lines_out.append(REPLY_LINE_MODEL_ASK_OR_NOT_LABELS_NOT_LOGGED_NOTICE.format(problem=verdicts_problem))
     return json.dumps({"decision": "block", "reason": "\n".join(lines_out)}, ensure_ascii=False)
 
 
 def main():
     try:
         output = run(sys.stdin.read(), os.environ)
+    except ModelLineVerdictsNotLogged as error:
+        print(f"walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook: the reply "
+              f"passed, but the model's verdicts on its lines were not logged, {error}; the agent need not act.",
+              file=sys.stderr)
+        return 1
     except Exception as error:
         print(f"walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook: the hook "
               f"failed, so it did not check the reply for a question to the user outside the approval-walk's "

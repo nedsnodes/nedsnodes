@@ -157,11 +157,11 @@ RECOMMENDATION = re.compile(r"Recommendation:(.*)$", re.I | re.M)
 # text to repeat after `^\s*`.
 MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT = r"(?:(?:[-*+]|\d+[.)]|>)\s+)"
 # Recognises `#new` and `#new_if_d` mark lines, the walk-document lines holding a text an answer adds: after any list
-# or quotation marks, the mark `#new` or `#new_if_d`, spelled exactly, then the text. The walk check program and the
-# short-answer hook both read marks with this one pattern, so that a line one of them takes for a mark the other
-# cannot skip.
+# or quotation marks and a part's opening `Part N.`, the mark `#new` or `#new_if_d`, spelled exactly, then the text.
+# The walk check program and the short-answer hook both read marks with this one pattern, so that a line one of them
+# takes for a mark the other cannot skip.
 APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN = re.compile(
-    rf"^\s*{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*(#new(?:_if_d)?)\b[:\s]*(.*)$")
+    rf"^\s*(?:{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}|Part \d+\.\s+)*(#new(?:_if_d)?)\b[:\s]*(.*)$")
 
 REPOSITORY_TOP = Path(__file__).resolve().parents[3]
 SUITE_RUNNER_FILE = REPOSITORY_TOP / "scripts" / "run-all-test-suites.py"

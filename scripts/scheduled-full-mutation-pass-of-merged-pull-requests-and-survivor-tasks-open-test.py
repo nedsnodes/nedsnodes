@@ -1568,7 +1568,7 @@ def run_cases():
         fixture.set_last(start)
         merge = fixture.commit("scripts/thing.py", "def double(x):\n    return x + x\n",
                                author="alpha")
-        (alpha_list / (job.TASK_HIGH_WATER_MARK_FILE_NAME + ".partial")).mkdir()
+        (alpha_list / job.TASK_HIGH_WATER_MARK_FILE_NAME).mkdir()
         plan = {merge: {"json": verdict(survived=[survivor()])}}
         completed = fixture.run(plan)
         check("a .highwatermark that cannot be written after the task is linked stops the run, "
@@ -1579,7 +1579,7 @@ def run_cases():
               and fixture.state_json()["last_tested_main_commit"] == start,
               (completed.returncode, task_files(alpha_list), fixture.state_json(),
                completed.stderr))
-        (alpha_list / (job.TASK_HIGH_WATER_MARK_FILE_NAME + ".partial")).rmdir()
+        (alpha_list / job.TASK_HIGH_WATER_MARK_FILE_NAME).rmdir()
         completed = fixture.run(plan)
         key = job.mutant_key(survivor())
         check("the next run finds that task by the mutant's diff file, opens no second one, "

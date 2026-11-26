@@ -1091,6 +1091,34 @@ with tempfile.TemporaryDirectory() as scratch:
           (ran(root), result.stdout, result.stderr))
     base = head_tested
 
+    # When the runner differs from the first commit, the later comparisons are not made, so a
+    # later commit whose comparison would fail, such as one git ls-tree cannot read, stops
+    # nothing.
+    real_suites_selected_since = module.suites_selected_since
+    compared = []
+
+    def suites_selected_since_failing_after_the_first(top, suites, recordings, commit, *rest):
+        compared.append(commit)
+        if len(compared) > 1:
+            raise module.CouldNotRun("injected: git ls-tree of the second commit failed")
+        return [(suite, False, "none of its files differs") for suite in suites]
+
+    module.suites_selected_since = suites_selected_since_failing_after_the_first
+    try:
+        answer = module.suites_selected_since_every_commit(
+            pathlib.Path("/nowhere"), ["a-test.py"], {}, ["first-commit", "second-commit"],
+            [{module.PROGRAM: "M"}, {}], {}, {}, None)
+        refused = None
+    except module.CouldNotRun as refusal:
+        answer, refused = None, str(refusal)
+    finally:
+        module.suites_selected_since = real_suites_selected_since
+    check("given two commits, when the test runner differs from the first, the comparison with "
+          "the second is not made, so its failure does not stop the run, and every suite runs",
+          refused is None and compared == ["first-commit"] and answer is not None
+          and [(suite, selected) for suite, selected, _ in answer] == [("a-test.py", True)],
+          (compared, answer, refused))
+
     result = run(root, CHANGED_SINCE, "no-such-commit")
     check("a commit git cannot resolve is refused, exit 2, before anything runs",
           result.returncode == 2 and CHANGED_SINCE in result.stderr, (result.returncode,

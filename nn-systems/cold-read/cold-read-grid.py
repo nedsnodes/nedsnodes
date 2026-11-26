@@ -287,11 +287,14 @@ STOPPED_CELL_WRITE_CHECK_LINE = (
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
     + ".\nBefore "
     "you do anything else, read `git status` against the edits you know are your own. "
-    "Undo a change git status lists, by running `rm -r -- <path>` if it is untracked or "
+    "For a path git status lists whose every uncommitted change shows a reviewer wrote it, such as "
+    "notes about the document under review, undo it: run `rm -r -- <path>` if it is untracked or "
     f"`git --literal-pathspecs {STRAY_WRITE_RESTORE_ARGUMENTS} <path>` if it is tracked, with <path> "
-    "replaced by the path as one shell-quoted argument, only when its content shows a reviewer wrote "
-    "it, such as notes about the document under review. Ask the user about any other "
-    "change you did not make, and whenever you are unsure.")
+    "replaced by the path as one shell-quoted argument. "
+    "For a file that holds a reviewer's writing beside other uncommitted changes, delete only the "
+    "reviewer's writing, by editing the file: either command above throws away every uncommitted "
+    "change to the file. "
+    "Ask the user about any other change you did not make, and whenever you are unsure.")
 
 # A stopped cell never reaches its own stray-write check, so the grid runs one for it
 # against the snapshot it took before launching the cells. What to do goes on the next
