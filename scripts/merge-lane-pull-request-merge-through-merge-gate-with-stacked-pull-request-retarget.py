@@ -960,7 +960,9 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                   f"opens one for them, because a merge opens a repair task only for a test new "
                   f"to the record or one whose recorded task is closed: {names}.\n{tell_the_user}")
             kept["complete"] = False
+            # The writer runs change() before it writes, so these name what was never saved.
             changed_since_first_save.clear()
+            named_by_second_save.clear()
     for (suite, test), (seat, task_id, how) in sorted(changed_since_first_save.items()):
         if closed_task_of_test.get((suite, test)) == (seat, task_id):
             continue

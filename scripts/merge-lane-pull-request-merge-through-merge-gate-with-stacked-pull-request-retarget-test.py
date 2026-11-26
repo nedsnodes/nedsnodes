@@ -1756,6 +1756,35 @@ def failed_suites_kept_in_view_cases(scratch):
               and "scripts/broken-test.py: case a (task #4 on author-seat's task list)" in output,
               f"exit {exit_code}\n{output}")
 
+        saves.clear()
+
+        def second_save_fails_on_its_write(change):
+            saves.append(change)
+            if len(saves) == 2:
+                change(program.failed_suites_record.failed_after_merge_test_suites_on_main_record_read())
+                raise program.failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable(
+                    "No space left on device")
+            return saved_apply(change)
+
+        program.failed_suites_record.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = second_save_fails_on_its_write
+        try:
+            exit_code, output, _, _, _ = run_case(
+                scratch, "closed-task-reopened-then-writer-raised-then-second-save-write-failed",
+                [(GATE_PASSED, 0)], default_routes([]), runner_answer=(RUNNER_FAILED, 1),
+                before_the_program_runs=closed_task_and_mark_unwritable)
+        finally:
+            program.failed_suites_record.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = saved_apply
+        tests = failed_suites_record_of(
+            scratch / "closed-task-reopened-then-writer-raised-then-second-save-write-failed")[
+            "scripts/broken-test.py"]["failed_tests"]
+        check("when the writer raises after linking and the second save then fails on its write, "
+              "the writer's STOP says the record does not name the task, as the record shows",
+              exit_code == 3 and len(saves) == 2 and tests["case a"]["repair_task_id"] is None
+              and "STOP: merged, but the task writer wrote repair task #4 to" in output
+              and "The failed suites record does not name it" in output
+              and "The failed suites record names it." not in output,
+              f"exit {exit_code}\n{output}\n{tests}")
+
         def one_test_taken_off_between_the_saves(arguments, merge_commit, seat, failed_tests):
             opened = saved_opened(arguments, merge_commit, seat, failed_tests)
             record_path = program.failed_suites_record.failed_suites_record_file()
