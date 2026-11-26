@@ -2260,13 +2260,13 @@ check("the ssh time limit of a read on ned-box follows the agy cell's per-model 
       + warning_module.new_words.NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS
       + warning_module.COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS)
 check("the ssh time limit of a read on ned-box is built from the agy cell's 15-minute "
-      "default, killed a minute later, the Sonnet backup's 10 minutes and the Question 4 "
-      "cell's 10 minutes",
+      "default, killed a minute later, the Sonnet backup's 10 minutes, the new-words "
+      "meaning checks' 10 minutes and the Question 4 cell's 10 minutes",
       warning_module.agy_cell.COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS == 16 * 60
       and warning_module.COLD_READ_FAST_READ_RUN_ON_NED_BOX_OVER_SSH_TIMEOUT_SECONDS
       == warning_module.FAST_READ_ATTEMPTS
       * len(warning_module.agy_cell.TIER_TO_AGY_MODEL_CHAIN[warning_module.FAST_READ_TIER]) * 16 * 60
-      + 10 * 60 + 5 * 60 + 10 * 60,
+      + 10 * 60 + 5 * 60 + 10 * 60 + 10 * 60,
       repr(warning_module.COLD_READ_FAST_READ_RUN_ON_NED_BOX_OVER_SSH_TIMEOUT_SECONDS))
 check("the Question 4 prompt carries the fast-clarify prompt's reading rules whole, "
       "from their first sentence to their last",

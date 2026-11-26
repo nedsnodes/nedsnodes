@@ -613,7 +613,7 @@ class SweepLog:
             if typed is not None and arrived < typed:
                 continue
             reminded.update(subject for subject in event["subjects"]
-                            if subject not in last_held_at or last_held_at[subject] < arrived)
+                            if subject not in last_held_at or not arrived < last_held_at[subject])
         return reminded
 
     def checked_sentences(self, seat):

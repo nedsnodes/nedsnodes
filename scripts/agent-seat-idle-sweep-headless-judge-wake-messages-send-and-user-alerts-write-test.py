@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Cases for scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py.
 
-Every case runs the program as a subprocess against folders this suite made, never the real ones:
+The cases of `reminded_subjects`, at the end, are log-only: they import the program and run it in
+this process on a log file this suite wrote, with the real HOME, which that method never reads.
+Every other case runs the program as a subprocess against folders this suite made, never the real ones:
 a handoff directory, agents, projects and tasks roots, a ~/.claude.json, a log file, a state
 directory and HOME, under which user-alerts are written. `claude` is a fake placed first on PATH:
 it answers each call with the next scripted answer, as stream-json, and records the call's
@@ -331,7 +333,7 @@ class Machine:
         return ([json.loads(path.read_text()) for path in sorted(pending.glob("*.json"))]
                 if pending.is_dir() else [])
 
-    def run(self, minutes, *extra, path_has_fake=True, github_budget_spent=False, runner_source=None):
+    def run(self, minutes, *extra, path_has_fake=True, runner_source=None):
         environment = dict(os.environ)
         environment["HOME"] = str(self.home)
         # Python finds the user's site-packages from HOME, and on the Mac markdown-it-py is installed there.
@@ -345,8 +347,6 @@ class Machine:
         environment["FAKE_CLAUDE_CALLS"] = str(self.calls)
         environment["FAKE_CLAUDE_ANSWERS"] = str(self.answers)
         environment["FAKE_CLAUDE_PROJECTS"] = str(self.projects)
-        if github_budget_spent:
-            runner_source = GITHUB_BUDGET_SPENT_RUNNER
         runner = ["-c", runner_source] if runner_source else []
         completed = subprocess.run(
             [sys.executable, *runner, str(PROGRAM), "--now", at(minutes), "--handoff-directory",
@@ -2017,7 +2017,7 @@ task_file = machine.tasks / "nedsnodes-alpha-tasks" / "1.json"
 task_file.write_text(json.dumps({**json.loads(task_file.read_text()),
                                  "metadata": {"prerequisites": [{"pr_merged": 50}]}}))
 machine.script(judged(False, reason="r"))
-code, output = machine.run(0, github_budget_spent=True)
+code, output = machine.run(0, runner_source=GITHUB_BUDGET_SPENT_RUNNER)
 skipped = [{"kind": "pr_merged", "number": 50}]
 check("a prerequisite the GitHub budget left unasked: logged by name",
       code == 0 and [(event["agent_seat"], event["conditions"]) for event in
@@ -4191,6 +4191,9 @@ check("a hold made while the sender ran, before the reminder arrived, has not an
       reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.3)}) == {"open task: 1"})
 check("a hold made after the reminder arrived frees the task to be raised again",
       reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.7)}) == set())
+check("a hold logged at the very time the reminder arrived has not answered it, as typing at that time has not",
+      reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.5)}) == {"open task: 1"}
+      and reminded([REMINDER, ARRIVED], typed=at(0.5)) == {"open task: 1"})
 check("before the delivery check, typing before the send was logged has not answered the reminder",
       reminded([REMINDER], typed=at(0.05)) == {"open task: 1"})
 check("before the delivery check, typing after the send was logged answers the reminder",
