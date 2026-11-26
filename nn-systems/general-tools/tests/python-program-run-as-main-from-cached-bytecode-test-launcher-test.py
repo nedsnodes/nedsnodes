@@ -43,8 +43,14 @@ def check(name, condition, detail=None):
         print(f"FAIL  {name}: {detail!r}")
 
 
+# Reviewers set the first and a mutant run sets the second; either keeps the cache out of the probe's __pycache__.
+CHILD_ENVIRONMENT = {name: value for name, value in os.environ.items()
+                     if name not in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")}
+
+
 def run(*command, cwd):
-    return subprocess.run([sys.executable, *map(str, command)], capture_output=True, text=True, cwd=cwd)
+    return subprocess.run([sys.executable, *map(str, command)], capture_output=True, text=True, cwd=cwd,
+                          env=CHILD_ENVIRONMENT)
 
 
 with tempfile.TemporaryDirectory() as scratch:
