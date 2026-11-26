@@ -454,7 +454,13 @@ GH_TIMEOUT_SECONDS = 120
 # Beyond the pre-push conflict check's own limit: the hook's other checks and
 # git sending the branch.
 PUSH_TIME_MARGIN_SECONDS = 120
-ADJUDICATION_TIMEOUT_SECONDS = 420
+# What a ghi-guide-agent cold start adds to an ask's budget: it reads
+# issues-open.md and about 220 linked files, and past ghi-guide-agent sessions
+# took a 90th percentile of 8.2 s from one Read to the next. Kept here, not
+# in scripts/ghi-guide-agent-ask.py, because that script imports this one.
+GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS = 1800
+# The ask's 300 s budget and 120 s of ssh slack, plus a cold start's extra.
+ADJUDICATION_TIMEOUT_SECONDS = 420 + GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
 # scripts/ghi-guide-agent-ask.py's GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING.
 # Copied rather than imported, because this program runs that one as a
 # subprocess and loads nothing from it; ghi-issue-write-test.py checks the two
@@ -798,10 +804,10 @@ def _slug_cut_within(joined: str, limit: int) -> str:
     return head.rsplit("-", 1)[0] if "-" in head else joined[:limit]
 
 
-def placeholder_body(key: str) -> str:
+def placeholder_body(key: str, repo: str) -> str:
     return (f"Filing in progress, pairing key {key}. This body becomes the "
             "links to this issue's files once they land on main. If it still "
-            "reads this way, rerun `scripts/ghi-issue-write.py create` on the "
+            f"reads this way, rerun `{create_rerun_command(repo)}` on the "
             "file and it will continue from where it stopped. If that file is "
             f"gone, rerun it on this issue's file under {GHI_MD_DIRECTORY}/.")
 
@@ -1107,11 +1113,14 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     reaches GitHub; otherwise None. A ruling question
     does not stop the write.
 
-    Not handled: a too-similar verdict naming the edited issue and a number
-    that is not a GHI, such as a pull request's. The edited issue is dropped,
-    the ask's closed-GHI check passes a number its mirror does not hold, and
-    the refusal sends the author to that number; the author's reconsider
-    path in RECONSIDER_LINE passes the write."""
+    Not handled: a too-similar verdict naming the edited issue, while it is
+    open, and a number that is not a GHI, such as a pull request's. The ask's
+    closed-GHI check passes a number its mirror does not hold, the edited
+    issue is dropped here, and the refusal sends the author to that number;
+    the author's reconsider path in RECONSIDER_LINE passes the write. When
+    the edited issue is closed in the mirror, the ask rechecks the verdict
+    before it reaches here, and a failed or repeated recheck skips the
+    adjudication instead."""
     marker = repository_root / RECONSIDERED_MARKER_NAME
     if marker.is_file():
         marker.unlink()
@@ -1609,7 +1618,7 @@ def file_issue(repo: str, title: str, key: str, runner, report) -> int:
     only thing a rerun has to find this issue by."""
     completed = runner(
         ["gh", "issue", "create", "--repo", repo, "--title", title,
-         "--body", placeholder_body(key)])
+         "--body", placeholder_body(key, repo)])
     report((completed.stdout or "").strip())
     match = re.search(r"/issues/(\d+)", completed.stdout or "")
     if not match:
@@ -1938,11 +1947,13 @@ def land_file(repo: str, number: int, title: str, source: Path,
     return destination
 
 
-def create_rerun_command(repo: str, source) -> str:
+def create_rerun_command(repo: str, source=None) -> str:
     """The create command a stopped filing tells the agent to rerun, quoted
     for the shell and carrying the run's --repo, so the rerun files into the
-    same repository."""
-    arguments = ["scripts/ghi-issue-write.py", "create", str(source)]
+    same repository. Without a source, the text around it names the file."""
+    arguments = ["scripts/ghi-issue-write.py", "create"]
+    if source is not None:
+        arguments.append(str(source))
     if repo != DEFAULT_REPO:
         arguments += ["--repo", repo]
     return shlex.join(arguments)
@@ -2302,9 +2313,8 @@ def validate_edit(path: Path, repository_root: Path):
     text = path.read_text(encoding="utf-8")
     if not text.strip():
         raise Refused(f"{path} is empty", 64)
-    numbered = re.match(r"^(\d+)-", path.name)
-    if numbered:
-        number = int(numbered.group(1))
+    number = issue_number_in_file_name(path)
+    if number is not None:
         relative = relative_to_root(path, repository_root)
         if not writable_relative_path(relative):
             raise Refused(

@@ -381,14 +381,36 @@ with tempfile.TemporaryDirectory() as directory:
           and s.state()["last_run"]["result"] == "passed", (code, printed, calls))
     s.state_file.write_text("{not json")
     code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
-    check("--record-follow-up-request-sent refuses an unreadable state file",
-          code == program.EXIT_REFUSED and "not JSON" in printed
-          and "the follow-up request was not recorded, because the state file cannot be read: "
-          f"{s.state_file} is not JSON" in printed
-          and "If you have not yet sent agent-seat reboot-test a follow-up request quoting "
-          "this message's first line" in printed
-          and "Do not run python3 scripts/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py "
-          "--record-follow-up-request-sent again for this refusal" in printed, (code, printed))
+    refusal_line_prefixes = (
+        "no-sandbox-test-suites-run-on-main-in-a-quiet-gap: the follow-up request was not "
+        f"recorded, because the state file cannot be read: {s.state_file} is not JSON",
+        "If you have not yet sent agent-seat reboot-test a follow-up request quoting "
+        "this message's first line",
+        "Do not run python3 scripts/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py "
+        "--record-follow-up-request-sent again for this refusal")
+    check("--record-follow-up-request-sent refuses an unreadable state file, its three lines "
+          "in order, each on its own line",
+          code == program.EXIT_REFUSED
+          and [line[:len(prefix)] for line, prefix
+               in zip(printed.splitlines(), refusal_line_prefixes)] == list(refusal_line_prefixes)
+          and len(printed.splitlines()) == 3, (code, printed))
+    absolute_state_file = s.state_file
+    # The test sandbox makes TMPDIR a symlink, and after chdir() the program sees the physical path.
+    physical_state_file = absolute_state_file.parent.resolve() / absolute_state_file.name
+    working_directory = os.getcwd()
+    os.chdir(absolute_state_file.parent)
+    try:
+        s.state_file = Path(absolute_state_file.name)
+        code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
+        notice = s.notice()
+    finally:
+        os.chdir(working_directory)
+        s.state_file = absolute_state_file
+    check("a relative --state-file is named by its full path in the refusal",
+          code == program.EXIT_REFUSED
+          and f"cannot be read: {physical_state_file} is not JSON" in printed, (code, printed))
+    check("a relative --state-file is named by its full path in the merge-gate notice",
+          f"cannot be read: {physical_state_file} is not JSON" in notice, notice)
     s.run()
     code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
     check("--record-follow-up-request-sent refuses when the last run passed",
@@ -554,6 +576,48 @@ with tempfile.TemporaryDirectory() as directory:
           code == program.EXIT_RUN_STOPPED_BY_A_FAILED_STEP and calls == []
           and state["last_run"]["result"] == "stopped"
           and "git fetch origin failed" in state["last_run"]["reason"], (code, printed, state))
+    gate_call = ["--print-merge-gate-notice-of-last-failed-or-stopped-run", "--clone", str(s.clone)]
+    gate_out = io.StringIO()
+
+    def parse_arguments_refused(argv):
+        raise AssertionError(f"merge-gate.sh's call went to parse_arguments: {argv}")
+
+    with constants(DEFAULT_STATE_FILE=s.state_file, parse_arguments=parse_arguments_refused), \
+            contextlib.redirect_stdout(gate_out):
+        gate_code = program.main(gate_call)
+    check("merge-gate.sh's call, read without argparse, prints what the full parse prints",
+          gate_code == program.EXIT_DONE and "git fetch origin failed" in gate_out.getvalue()
+          and gate_out.getvalue() == s.notice(), (gate_code, gate_out.getvalue()))
+    bare_flag_parsed, full_parse = [], program.parse_arguments
+    with constants(DEFAULT_STATE_FILE=s.state_file,
+                   parse_arguments=lambda argv: bare_flag_parsed.append(argv) or full_parse(argv)), \
+            contextlib.redirect_stdout(io.StringIO()):
+        program.main(gate_call[:1])
+    check("the notice flag alone goes to parse_arguments; only merge-gate.sh's exact call skips it",
+          bare_flag_parsed == [gate_call[:1]], bare_flag_parsed)
+    real_gettempdir = tempfile.gettempdir
+
+    def no_writable_temporary_directory():
+        raise FileNotFoundError("No usable temporary directory found")
+
+    tempfile.gettempdir = no_writable_temporary_directory
+    try:
+        with constants(DEFAULT_STATE_FILE=s.state_file), \
+                contextlib.redirect_stdout(io.StringIO()) as unwritable_out:
+            unwritable_code = program.main(gate_call[:1])
+    finally:
+        tempfile.gettempdir = real_gettempdir
+    check("with no writable temporary directory, the notice flag alone still prints the notice",
+          unwritable_code == program.EXIT_DONE and unwritable_out.getvalue() == s.notice(),
+          (unwritable_code, unwritable_out.getvalue()))
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            program.main(gate_call[:2])
+            missing_value_exit = None
+        except SystemExit as stop:
+            missing_value_exit = stop.code
+    check("--clone with no value still goes to argparse, which refuses it with exit 2",
+          missing_value_exit == 2, missing_value_exit)
     s.state_file.unlink()
     check("with no state file the notice is empty", s.notice() == "")
     real_state_file = s.state_file

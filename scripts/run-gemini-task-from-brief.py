@@ -26,11 +26,12 @@ logins, recover reports from chat, retry models, or verify report content.
 
 agy runs on its own Google login, never on a Gemini API key: the launcher
 removes GEMINI_API_KEY from agy's environment, because a key is billed per
-call. It also removes GH_TOKEN and GITHUB_TOKEN, so agy is given no GitHub access. When agy has no login, its "Authentication required." message is in
+call. It also removes GH_TOKEN and GITHUB_TOKEN, so agy gets no GitHub token from its caller;
+how gh behaves inside the macOS sandbox is said beside CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py. When agy has no login, its "Authentication required." message is in
 the log.
 
 Runs `agy models` inside the same sandbox before starting the task, refusing
-unknown names with the known names. The default is gemini-4-argon-high.
+unknown names with the known names. The default is gemini-4-neon-high.
 Closes stdin and logs both output streams to REPORT.run.log, or to
 --run-log; an existing log at that path is overwritten. The
 deadline covers model discovery and task execution after sandbox setup;
@@ -74,7 +75,7 @@ def _parser():
     parser.add_argument("--brief", required=True)
     parser.add_argument("-o", dest="report", required=True)
     parser.add_argument("--sandbox", choices=("read-only", "workspace-write"), default="read-only")
-    parser.add_argument("-m", dest="model", default="gemini-4-argon-high")
+    parser.add_argument("-m", dest="model", default="gemini-4-neon-high")
     parser.add_argument("--effort")
     parser.add_argument("--writable-root", action="append", default=[])
     parser.add_argument("--network", action="store_true")

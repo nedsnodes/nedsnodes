@@ -103,6 +103,21 @@ with tempfile.TemporaryDirectory() as scratch_name:
           exit_code == 0 and (store_with_a_just_made_directory / "z-just-started-seat").is_dir()
           and "deleted 1 capture(s)" in output, output)
 
+    store_with_unrelated_files = scratch / "store-with-unrelated-files"
+    older_capture = capture_file(store_with_unrelated_files, "a-seat", "20261001T000000Z-a-seat-terminal-capture.log", 10)
+    newest_capture = capture_file(store_with_unrelated_files, "a-seat", "20261002T000000Z-a-seat-terminal-capture.log", 10)
+    sorts_before_the_captures = capture_file(store_with_unrelated_files, "a-seat", "00-notes.txt", 10)
+    sorts_after_the_captures = capture_file(store_with_unrelated_files, "a-seat", "README.txt", 10)
+    other_seats_name = capture_file(store_with_unrelated_files, "a-seat", "20261003T000000Z-b-seat-terminal-capture.log", 10)
+    impossible_date = capture_file(store_with_unrelated_files, "a-seat", "20261399T000000Z-a-seat-terminal-capture.log", 10)
+    exit_code, output = run(["--captures-directory", str(store_with_unrelated_files)])
+    check("among unrelated old files on both sides of the sort order, only the older capture is "
+          "deleted; the newest capture and every file not named as this agent-seat's capture stay",
+          exit_code == 0 and not older_capture.exists() and newest_capture.exists()
+          and sorts_before_the_captures.exists() and sorts_after_the_captures.exists()
+          and other_seats_name.exists() and impossible_date.exists()
+          and "deleted 1 capture(s)" in output, output)
+
     exit_code, output = run(["--captures-directory", str(scratch / "never-made")])
     check("a captures directory that does not exist is not a failure: exit 0, nothing deleted",
           exit_code == 0 and "deleted 0 capture(s)" in output and "FAILED" not in output, output)

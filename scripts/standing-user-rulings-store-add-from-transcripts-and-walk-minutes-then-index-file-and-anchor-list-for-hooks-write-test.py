@@ -1078,7 +1078,7 @@ with tempfile.TemporaryDirectory() as directory:
           exit_code == program.EXIT_SOURCE_OR_OUTPUT_FAILED
           and stderr.getvalue() == "FAILED: moving stored source paths to the names the project rename gave them: "
                                    "database is locked\n" + MOVE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n"
-                                   + f"FAILED: transcript {blocked}: [Errno 13] Permission denied: '{blocked}'\n"
+                                   + f"FAILED: transcript {blocked}: [Errno 13] Permission denied: {str(blocked)!r}\n"
                                    + SOURCE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n",
           f"exit {exit_code}: {stderr.getvalue()!r}")
 

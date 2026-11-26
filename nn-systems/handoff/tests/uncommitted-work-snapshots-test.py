@@ -48,6 +48,8 @@ MODULE_RELATIVE = Path("nn-systems/handoff/uncommitted-work-snapshots.py")
 HOOK_RELATIVE = Path("scripts/uncommitted-work-snapshot-hook.py")
 POST_CHECKOUT_HOOK_RELATIVE = Path("scripts/git-client-side-hooks/post-checkout")
 OWNER_FILE_MODULE_RELATIVE = Path("scripts/worktree-owner-file-read-and-write.py")
+AGENT_SEAT_NAME_MODULE_RELATIVE = Path(
+    "nn-systems/general-tools/agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py")
 CLEANER_RELATIVE = Path("scripts/clean-worktrees.py")
 GIT_OUTPUT_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
@@ -62,10 +64,12 @@ LOG_STORE_WRITER_MODULE_RELATIVE = Path(
 NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 # The cleaner reads the review checkouts directory from the merge-lane helpers' common module,
-# which loads the test runner, which loads the git-redirecting variables module, the attendance check
-# and the project-rename path names.
+# which loads the repository-name module and the test runner, which loads the git-redirecting
+# variables module, the attendance check and the project-rename path names.
 MERGE_LANE_COMMON_MODULE_RELATIVE = Path(
     "scripts/merge-lane-pull-request-helpers-common-options-paths-and-token.py")
+REPOSITORY_NAME_MODULE_RELATIVE = Path(
+    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 TEST_RUNNER_RELATIVE = Path("scripts/run-all-test-suites.py")
 GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
@@ -162,10 +166,11 @@ def new_clone():
     main = base / "main"
     git(SCRATCH, "clone", "-q", str(origin), str(main))
     for relative in (MODULE_RELATIVE, HOOK_RELATIVE, CLEANER_RELATIVE, OWNER_FILE_MODULE_RELATIVE,
+                     AGENT_SEAT_NAME_MODULE_RELATIVE,
                      GIT_OUTPUT_MODULE_RELATIVE, TASK_WRITE_MODULE_RELATIVE, TASK_FILE_REWRITE_MODULE_RELATIVE,
                      NEXT_STEP_LINES_MODULE_RELATIVE,
                      LOG_STORE_WRITER_MODULE_RELATIVE, NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE,
-                     MERGE_LANE_COMMON_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
+                     MERGE_LANE_COMMON_MODULE_RELATIVE, REPOSITORY_NAME_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
                      GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE, ATTENDANCE_CHECK_MODULE_RELATIVE,
                      PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE):
         (main / relative).parent.mkdir(parents=True, exist_ok=True)
@@ -1042,7 +1047,7 @@ def test_restore_a_subset():
               and ref in task.get("description", "") and str(target) in task.get("description", ""),
               f"restore opens the restored branch's task, naming its restore commit, {where}", task)
         holding = first_prompt_list.tasks_holding("seat-five", restore_task_list())
-        check(holding.holders(branch) and holding.holders(target)
+        check(holding.holds(branch) and holding.holds(target)
               and not holding.unreadable,
               f"the first prompt's list reads the task restore opens as holding its branch and "
               f"worktree, so it does not list them, {where}", task)

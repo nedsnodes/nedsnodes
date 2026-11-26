@@ -62,16 +62,6 @@
       }
     },
     {
-      "name": "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open",
-      "owner": "fleet-restart-at-login",
-      "program": "scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py",
-      "arguments": [],
-      "output": ".claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log",
-      "on": {
-        "ned-box": {"scheduler": "cron", "schedule": "30 0 * * *"}
-      }
-    },
-    {
       "name": "clean-worktrees",
       "owner": "MD-skills",
       "program": "scripts/clean-worktrees.py",
@@ -234,6 +224,16 @@
           "launchd_keys": {"StartCalendarInterval": {"Hour": 5, "Minute": 45}}
         },
         "ned-box": {"scheduler": "cron", "schedule": "45 5 * * *"}
+      }
+    },
+    {
+      "name": "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job",
+      "owner": "merge-lane-2",
+      "program": "scripts/merge-lane-open-prs-watch-and-reviewer-assign.py",
+      "arguments": ["--poll-once"],
+      "output": ".claude/merge-lane-open-prs-watch-and-reviewer-assign-poll-once.log",
+      "on": {
+        "ned-box": {"scheduler": "cron", "schedule": "* * * * *"}
       }
     }
   ]

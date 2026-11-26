@@ -1851,7 +1851,8 @@ def run_completed_task_prune_cases(workspace: Path):
     check("when the high-water mark cannot be written, nothing is removed and the line says why",
           fixture.present("9.json") and "high-water mark" in line and "removed nothing" in line, line)
     check("a high-water mark that could not be written leaves no partial file behind",
-          not (fixture.list_directory / ".highwatermark.partial").exists(), line)
+          not [path.name for path in fixture.list_directory.iterdir() if path.name.endswith(".partial")],
+          sorted(path.name for path in fixture.list_directory.iterdir()))
 
     fixture = PruneFixture(workspace, "read-only")
     (fixture.list_directory / ".highwatermark").write_text("30", encoding="utf-8")
@@ -2336,11 +2337,10 @@ def run_background_task_past_wait_limit_cases(workspace: Path):
     check("the writer reports the tasks past their wait-limit it recorded",
           "background tasks past their wait-limit: 1 recorded" in written.stdout, written.stdout)
     prompt = writer.supervisor.build_ignition_prompt(Path("/x/dialog.md"), fields)
-    check("the successor's first prompt carries the task's five fields and asks for a speed-up "
-          "before a raised wait-limit",
-          expected_field in prompt and "Run again any you still need, looking first for a way to make it faster"
-          in prompt and "raise its kind's wait-limit in the wait-limit table only when you find no such way"
-          in prompt, prompt[:1200])
+    check("the successor's first prompt carries the task's five fields and says to run again any "
+          "it still needs",
+          expected_field in prompt and "Run again any you still need." in prompt
+          and "looking first for a way to make it faster" not in prompt, prompt[:1200])
 
     lost = run_writer(handoffs, "carry on\n", "--agent", "pastwaitlimitlostcase",
                       environment_overrides={"HOME": str(home),
