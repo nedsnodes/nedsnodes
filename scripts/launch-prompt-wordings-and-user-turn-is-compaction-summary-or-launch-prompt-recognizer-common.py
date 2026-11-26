@@ -28,11 +28,11 @@ REINCARNATION_OPENER_MARKER = "the dialog from the session you are continuing"
 # Anchor the opener to avoid matching its text quoted in a hand-written brief.
 REINCARNATION_OPENER_PATTERN = re.compile(
     r"Read .+? — (?:it is )?" + re.escape(REINCARNATION_OPENER_MARKER))
-IGNITION_WITHOUT_CONVERSATION_TAIL_OPENING = "(Recovered at "
+IGNITION_WITHOUT_CONVERSATION_TAIL_PROMPT_OPENING_WORDS = "(Recovered at "
 IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER = "the previous session's conversation-tail is unavailable"
 FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PHRASE = "it is the dialog from this seat's last recorded session"
 FIRST_PROMPT_AFTER_RECORDED_EXIT_MARKER = "as it does when a session is stopped on purpose"
-FIRST_PROMPT_AFTER_RECORDED_EXIT_SENTENCE = (
+CRASH_RECOVERY_FIRST_PROMPT_SENTENCE_SAYING_SUPERVISOR_RECORDED_LAST_SESSION_EXIT = (
     f"This seat's supervisor recorded the exit of its last session, {FIRST_PROMPT_AFTER_RECORDED_EXIT_MARKER}, "
     "so recovery did not bring the seat back on its own.")
 
@@ -40,12 +40,12 @@ FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_PATTERN = re.compile(
     re.escape(FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE).replace(re.escape("{agent}"), ".+?"))
 FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PATTERN = re.compile(
     r"Read .+? — " + re.escape(FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PHRASE))
-# Prompts written before 2026-11-17 put this note on a line of its own after the next step.
+# Transcripts already written hold prompts that put this note on a line of its own after the next step.
 IGNITION_WITHOUT_CONVERSATION_TAIL_PATTERN = re.compile(
-    "^" + re.escape(IGNITION_WITHOUT_CONVERSATION_TAIL_OPENING) + r"[^:\n]+: "
+    "^" + re.escape(IGNITION_WITHOUT_CONVERSATION_TAIL_PROMPT_OPENING_WORDS) + r"[^:\n]+: "
     + re.escape(IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER), re.MULTILINE)
 FIRST_PROMPT_AFTER_RECORDED_EXIT_PATTERN = re.compile(
-    r"(?:You are .+?\. )?" + re.escape(FIRST_PROMPT_AFTER_RECORDED_EXIT_SENTENCE))
+    r"(?:You are .+?\. )?" + re.escape(CRASH_RECOVERY_FIRST_PROMPT_SENTENCE_SAYING_SUPERVISOR_RECORDED_LAST_SESSION_EXIT))
 # The handoff-supervisor puts this line after the launch command's prompt, and leftovers may follow it.
 FIRST_PROMPT_FROM_LAUNCH_COMMAND_LINE_PATTERN = re.compile(
     "^(?:" + "|".join(re.escape(line) for line in (FIRST_PROMPT_FROM_LAUNCH_COMMAND_NOT_TYPED_BY_THE_USER_LINE,

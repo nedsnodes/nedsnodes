@@ -220,8 +220,8 @@ _claude_json_presets_spec.loader.exec_module(claude_json_presets)
 # A shared module avoids circular loading between recovery and the supervisor.
 # Re-export the names for callers that reach them through this module.
 _launch_prompt_recognize_spec = importlib.util.spec_from_file_location(
-    "compaction_summary_and_launch_prompt_user_turn_text_recognize_common",
-    Path(__file__).with_name("compaction-summary-and-launch-prompt-user-turn-text-recognize-common.py"))
+    "launch_prompt_wordings_and_user_turn_is_compaction_summary_or_launch_prompt_recognizer_common",
+    Path(__file__).with_name("launch-prompt-wordings-and-user-turn-is-compaction-summary-or-launch-prompt-recognizer-common.py"))
 launch_prompt_recognize = importlib.util.module_from_spec(_launch_prompt_recognize_spec)
 _launch_prompt_recognize_spec.loader.exec_module(launch_prompt_recognize)
 _worth_resuming_spec = importlib.util.spec_from_file_location(
@@ -609,7 +609,7 @@ def write_first_prompt_after_recorded_exit(handoff_directory: Path, name: str,
     # The supervisor’s default resume prompt describes a crash; a recorded exit proves no such thing.
     handoff_directory.mkdir(parents=True, exist_ok=True)
     prompt_path = first_prompt_after_recorded_exit_path(handoff_directory, name, by_hand)
-    recorded = launch_prompt_recognize.FIRST_PROMPT_AFTER_RECORDED_EXIT_SENTENCE
+    recorded = launch_prompt_recognize.CRASH_RECOVERY_FIRST_PROMPT_SENTENCE_SAYING_SUPERVISOR_RECORDED_LAST_SESSION_EXIT
     re_verify = "Re-verify any in-flight state before trusting it, then continue."
     if by_hand:
         prompt = (f"{recorded} It has now been restarted by hand, resuming this "

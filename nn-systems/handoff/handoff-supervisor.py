@@ -194,8 +194,8 @@ remote_control_name_common = importlib.util.module_from_spec(_remote_control_nam
 _remote_control_name_common_spec.loader.exec_module(remote_control_name_common)
 
 _launch_prompt_recognize_spec = importlib.util.spec_from_file_location(
-    "compaction_summary_and_launch_prompt_user_turn_text_recognize_common",
-    SCRIPTS_DIRECTORY / "compaction-summary-and-launch-prompt-user-turn-text-recognize-common.py")
+    "launch_prompt_wordings_and_user_turn_is_compaction_summary_or_launch_prompt_recognizer_common",
+    SCRIPTS_DIRECTORY / "launch-prompt-wordings-and-user-turn-is-compaction-summary-or-launch-prompt-recognizer-common.py")
 launch_prompt_recognize = importlib.util.module_from_spec(_launch_prompt_recognize_spec)
 _launch_prompt_recognize_spec.loader.exec_module(launch_prompt_recognize)
 
@@ -1512,7 +1512,7 @@ class IgnitionPlanWithoutConversationTail:
         else:
             recovery_note = (f"{launch_prompt_recognize.IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER}; "
                              "this next-step and the repository are your whole context.")
-        prompt = (f"{launch_prompt_recognize.IGNITION_WITHOUT_CONVERSATION_TAIL_OPENING}{self.occasion}: {recovery_note}) "
+        prompt = (f"{launch_prompt_recognize.IGNITION_WITHOUT_CONVERSATION_TAIL_PROMPT_OPENING_WORDS}{self.occasion}: {recovery_note}) "
                   + ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION)
         for line in waiting_approval_walk_item:
             prompt += " " + line

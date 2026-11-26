@@ -10,8 +10,8 @@ import os
 from pathlib import Path
 
 _launch_prompt_recognize_spec = importlib.util.spec_from_file_location(
-    "compaction_summary_and_launch_prompt_user_turn_text_recognize_common",
-    Path(__file__).with_name("compaction-summary-and-launch-prompt-user-turn-text-recognize-common.py"))
+    "launch_prompt_wordings_and_user_turn_is_compaction_summary_or_launch_prompt_recognizer_common",
+    Path(__file__).with_name("launch-prompt-wordings-and-user-turn-is-compaction-summary-or-launch-prompt-recognizer-common.py"))
 launch_prompt_recognize = importlib.util.module_from_spec(_launch_prompt_recognize_spec)
 _launch_prompt_recognize_spec.loader.exec_module(launch_prompt_recognize)
 

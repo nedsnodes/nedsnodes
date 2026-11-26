@@ -14,7 +14,7 @@ when it compacts a conversation, nor a prompt that the handoff-supervisor or
 crash recovery (scripts/recover-crashed-seats.py) starts or resumes an
 agent-session with, which this reader recognizes, where those programs put
 them, by the constants they build them from in
-scripts/compaction-summary-and-launch-prompt-user-turn-text-recognize-common.py. That includes a prompt passed to the handoff-supervisor with
+scripts/launch-prompt-wordings-and-user-turn-is-compaction-summary-or-launch-prompt-recognizer-common.py. That includes a prompt passed to the handoff-supervisor with
 --first-prompt-file or --first-prompt, such as a new agent-seat's founding
 prompt, which the handoff-supervisor ends with a line of its own; such a prompt
 written before it did so has no such line and is read as his. Turns written
@@ -45,8 +45,8 @@ DEFAULT_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 WRAPPED_BLOCK = re.compile(r"\A\s*<[a-z-]+>.*</[a-z-]+>\s*\Z", re.DOTALL)
 PROGRAM_PROMPT_ENTRYPOINT = "sdk-cli"
 _launch_prompt_recognize_spec = importlib.util.spec_from_file_location(
-    "compaction_summary_and_launch_prompt_user_turn_text_recognize_common",
-    Path(__file__).resolve().parent / "compaction-summary-and-launch-prompt-user-turn-text-recognize-common.py")
+    "launch_prompt_wordings_and_user_turn_is_compaction_summary_or_launch_prompt_recognizer_common",
+    Path(__file__).resolve().parent / "launch-prompt-wordings-and-user-turn-is-compaction-summary-or-launch-prompt-recognizer-common.py")
 launch_prompt_recognize = importlib.util.module_from_spec(_launch_prompt_recognize_spec)
 _launch_prompt_recognize_spec.loader.exec_module(launch_prompt_recognize)
 COMPACTION_SUMMARY_OPENING = launch_prompt_recognize.COMPACTION_SUMMARY_OPENING

@@ -62,7 +62,7 @@ ALERTS_MODULE_FILE = (CHECKOUT / "nn-systems" / "general-tools"
 LAUNCHED_AGENT_SESSION_ENVIRONMENT_FILE = (CHECKOUT / "nn-systems" / "handoff"
                                            / "handoff-supervisor-launched-agent-session-environment-variable-names-common.py")
 TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude-code-session-transcript-records-read-backward-common.py"
-SPEAKER_TEST_FILE = CHECKOUT / "scripts" / "compaction-summary-and-launch-prompt-user-turn-text-recognize-common.py"
+SPEAKER_TEST_FILE = CHECKOUT / "scripts" / "launch-prompt-wordings-and-user-turn-is-compaction-summary-or-launch-prompt-recognizer-common.py"
 # At most half this hook's timeout in .claude/settings.json, so a stalled insert is reported, not killed with
 # the hook after the alerts are claimed; a test checks.
 INSERT_TIMEOUT_SECONDS = 5
@@ -151,7 +151,7 @@ def record_text(record):
 
 def typed_by_user(payload):
     prompt = payload.get("prompt") or ""
-    speaker_test = load_module("compaction_summary_and_launch_prompt_user_turn_text_recognize_common", SPEAKER_TEST_FILE)
+    speaker_test = load_module("launch_prompt_wordings_and_user_turn_is_compaction_summary_or_launch_prompt_recognizer_common", SPEAKER_TEST_FILE)
     if speaker_test.user_turn_text_is_compaction_summary_or_launch_prompt(prompt):
         return False
     transcript = payload.get("transcript_path")
