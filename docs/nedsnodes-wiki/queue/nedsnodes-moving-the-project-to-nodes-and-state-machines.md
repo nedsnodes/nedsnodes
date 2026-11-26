@@ -286,7 +286,7 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 7. Should the code-prompt-code bullet of `CLAUDE.md` name its two kinds, cpc-tool and cpc-node?
 8. Should create-GHI and edit-GHI write their own rerun task, reversing the user-ruling of 2026-10-10?
 9. Did the user's remark "The code prompt code, it seems like it's just adding some formalism" point at the term? Items 10.1 and 10.2 have since kept and extended the term.
-10. Should one shared function print a test file's verdict line and exit with its code?
+10. One shared function prints a test file's last line and exits with its code: `END <UTC time> passed=<N> failed=<M> #nc_test_suite_pass`, `#nc_test_suite_fail` or `#nc_test_suite_could_not_run`, with exit 0, 1 or 2 to match, as in `END 2026-11-24T23:10:02Z passed=12 failed=0 #nc_test_suite_pass`.
 11. Should the shared skip function take the cause from a fixed set and write the reason's opening itself?
 12. Should the approval-walk's check program hand out its bookkeeping one step at a time, each step validated before the next?
 13. Should a Stop hook refuse to end a turn until a discussion that changes a waiting approval-walk item is in the walk-minutes, with the session-handoff deferred until then?
