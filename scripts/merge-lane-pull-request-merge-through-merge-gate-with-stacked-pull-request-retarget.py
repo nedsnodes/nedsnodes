@@ -1558,7 +1558,8 @@ def main(argv=None, wait=time.sleep):
             print(f"STOP: not merged: the merge queue is stopped, because {stop_file} says: "
                   f"{stop_reason}\n"
                   f"No merge may start until main is handled. If you are merge-lane-2, run: "
-                  f"python3 {queue_program} merge-batch-start\n"
+                  f"python3 {queue_program} --merge-program-outputs-directory "
+                  f"{shlex.quote(str(outputs))} merge-batch-start\n"
                   f"and do what its STOPPED line says, which covers a stop with or without a "
                   f"stopped notice. Otherwise tell merge-lane-2 this message, with Claude Code's "
                   f"SendMessage tool, naming pull request {arguments.pull_request}.")

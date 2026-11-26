@@ -1227,9 +1227,11 @@ def merge_program_lock_and_merge_queue_stop_file_cases(scratch):
           f"exit {exit_code}\n{output}")
     queue_program = Path(program.__file__).resolve().with_name(
         "merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py")
+    outputs = scratch / "stop-file-present" / "outputs"
     check("a stop file no merge queue run wrote, so with no stopped notice, sends merge-lane-2 "
           "to merge-batch-start, whose STOPPED line covers that case, and names no notice",
-          f"run: python3 {queue_program} merge-batch-start\n" in output
+          f"run: python3 {queue_program} --merge-program-outputs-directory "
+          f"{shlex.quote(str(outputs))} merge-batch-start\n" in output
           and queue_program.is_file() and "stopped notice says" not in output,
           output)
 

@@ -44,6 +44,12 @@ for garbled in state.get("gh_garbles", []):
 for failing in state.get("gh_fails", []):
     if " ".join(argv).startswith(failing):
         sys.stderr.write("HTTP 502: bad gateway\n"); sys.exit(1)
+for call, lines in state.get("gh_queue_appends", {}).items():
+    marker = state_file + ".appended-on-" + call.replace(" ", "-")
+    if " ".join(argv).startswith(call) and not os.path.exists(marker):
+        open(marker, "w").close()
+        with open(os.environ["FAKE_QUEUE"], "a") as queue:
+            queue.writelines(line + "\n" for line in lines)
 if argv[:2] == ["pr", "view"]:
     print(json.dumps(state["prs"][argv[2]]))
 elif argv[:2] == ["pr", "list"]:
@@ -60,6 +66,7 @@ FAKE_MERGE_PROGRAM = r'''import json, os, sys
 state_file = os.environ["FAKE_STATE"]
 state = json.load(open(state_file))
 number, head, since = sys.argv[1:4]
+outputs = sys.argv[sys.argv.index("--merge-lane-worktrees-and-outputs-directory") + 1]
 with open(state_file + ".merge-calls", "a") as log:
     log.write(json.dumps([number, head, since]) + "\n")
 outcome = state["merge_outcomes"].get(number, {"exit": 0, "merged": True})
@@ -73,7 +80,7 @@ if outcome.get("merged"):
 json.dump(state, open(state_file, "w"))
 print(outcome.get("output", "SUMMARY: 1 suite passed"))
 if outcome["exit"] in (3, 4):
-    open(os.path.join(os.environ["FAKE_OUTPUTS"], "merge-queue-stopped.txt"), "w").write(
+    open(os.path.join(outputs, "merge-queue-stopped.txt"), "w").write(
         f"pull request {number}'s merge program exited {outcome['exit']}\n")
 sys.exit(outcome["exit"])
 '''
@@ -105,7 +112,7 @@ def merge_account_review(head, at):
 
 class Case:
     def __init__(self, scratch, name, queue_lines, prs, merge_outcomes=None, reviews=None,
-                 branches=None, gh_fails=None, gh_garbles=None):
+                 branches=None, gh_fails=None, gh_garbles=None, gh_queue_appends=None):
         self.directory = scratch / name
         self.directory.mkdir()
         self.queue = self.directory / "merge-queue.txt"
@@ -117,7 +124,7 @@ class Case:
         self.state.write_text(json.dumps({
             "prs": prs, "merge_outcomes": merge_outcomes or {}, "reviews": reviews or {},
             "branches": branches or {}, "gh_fails": gh_fails or [],
-            "gh_garbles": gh_garbles or []}))
+            "gh_garbles": gh_garbles or [], "gh_queue_appends": gh_queue_appends or {}}))
         bin_directory = self.directory / "bin"
         bin_directory.mkdir()
         self.gh = bin_directory / "gh"
@@ -127,8 +134,7 @@ class Case:
         self.merge_program.write_text(FAKE_MERGE_PROGRAM)
         self.follow_up = bin_directory / "follow-up.py"
         self.follow_up.write_text(FAKE_FOLLOW_UP)
-        self.environment = {"FAKE_STATE": str(self.state), "FAKE_QUEUE": str(self.queue),
-                            "FAKE_OUTPUTS": str(self.outputs)}
+        self.environment = {"FAKE_STATE": str(self.state), "FAKE_QUEUE": str(self.queue)}
 
     def argv(self, *subcommand):
         return ["--merge-queue-file", str(self.queue), "--merge-batches-directory",
@@ -338,6 +344,46 @@ def merging_cases(scratch):
           exit_code == 0 and [call[0] for call in case.merge_calls()] == ["10"]
           and "DONE" not in output, f"{flock_calls}\n{output}")
 
+    case = Case(scratch, "reapproved-while-checked", [approved(10, A)], {"10": pr(MOVED)},
+                gh_queue_appends={"pr view 10": [approved(10, MOVED)]})
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("a new approved line a lane appends while the old line is checked is not put behind a "
+          "HELD line, and is read again at once and merged",
+          exit_code == 0 and "HELD 10" not in case.queue_text()
+          and case.merge_calls() == [["10", MOVED, QUEUED]] and case.notices().get("held-10.txt") is None,
+          f"{case.queue_text()}\n{case.merge_calls()}\n{output}")
+
+    case = Case(scratch, "stacked-before-a-line-appended-meanwhile",
+                [approved(11, B), approved(10, A)],
+                {"10": pr(A), "11": pr(B, base="topic-10"), "12": pr(C)},
+                merge_outcomes={"10": {"exit": 0, "merged": True, "retargets": ["11"],
+                                       "queue_append": [approved(12, C)]}},
+                branches={"topic-10": [10]})
+    case.run("merge-batch-run-in-queue-order")
+    check("a stacked pull request passed over is tried again after the merge below it, before a "
+          "line appended during that merge",
+          [call[0] for call in case.merge_calls()] == ["10", "11", "12"], case.merge_calls())
+
+    case = Case(scratch, "merge-only-refused-then-reapproved", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B)},
+                merge_outcomes={"11": {"exit": 1, "output": "GATE REFUSED (#11): the approval covers x"}})
+    real_held = program.MergeQueuePullRequestMergeBatchRunner.held
+
+    def held_then_a_lane_reapproves(self, number, *rest):
+        appended = real_held(self, number, *rest)
+        with open(self.arguments.merge_queue_file, "a") as queue:
+            queue.write(approved(number, B) + "\n")
+        return appended
+    program.MergeQueuePullRequestMergeBatchRunner.held = held_then_a_lane_reapproves
+    try:
+        case.run("merge-batch-run-in-queue-order", "--merge-only", "11")
+    finally:
+        program.MergeQueuePullRequestMergeBatchRunner.held = real_held
+    stop = case.stop_text() or ""
+    check("a --merge-only stop names the outcome the merge batch saw, even when a lane appends "
+          "a new line for that pull request before the stop",
+          "HELD 11 refused: GATE REFUSED (#11)" in stop and "stacked" not in stop, stop)
+
 
 def stopping_cases(scratch):
     case = Case(scratch, "exit-3", [approved(10, A), approved(11, B)],
@@ -355,6 +401,10 @@ def stopping_cases(scratch):
               "merged, but a step after the merge")
           and "FAIL scripts/x-test.py" in stopped[0] and "SUMMARY: 1 failed" in stopped[0],
           f"{case.queue_text()}\n{stopped}\n{output}")
+    check("a merge that exits 3 after GitHub shows it merged puts its merge commit, author and "
+          "follow-up request in the STOPPED notice, since resuming never reaches it again",
+          stopped and f"Pull request 10 merged as {'10'.rjust(40, 'e')}; its author agent-seat is author-seat." in stopped[0]
+          and "#follow_up_request pull request 10" in stopped[0], stopped)
     exit_code, output = case.run("merge-batch-start")
     check("merge-batch-start starts nothing while the stop file exists, quotes it, and names "
           "the newest stopped notice",
@@ -380,10 +430,10 @@ def stopping_cases(scratch):
 
     case = Case(scratch, "github-read-fails", [approved(10, A)], {"10": pr(A)},
                 gh_fails=["pr view 10"])
-    case.run("merge-batch-run-in-queue-order")
-    check("a GitHub read that fails stops the batch, quoting gh's error",
-          "gh pr view 10 exited 1: HTTP 502: bad gateway" in (case.stop_text() or ""),
-          case.stop_text())
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("a GitHub read that fails stops the batch, quoting gh's error, and exits 1",
+          exit_code == 1 and "gh pr view 10 exited 1: HTTP 502: bad gateway" in (case.stop_text() or ""),
+          f"exit {exit_code}\n{case.stop_text()}")
 
     case = Case(scratch, "github-read-not-json", [approved(10, A)], {"10": pr(A)},
                 gh_garbles=["pr view 10"])
@@ -394,9 +444,11 @@ def stopping_cases(scratch):
 
     case = Case(scratch, "queue-unwritable", [approved(10, A)], {"10": pr(A)})
     case.queue.chmod(0o444)
-    case.run("merge-batch-run-in-queue-order")
-    check("a merge queue file that cannot be appended to stops the batch, naming the error",
-          "Permission denied" in (case.stop_text() or ""), case.stop_text())
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("a merge queue file that cannot be appended to stops the batch, naming the error, "
+          "and exits 1",
+          exit_code == 1 and "Permission denied" in (case.stop_text() or ""),
+          f"exit {exit_code}\n{case.stop_text()}")
 
     case = Case(scratch, "branch-list-fails", [approved(10, A)], {"10": pr(A, base="topic")},
                 gh_fails=["pr list"])
@@ -405,18 +457,25 @@ def stopping_cases(scratch):
           "gh pr list --repo exited 1" in (case.stop_text() or ""), case.stop_text())
 
     case = Case(scratch, "unknown-line", [approved(10, A), "SOMETHING 10 odd"], {"10": pr(A)})
-    case.run("merge-batch-run-in-queue-order")
-    check("a line of no known kind stops the batch, naming its number",
-          "line 2 of " in (case.stop_text() or "") and "'SOMETHING 10 odd'" in case.stop_text()
-          and case.merge_calls() == [], case.stop_text())
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("a line of no known kind stops the batch, naming its number, and exits 0, since the "
+          "file was read",
+          exit_code == 0 and "line 2 of " in (case.stop_text() or "")
+          and "'SOMETHING 10 odd'" in case.stop_text() and case.merge_calls() == [],
+          case.stop_text())
 
     case = Case(scratch, "stop-file-before-the-pass", [approved(10, A)], {"10": pr(A)})
     (case.outputs / STOP_FILE_NAME).write_text("the GHI-MD edit merge job's merge exited 3\n")
     exit_code, output = case.run("merge-batch-run-in-queue-order")
-    check("a stop file written by another caller ends the batch before its next merge, with no "
-          "new notice",
-          exit_code == 0 and case.merge_calls() == [] and case.notices() == {}
-          and "the stop file exists, so the merge batch ends" in output, output)
+    stopped = [text for name, text in case.notices().items() if name.startswith("stopped-")]
+    check("a stop file written by another caller ends the batch before its next merge, with a "
+          "STOPPED notice quoting it, and leaves the stop file as it was",
+          exit_code == 0 and case.merge_calls() == [] and len(stopped) == 1
+          and "written outside this merge batch, says: the GHI-MD edit merge job's merge exited 3"
+          in stopped[0]
+          and case.stop_text() == "the GHI-MD edit merge job's merge exited 3\n"
+          and "the stop file exists, so the merge batch ends" in output,
+          f"{output}\n{case.notices()}")
 
     case = Case(scratch, "merge-only-not-waiting", [approved(10, A)], {"10": pr(A)})
     case.run("merge-batch-run-in-queue-order", "--merge-only", "99")
@@ -428,9 +487,10 @@ def stopping_cases(scratch):
     case.batches.mkdir()
     (case.batches / program.MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME).write_text("a file, not a directory\n")
     exit_code, output = case.run("merge-batch-run-in-queue-order")
-    check("a notice that cannot be written stops the batch, and the log says why",
-          "could not write the notice" in output and "could not write the notice" in (
-              case.stop_text() or ""), f"{output}\n{case.stop_text()}")
+    check("a notice that cannot be written stops the batch, the log says why, and it exits 1",
+          exit_code == 1 and "could not write the notice" in output
+          and "could not write the notice" in (case.stop_text() or ""),
+          f"exit {exit_code}\n{output}\n{case.stop_text()}")
 
     case = Case(scratch, "stop-file-unwritable", [approved(10, A)], {"10": pr(A)},
                 gh_fails=["pr view 10"])
@@ -441,6 +501,19 @@ def stopping_cases(scratch):
     check("a stop file that cannot be written is said in the notice and the log, with what to do",
           stopped and "could not be written" in stopped[0] and "append a HOLD- line" in output,
           f"{stopped}\n{output}")
+
+    case = Case(scratch, "stop-file-unwritable-in-progress-kept", [approved(10, A)], {"10": pr(A)})
+    case.batches.mkdir()
+    in_progress = case.batches / program.MERGE_IN_PROGRESS_FILE_NAME
+    in_progress.write_text("pull request 9, started 2026-11-25T10:00:00Z\n")
+    shutil.rmtree(case.outputs)
+    case.outputs.write_text("a file, not a directory\n")
+    exit_code, output = case.run("merge-batch-start")
+    check("when the stop file cannot be written, the in-progress file is kept, so the next start "
+          "still finds that the batch died mid-merge and starts nothing",
+          output.startswith("DIED MID-MERGE: ") and in_progress.exists()
+          and case.run("merge-batch-start")[1].startswith("DIED MID-MERGE: ")
+          and case.merge_calls() == [], f"{output}\n{in_progress.exists()}")
 
 
 def next_merge_decision_cases(scratch):
@@ -504,6 +577,26 @@ def starting_cases(scratch):
           and "main is untested" in (case.stop_text() or "")
           and output_again.startswith("STOPPED: ") and case.notices() == first_notices
           and case.merge_calls() == [], f"{output}\n{output_again}\n{case.notices()}")
+
+    case = Case(scratch, "run-directly-after-a-death", [approved(10, A)], {"10": pr(A)})
+    case.batches.mkdir()
+    (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
+        "pull request 9, started 2026-11-25T10:00:00Z\n")
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("merge-batch-run-in-queue-order run directly after a batch died mid-merge merges "
+          "nothing and writes the stop file and a stopped notice",
+          exit_code == 0 and case.merge_calls() == [] and "main is untested" in (case.stop_text() or "")
+          and any(name.startswith("stopped-") for name in case.notices()), f"{output}\n{case.notices()}")
+
+    case = Case(scratch, "lock-held-and-stopped", [approved(10, A)], {"10": pr(A)})
+    case.batches.mkdir()
+    (case.outputs / STOP_FILE_NAME).write_text("pull request 9's merge program exited 3\n")
+    with open(case.batches / program.MERGE_BATCH_LOCK_FILE_NAME, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        exit_code, output = case.run("merge-batch-start")
+    check("a start while a merge batch holds the lock and the stop file exists says STOPPED, "
+          "not ALREADY RUNNING",
+          exit_code == 0 and output.startswith("STOPPED: ") and "exited 3" in output, output)
 
     case = Case(scratch, "lock-held", [approved(10, A)], {"10": pr(A)})
     case.batches.mkdir()
