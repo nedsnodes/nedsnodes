@@ -1717,6 +1717,34 @@ with tempfile.TemporaryDirectory() as scratch:
     # all, so the case above also proves the read did not need the skill's
     # prompt file to run.
 
+    # --- A cell report with no provenance stamp ends in one FAILED line -----
+    repository = build_scratch_repository(scratch)
+    suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
+    # The read also imports the launcher, so the stand-in keeps the module and
+    # replaces only what running it does.
+    stand_in_launcher = repository / "nn-systems" / "cold-read" / "cold-read-agy-cell.py"
+    stand_in_launcher.write_text(
+        stand_in_launcher.read_text(encoding="utf-8").replace(
+            'if __name__ == "__main__":\n    sys.exit(main())',
+            'if __name__ == "__main__":\n'
+            '    unstamped = pathlib.Path(sys.argv[sys.argv.index("--report") + 1])\n'
+            '    unstamped.parent.mkdir(parents=True, exist_ok=True)\n'
+            '    unstamped.write_text("UNSTAMPED REPORT\\n", encoding="utf-8")'),
+        encoding="utf-8")
+    result = run_fast_read(
+        repository, stubs, {"*": {"report": "STUB FAST READ\n"}},
+        suggestions, walk_draft_relative, counter, options=("--without-question-4",),
+    )
+    check("when the cell launcher exits 0 but leaves a report with no provenance stamp, "
+          "the read exits 1 with one FAILED line on stdout naming the missing stamp, "
+          "and no traceback",
+          result.returncode == 1
+          and result.stdout == "FAILED (no fast read report was written: the cell's report "
+                               "has no provenance stamp)\n"
+          and "Traceback" not in result.stderr
+          and "not a provenance stamp" in result.stderr,
+          f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr[-400:]!r}")
+
     # --- The embedded instructions are current ----------------------------
     # This case reads the real checkout, not a scratch one, because both
     # files it compares live there. REPO_ROOT comes from this test file's own
@@ -2780,6 +2808,7 @@ for last; do :; done
 exec env -u CLAUDE_CODE_SESSION_ID sh -c "$last"
 """
 STAND_IN_REMOTE_FAST_READ = """import json, os, pathlib, sys
+# Knows --without-question-4 and --text-intended-reader-category, as a current reader does.
 plan = json.loads(os.environ["STAND_IN_REMOTE_FAST_READ_PLAN"])
 pathlib.Path(plan["record"]).write_text(json.dumps({
     "argv": sys.argv[1:], "cwd": os.getcwd(),
@@ -2913,6 +2942,23 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
                   if remote_record.exists() else {})
         check("with no agent-session ID set, none is passed to the read on ned-box",
               exit_code == 0 and remote.get("session") is None, repr(remote))
+
+        ned_box_reader = ned_box_worktree / "nn-systems" / "cold-read" / "cold-read-fast-read.py"
+        ned_box_reader.write_text(STAND_IN_REMOTE_FAST_READ.replace(
+            " and --text-intended-reader-category", ""), encoding="utf-8")
+        for options in ((), ("--text-intended-reader-category", "agent-readable")):
+            exit_code, stdout, stderr = read_from_mac(mac_draft, options=options)
+            check(f"with options {list(options)}, when the ned-box checkout's reader predates "
+                  "--text-intended-reader-category, nothing is read and one FAILED line names "
+                  "the option, with the remedy, exit 1",
+                  exit_code == 1 and not remote_record.exists()
+                  and stdout == "FAILED (no fast read ran: the ned-box checkout reader predates "
+                                "--text-intended-reader-category)\n"
+                  and "does not know the option --text-intended-reader-category" in stderr
+                  and "rebasing its branch onto origin/main" in stderr
+                  and f"holding {mac_draft}" in stderr,
+                  f"exit {exit_code}; {stdout!r}; {stderr!r}")
+        ned_box_reader.write_text(STAND_IN_REMOTE_FAST_READ, encoding="utf-8")
 
         exit_code, stdout, stderr = read_from_mac(mac_draft, ssh_mode="unreachable")
         check("when ned-box cannot be reached, the read says so with ssh's words and exits 1",

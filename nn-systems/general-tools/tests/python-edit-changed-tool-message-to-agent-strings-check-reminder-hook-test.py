@@ -99,23 +99,27 @@ def write_then_run(cwd, file_path, content):
                      "tool_response": {}})
 
 
-FAST_READ_COMMAND_PREFIX = "  python3 nn-systems/cold-read/cold-read-fast-read.py --target "
+FAST_READ_COMMAND_PREFIX = "  python3 "
 FAST_READ_COMMAND_CATEGORY_WORDS = ["--text-intended-reader-category", "agent-readable"]
+# The hook names the reader in its own checkout, not one relative to the agent's.
+HOOK_CHECKOUT_FAST_READER = str(HOOK_PATH.resolve().parent.parent / "cold-read" / "cold-read-fast-read.py")
 
 
 def fast_read_targets(text):
     """The --target files of the cold-read-fast-read commands a reminder gives, each
     read as a shell reads it, so a target the hook did not quote fails its case,
-    as does a command that does not end by naming agent-readable, the category
-    of a tool-message-to-agent."""
+    as does a command that names a reader other than the one in the hook's own
+    checkout, or that does not end by naming agent-readable, the category of a
+    tool-message-to-agent."""
     targets = []
     for line in text.split("\n"):
-        if line.startswith(FAST_READ_COMMAND_PREFIX):
+        if line.startswith(FAST_READ_COMMAND_PREFIX) and "cold-read-fast-read.py" in line:
             try:
                 words = shlex.split(line)
             except ValueError:
                 words = []  # An unquoted target can leave a quote unclosed.
-            targets.append(Path(words[3]) if len(words) == 6 and words[4:] == FAST_READ_COMMAND_CATEGORY_WORDS
+            targets.append(Path(words[3]) if len(words) == 6 and words[1] == HOOK_CHECKOUT_FAST_READER
+                           and words[2] == "--target" and words[4:] == FAST_READ_COMMAND_CATEGORY_WORDS
                            else None)
     return targets
 
@@ -443,9 +447,13 @@ with tempfile.TemporaryDirectory() as temporary:
     many_messages = "".join(f'print("message number {index}")\n' for index in range(30))
     result = write_then_run(repository, repository / "scripts" / "many.py", many_messages)
     text = agent_text(result)
-    check("a long list is capped and says how many more there are",
-          "scripts/many.py:20  message number 19" in text and "message number 20" not in text
-          and "and 10 more in scripts/many.py, not listed here" in text
+    # The character limit may list fewer than 20, since each command names the
+    # reader by the absolute path of the checkout this suite runs in.
+    listed = [line for line in text.split("\n") if line.startswith("  scripts/many.py:")]
+    check("a long list is capped at 20 and says how many more there are",
+          1 <= len(listed) <= 20 and "message number 20" not in text
+          and listed == [f"  scripts/many.py:{index + 1}  message number {index}" for index in range(len(listed))]
+          and f"and {30 - len(listed)} more in scripts/many.py, not listed here" in text
           and "changed 30 " in text, text)
     long_messages = "".join(f'print("{"x" * 5000} {index}")\n' for index in range(30))
     long_path = repository / "nn-systems" / ("a-directory-with-a-long-name-" * 3) / \
@@ -503,7 +511,7 @@ with tempfile.TemporaryDirectory() as temporary:
     check("a message file that cannot be written still lists the message, and says how to fast-read it, exit 0",
           result.returncode == 0 and "scripts/tool.py:8  first message, again" in text
           and "could not write the listed messages to files for their cold-read-fast-read" in text
-          and "python3 nn-systems/cold-read/cold-read-fast-read.py --target <that file> "
+          and f"python3 {shlex.quote(HOOK_CHECKOUT_FAST_READER)} --target <that file> "
               "--text-intended-reader-category agent-readable" in text, result)
     reset()
 
