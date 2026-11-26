@@ -2108,6 +2108,28 @@ def ghi_md_paths_for_issue(number: int, repository_root: Path, runner,
     return selected
 
 
+def landed_heading_the_title_lacks(repo: str, number: int, paths,
+                                   repository_root: Path, runner):
+    """The heading of the issue's one GHI-MD as main holds it, when the
+    issue's title differs from it, else None. The issue is titled with the
+    heading the file had at step 3, and its landing pull request can still
+    change that heading before it merges; no edit follows to carry the
+    change, since main's copy already has the new heading. Read from main,
+    not from the checkout, which can be older than the landing pull request
+    or hold a local edit. An issue with several GHI-MDs is left alone, as
+    `title_follows_heading_in_this_edit` leaves it."""
+    if len(paths) != 1:
+        return None
+    shown = runner(["git", "show", f"origin/main:{paths[0]}"],
+                   cwd=str(repository_root))
+    heading = first_heading(shown.stdout)
+    viewed = runner(["gh", "issue", "view", str(number), "--repo", repo,
+                     "--json", "title"])
+    if json.loads(viewed.stdout)["title"] == heading:
+        return None
+    return heading
+
+
 def link_body(repo: str, number: int, repository_root: Path, runner, report,
               rerun_on: str):
     """Step 5. Nothing happens until the file is on main: until then the body
@@ -2133,9 +2155,18 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
         report("Once the pull request from step 4 merges, pull main and "
                f"rerun: {create_rerun_command(repo, rerun_on)}")
         return False
-    runner(["gh", "issue", "edit", str(number), "--repo", repo,
-            "--body", links_body(repo, paths)])
+    # The title goes in the same call as the body: the body edit removes
+    # the pairing key, after which no rerun can come back to set it.
+    heading = landed_heading_the_title_lacks(repo, number, paths,
+                                             repository_root, runner)
+    command = ["gh", "issue", "edit", str(number), "--repo", repo,
+               "--body", links_body(repo, paths)]
+    if heading is not None:
+        command += ["--title", heading]
+    runner(command)
     report(f"body is now {len(paths)} link(s): " + ", ".join(paths))
+    if heading is not None:
+        report(f"title is now: {heading}")
     return True
 
 
@@ -2152,24 +2183,6 @@ def issue_whose_filing_stopped_before_step_5(path: Path, repo: str, runner):
     return None
 
 
-def sync_title_to_landed_heading(repo: str, number: int, path: Path, runner,
-                                 report):
-    """A filing's issue is titled with the heading the file had at step 3,
-    but its landing pull request can still change that heading before it
-    merges. No edit follows to carry the change, since main's copy already
-    has the new heading, so the resume that links the body sets the title.
-    A reply without a title is left alone rather than read as a mismatch."""
-    heading = first_heading(path.read_text())
-    viewed = runner(["gh", "issue", "view", str(number), "--repo", repo,
-                     "--json", "title"])
-    title = (json.loads(viewed.stdout or "{}") or {}).get("title")
-    if not title or title == heading:
-        return
-    runner(["gh", "issue", "edit", str(number), "--repo", repo,
-            "--title", heading])
-    report(f"title is now: {heading}")
-
-
 def create(path: Path, repo: str, repository_root: Path, runner, report):
     """The whole sequence, and the one function the tests drive."""
     filed_number = issue_whose_filing_stopped_before_step_5(path, repo, runner)
@@ -2179,9 +2192,6 @@ def create(path: Path, repo: str, repository_root: Path, runner, report):
                "stopped before step 5")
         finished = link_body(repo, filed_number, repository_root, runner,
                              report, str(path))
-        if finished:
-            sync_title_to_landed_heading(repo, filed_number, path, runner,
-                                         report)
         report_open_ruling_questions(
             filed_number, "filed", ghi_guide_agent_prefixes(path.name, filed_number),
             runner, report)

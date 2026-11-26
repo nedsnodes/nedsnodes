@@ -226,6 +226,13 @@ class Recorder:
     def __call__(self, arguments, timeout=None, cwd=None, check=True):
         self.calls.append(with_question_read(arguments))
         self.timeouts.append(timeout)
+        if (arguments[:2] == ["git", "show"]
+                and arguments[2].startswith("origin/main:")
+                and not any("origin/main:" in key for key in self.answers)):
+            # Step 5 reads the heading of main's copy before its body edit.
+            # A case that is not about the title gets no heading, which the
+            # title read below matches, so the title is left alone.
+            return Completed()
         for prefix, answer in self.answers.items():
             if prefix in " ".join(arguments):
                 if isinstance(answer, Exception):
@@ -235,6 +242,11 @@ class Recorder:
                         f"{' '.join(arguments[:3])} failed: "
                         f"{(answer.stderr or answer.stdout).strip()}", 1)
                 return answer
+        if arguments[-2:] == ["--json", "title"]:
+            # The title read before step 5's body edit, answered as the
+            # heading an unanswered `git show` of main's copy gives, so a
+            # case that is not about the title sees it left alone.
+            return Completed(json.dumps({"title": ""}))
         return Completed()
 
     def commands(self):
@@ -1498,6 +1510,9 @@ def run_cases(scratch: Path):
     landed = written(scratch, "570-a-statusline-that-drops-its-branch-name.md",
                      STAGED)
     moved = Recorder({
+        "gh issue view 570 --repo nedsnodes/nedsnodes --json title":
+            Completed(json.dumps({"title": TITLE})),
+        f"git show origin/main:{LANDED}": Completed(STAGED),
         "gh issue view": Completed('{"body": "in progress ' + KEY + '"}'),
         "git ls-tree": Completed(LANDED + "\0"),
     })
@@ -2852,7 +2867,7 @@ def run_saved_question_on_resume_cases(scratch: Path):
     created_saved.write_text(ghi_guide_agent_file("may the filing go ahead?"))
     numbered = Recorder({
         "gh issue view 570": Completed(json.dumps(
-            {"body": tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)})),
+            {"title": "", "body": tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)})),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
     })
     lines = []
@@ -2892,30 +2907,108 @@ def run_saved_question_on_resume_cases(scratch: Path):
 
 def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
     """The landing pull request changed the heading after the issue was
-    filed under the old one, so the resume that links the body also sets
-    the title."""
+    filed under the old one, so step 5 sets the title to main's heading in
+    the same call that links the body."""
     log_store_at(scratch / "title-store").mkdir()
-    source = filed_ghi_md(scratch)
-    placeholder = tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)
+    local = FILE_TEXT.replace(f"# {EDIT_TITLE}", "# Local unmerged heading")
+    source = filed_ghi_md(scratch, text=local)
+    placeholder = tool.placeholder_body(tool.pairing_key(local), REPO)
+    title_view = f"gh issue view 570 --repo {REPO} --json title"
+    main_copy = f"git show origin/main:{EDIT_RELATIVE}"
+
+    def numbered_run(title, landed=True, extra=None):
+        answers = {title_view: Completed(json.dumps({"title": title})),
+                   "gh issue view 570": issue_json(title, placeholder),
+                   main_copy: Completed(FILE_TEXT)}
+        if landed:
+            answers["git ls-tree"] = Completed(EDIT_RELATIVE + "\0")
+        answers.update(extra or {})
+        recorder = Recorder(answers)
+        lines = []
+        try:
+            outcome = tool.create(source, REPO, scratch, recorder, lines.append)
+        except (tool.Refused, KeyError) as raised:
+            outcome = raised
+        return recorder, lines, outcome
+
+    def one_edit_with_title(recorder, title):
+        return [call for call in recorder.calls
+                if call[:3] == ["gh", "issue", "edit"]
+                and "--body" in call
+                and (("--title" in call and title in call) if title
+                     else "--title" not in call)]
+
     for name, title, landed, renamed in (
             ("a title the heading changed from", "Handoff dialog: older words",
              True, True),
-            ("a title that is the heading already", EDIT_TITLE, True, False),
+            ("a title that is main's heading already", EDIT_TITLE, True, False),
             ("a file not yet on main", "Handoff dialog: older words", False,
              False)):
-        answers = {"gh issue view 570": issue_json(title, placeholder)}
-        if landed:
-            answers["git ls-tree"] = Completed(EDIT_RELATIVE + "\0")
-        recorder = Recorder(answers)
-        lines = []
-        tool.create(source, REPO, scratch, recorder, lines.append)
+        recorder, lines, _ = numbered_run(title, landed)
         check(f"a create resumed on its landed file with {name} "
-              + ("sets the title to the heading" if renamed
-                 else "leaves the title alone"),
-              ran_with(recorder, "gh issue edit 570", "--title", EDIT_TITLE)
-              == renamed
+              + ("sets the title to main's heading in the body's edit"
+                 if renamed else "leaves the title alone"),
+              (len(one_edit_with_title(recorder,
+                                       EDIT_TITLE if renamed else None)) == 1
+               if landed else not recorder.ran("gh issue edit"))
               and (f"title is now: {EDIT_TITLE}" in lines) == renamed,
-              (recorder.commands(), lines))
+              (recorder.calls, lines))
+
+    recorder, lines, _ = numbered_run("Handoff dialog: older words")
+    check("the title comes from main's copy, not from a checkout whose "
+          "heading never merged",
+          not any("Local unmerged heading" in " ".join(call)
+                  for call in recorder.calls), (recorder.calls, lines))
+
+    failing, lines, outcome = numbered_run(
+        "Handoff dialog: older words",
+        extra={"gh issue edit": Completed("", returncode=1,
+                                          stderr="title write failed")})
+    rerun, rerun_lines, rerun_outcome = numbered_run(
+        "Handoff dialog: older words")
+    check("a failed title write leaves the body's pairing key, so a rerun "
+          "sets the title and links the body",
+          isinstance(outcome, tool.Refused)
+          and failing.count("gh issue edit") == 1
+          and rerun_outcome == (570, True)
+          and len(one_edit_with_title(rerun, EDIT_TITLE)) == 1,
+          (outcome, failing.calls, rerun_outcome, rerun.calls))
+
+    empty, lines, outcome = numbered_run(
+        "unused", extra={title_view: Completed("{}")})
+    check("a title read that answers no title raises, and nothing is edited",
+          isinstance(outcome, KeyError) and not empty.ran("gh issue edit"),
+          (outcome, empty.calls))
+
+    several, lines, _ = numbered_run(
+        "Handoff dialog: older words",
+        extra={"git ls-tree": Completed(
+            EDIT_RELATIVE + "\0docs/issues/570-another-file.md\0")})
+    check("an issue with several GHI-MDs on main keeps its title",
+          len(one_edit_with_title(several, None)) == 1
+          and not several.ran(title_view), (several.calls, lines))
+
+    original = written(scratch)
+    key = tool.pairing_key(FILE_TEXT)
+    from_original = Recorder({
+        "gh issue list": Completed(json.dumps([{
+            "number": 570, "title": "Handoff dialog: older words",
+            "body": tool.placeholder_body(key, REPO)}])),
+        title_view: Completed(json.dumps(
+            {"title": "Handoff dialog: older words"})),
+        main_copy: Completed(tool.with_issue_frontmatter(
+            FILE_TEXT, REPO, 570, EDIT_TITLE)),
+        "git show": Completed(tool.with_issue_frontmatter(
+            FILE_TEXT, REPO, 570, EDIT_TITLE)),
+        "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
+    })
+    lines = []
+    outcome = tool.create(original, REPO, scratch, from_original, lines.append)
+    check("a rerun on the original source whose filing merged sets the "
+          "title in the body's edit too",
+          outcome == (570, True)
+          and len(one_edit_with_title(from_original, EDIT_TITLE)) == 1,
+          (from_original.calls, lines))
     log_store_at(scratch / "default-log-store")
 
 
@@ -5585,6 +5678,8 @@ def run_resumed_create_after_older_name_merged_real_git_cases(scratch: Path):
                 return Completed("[]")
             if "pr create" in gh_calls[-1]:
                 return Completed("https://github.com/x/y/pull/11\n")
+            if "issue view" in gh_calls[-1]:
+                return Completed(json.dumps({"title": title}))
             return Completed("")
         return tool.run(arguments, timeout=timeout or tool.GH_TIMEOUT_SECONDS,
                         cwd=cwd, check=check)
