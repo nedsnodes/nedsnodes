@@ -166,6 +166,23 @@ def test_a_short_title_names_the_item_only_right_after_one_of_its_numbers(root):
           result.stdout + result.stderr)
 
 
+def test_titles_of_items_are_searched_in_one_run_each_with_its_own_numbers(root):
+    store = Store(root)
+    both = store.session("both", [agent_record("Items 3 and 4 of 9: two openings, then Item 3 of 9: the first"),
+                                  user_record("both at once")])
+    store.session("wrong-number", [agent_record("Item 4 of 9: the first"), user_record("not item 3")])
+    result = store.run("--title-of-items=3,4:two openings", "--title-of-items=3:the first")
+    check("an agent-session naming two titles is printed once, and each short title only after its own numbers",
+          result.returncode == 0 and result.stdout.count("both at once") == 1 and "not item 3" not in result.stdout
+          and f"{both}" in result.stdout, result.stdout + result.stderr)
+    result = store.run("--title-of-items=the first")
+    check("a --title-of-items value without its numbers is refused", result.returncode == 2
+          and "N[,N]...:TITLE" in result.stderr, result.stdout + result.stderr)
+    result = store.run("--title", "the first")
+    check("--title without --item-number is refused", result.returncode == 2
+          and "--item-number" in result.stderr, result.stdout + result.stderr)
+
+
 def test_a_short_title_names_the_item_after_every_running_count_the_walk_finder_reads_and_only_as_a_whole(root):
     store = Store(root)
     listed = store.session("listed", [agent_record("Items 9.1, 9.2 of 35: The fix"), user_record("listed answer")])
@@ -192,6 +209,17 @@ def test_a_short_title_closed_by_underscore_emphasis_names_the_item(root):
           result.returncode == 0
           and all(f"{dialog}:{line_in(dialog, answer)}  {answer}" in result.stdout
                   for dialog, answer in [(single, "single answer"), (double, "double answer")]),
+          result.stdout + result.stderr)
+
+
+def test_a_title_followed_by_an_underscore_and_a_letter_does_not_name_the_item(root):
+    store = Store(root)
+    longer = store.session("longer", [agent_record("Item 3 of 9: Fix foo_bar"), user_record("longer answer")])
+    closed = store.session("closed", [agent_record("Item 3 of 9: _Fix foo_"), user_record("closed answer")])
+    result = store.run("--title", "Fix foo", "--item-number", "3")
+    check("an underscore inside a longer word ends no title, while one that closes emphasis still does",
+          f"{closed}:{line_in(closed, 'closed answer')}  closed answer" in result.stdout
+          and "longer answer" not in result.stdout and longer.exists(),
           result.stdout + result.stderr)
 
 

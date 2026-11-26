@@ -97,6 +97,8 @@ Ruled "y": the naming rule binds new file names only. An existing file is rename
 2. **"domain-knowledge agent" is renamed to info-agent** in `docs/issues/26-dynamic-agent-team-model.md`, `docs/issues/46-ghi-guide-agent.system.design.md` and the queue note `git show 93bcc041:docs/nedschorus-wiki/queue/26-lifecycle-revision-from-ghi-info.md`. That note was deleted on 2026-09-28 (queue-drain item 13) after its three lifecycle facts were written into `docs/issues/26-dynamic-agent-team-model.md` without the old term, so it needs no rename.
 3. **`agent-seat` keeps its glossary definition.** The proposed rename to interactive-agent was declined: "I'm fine with an agent-seat as defined".
 
+Items 1 and 2 were replaced on 2026-11-24 by guide-agent, which the glossary already defines: the user approved item 24 of overall-cleanup's approval-walk overall-cleanup-items-handed-over-from-long-approval-walks-2026-11-21, saying "Yeah, we're not going to have any info agents. We're just going to have guide agents." (walk-minutes `nedlern@ned-box:/home/nedlern/agents/overall-cleanup/docs/walk/overall-cleanup-items-handed-over-from-long-approval-walks-2026-11-21-minutes.md`, item 24). No info-agent entry joins the glossary, and the three uses of "domain-knowledge agent" in `docs/issues/26-dynamic-agent-team-model.md` and `docs/issues/46-ghi-guide-agent.system.design.md` now say guide-agent.
+
 Already applied: the ghi seat-brief calls ghi-info an info-agent, landed in PR [Five seat briefs rewritten against current state, with the cold read's fixes and the walk's rulings](https://github.com/nedsnodes/nedsnodes/pull/454).
 
 ## Ruled at the cold-read-research seat, superseded 2026-09-17
@@ -156,7 +158,6 @@ No change is needed to `.claude/skills/cold-read/prompts/terminology-prompt.md` 
 ## Remaining
 
 1. **The cold-read skill's ask-the-user route** for a terminology finding whose fix is a rename beyond the document: four ask-the-user cases become five (text in "The cold-read skill change that makes this self-sustaining" above, written when those cases were step 7; they are step 8 of `.claude/skills/cold-read/SKILL.md` today, and the record it names is `triage.md`). Skill prose: cold read, walk, marker. At the MD-skills seat.
-2. **The 2026-09-16 rulings above.** The info-agent glossary entry and the rename in the files named are not yet made. The ghi seat brief, one of the files the rename would have reached, was deleted on 2026-10-01, so no clause there is left to drop. Not yet assigned to a seat.
 
 ## Notes
 

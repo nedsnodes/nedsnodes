@@ -11,7 +11,7 @@ User-designed 2026-07-25 (outer walk item 16); supersedes the org-chart possibil
 
 ## In one line
 
-Task-scoped worker agents + on-tap domain-knowledge agents + SDLC skills carried by workers and subagents; **sparring pairs** (Claude Code + Codex; cooperate as driver/guardian — the guardian covers the driver's back, protective never antagonistic — compete as N-version teams on hard tasks, reconcile at phase boundaries); cheap **spy** watchers triaging a filtered intent-stream to domain experts; PM agents as the user's interface.
+Task-scoped worker agents + on-tap guide-agents + SDLC skills carried by workers and subagents; **sparring pairs** (Claude Code + Codex; cooperate as driver/guardian — the guardian covers the driver's back, protective never antagonistic — compete as N-version teams on hard tasks, reconcile at phase boundaries); cheap **spy** watchers triaging a filtered intent-stream to domain experts; PM agents as the user's interface.
 
 ## The goal: context engineering
 

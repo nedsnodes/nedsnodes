@@ -1816,8 +1816,11 @@ def recorded_mutant_not_applied_verdict(checkout, path, hunks, head, why_not_app
             f"If your branch removed or changed that line on purpose: the mutant is gone from "
             f"your branch; leave the survivor task that names this diff file open, and the "
             f"nightly mutation pass rechecks it once your branch is merged.\n"
-            f"If your branch changed that line by accident: run git checkout origin/main -- "
-            f"{shlex.quote(place.rsplit(':', 1)[0])}, commit, and run this command again.\n"
+            f"If your branch changed that line by accident: edit the line back as origin/main has "
+            f"it at {place}, which git diff origin/main -- {shlex.quote(place.rsplit(':', 1)[0])} "
+            f"shows, commit, and run this command again. Do not run git checkout origin/main -- "
+            f"on the file: it would also throw away every other change your branch and your "
+            f"uncommitted work made to the file.\n"
             f"Otherwise, make the diff's change by hand at {place}, run that file's suites, and "
             f"put the line back before you commit.\n"
             f"If a suite fails: the mutant is killed, so no new test is needed; mark the survivor "
@@ -1832,9 +1835,11 @@ def recorded_mutant_not_applied_verdict(checkout, path, hunks, head, why_not_app
             f"still has the lines it replaces, so your branch changed them.\n"
             f"If your branch changed them on purpose, the mutant is gone from your branch: once "
             f"your branch is merged, the nightly mutation pass drops it from its task.\n"
-            f"Otherwise, put {path} back as origin/main has it, with git checkout origin/main -- "
-            f"{shlex.quote(path)}, keep your test in another file, commit both, and run this "
-            f"command again.")
+            f"Otherwise, edit the lines the diff replaces back as origin/main has them, which git "
+            f"diff origin/main -- {shlex.quote(path)} shows, keep your test in another file, "
+            f"commit both, and run this command again. Do not run git checkout origin/main -- "
+            f"{shlex.quote(path)}: it would also throw away every other change your branch and "
+            f"your uncommitted work made to {path}.")
     return "could not be judged", (
         f"it does not apply to {path} at head {head[:12]}: {why_not_applied}, and whether "
         f"origin/main still has the lines it replaces cannot be told: there is no local "

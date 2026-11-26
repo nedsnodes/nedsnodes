@@ -48,8 +48,9 @@ Usage:
                 and one in
                 SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or
                 SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the first
-                COMMIT alone, since a pull request head test run leaves
-                out the former and most of the latter. Without it
+                COMMIT alone, the safe side, since a pull request head
+                test run leaves out the former, and the latter unless
+                the change edits a file it reads. Without it
                 every suite runs. Without --only-suites-named,
                 and where suites run in nn-test-sandboxes, it keeps a
                 suite in SUITES_RUN_WITHOUT_ANY_SANDBOX only when the
@@ -2697,16 +2698,18 @@ def copy_lines_of_suite_output(stream, log, started, cases):
                       "unix_time": time.time()})
 
 
-def test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(cases):
+def test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(
+        cases, skipped_texts=()):
     """Give each FAIL case the name its suite's other case lines show it has.
 
     A FAIL line prints a case's name, then ": " and a detail, and a name may itself hold ": ",
     as in "--failures-only: prints X", so the line alone cannot say where the name ends. The
     name is the shortest prefix of the line's text, ending just before a ": ", that no PASS case
     of the suite has as its name or as the start of its name followed by ": ", and that no other
-    FAIL line of the suite starts with followed by ": "; when there is none, the whole text."""
+    FAIL line, nor any of skipped_texts, the suite's SKIP lines' case texts, starts with
+    followed by ": "; when there is none, the whole text."""
     passed = [case["name"] for case in cases if case["verdict"] == "PASS"]
-    failing = [case["text"] for case in cases if case["verdict"] == "FAIL"]
+    failing = [case["text"] for case in cases if case["verdict"] == "FAIL"] + list(skipped_texts)
     for case in cases:
         if case["verdict"] != "FAIL":
             continue
@@ -2781,7 +2784,7 @@ def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):
         failed_after_last_case = int(bool(cases) and result["exit"] != 0 and not failed)
         suite_element = xml.etree.ElementTree.SubElement(
             root, "testsuite", name=result["suite"],
-            tests=str(len(cases) + failed_after_last_case if cases else 1),
+            tests=str((len(cases) + failed_after_last_case if cases else 1) + len(result["skips"])),
             failures=str(failed + failed_after_last_case if cases else int(result["exit"] != 0)),
             skipped=str(len(result["skips"])), time=f"{result['seconds']:.3f}",
             ran_to_the_end=str(test_suite_ran_to_the_end(result)).lower(),
@@ -3678,14 +3681,16 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
         counters)
     if killed_at_memory_ceiling and exit_code == 0:
         exit_code = -signal.SIGKILL
+    skips = skipped_case_lines(log_file)
     result = {
         "suite": suite,
         "exit": exit_code,
         "seconds": seconds,
         "log": log_file,
-        "skips": skipped_case_lines(log_file),
+        "skips": skips,
         "cases": test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(
-            list(cases)),
+            list(cases), [skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker(line)
+                          for line in skips]),
         "output_note": output_note,
         "cpu_seconds": None,
         "peak_memory_bytes": None,
@@ -4780,19 +4785,25 @@ def suites_selected_since_every_commit(top, suites, recordings, commits, differs
     program differs from the first commit, and a suite in
     SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the
     first commit alone."""
-    selections = [suites_selected_since(top, suites, recordings, commit, differ,
-                                        files_only_strace_saw_by_suite, read_only_recordings,
-                                        read_only_directory)
-                  for commit, differ in zip(commits, differs)]
+    def selected_since(commit, differ):
+        return suites_selected_since(top, suites, recordings, commit, differ,
+                                     files_only_strace_saw_by_suite, read_only_recordings,
+                                     read_only_directory)
+
+    first = selected_since(commits[0], differs[0])
     if len(commits) == 1:
-        return selections[0]
-    if "scripts/run-all-test-suites.py" in differs[0]:
+        return first
+    if PROGRAM in differs[0]:
         # A pull request head test run runs main's copy of this program, never the pull
         # request's, so no suite has run under a changed copy before the after-merge test run.
+        # The later comparisons are not made, so a later commit they could not read stops
+        # nothing; differs already shows that each commit resolves.
         return [(suite, True, f"judged by the comparison with the first commit alone, "
                               f"{commits[0][:12]}, since a pull request head test run runs "
                               f"main's test runner, never a changed one: {why}")
-                for suite, _, why in selections[0]]
+                for suite, _, why in first]
+    selections = [first] + [selected_since(commit, differ)
+                            for commit, differ in zip(commits[1:], differs[1:])]
     combined = []
     for index, suite in enumerate(suites):
         if suite in SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or suite in SUITES_RUN_WITHOUT_ANY_SANDBOX:
@@ -4859,8 +4870,8 @@ def selective_test_run_selection_without_no_sandbox_suites(
             kept.append((suite, selected, why))
             continue
         # Judged by the first commit alone, as suites_selected_since_every_commit judges it:
-        # a later commit, a head test run's, never ran the suite, and holds the pull
-        # request's own change, so no file the change edits differs from it.
+        # a later commit, a head test run's, holds the pull request's own change, so no file
+        # the change edits differs from it, and that run may have left the suite out.
         edited = no_sandbox_suite_file_it_read_that_differs_or_none(
             suite, recordings.get(suite), files_only_strace_saw_by_suite.get(suite), differs[0])
         if edited is None:

@@ -488,7 +488,8 @@ def ghi_guide_answer_extract_and_schema_check_from_claude_result(result: dict, k
         return None, f"the answer's kind {kind!r} is none the schema allows: {shown}"
     unknown = sorted(set(answer) - set(properties))
     if unknown:
-        return None, f"the answer has fields the schema does not: {', '.join(unknown)}: {shown}"
+        # A field name is the model's text, so it is quoted: a newline in it would split the message.
+        return None, f"the answer has fields the schema does not: {', '.join(map(json.dumps, unknown))}: {shown}"
     missing = [field for field in GHI_GUIDE_ANSWER_FIELDS_EACH_KIND_NEEDS[kind] if field not in answer]
     if missing:
         return None, f"the {kind} answer lacks its {', '.join(missing)} field: {shown}"
@@ -780,16 +781,18 @@ def ask(question: str, include_closed: bool, seat_dir: Path, repo: str,
 
     # One deadline for the whole ask, however many turns it takes.
     deadline = time.monotonic() + timeout_seconds
+    budget_seconds = timeout_seconds
 
     def turn(prompt, resume_session_id, cold_start=False):
         """A claude turn that can only spend what the ask has left; the
         cold-start turn first adds ghi_issue_write.GHI_GUIDE_COLD_START_EXTRA_SECONDS to it."""
-        nonlocal deadline
+        nonlocal deadline, budget_seconds
         if cold_start:
             deadline += ghi_issue_write.GHI_GUIDE_COLD_START_EXTRA_SECONDS
+            budget_seconds += ghi_issue_write.GHI_GUIDE_COLD_START_EXTRA_SECONDS
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None, (f"the ask's {timeout_seconds}s budget was already spent "
+            return None, (f"the ask's {budget_seconds}s budget was already spent "
                           "before this turn could start")
         return run_claude(prompt, resume_session_id, seat_dir, remaining, json_schema)
 
@@ -972,6 +975,10 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
     cold_starting = not has_session or recycle
 
     if cold_starting:
+        if not locked:
+            print("ghi-guide-ask: another ask holds the state lock, so this "
+                  "ask cold-starts a throwaway session that reads the whole corpus",
+                  file=sys.stderr)
         if recycle_reason:
             # A reincarnation silently replacing the session would leave the
             # next investigator no way to tell a fresh answer from a
@@ -994,6 +1001,12 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
         if cold_reply is None:
             return None, None, f"ghi-guide cold-start failed: {error}"
         session_id = cold_reply["session_id"]
+        # Saved now, not at the end: a question turn that then runs out of
+        # the ask's deadline would otherwise throw away a paid-for cold start.
+        if locked:
+            state = default_state()
+            state[GHI_GUIDE_SESSION_ID_STATE_KEY] = session_id
+            save_state(state_path, state)
         resume_prompt = compose_resume_ask_prompt(question, include_closed, [], False,
                                                   request_form=request_form)
     else:
@@ -1039,8 +1052,6 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
                 answer = corrected
 
     if locked:
-        if cold_starting:
-            state = default_state()
         state[GHI_GUIDE_SESSION_ID_STATE_KEY] = session_id
         recent = state.get("recent_matches", [])
         recent.append(stale)

@@ -37,7 +37,7 @@ Build considerations beyond this design: the md-review rider, item 9 of `git sho
 
 ## What ghi-guide is
 
-The first build of the domain-knowledge-agent class defined in [26-dynamic-agent-team-model.md](26-dynamic-agent-team-model.md) ("the GHIs" is that class's first listed domain). Three duties:
+The first build of the guide-agent class defined in [26-dynamic-agent-team-model.md](26-dynamic-agent-team-model.md) ("the GHIs" is that class's first listed domain). Three duties:
 
 1. **Answer asks.** A GHI author, before filing or editing, asks what it should read. The answer is a bare list — "read #13, #24, #31."
 2. **Maintain.** Cross-links between issues, and link integrity across the issue–MD boundary in both directions: every GHI→MD reference resolves on main; every GHI-MD backlinks its correct GHI(s). Link repairs are `ghi-guide`'s own writes — its only write class. Detected problems beyond links — a GHI-MD stale relative to its issue, a body over the length limit — spawn fixers (§ Maintenance and fixers).

@@ -891,8 +891,28 @@ with tempfile.TemporaryDirectory() as scratch:
                           .replace(" --global --add safe.directory", "", 1)],
                          capture_output=True, text=True).stdout == separator_path,
           repr(copied_remedy))
+    apostrophe_path = "/x/a b'c"
+    git_quoted_apostrophe_path = "'" + apostrophe_path.replace("'", "'\\''") + "'"
+    joined_apostrophe_remedy = common_module.join_error_text_lines_with_one_space(
+        f"fatal: detected dubious ownership in repository at '{apostrophe_path}'\n"
+        "To add an exception for this directory, call:\n\n"
+        f"\tgit config --global --add safe.directory {git_quoted_apostrophe_path}")
+    copied_apostrophe_remedy = joined_apostrophe_remedy.split("call: ", 1)[1]
+    check("git's remedy for a path holding U+2028 and an apostrophe, copied from the joined "
+          "line, still names the original path",
+          len(joined_apostrophe_remedy.splitlines()) == 1
+          and subprocess.run(["bash", "-c", copied_apostrophe_remedy.replace("git config", "printf %s", 1)
+                              .replace(" --global --add safe.directory", "", 1)],
+                             capture_output=True, text=True).stdout == apostrophe_path,
+          repr(joined_apostrophe_remedy))
     check("a U+2028 outside any quoted span is written as its escape",
           common_module.join_error_text_lines_with_one_space("fatal: a\u2028b") == "fatal: a\\u2028b")
+    unparsable_command = common_module.join_error_text_lines_with_one_space(
+        "git config --global --add safe.directory '/x/a\u2028b")
+    check("a git command line shlex cannot split, holding U+2028 and an unmatched quote, stays "
+          "one line with the character escaped",
+          unparsable_command == "git config --global --add safe.directory '/x/a\\u2028b",
+          repr(unparsable_command))
 
     # A cell whose pre-run snapshot failed passes git's reason, so the line the grid lifts carries it.
     captured = io.StringIO()
@@ -960,41 +980,26 @@ with tempfile.TemporaryDirectory() as scratch:
     PERMISSION_NOISE = ("Permission allow rule (/Users/el/.claude/settings.json): "
                         "Glob(//Users/el/agents/**) is not matched by file permission checks\n")
 
-    def classify(stdout="", stderr="", exit_code=1, model="claude-fable-5-1", start_error=""):
+    def classify(stdout="", stderr="", exit_code=1, start_error=""):
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
-            recognised_texts=claude_module.recognised_failure_texts_for_model(model),
+            recognised_texts=claude_module.RECOGNISED_FAILURE_TEXTS,
             start_error=start_error)
 
-    check("the weekly limit line is account-limit, the limit and its reset as detail",
+    check("the weekly limit line is no recognised text: exit-N, the line as detail",
           classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")
-          == ("account-limit", "weekly limit · resets Nov 7, 3am (America/Los_Angeles)"),
+          == ("exit-1", WEEKLY_LIMIT_LINE),
           repr(classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")))
-    check("a line starting \"You've hit your \" whose next words do not end in limit is exit-N",
-          classify(stdout="You've hit your limitless quota · resets Nov 7\n")[0] == "exit-1",
-          repr(classify(stdout="You've hit your limitless quota · resets Nov 7\n")))
-    check("three words before limit is still account-limit",
-          classify(stdout="You've hit your Opus weekly usage limit · resets Nov 7\n")
-          == ("account-limit", "Opus weekly usage limit · resets Nov 7"),
-          repr(classify(stdout="You've hit your Opus weekly usage limit · resets Nov 7\n")))
-    check("exactly four words before limit is exit-N",
-          classify(stdout="You've hit your a b c d limit\n")[0] == "exit-1",
-          repr(classify(stdout="You've hit your a b c d limit\n")))
-    check("a line whose \"limit\" comes five or more words after \"You've hit your \" is exit-N",
-          classify(stdout="You've hit your stride and now the speed limit\n")[0] == "exit-1",
-          repr(classify(stdout="You've hit your stride and now the speed limit\n")))
-    check("the Fable limit line is model-limit for a Fable attempt, the family as detail",
-          classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n") == ("model-limit", "Fable"),
+    check("the Fable limit line is no recognised text: exit-N, the line as detail",
+          classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n")
+          == ("exit-1", FABLE_LIMIT_LINE[:120]),
           repr(classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n")))
-    check("the same line on an Opus attempt is not that model's limit: exit-N",
-          classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")[0] == "exit-1",
-          repr(classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")))
     check("the logged-out capture is logged-out with the whole line as detail",
           classify(stdout=LOGGED_OUT_LINE + "\n") == ("logged-out", LOGGED_OUT_LINE),
           repr(classify(stdout=LOGGED_OUT_LINE + "\n")))
-    check("a limit text inside a line, not at its start, is not recognised",
-          classify(stdout=f"The document quotes: {WEEKLY_LIMIT_LINE}\n")[0] == "exit-1",
-          repr(classify(stdout=f"The document quotes: {WEEKLY_LIMIT_LINE}\n")))
+    check("a recognised text inside a line, not at its start, is not recognised",
+          classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")[0] == "exit-1",
+          repr(classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")))
     check("an agent-binary that could not be started is agent-binary-missing with the error",
           classify(exit_code=None, start_error="[Errno 2] No such file or directory: 'claude'")
           == ("agent-binary-missing", "[Errno 2] No such file or directory: 'claude'"))
@@ -1014,10 +1019,10 @@ with tempfile.TemporaryDirectory() as scratch:
           classify(stdout="only stdout\n", exit_code=64) == ("exit-64", "only stdout")
           and classify(stdout="only stdout\n", stderr=" \n\n", exit_code=64) == ("exit-64", "only stdout")
           and classify(exit_code=-9) == ("exit--9", "no output"))
-    check("a Codex attempt recognises no text, so the Claude limit line is exit-1 there",
+    check("an attempt given no recognised texts makes the Claude logged-out line exit-1",
           common_module.classify_failed_attempt(
-              stdout=WEEKLY_LIMIT_LINE + "\n", stderr="", exit_code=1, recognised_texts=[])
-          == ("exit-1", WEEKLY_LIMIT_LINE))
+              stdout=LOGGED_OUT_LINE + "\n", stderr="", exit_code=1, recognised_texts=[])
+          == ("exit-1", LOGGED_OUT_LINE))
 
     # The Codex logged-out line carries the tracing logger's timestamp, which
     # the classifier skips before matching by how the line starts; the
@@ -1025,7 +1030,7 @@ with tempfile.TemporaryDirectory() as scratch:
     def classify_codex(stdout="", stderr="", exit_code=1):
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
-            recognised_texts=codex_module.recognised_failure_texts_for_model("gpt-5-codex"))
+            recognised_texts=codex_module.RECOGNISED_FAILURE_TEXTS)
 
     check("the Codex 401 capture on stderr is logged-out, the line after its timestamp as detail",
           classify_codex(stderr=CODEX_LOGGED_OUT_LINE + "\n")
@@ -1046,19 +1051,6 @@ with tempfile.TemporaryDirectory() as scratch:
           repr(classify_codex(stderr=f"{CODEX_LOGGED_OUT_TIMESTAMP} {WEEKLY_LIMIT_LINE}\n")))
     check("the Claude logged-out line still matches at column 0 with no timestamp",
           classify(stdout=LOGGED_OUT_LINE + "\n") == ("logged-out", LOGGED_OUT_LINE))
-    check("the family name is the model id's second word, capitalised",
-          claude_module.model_family_name("claude-fable-5-1") == "Fable"
-          and claude_module.model_family_name("claude-opus-5") == "Opus")
-    check("a one-word alias such as haiku is capitalised too, as Claude's model-limit message spells it",
-          claude_module.model_family_name("haiku") == "Haiku",
-          repr(claude_module.model_family_name("haiku")))
-    check("a two-word model id such as claude-haiku gives its second word",
-          claude_module.model_family_name("claude-haiku") == "Haiku",
-          repr(claude_module.model_family_name("claude-haiku")))
-    check("a model id whose second word is empty is capitalised whole",
-          claude_module.model_family_name("claude--x") == "Claude--x",
-          repr(claude_module.model_family_name("claude--x")))
-
     # Through the real cells: the cause line is the last line of the attempt
     # in the log the grid reads, in the form the grid parses.
     shutil.rmtree(repository)
@@ -1069,26 +1061,26 @@ with tempfile.TemporaryDirectory() as scratch:
         {"claude-fable-5-1": {"exit": 1, "stdout": FABLE_LIMIT_LINE + "\n"}},
         report, "--tier", "second-strongest-model",
     )
-    check("a Claude cell that hit the Fable limit prints cause: model-limit — Fable",
+    check("a Claude cell that hit the Fable limit prints cause: exit-1 with the line as detail",
           result.returncode == 1
-          and "cold-read-claude-cell: cause: model-limit — Fable" in result.stderr,
+          and f"cold-read-claude-cell: cause: exit-1 — {FABLE_LIMIT_LINE[:120]}" in result.stderr,
           repr(result.stderr))
     cause_lines = [line for line in result.stderr.splitlines()
                    if line.startswith("cold-read-claude-cell: cause:")]
     check("the cause line is the last line of its own about the attempt",
           len(cause_lines) == 1
-          and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: model-limit"),
+          and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: exit-1"),
           repr(result.stderr))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
     report = repository / "cold-read-records" / "run-cause-b" / "codex-defect-hunt-second-strongest-model.md"
     result = run_codex_cell(
         repository, stubs,
-        {"*": {"exit": 1, "stdout": WEEKLY_LIMIT_LINE + "\n"}},
+        {"*": {"exit": 1, "stdout": LOGGED_OUT_LINE + "\n"}},
         report,
     )
-    check("a Codex cell printing the Claude limit text names exit-1, the line as detail",
-          f"cold-read-codex-cell: cause: exit-1 — {WEEKLY_LIMIT_LINE}" in result.stderr,
+    check("a Codex cell printing the Claude logged-out text names exit-1, the line as detail",
+          f"cold-read-codex-cell: cause: exit-1 — {LOGGED_OUT_LINE}" in result.stderr,
           repr(result.stderr))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
@@ -2315,11 +2307,21 @@ with tempfile.TemporaryDirectory() as instrument_scratch:
 
 # Each launcher's --effort help states the efforts its own tier map pins, so
 # the help cannot name a launcher's effort the map no longer holds.
+# The agy cell refuses before argparse runs when no sandbox program is on PATH,
+# so the stand-ins go first on the child's PATH.
+help_sandbox_scratch = tempfile.TemporaryDirectory()
+help_environment = dict(os.environ, PATH=os.pathsep.join([
+    str(scratch_repository_fixture.install_fake_sandbox_programs(
+        Path(help_sandbox_scratch.name) / "fake-sandbox-programs")),
+    os.environ.get("PATH", "")]))
 for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
                       "cold-read-codex-cell.py"):
-    launcher_help = subprocess.run(
+    launcher_help_run = subprocess.run(
         [sys.executable, str(SYSTEM_DIRECTORY / launcher_file), "--help"],
-        capture_output=True, text=True, timeout=60).stdout
+        capture_output=True, text=True, timeout=60, env=help_environment)
+    check(f"{launcher_file} --help exits 0", launcher_help_run.returncode == 0,
+          f"exit {launcher_help_run.returncode}; stderr: {launcher_help_run.stderr[-600:]}")
+    launcher_help = launcher_help_run.stdout
     launcher_help_words = " ".join(launcher_help.split())
     # argparse wraps after a hyphen, so compare with every space removed.
     launcher_help_unspaced = "".join(launcher_help.split())
@@ -2331,8 +2333,7 @@ for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
     for tier, effort in _launcher.TIER_TO_REASONING_EFFORT.items():
         check(f"{launcher_file}'s --effort help says its {tier} tier runs at {effort}",
               f"{tier}runsat{effort}" in launcher_help_unspaced, launcher_help_words[-600:])
-    check(f"{launcher_file}'s --effort help names no other launcher's pinned effort",
-          "pins medium" not in launcher_help_words, launcher_help_words[-600:])
+help_sandbox_scratch.cleanup()
 
 print()
 if failures:

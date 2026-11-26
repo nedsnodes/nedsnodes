@@ -100,11 +100,14 @@ def write_then_run(cwd, file_path, content):
 
 
 FAST_READ_COMMAND_PREFIX = "  python3 nn-systems/cold-read/cold-read-fast-read.py --target "
+FAST_READ_COMMAND_CATEGORY_WORDS = ["--text-intended-reader-category", "agent-readable"]
 
 
 def fast_read_targets(text):
     """The --target files of the cold-read-fast-read commands a reminder gives, each
-    read as a shell reads it, so a target the hook did not quote fails its case."""
+    read as a shell reads it, so a target the hook did not quote fails its case,
+    as does a command that does not end by naming agent-readable, the category
+    of a tool-message-to-agent."""
     targets = []
     for line in text.split("\n"):
         if line.startswith(FAST_READ_COMMAND_PREFIX):
@@ -112,7 +115,8 @@ def fast_read_targets(text):
                 words = shlex.split(line)
             except ValueError:
                 words = []  # An unquoted target can leave a quote unclosed.
-            targets.append(Path(words[-1]) if len(words) == 4 else None)
+            targets.append(Path(words[3]) if len(words) == 6 and words[4:] == FAST_READ_COMMAND_CATEGORY_WORDS
+                           else None)
     return targets
 
 
@@ -499,7 +503,8 @@ with tempfile.TemporaryDirectory() as temporary:
     check("a message file that cannot be written still lists the message, and says how to fast-read it, exit 0",
           result.returncode == 0 and "scripts/tool.py:8  first message, again" in text
           and "could not write the listed messages to files for their cold-read-fast-read" in text
-          and "python3 nn-systems/cold-read/cold-read-fast-read.py --target <that file>" in text, result)
+          and "python3 nn-systems/cold-read/cold-read-fast-read.py --target <that file> "
+              "--text-intended-reader-category agent-readable" in text, result)
     reset()
 
     # A repository with no commit has no HEAD, so git ls-tree fails; an edit that wrote no

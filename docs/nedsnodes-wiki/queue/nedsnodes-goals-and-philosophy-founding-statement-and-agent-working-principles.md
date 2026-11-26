@@ -12,14 +12,15 @@ The user gave merge-lane-2 a statement of the project's philosophy on 2026-11-03
 
 Wherever practical, an agent puts a rule that code, a schema, a state machine or a test can hold reliably into one of them, because agents debug and test code well and judge prose poorly; a guard still meets the two conditions of the bullet of `CLAUDE.md` that begins "Propose a guard". Each step that needs judgment gets clear questions, inputs and expected decisions, as S1 says. Prose always precedes code: the design and the contract are prose, and the implementation comes from them; the test plan is prose, and the tests come from it. Fresh-readers, not the writing agent, test whether prose is clear, and the user reviews all final prose, after its cold read and before it lands: in the design-to-main pipeline the designs, the contracts and the test plans, and outside it the documents that govern the project, but not code changes or traffic between nodes; an obvious-error-fix stays an agent's to make. Sources: S1 to S5.
 
-### 2. Put every finding in one of four categories
+### 2. Put every finding in one of five categories
 
-The statement says "three categories" and lists four; this page uses four, defined in the user's later words (S35). Every finding, from a review, a test or an approval-walk, goes in one:
+The statement says "three categories" and lists four; this page uses those four, defined in the user's later words (S35), and a fifth, Declined. Every finding, from a review, a test or an approval-walk, goes in one:
 
 1. Must fix now: the finding prevents the next step from being completed or validated correctly. Only this category holds the work back.
 2. Fix next: in a follow-up pull request on the finding's topic, opened after the current one merges, with a task holding the finding until that pull request opens, or as the next item in the approval-walk.
 3. Fix during maintenance: a nit, or another maintenance kind of thing.
 4. File an improvement, a feature or a change: as a task if it is short term and of smaller scope, or as a GHI if it is longer term or of larger scope.
+5. Declined: a check shows the finding wrong, or the user has already ruled on the question it raises. A declined finding gets no record of its own: its reason, or the quoted user-ruling, is attached to the finding where it was reported, as a reply to its review comment, on its line in the cold-read-record's triage, or under its item in the walk-minutes.
 
 A finding filed in category 4 stays visible, with the reason for filing it rather than fixing it, a defined follow-up, its prerequisites, and what it unblocks; prerequisites are done first. An improvement or an addition a review finds, rather than a defect, is a finding like any other, and falls in category 4: the user's words in S35 answer the question he asked in S34.
 

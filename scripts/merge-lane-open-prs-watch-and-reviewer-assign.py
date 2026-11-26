@@ -115,10 +115,17 @@ task saying how to repair it, and never becomes a new baseline, which would
 drop the events since the last run; --poll-once-write-baseline makes the first
 state file. Each successful poll also assigns reviews as above; its
 REVIEW-ASSIGNED lines, and a WATCH line saying assignment stopped, go to the
-event file, the WATCH line once per case as the state file records. A failed
+event file, the WATCH line once per case as the state file records. A run whose
+append fails keeps the deal of each pull request whose REVIEW-ASSIGNED line the
+event file holds, or of every one when the file cannot be read back, names those
+pull requests in its failure task, since a failed append may not survive a crash,
+and puts the rest back out of the assignment file, so the next run that can
+append deals them again. A failed
 poll keeps the state, assigns nothing, and only
 WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK failed polls in a row open a task.
-Not detected: an event file emptied and then refilled by later polls to at least
+Not detected: a run killed between writing the assignment file and appending
+its REVIEW-ASSIGNED lines, whose pull requests stay assigned with no line;
+an event file emptied and then refilled by later polls to at least
 as many lines as were delivered, whose lost lines no task names; when
 writing the task fails at that failed poll, the rest of the same outage, which
 opens no task; and a task list directory that does not exist, so that each
@@ -559,11 +566,14 @@ def merge_lane_pull_request_review_assignments_file_text_and_assignments_read(pa
     return text, assignments
 
 
-def merge_lane_pull_request_review_assignments_file_write(path, text):
+def merge_lane_pull_request_review_assignments_file_write(path, text, only_when_absent=False):
     """Write text as the file at path, through a temporary file of its own beside the file a
     symbolic link at path names, so that a write that fails leaves the old file whole and the
     link in place. The new file keeps the old one's mode, or takes the mode a new file gets. The
-    caller holds merge_lane_pull_request_review_assignments_file_lock. Raises OSError.
+    caller holds merge_lane_pull_request_review_assignments_file_lock. Raises OSError, and
+    FileExistsError when only_when_absent is set and a file is at path, which is then left as
+    it is. Returns None, or, when the file was written but its temporary file could not be
+    removed, the sentence that names that temporary file and the error.
     Not handled: a symbolic link at path repointed between the caller's read and this write,
     which sends the text read from the old file to the new one; and a directory with a default
     ACL, whose mode for a new file 0o666 & ~umask overrides."""
@@ -581,9 +591,19 @@ def merge_lane_pull_request_review_assignments_file_write(path, text):
             os.umask(umask)
             mode = 0o666 & ~umask
         os.chmod(partial, mode)
-        os.replace(partial, target)
-    finally:
+        if only_when_absent:
+            os.link(partial, target)
+        else:
+            os.replace(partial, target)
+    except BaseException:
         partial.unlink(missing_ok=True)
+        raise
+    # After os.link the temporary name remains, so a failed removal must not read as a failed write.
+    try:
+        partial.unlink(missing_ok=True)
+    except OSError as error:
+        return f"its temporary file {partial} was left behind, because removing it failed: {error}"
+    return None
 
 
 def pull_request_waits_for_merge_lane_verdict(pull_request):
@@ -693,10 +713,17 @@ def merge_lane_pull_request_review_assignments_file_lock(path):
 
 
 def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, options_in_use=(),
-                                                    report_stop=emit):
+                                                    report_stop=emit, record_assigned_lines=None):
     """Deal the pull requests with no assignment, write them to the assignment file, and return
     a REVIEW-ASSIGNED event line for each one the file holds afterwards. A failure passes a WATCH
-    line to report_stop each time its case differs from the last poll's, as state records."""
+    line to report_stop each time its case differs from the last poll's, as state records.
+    record_assigned_lines, when given, is called with those lines while the lock is held. When it
+    raises OSError, the assignment file keeps the deal of each pull request whose line the error
+    names as in the event file (EventLinesAppendFailed.written_lines), or every deal when the
+    event file could not be read back, and loses the others, so the next poll deals those again;
+    the OSError raised then names the kept pull requests, whose lines a failed append may not keep
+    through a crash. When putting the file back fails too, it names the pull requests the file
+    keeps with no REVIEW-ASSIGNED line recorded."""
 
     def stop(case, message):
         if state.get("stopped") != case:
@@ -745,7 +772,45 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
                  f"poll that can write them to the file prints their REVIEW-ASSIGNED lines.")
             return []
         state["stopped"] = None
-        return [event_line(pull_request, f"REVIEW-ASSIGNED {lane}") for pull_request, lane in dealt]
+        assigned_lines = [event_line(pull_request, f"REVIEW-ASSIGNED {lane}")
+                          for pull_request, lane in dealt]
+        if record_assigned_lines is not None:
+            try:
+                record_assigned_lines(assigned_lines)
+            except OSError as error:
+                written = getattr(error, "written_lines", [])
+                read_back = getattr(error, "read_back", True)
+                # A deal whose line reached, or may have reached, the event file stands: dealing it
+                # again could send the pull request to a second agent-seat.
+                kept = [(deal, line) for deal, line in zip(dealt, assigned_lines)
+                        if line in written or not read_back]
+                put_back = [line for line in assigned_lines if read_back and line not in written]
+                message = str(error)
+                if kept:
+                    message += (
+                        f". The assignment file {path} keeps these pull requests, whose "
+                        f"REVIEW-ASSIGNED lines the event file "
+                        + ("held" if read_back else "may hold")
+                        + " after the failed append: " + "; ".join(line for _, line in kept)
+                        + ". Those lines may not survive a crash, because the append failed. For "
+                        "each one the event file does not hold, forward the line to its merge-lane "
+                        "agent-seat as you forward REVIEW-ASSIGNED lines")
+                if put_back:
+                    try:
+                        merge_lane_pull_request_review_assignments_file_write(
+                            path, text + separator + "".join(
+                                f"{pull_request['number']} {lane}\n" for (pull_request, lane), _ in kept))
+                    except OSError as put_back_error:
+                        raise OSError(
+                            f"{message}; and the assignment file {path} could not be put back "
+                            f"({put_back_error}), so it assigns these pull requests although no "
+                            f"REVIEW-ASSIGNED line for them was recorded: "
+                            + "; ".join(put_back)
+                            + ". Send each to its merge-lane agent-seat yourself") from error
+                if isinstance(error, EventFileCutBackFailed):
+                    raise
+                raise OSError(message) from error
+        return assigned_lines
 
 
 def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token, options_in_use=()):
@@ -761,27 +826,31 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
              f"  Make the directory {path.parent} writable by the user {getpass.getuser()}, then run "
              f"the same command again.")
         return 1
+
+    def existing_file_kept():
+        try:
+            merge_lane_pull_request_review_assignments_file_read(path)
+        except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
+            warn(f"merge-lane-open-prs-watch-and-reviewer-assign: nothing was seeded, because the assignment file "
+                 f"exists: seeding would replace it, giving each reviewed pull request the seed "
+                 f"file does not name the merge-lane agent-seat of "
+                 f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}, in place of the one it was "
+                 f"assigned. The file is damaged: {error}.\n"
+                 + merge_lane_pull_request_review_assignments_file_repair_steps(
+                     path, error.case, options_in_use)
+                 .rstrip("\n"))
+            return 1
+        emit(f"WATCH: nothing was seeded, because the assignment file {path} exists and every "
+             f"line of it reads correctly: seeding would replace it, giving each reviewed pull "
+             f"request the seed file does not name the merge-lane agent-seat of "
+             f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}, in place of the one it was "
+             f"assigned.\n"
+             f"  Do nothing more: the watcher reads the file at each poll.")
+        return 0
+
     with lock:
         if path.exists():
-            try:
-                merge_lane_pull_request_review_assignments_file_read(path)
-            except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
-                warn(f"merge-lane-open-prs-watch-and-reviewer-assign: nothing was seeded, because the assignment file "
-                     f"exists: seeding would replace it, giving each reviewed pull request the seed "
-                     f"file does not name the merge-lane agent-seat of "
-                     f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}, in place of the one it was "
-                     f"assigned. The file is damaged: {error}.\n"
-                     + merge_lane_pull_request_review_assignments_file_repair_steps(
-                         path, error.case, options_in_use)
-                     .rstrip("\n"))
-                return 1
-            emit(f"WATCH: nothing was seeded, because the assignment file {path} exists and every "
-                 f"line of it reads correctly: seeding would replace it, giving each reviewed pull "
-                 f"request the seed file does not name the merge-lane agent-seat of "
-                 f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}, in place of the one it was "
-                 f"assigned.\n"
-                 f"  Do nothing more: the watcher reads the file at each poll.")
-            return 0
+            return existing_file_kept()
         try:
             assignments = merge_lane_pull_request_review_assignments_file_read(seed_path, "seed file")
         except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
@@ -806,18 +875,14 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
             lane = MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER.get(pull_request["number"] % 3)
             if pull_request["number"] not in assignments and pull_request["reviews"] and lane:
                 assignments[pull_request["number"]] = lane
-        # The lock binds only the programs: a file put back by hand while GitHub was read would
-        # be replaced.
-        if path.exists():
-            warn(f"merge-lane-open-prs-watch-and-reviewer-assign: nothing was seeded, because the "
-                 f"assignment file {path} appeared while the open pull requests were read from "
-                 f"GitHub, and seeding would replace it.\n"
-                 f"  Run the same command again: it keeps the file when every line of it reads "
-                 f"correctly, and says how to repair it otherwise.")
-            return 1
+        # The lock binds only the programs, so a file put back by hand while GitHub was read is
+        # found by the write, which never replaces one.
         try:
-            merge_lane_pull_request_review_assignments_file_write(
-                path, "".join(f"{number} {lane}\n" for number, lane in assignments.items()))
+            leftover = merge_lane_pull_request_review_assignments_file_write(
+                path, "".join(f"{number} {lane}\n" for number, lane in assignments.items()),
+                only_when_absent=True)
+        except FileExistsError:
+            return existing_file_kept()
         except OSError as error:
             warn(f"merge-lane-open-prs-watch-and-reviewer-assign: nothing was seeded, because the "
                  f"assignment file {path} could not be written: {error}. No assignment file was made.\n"
@@ -828,6 +893,10 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
              f"and {len(assignments) - from_seed} open pull request(s) with a review by "
              f"the GitHub account {fix_round.MERGE_LANE_2_REVIEWER_LOGIN}, each given the merge-lane agent-seat of "
              f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}")
+        if leftover:
+            warn(f"merge-lane-open-prs-watch-and-reviewer-assign: the assignment file {path} was made, "
+                 f"but {leftover}.\n"
+                 f"  The watcher does not read that file; delete it by hand.")
         return 0
 
 
@@ -835,7 +904,17 @@ def merge_lane_pull_request_review_assignments_list(path, lane, repo, token, opt
     """Print the lane's open pull requests that are not drafts, and whether each waits for its
     verdict. Return the exit status."""
     try:
-        assignments = merge_lane_pull_request_review_assignments_file_read(path)
+        # The lock keeps the read from seeing a deal that a failed append is about to put back.
+        lock = merge_lane_pull_request_review_assignments_file_lock(path)
+    except OSError as error:
+        warn(f"merge-lane-open-prs-watch-and-reviewer-assign: cannot list {lane}'s pull requests, because "
+             f"the lock file beside the assignment file {path} cannot be opened or locked ({error}).\n"
+             f"  Tell merge-lane-2, which runs the watcher, quoting this message.\n"
+             f"  If you are a subagent, report this message to the agent that dispatched you instead of acting on it.")
+        return 1
+    try:
+        with lock:
+            assignments = merge_lane_pull_request_review_assignments_file_read(path)
     except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
         warn(f"merge-lane-open-prs-watch-and-reviewer-assign: cannot list {lane}'s pull requests, because "
              f"{error}. merge-lane-2's open-pull-request watcher meets the same failure, and "
@@ -937,14 +1016,102 @@ def event_file_line_count(path):
         return 0
 
 
+class EventLinesAppendFailed(OSError):
+    """An append to the event file failed after it opened the file. written_lines holds the lines
+    of the append the file holds whole at the append's offset, in order, which may not survive a
+    crash; read_back is False when the file could not be read back, so any line may be there."""
+
+    def __init__(self, message, written_lines, read_back):
+        super().__init__(message)
+        self.written_lines = written_lines
+        self.read_back = read_back
+
+
+class EventFileCutBackFailed(OSError):
+    """The event file ends inside a line, and the bytes after its last newline could not be cut."""
+
+
+def event_file_cut_back_to_last_whole_line(path):
+    """Cut the bytes after the event file's last newline, which an append that stopped inside a
+    line leaves, so that the next line does not glue onto them. Raises EventFileCutBackFailed when
+    they cannot be cut."""
+    try:
+        with path.open("rb") as events:
+            end = events.seek(0, os.SEEK_END)
+            if end == 0:
+                return
+            events.seek(end - 1)
+            if events.read(1) == b"\n":
+                return
+            while end > 0:
+                start = max(0, end - 65536)
+                events.seek(start)
+                chunk = events.read(end - start)
+                newline = chunk.rfind(b"\n")
+                if newline >= 0:
+                    end = start + newline + 1
+                    break
+                end = start
+    except FileNotFoundError:
+        return
+    try:
+        os.truncate(path, end)
+    except OSError as error:
+        raise EventFileCutBackFailed(
+            f"the event file {path} ends inside a line, which a failed append left, and the poll "
+            f"could not cut that line back ({error}), so this poll recorded nothing. Each later "
+            f"poll cuts the line back itself before it records, so polls record again once the "
+            f"cut works. Fix what the error names; do not edit the event file by hand. When a "
+            f"later poll has recorded events, mark this task completed") from error
+
+
 def event_lines_append(path, lines, now):
+    """Append the lines, each after the UTC time. Raises EventLinesAppendFailed when the append
+    fails after the file is opened, and OSError when it cannot be opened or ends inside a line
+    that cannot be cut back."""
     if not lines:
         return
+    # The caller's lock keeps other writers out, so bytes after the last newline are a failed
+    # append's.
+    event_file_cut_back_to_last_whole_line(path)
     stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    with path.open("a", encoding="utf-8", errors="replace") as events:
-        events.write("".join(f"{stamp} {redact_secrets(line)}\n" for line in lines))
-        events.flush()
-        os.fsync(events.fileno())
+    encoded = [f"{stamp} {redact_secrets(line)}\n".encode("utf-8", errors="replace") for line in lines]
+    start = None
+    try:
+        with path.open("ab") as events:
+            start = events.tell()
+            events.write(b"".join(encoded))
+            events.flush()
+            os.fsync(events.fileno())
+    except OSError as error:
+        if start is None:
+            raise
+        held = event_file_count_of_appended_lines_found_whole_from_append_offset(path, start, encoded)
+        if held is None:
+            raise EventLinesAppendFailed(
+                f"{error}; the event file {path} could not be read back, so it may hold any of "
+                f"this append's {len(lines)} lines", [], read_back=False) from error
+        raise EventLinesAppendFailed(
+            f"{error}; the event file {path} holds {held} of this append's {len(lines)} lines",
+            lines[:held], read_back=True) from error
+
+
+def event_file_count_of_appended_lines_found_whole_from_append_offset(path, offset, encoded_lines):
+    """Return how many of the encoded lines the file holds whole, in order, from the offset, or
+    None when it cannot be read."""
+    try:
+        with path.open("rb") as events:
+            events.seek(offset)
+            found = events.read(sum(len(line) for line in encoded_lines))
+    except OSError:
+        return None
+    held = 0
+    for line in encoded_lines:
+        if not found.startswith(line):
+            break
+        found = found[len(line):]
+        held += 1
+    return held
 
 
 def open_task_with_subject_exists(task_list_directory, subject):
@@ -1020,9 +1187,11 @@ def poll_once_write_baseline(arguments, token, state_path, events_path):
     emit(f"WATCH: wrote the baseline of {len(pull_requests)} open pull request(s) to {state_path}.\n"
          f"  The baseline raises no event, so list the open pull requests by hand once: a pull "
          f"request that opened, got a new head or was marked ready since the last good run, or "
-         f"while another watcher held its events, is reported by no one.\n"
-         f"  The baseline also counts every line of {events_path} as delivered: read any line no "
-         f"events task named before this baseline.")
+         f"while a watcher started without --poll-once held its events, is reported by no "
+         f"one.\n"
+         f"  The baseline also counts every line of {events_path} as delivered: read any line "
+         f"that no task on {arguments.task_list_directory}, the task list --poll-once opens "
+         f"tasks on, named before this baseline.")
     return 0
 
 
@@ -1061,30 +1230,42 @@ def poll_once(arguments, assignments_file, options_in_use):
             lines = needs_a_look_events(arguments.needs_a_look_directory, state["notices"],
                                         state_survives_restarts=True)
             pull_requests, reason = fetch_open_pull_requests(arguments.repo, token)
+            now = time.time()
             if reason is None:
                 state["failed_polls"] = 0
                 lines += events_for_poll(state["pull_requests"], pull_requests)
                 if assignments_file is not None:
+
+                    def record_with_this_polls_events(assigned_lines):
+                        event_lines_append(events_path, lines + assigned_lines, now)
+                        lines.clear()
+
                     # Cron's output goes to a log nobody reads, so a stop goes to the event file.
-                    lines += merge_lane_pull_request_review_assignment_lines(
+                    merge_lane_pull_request_review_assignment_lines(
                         assignments_file, pull_requests, state.setdefault("review_assignment", {}),
-                        options_in_use, report_stop=lines.append)
+                        options_in_use, report_stop=lines.append,
+                        record_assigned_lines=record_with_this_polls_events)
                 state["pull_requests"] = {
                     number: {"head_sha": seen["head_sha"], "is_draft": seen["is_draft"]}
                     for number, seen in pull_requests_by_number(pull_requests).items()}
             else:
                 state["failed_polls"] += 1
-            now = time.time()
             # The event is on disk before the state forgets it, so a crash repeats an event at worst.
             event_lines_append(events_path, lines, now)
             poll_state_write(state_path, state)
             events_task_opened_when_due(state, state_path, events_path, task_list_directory, now)
         except PollStateUnusable as error:
             return failure_reported(task_list_directory, "its state cannot be used", str(error))
+        except EventFileCutBackFailed as error:
+            # Its own subject, so an open append-failure task does not swallow it.
+            return failure_reported(task_list_directory, "its polls record nothing until the event "
+                                    "file's last line is cut back", str(error))
         except OSError as error:
             return failure_reported(task_list_directory, "it could not record or deliver events",
-                                    f"{error}. Undelivered events stay in {events_path} for the "
-                                    f"next run once this is repaired.")
+                                    f"{error}. The state file still holds the last run that "
+                                    f"recorded its events, so the first run after this is repaired "
+                                    f"finds this run's events again; lines already in "
+                                    f"{events_path} reach a later events task.")
         if reason is None:
             return 0
         snippet = one_line_snippet(reason, FAILURE_REASON_SNIPPET_CHARS)
@@ -1145,7 +1326,7 @@ def parse_arguments(argv):
     parser.add_argument("--poll-once-directory", type=Path,
                         help="directory of --poll-once's state, event file and lock "
                              f"(default: {OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY} with the default --repo; "
-                             "another --repo must name its own)")
+                             "with another --repo, give this option too)")
     parser.add_argument("--task-list-directory", type=Path,
                         default=Path.home() / ".claude" / "tasks" / "nedsnodes-merge-lane-2-tasks",
                         help="the task list --poll-once opens tasks on (default: %(default)s)")
@@ -1205,8 +1386,9 @@ def main(argv=None):
         if arguments.poll_once_directory is None:
             if not repo_is_default:
                 warn(f"merge-lane-open-prs-watch-and-reviewer-assign: --repo {arguments.repo} is not "
-                     f"the default repository, whose state the default --poll-once-directory "
-                     f"holds, so name a directory for {arguments.repo} with --poll-once-directory.")
+                     f"the default repository {DEFAULT_REPO}, and the default --poll-once-directory "
+                     f"holds only {DEFAULT_REPO}'s state, so give --poll-once-directory a directory "
+                     f"for {arguments.repo}'s state; the run makes it if it is missing.")
                 return 2
             arguments.poll_once_directory = OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY
         return poll_once(arguments, assignments_file, options_in_use)

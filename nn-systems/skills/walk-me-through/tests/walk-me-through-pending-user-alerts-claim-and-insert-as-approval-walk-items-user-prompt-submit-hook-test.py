@@ -91,7 +91,10 @@ class Case:
         die by a signal, which a real run cannot be made to; every other subprocess.run, such as git's, runs."""
         payload = {"hook_event_name": "UserPromptSubmit", "prompt": prompt, "cwd": str(self.checkout),
                    "session_id": SESSION_ID, "transcript_path": str(self.transcript)}
-        run_hook_as_platform = ("import runpy, subprocess, sys; sys.platform = sys.argv[1]; "
+        # sysconfig names its data module after sys.platform when first read, which Python 3.14 on the Mac does
+        # after the fake is set, so it is read first, under the real platform.
+        run_hook_as_platform = ("import runpy, subprocess, sys, sysconfig; sysconfig.get_config_vars(); "
+                                "sys.platform = sys.argv[1]; "
                                 + ("subprocess.run = (lambda real: lambda *a, **k: "
                                    f"({insert_run}) if 'user-alert-insert' in str(a[0]) else real(*a, **k))"
                                    "(subprocess.run); " if insert_run else "")
@@ -260,6 +263,15 @@ def run_not_typed_cases(root):
     case.turn_record("peer", "please restart merge-lane-2")
     case.run("please restart merge-lane-2")
     check("a prompt the transcript records as another agent-seat's message claims nothing, whatever its text",
+          case.names("pending") == ["alert-a"], repr(case.names("claimed")))
+
+    case = Case(root, "handoff-first-prompt")
+    case.alert("alert-a")
+    first_prompt = ("Read /home/nedlern/.claude/handoffs/ned-box-helper-dialog-0058.md — the dialog from the session "
+                    "you are continuing, written at 2026-11-25T20:32:08Z.")
+    case.turn_record("human", first_prompt)
+    case.run(first_prompt)
+    check("the handoff-supervisor's first prompt, which the transcript records as human, claims nothing",
           case.names("pending") == ["alert-a"], repr(case.names("claimed")))
 
     case = Case(root, "stale-human-record")

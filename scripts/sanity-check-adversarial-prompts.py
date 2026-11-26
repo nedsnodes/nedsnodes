@@ -142,8 +142,8 @@ Running a sanity-check, and reading its output:
   prints the `record:` line and the record's path.
 - An agent that saves no report is launched once more by the runner, with the
   same prompt, in the same copy, unless the cause is one only the user can
-  clear or the launch timed out. The cause classes: `logged-out`,
-  `agent-binary-missing`, `account-limit` and `model-limit`, which only the
+  clear or the launch timed out. The cause classes: `logged-out` and
+  `agent-binary-missing`, which only the
   user can clear and which are never relaunched; `timeout`, the launch cut off
   after an hour, never relaunched, because the same launch would cost the same
   hour; `exit-<code>`, any other failed launch, whose detail is the last line
@@ -360,16 +360,14 @@ def _cold_read_cell_program(file_name: str):
 
 
 # What each agent-binary prints when a launch fails for a reason it can name
-# (logged out, a usage limit), per agent-binary: a function from the model to the
-# texts, which common.classify_failed_attempt matches against the start of
+# (logged out), per agent-binary: the texts that
+# common.classify_failed_attempt matches against the start of
 # each line the agent-binary wrote. Each text was captured from a real run and
 # is kept, with its source, beside the cold-read cell that met it; taken from
 # there, not copied, so a text added for one instrument is recognised by both.
-RECOGNISED_FAILURE_TEXTS_FOR_MODEL = {
-    "claude": _cold_read_cell_program(
-        "cold-read-claude-cell.py").recognised_failure_texts_for_model,
-    "codex": _cold_read_cell_program(
-        "cold-read-codex-cell.py").recognised_failure_texts_for_model,
+RECOGNISED_FAILURE_TEXTS = {
+    "claude": _cold_read_cell_program("cold-read-claude-cell.py").RECOGNISED_FAILURE_TEXTS,
+    "codex": _cold_read_cell_program("cold-read-codex-cell.py").RECOGNISED_FAILURE_TEXTS,
 }
 
 # The signals that end a run early and that this runner answers by stopping
@@ -651,7 +649,6 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # The run was stopped: the chain does not go on to a model whose
             # review nobody is left to save.
             break
-        recognised_texts = RECOGNISED_FAILURE_TEXTS_FOR_MODEL["claude"](model)
         # dontAsk: a tool call --allowedTools does not allow is refused, with no one to ask.
         command = [
             *command_line_prefix.claude_code_headless_run_command_line_prefix_build("dontAsk"),
@@ -713,7 +710,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             print_warning_with_its_next_step(f"{model} failed (exit {completed.returncode})", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
-                exit_code=completed.returncode, recognised_texts=recognised_texts)
+                exit_code=completed.returncode, recognised_texts=RECOGNISED_FAILURE_TEXTS["claude"])
             continue
         if not completed.stdout.strip():
             # Exiting 0 with nothing to show is the ending that looks most like
@@ -723,7 +720,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             print_warning_with_its_next_step(f"{model} exited 0 but produced no review", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr=completed.stderr or "", exit_code=0,
-                recognised_texts=recognised_texts)
+                recognised_texts=RECOGNISED_FAILURE_TEXTS["claude"])
             continue
         return 0, completed.stdout, model, "+".join(failed_attempts), None
     return 1, "", "", "+".join(failed_attempts), last_cause
@@ -854,7 +851,7 @@ def run_codex(prompt: str, checkout: pathlib.Path = None) -> tuple:
             cause = common.classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
                 exit_code=completed.returncode,
-                recognised_texts=RECOGNISED_FAILURE_TEXTS_FOR_MODEL["codex"](CODEX_MODEL))
+                recognised_texts=RECOGNISED_FAILURE_TEXTS["codex"])
             return completed.returncode, "", CODEX_MODEL, "", cause
         return (0, last_message_path.read_text(encoding="utf-8", errors="replace"),
                 CODEX_MODEL, "", None)

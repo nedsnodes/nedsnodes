@@ -32,7 +32,7 @@ This page tells an agent-seat how to run Codex and Gemini, and what to expect fr
 2. Pass the repository with `--add-dir <repo>`, or nothing from the repository loads, `AGENTS.md` included.
 3. Without `--dangerously-skip-permissions`, a headless run still reads files in its working directory, and runs the commands an allow-rule under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` permits: under the rule `command(agy)` it ran `agy --version` and `agy --help`. It was denied every other file read, in the home and in `/etc` included, and every other command it tried; a denied run ends with "no output produced — a tool required the X permission that headless mode cannot prompt for" (agy 1.4.12 on ned-box, 2026-10-31). The launcher passes the flag so that agy can write its report, and that flag is why the launcher runs agy inside the operating system's sandbox.
 4. Gemini sometimes writes the whole review as its answer instead of into the report file. The launcher then takes the answer as the report when it is at least 120 words; a shorter answer with no report file counts as a failed run.
-5. `--print-timeout` defaults to `0s`, no limit; the launcher sets `30m`, so a run that hangs is stopped.
+5. `--print-timeout` defaults to `0s`, no limit; the launcher sets `15m` for the cold-read-fast-read and `40m` for the cold-read-grid's Gemini cell, so a run that hangs is stopped.
 
 **Its own documentation.** On ned-box, agy's customization guide is `~/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md`, with the rule-loading details in `~/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/rules.md`. Read it before asking agy about itself: asked about itself, agy may spend its whole run on experiments and time out.
 
