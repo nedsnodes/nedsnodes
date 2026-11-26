@@ -1100,6 +1100,27 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and seeded.read_text(encoding="utf-8") == "4028 lane-one\n", errors)
         seeded.unlink()
 
+        real_link, real_replace = watcher_module.os.link, watcher_module.os.replace
+
+        def putting_the_file_back_first(real):
+            def make_the_name(source, destination):
+                if str(source).endswith(".partial") and not seeded.exists():
+                    seeded.write_text("4028 merge-lane-3\n", encoding="utf-8")
+                return real(source, destination)
+            return make_the_name
+
+        watcher_module.os.link = putting_the_file_back_first(real_link)
+        watcher_module.os.replace = putting_the_file_back_first(real_replace)
+        try:
+            exit_code, lines, errors = seed_with([open_at_seed])
+        finally:
+            watcher_module.os.link, watcher_module.os.replace = real_link, real_replace
+        check("a seed run whose assignment file is put back after every check for it, just "
+              "before the new file takes its name, keeps the put-back file and exits 0",
+              exit_code == 0 and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n"
+              and not list(scratch.glob("seeded.txt.*.partial")), f"{lines} {errors}")
+        seeded.unlink()
+
         real_unlink = watcher_module.Path.unlink
 
         def unlink_failing_for_the_temporary_file(self, *args, **kwargs):
@@ -1901,7 +1922,7 @@ class PollOnceMachine:
     def time(self):
         return self.now
 
-    def run(self, flag="--poll-once", assignment_options=None):
+    def run(self, flag="--poll-once", assignment_options=None, stdout=None):
         saved = (watcher_module.time, watcher_module.fetch_open_pull_requests,
                  list(watcher_module.SECRETS_TO_REDACT))
         watcher_module.time = self
@@ -1909,7 +1930,8 @@ class PollOnceMachine:
             (None, self.poll) if isinstance(self.poll, str) else (self.poll, None))
         errors, output = io.StringIO(), io.StringIO()
         try:
-            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            with (contextlib.redirect_stdout(output if stdout is None else stdout),
+                  contextlib.redirect_stderr(errors)):
                 code = watcher_module.main([
                     flag, "--token-file", str(self.token_file),
                     "--poll-once-directory", str(self.directory),
@@ -1989,6 +2011,35 @@ def run_poll_once_cases(scratch_root, token_file):
           "step, not a traceback",
           code == 1 and "wrong type" in machine.errors and "Traceback" not in machine.errors,
           f"{code} {machine.errors}")
+
+    machine = machine_for("state-put-back-while-github-is-read")
+
+    class StatePutBackWhileGitHubIsRead(list):
+        def __iter__(self):
+            machine.state_path.write_text("put back by hand", encoding="utf-8")
+            return super().__iter__()
+
+    machine.poll = StatePutBackWhileGitHubIsRead([poll_once_pull_request(1)])
+    code = machine.run("--poll-once-write-baseline")
+    check("--poll-once-write-baseline whose state file is put back while GitHub is read exits 1, "
+          "keeps that file and says so",
+          code == 1 and machine.state_path.read_text(encoding="utf-8") == "put back by hand"
+          and "appeared while GitHub was read" in machine.errors
+          and not list(machine.directory.glob("*.partial")), f"{code} {machine.errors}")
+
+    machine = machine_for("ascii-only-output")
+    machine.tasks = machine.tasks.with_name("tasks-\u00e9")
+    machine.tasks.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    ascii_bytes = io.BytesIO()
+    ascii_output = io.TextIOWrapper(ascii_bytes, encoding="ascii")
+    code = machine.run("--poll-once-write-baseline", stdout=ascii_output)
+    ascii_output.flush()
+    check("--poll-once-write-baseline whose output cannot encode the task list path exits 0 and "
+          "prints its instructions with the character replaced, not a traceback",
+          code == 0 and machine.state_path.exists() and "Traceback" not in machine.errors
+          and b"list the open pull requests by hand once" in ascii_bytes.getvalue()
+          and b"tasks-?" in ascii_bytes.getvalue(), f"{code} {machine.errors}")
 
     machine = machine_for("quiet")
     machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2, draft=True)]
