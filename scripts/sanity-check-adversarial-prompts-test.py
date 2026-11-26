@@ -164,6 +164,17 @@ def load_runner():
     return module
 
 
+def ends_with_shipped_record_line_and_its_citation(out):
+    """A run whose record arrived ends with its `record: shipped:` line, then
+    the citation line of that same record."""
+    lines = out.splitlines()
+    if len(lines) < 2 or not lines[-2].startswith("record: shipped: "):
+        return False
+    name = lines[-2][len("record: shipped: "):].split(" ", 1)[0]
+    return lines[-1] == ("sanity-check-record: "
+                         + str(scratch_store_sanity_check_records() / name))
+
+
 def scratch_store_sanity_check_records():
     """Where the runner last loaded ships its records."""
     return pathlib.Path(os.environ[RECORD_SHIP_DESTINATION_VARIABLE]).parent / "sanity-check-records"
@@ -1401,6 +1412,25 @@ def main():
           said)
     check("and says the record is kept, not deleted",
           "not deleted" in said and "Delete the record directory" not in said, said)
+    check("and ends with the record's citation line for the pull request description",
+          said.splitlines()[-1] == runner_ship.record_citation_line(record_dir)
+          and said.splitlines()[-1].startswith("sanity-check-record: ")
+          and said.splitlines()[-1].endswith("/sanity-check-records/2026-09-17-design"),
+          said.splitlines()[-1:])
+    for refused_or_failed in ("REFUSED: 2026-09-17-design — already in the store",
+                              "FAILED: the shipper could not be run (boom); the record stays on disk."):
+        not_shipped = io.StringIO()
+        with contextlib.redirect_stdout(not_shipped):
+            runner_ship.print_run_completion(record_dir, ship=lambda directory: refused_or_failed)
+        check(f"a record the shipper answers {refused_or_failed.split(':')[0]} gets no citation line",
+              "sanity-check-record: " not in not_shipped.getvalue(), not_shipped.getvalue())
+    no_report = io.StringIO()
+    with contextlib.redirect_stdout(no_report):
+        runner_ship.print_completion_of_run_that_saved_no_report(
+            record_dir, ship=lambda directory: "shipped: fine")
+    check("a run that saved no report also ends with its record's citation line",
+          no_report.getvalue().splitlines()[-1] == runner_ship.record_citation_line(record_dir),
+          no_report.getvalue().splitlines()[-1:])
     run_source = inspect.getsource(getattr(runner_ship, "run_cells_in_review_copy", runner_ship.main))
     check("main ends a run that saved reports through that block",
           "print_run_completion(out_dir)" in run_source,
@@ -2772,8 +2802,7 @@ sys.exit(module.main())
                                / record.name / "sanity-check-run.log") if record else None
                 check(f"and the record of the run {signal_name} stopped is shipped, "
                       f"its log whole",
-                      out.splitlines()[-1:] != []
-                      and out.splitlines()[-1].startswith("record: shipped: ")
+                      ends_with_shipped_record_line_and_its_citation(out)
                       and shipped_log is not None and shipped_log.is_file()
                       and shipped_log.read_text(encoding="utf-8") == log_text
                       and "record: " not in log_text,
@@ -2823,8 +2852,7 @@ sys.exit(module.main())
                   started and process.returncode == -signal.SIGTERM
                   and "Traceback" not in err
                   and "STOPPED: SIGTERM ended this run" in out
-                  and out.splitlines()[-1:] != []
-                  and out.splitlines()[-1].startswith("record: shipped: ")
+                  and ends_with_shipped_record_line_and_its_citation(out)
                   and left_in_copies_root(base) == [],
                   f"started {started}, exit {process.returncode}, "
                   f"copies root {left_in_copies_root(base)}, stdout {out!r}, stderr {err!r}")
@@ -2859,8 +2887,7 @@ sys.exit(module.main())
                   process.returncode == -signal.SIGTERM
                   and "Traceback" not in err
                   and "STOPPED: SIGTERM ended this run" in out
-                  and out.splitlines()[-1:] != []
-                  and out.splitlines()[-1].startswith("record: shipped: ")
+                  and ends_with_shipped_record_line_and_its_citation(out)
                   and left_in_copies_root(base) == [],
                   f"exit {process.returncode}, copies root {left_in_copies_root(base)}, "
                   f"stdout {out!r}, stderr {err!r}")
