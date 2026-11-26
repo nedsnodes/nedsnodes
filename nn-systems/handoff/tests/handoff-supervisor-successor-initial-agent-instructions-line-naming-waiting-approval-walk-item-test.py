@@ -55,10 +55,11 @@ def walk_in(root, minutes, document=WALK_DOCUMENT, name=WALK):
 def approved_line(walk, count_and_point, link, count):
     """The line the user approved for a waiting item with a page link, filled in."""
     return (f"Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
-            f"{link}. Before your first message, open that page with the Artifact tool. If it is gone, publish "
-            f"the item again from docs/walk/{walk}.md and append the line \"#item_page item {count} <new link>\" "
-            f"to docs/walk/{walk}-minutes.md. Show the item in full, and end your first message with its closing "
-            f"line, holding the link that opens.")
+            f"{link}. Before your first message, check, with the Artifact tool's read action, that the link "
+            f"still works. If the read fails, publish the item again from docs/walk/{walk}.md and append the line "
+            f"\"#item_page item {count} <new link>\" to docs/walk/{walk}-minutes.md. Show the item in full, and "
+            f"end your first message with the item's closing line, holding the link that works: this one, or "
+            f"the new link when you published again.")
 
 
 def without_link_line(walk, count_and_point, count):
@@ -270,6 +271,69 @@ def run_walk_minutes_cases(workspace):
           and "could not read the item's text" in one_missing[0] and "`Item 2`" in one_missing[0],
           repr(one_missing))
 
+    root = workspace / "several-items-no-total-later-named-one-without-heading"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
+                     "## Item 3 of 3: Last\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        no_total = lines_for(root)
+    check("several waiting items, no total, a later-named one with no heading: the `#item_page` line still has `of M`",
+          len(no_total) == 1 and no_total[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "`Item 2`" in no_total[0], repr(no_total))
+
+    root = workspace / "several-items-no-total-first-named-one-without-heading"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 2 of 3: Named second\n\nRecommendation: two.\n\n"
+                     "## Item 3 of 3: Last\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        first_missing = lines_for(root)
+    check("several waiting items, no total, the first-named one with no heading: the `#item_page` line still has `of M`",
+          len(first_missing) == 1 and first_missing[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "`Item 1`" in first_missing[0], repr(first_missing))
+
+    root = workspace / "several-items-no-total-first-named-one-repeated"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
+                     "## Item 1 of 2: Named first again\n\nRecommendation: one again.\n\n"
+                     "## Item 2 of 3: Named second\n\nRecommendation: two.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        first_repeated = lines_for(root)
+    check("several waiting items, no total, the first-named one's heading repeated, one giving the counted M: "
+          "the `#item_page` line still has `of M`, and the counted M does not settle the repeated heading",
+          len(first_repeated) == 1 and first_repeated[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "more than one heading for `Item 1`" in first_repeated[0], repr(first_repeated))
+
+    root = workspace / "several-items-first-repeated-later-missing"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
+                     "## Item 1 of 4: Named first again\n\nRecommendation: one again.\n\n"
+                     "## Item 3 of 3: Last\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        both_problems = lines_for(root)
+    check("several waiting items, the first-named one's heading repeated and a later one's missing: one error names both",
+          len(both_problems) == 1 and "no heading `Item 2`" in both_problems[0]
+          and "more than one heading for `Item 1`" in both_problems[0], repr(both_problems))
+
+    root = workspace / "no-total-no-item-heading"
+    walk_in(root, "#next_to_present item 1\n", document="# Fixture\n\nNo item headings here.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        no_headings = lines_for(root)
+    check("no total and no item heading: the `#item_page` line has no `of 0`, and the error says why",
+          len(no_headings) == 1 and no_headings[0].startswith(without_link_line(WALK, "1", "1"))
+          and "of 0" not in no_headings[0] and "no heading with a running count" in no_headings[0],
+          repr(no_headings))
+
+    root = workspace / "no-total-hook-fails-to-load"
+    walk_in(root, "#next_to_present item 1\n",
+            document="# Fixture\n\n## Item 1 of 2: First\n\nRecommendation: one.\n\n"
+                     "## Item 2 of 2: Second\n\nRecommendation: two.\n")
+    with fixture.supervisor_names_replaced(WALK_SHORT_ANSWER_HOOK_PATH=root / "no-such-hook.py"), \
+            contextlib.redirect_stdout(io.StringIO()):
+        hook_unloadable = lines_for(root)
+    check("no total and a short-answer hook that fails to load: the `#item_page` line still has `of M`, then the error",
+          len(hook_unloadable) == 1 and hook_unloadable[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "could not read the item's text" in hook_unloadable[0], repr(hook_unloadable))
+
     root = workspace / "open-and-paused"
     paused = walk_in(root, "#next_to_present item 1 of 3\n#approval_walk_paused away\n", name="fixture-paused-walk")
     walk_in(root, OPEN_MINUTES)
@@ -346,6 +410,15 @@ def run_walk_minutes_cases(workspace):
           len(failed) == 1 and walk_finder.newest_item_page_link_per_item_from_walk_minutes(
               OPEN_MINUTES + failed[0] + "\n", parser).get("2") == walk_finder.ITEM_PAGE_PUBLISH_FAILED,
           repr(failed))
+
+    no_total = without_link_line(WALK, "1", "1")
+    no_total_filled = [quoted_item_page_lines(no_total)[0].replace("<new link>", "https://claude.ai/artifact/Republished"),
+                       quoted_item_page_lines(no_total)[1].replace("<what the Artifact tool said>", "it timed out")]
+    check("with no total known, each `#item_page` line the no-link line asks for, filled in, is read by the walk finder",
+          [walk_finder.newest_item_page_link_per_item_from_walk_minutes("#next_to_present item 1\n" + line + "\n",
+                                                                        parser).get("1") for line in no_total_filled]
+          == ["https://claude.ai/artifact/Republished", walk_finder.ITEM_PAGE_PUBLISH_FAILED],
+          repr(no_total_filled))
 
     root = workspace / "walk-finder-missing"
     walk_in(root, OPEN_MINUTES)
