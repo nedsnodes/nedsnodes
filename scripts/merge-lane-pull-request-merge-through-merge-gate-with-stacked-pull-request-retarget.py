@@ -317,14 +317,14 @@ def review_tools_worktree_moved_to_main_refusal_message(worktree):
     def could_not_read(what, failed):
         return (f"could not read {what} in {worktree}: {git_error(failed)}\n"
                 f"Tell the user this message as printed, from its STOP line, which quotes git's "
-                f"error, through this line.")
+                f"error, to the end of this message.")
 
     fetch = git("fetch", "--quiet", "origin")
     if fetch.returncode != 0:
         return (f"could not fetch origin in {worktree}, so whether its merge-gate.sh is "
                 f"main's cannot be told: {git_error(fetch)}\n"
                 f"Run this again once; if it fails the same way, tell the user this message as "
-                f"printed, from its STOP line, which quotes git's error, through this line.")
+                f"printed, from its STOP line, which quotes git's error, to the end of this message.")
     head = git("rev-parse", "HEAD")
     main = git("rev-parse", "origin/main")
     if head.returncode != 0 or main.returncode != 0:
@@ -389,8 +389,8 @@ def review_tools_worktree_moved_to_main_refusal_message(worktree):
                     f"them. Once they are gone, run this program again. {subagent}")
         return (f"{could_not_check_out}: {git_error(checkout)}\n"
                 f"Run this program again once; if it fails the same way, tell the user this "
-                f"message as printed, from its STOP line, which quotes git's error, through "
-                f"this line.")
+                f"message as printed, from its STOP line, which quotes git's error, to the "
+                f"end of this message.")
     print(f"checked out origin/main in {worktree}, which was at {head[:8]}", flush=True)
     return None
 
@@ -414,7 +414,7 @@ def stacked_pull_requests_retarget(pull_request, environment):
         print(f"STOP: not merged: could not read pull request {pull_request}'s branch, so the "
               f"pull requests based on it could not be found: {gh_error(view)}\n"
               f"Run this again once; if it fails the same way, tell the user this message as "
-              f"printed, from its STOP line, which quotes gh's error, through this line.")
+              f"printed, from its STOP line, which quotes gh's error, to the end of this message.")
         return EXIT_COULD_NOT_RUN, None
     branches = json.loads(view.stdout)
     branch, base = branches["headRefName"], branches["baseRefName"]
@@ -426,7 +426,7 @@ def stacked_pull_requests_retarget(pull_request, environment):
         print(f"STOP: not merged: could not list the open pull requests, so those based on "
               f"{branch} could not be found: {gh_error(listing)}\n"
               f"Run this again once; if it fails the same way, tell the user this message as "
-              f"printed, from its STOP line, which quotes gh's error, through this line.")
+              f"printed, from its STOP line, which quotes gh's error, to the end of this message.")
         return EXIT_COULD_NOT_RUN, branch
     stacked = sorted(entry["number"] for entry in json.loads(listing.stdout)
                      if entry["baseRefName"] == branch)
@@ -465,7 +465,7 @@ def merged_branch_deleted(branch, environment):
               f"be read: {gh_error(read)}\n"
               f"If it is still there, delete it: {by_hand}\n"
               f"If that fails, tell the user this message as printed, from its STOP line, which "
-              f"quotes gh's error, through this line, and the error the deletion command printed.")
+              f"quotes gh's error, to the end of this message, and the error the deletion command printed.")
         return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
     deletion = run(["gh", "api", f"repos/{REPOSITORY}/git/refs/heads/{branch}",
                     "-X", "DELETE"], environment)
@@ -484,13 +484,13 @@ def merged_branch_deleted(branch, environment):
                   f"The read's error: {gh_error(reread)}\n"
                   f"If it is still there, delete it: {by_hand}\n"
                   f"If that fails, tell the user this message as printed, from its STOP line "
-                  f"through this line, and the error the deletion command printed.")
+                  f"to the end of this message, and the error the deletion command printed.")
             return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
         print(f"STOP: merged, but the branch {branch} is still on GitHub and could not be "
               f"deleted: {gh_error(deletion)}\n"
               f"Delete it: {by_hand}\n"
               f"If that fails, tell the user this message as printed, from its STOP line, which "
-              f"quotes gh's error, through this line, and the error the deletion command printed.")
+              f"quotes gh's error, to the end of this message, and the error the deletion command printed.")
         return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
     print(f"deleted the branch {branch}, which the merge command left on GitHub")
     return EXIT_MERGED
@@ -514,7 +514,7 @@ def review_worktrees_remove(arguments):
                   f"If git names a cause you can fix, fix it and remove the worktree: "
                   f"git -C {checkout} worktree remove --force {worktree}\n"
                   f"Otherwise, tell the user this message as printed, from its STOP line, which "
-                  f"quotes git's error, through this line.")
+                  f"quotes git's error, to the end of this message.")
             exit_code = EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
             continue
         print(f"removed the review worktree {worktree}")
@@ -567,7 +567,7 @@ def recordings_matching_the_merge_commit_adopted(worktree, source, which_source,
               f"exits 3, and the next merge adopts its own recordings.\n"
               f"If the error names a cause you can fix, fix it; nothing needs to be run again. "
               f"Otherwise, tell the user this message as printed, from its STOP line, which "
-              f"quotes the error, through this line.")
+              f"quotes the error, to the end of this message.")
         return False
     print(f"adopted {len(adopted)} recordings into {into} from {source}, {which_source}; a "
           f"recording is adopted only when its run passed and it matches the merge commit")
@@ -704,7 +704,7 @@ def test_skipped(test, verdict):
 
 TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE = (
     "Tell the pull request's author, and the user, this message as printed, from its "
-    "STOP line through this line, with the FAIL and NOT RUN suite lines printed above "
+    "STOP line to the end of this message, with the FAIL and NOT RUN suite lines printed above "
     "it, if any.")
 
 
@@ -951,14 +951,26 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                 tasks_named)
         except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
             # The first save cleared each closed task's id, so no later merge sees one to reopen.
-            names = "; ".join(f"{test_named(suite, test)} (task #{task_id} on {seat}'s task list)"
-                              for (suite, test), (seat, task_id) in sorted(task_of_test.items()))
+            opened = "; ".join(
+                f"{test_named(suite, test)} (task #{task_id} on {seat}'s task list)"
+                for (suite, test), (seat, task_id) in sorted(task_of_test.items())
+                if closed_task_of_test.get((suite, test)) != (seat, task_id))
+            closed = "; ".join(
+                f"{test_named(suite, test)} (closed task #{task_id} on {seat}'s task list)"
+                for (suite, test), (seat, task_id) in sorted(task_of_test.items())
+                if closed_task_of_test.get((suite, test)) == (seat, task_id))
+            lost = ((f"The record names none of the repair tasks this run opened, and each "
+                     f"stays open on its task list: {opened}.\n" if opened else "")
+                    + (f"The record no longer names the closed repair task of {closed}; the "
+                       f"STOP below says no new one could be opened.\n" if closed else ""))
             print(f"STOP: merged, but the second save of the failed suites record failed: "
-                  f"{error}\n"
-                  f"So the record does not name the repair tasks just opened, and merge-gate.sh "
-                  f"shows those tests with no repair task. The record now holds no repair task for these tests, and no later merge "
-                  f"opens one for them, because a merge opens a repair task only for a test new "
-                  f"to the record or one whose recorded task is closed: {names}.\n{tell_the_user}")
+                  f"{error}\n{lost}"
+                  f"Another merge's test run may have changed these tests' entries since this "
+                  f"run's first save, so this run cannot say what the record now holds for them. "
+                  f"Where an entry is as this run left it, merge-gate.sh shows the test with no "
+                  f"repair task, and no later merge opens one for it, because a merge opens a "
+                  f"repair task only for a test new to the record or one whose recorded task is "
+                  f"closed.\n{tell_the_user}")
             kept["complete"] = False
             # The writer runs change() before it writes, so these name what was never saved.
             changed_since_first_save.clear()
@@ -972,15 +984,17 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
             print(f"Another merge's test run {how.format(named)} after this run saved the "
                   f"record, so the record does not tie {named} to repair task "
                   f"#{task_id} on {seat}'s task list. Task #{task_id} stays open, because the "
-                  f"record ties it to other tests.")
+                  f"record ties it to other tests. Nothing needs doing.")
             continue
         print(f"STOP: merged, but another merge's test run {how.format(named)} after this run "
               f"saved the record. So repair task #{task_id} on {seat}'s task list, "
               f"which this run opened for {named}, is tied to no test on the record and is not "
               f"needed.\n"
-              f"Complete task #{task_id} on {seat}'s task list, with a note that another merge's "
-              f"test run {how.format(named)}. If you are a subagent, tell the agent that "
-              f"dispatched you instead.")
+              f"Ask {seat}, with SendMessage, to complete task #{task_id} on its task list with "
+              f"TaskUpdate, setting its status to completed, with a note that another merge's "
+              f"test run {how.format(named)}; merges go on meanwhile, and you need not wait for "
+              f"its answer. If you are a subagent, tell the agent that dispatched you this "
+              f"message instead.")
         kept["complete"] = False
     for seat, task_id, (task_list, error) in writer_failed_after_writing:
         on_record = ("The failed suites record names it."
@@ -992,7 +1006,7 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
               f"{on_record}\n"
               f"If the error names a cause you can fix, such as a full disk, fix it; the task "
               f"writer need not be run again. Otherwise tell the user this message as printed, "
-              f"from its STOP line through this line. If you are a subagent, tell the agent that "
+              f"from its STOP line to the end of this message. If you are a subagent, tell the agent that "
               f"dispatched you instead.")
         kept["complete"] = False
     for name, error in sorted(undecided.items()):
@@ -1296,7 +1310,7 @@ def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(m
               f"that cause only: do not write {path} by hand, and nothing needs to be run again, "
               f"because the next merge whose test run leaves no test failing writes it. "
               f"Otherwise, tell the user this message as printed, from its STOP line, which "
-              f"quotes the error, through this line.")
+              f"quotes the error, to the end of this message.")
         return False
     print(f"recorded the merge commit {merge_commit[:12]} in {path}, so the next after-merge test run selects the "
           f"suites whose recorded inputs changed since it")
@@ -1372,7 +1386,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
     next_steps = (f"If git names a cause you can fix, fix it; then, in a detached worktree at "
                   f"{merge_commit}, run: {by_hand}\n"
                   f"Otherwise, tell the user this message as printed, from its STOP line, which "
-                  f"quotes git's error, through this line.")
+                  f"quotes git's error, to the end of this message.")
     # Not a fetch of every branch: that updates origin/main, which every agent-seat's
     # checkout of the same clone also fetches into, and git refuses the second of two
     # fetches that update it at once with "incorrect old value provided".
@@ -1465,7 +1479,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
               f"removed: {error}\n"
               f"If the error names a cause you can fix, fix it and remove {saved_apart}. "
               f"Otherwise, tell the user this message as printed, from its STOP line, which "
-              f"quotes the error, through this line.")
+              f"quotes the error, to the end of this message.")
         done_before_the_run = False
     # The run selects by the runner's default directory, which no head test run writes.
     done_before_the_run = recordings_matching_the_merge_commit_adopted(
@@ -1534,7 +1548,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
               f"If git names a cause you can fix, fix it and remove the worktree: "
               f"git -C {checkout} worktree remove --force {worktree}\n"
               f"Otherwise, tell the user this message as printed, from its STOP line, which "
-              f"quotes git's error, through this line.")
+              f"quotes git's error, to the end of this message.")
         every_step_complete = False
     else:
         print(f"removed the worktree {worktree}")
@@ -1635,7 +1649,7 @@ def merged_and_main_tested(arguments, wait):
     except common.MergeAccountTokenUnusable as unusable:
         print(f"STOP: not merged: {unusable}.\n"
               f"Tell the user this message as printed, from its STOP line, which says why the "
-              f"token is unusable, through this line: only the user can restore the token.")
+              f"token is unusable, to the end of this message: only the user can restore the token.")
         return EXIT_COULD_NOT_RUN
     environment = {**os.environ, "GH_TOKEN": token}
 

@@ -149,7 +149,10 @@ if os.path.exists(answer + ".out"):
 else:
     output, code = ("PASS scripts/some-test.py (1s)\n"
                     "SUMMARY: 1 passed, 0 failed, 1 total; fake runner\n"), 0
-if ("SUMMARY:" in output or os.path.exists(answer + ".junit")) and "--log-dir" in sys.argv and not os.path.exists(
+# A case's .junit fixture stands in for a run that printed no SUMMARY line, but never for one
+# that printed NOT RUN: the real runner judges no suite it did not run.
+if ("SUMMARY:" in output or (os.path.exists(answer + ".junit") and "NOT RUN " not in output)) \
+        and "--log-dir" in sys.argv and not os.path.exists(
         os.path.join(directory, "runner-writes-no-junit")):
     log_dir = sys.argv[sys.argv.index("--log-dir") + 1]
     os.makedirs(log_dir, exist_ok=True)
@@ -226,13 +229,13 @@ GIT_IDENTITY = ["-c", "user.name=merge-lane-test", "-c", "user.email=test@exampl
 # The merge program's instructions to tell the user a STOP message, written out whole here
 # so that a change to the program's wording fails a case.
 TELL_THE_USER_WITH_THE_GIT_ERROR = ("tell the user this message as printed, from its STOP "
-                                    "line, which quotes git's error, through this line.")
+                                    "line, which quotes git's error, to the end of this message.")
 TELL_THE_USER_WITH_THE_GH_ERROR = ("tell the user this message as printed, from its STOP line, "
-                                   "which quotes gh's error, through this line.")
+                                   "which quotes gh's error, to the end of this message.")
 TELL_THE_USER_WITH_THE_ERROR = ("tell the user this message as printed, from its STOP line, "
-                                "which quotes the error, through this line.")
+                                "which quotes the error, to the end of this message.")
 TELL_THE_USER_WITH_BOTH_GH_ERRORS = ("tell the user this message as printed, from its STOP line, "
-                                     "which quotes gh's error, through this line, and the error "
+                                     "which quotes gh's error, to the end of this message, and the error "
                                      "the deletion command printed.")
 RERUN_ONCE_THEN = "Run this again once; if it fails the same way, "
 
@@ -1751,9 +1754,28 @@ def failed_suites_kept_in_view_cases(scratch):
         check("when the second save fails, its STOP names each test the record now holds with no "
               "repair task and says no later merge opens one",
               exit_code == 3 and len(saves) == 2
-              and "The record now holds no repair task for these tests, and no later merge opens "
-                  "one for them" in output
+              and "this run cannot say what the record now holds for them" in output
+              and "Where an entry is as this run left it, merge-gate.sh shows the test with no "
+                  "repair task, and no later merge opens one for it" in output
               and "scripts/broken-test.py: case a (task #4 on author-seat's task list)" in output,
+              f"exit {exit_code}\n{output}")
+
+        saves.clear()
+        try:
+            program.failed_suites_record.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = second_save_fails
+            exit_code, output, _, _, _ = run_case(
+                scratch, "closed-task-not-replaced-then-second-save-failed", [(GATE_PASSED, 0)],
+                default_routes([]), runner_answer=(RUNNER_FAILED, 1),
+                before_the_program_runs=completed_task_and_no_checkout)
+        finally:
+            program.failed_suites_record.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = saved_apply
+        check("when a closed task cannot be replaced and the second save fails, its STOP names "
+              "the closed task apart from tasks this run opened, and lists no task as opened",
+              exit_code == 3 and len(saves) == 2
+              and "The record no longer names the closed repair task of scripts/broken-test.py: "
+                  "case a (closed task #3 on author-seat's task list)" in output
+              and "repair tasks this run opened" not in output
+              and "no new one could be opened" in output,
               f"exit {exit_code}\n{output}")
 
         saves.clear()
@@ -1810,8 +1832,10 @@ def failed_suites_kept_in_view_cases(scratch):
               exit_code == 0 and tests["case b"]["repair_task_id"] == 4
               and "Another merge's test run took scripts/broken-test.py: case a off the failed "
                   "suites record after this run saved the record" in output
-              and "Task #4 stays open, because the record ties it to other tests." in output
-              and "Complete task #4" not in output and "STOP" not in output,
+              and "Task #4 stays open, because the record ties it to other tests. Nothing needs "
+                  "doing." in output
+              and "to complete task #4" not in output and "Nothing needs doing." in output
+              and "STOP" not in output,
               f"exit {exit_code}\n{output}\n{tests}")
 
         known_failure_runs_that_are_not_only_known_failures = (
@@ -1911,7 +1935,7 @@ def failed_suites_kept_in_view_cases(scratch):
                       "task id, so no later merge opens it again",
                       exit_code == 3 and len(tasks_of_author(directory)) == 1
                       and fields["repair_task_id"] is None
-                      and "does not name the repair tasks just opened" in output,
+                      and "names none of the repair tasks this run opened" in output,
                       f"exit {exit_code}\n{output}\n{fields}")
 
         record_module.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = (
@@ -1931,7 +1955,7 @@ def failed_suites_kept_in_view_cases(scratch):
         check("a test reopened under a closed repair task whose new task the record cannot name "
               "keeps no task id, so the next merge does not open a second task beside it",
               exit_code == 3 and len(new_tasks) == 1 and fields["repair_task_id"] is None
-              and "does not name the repair tasks just opened" in output,
+              and "names none of the repair tasks this run opened" in output,
               f"exit {exit_code}\n{output}\n{fields}")
 
         def another_run_records_it_anew_before_the_second_save():
@@ -1975,7 +1999,9 @@ def failed_suites_kept_in_view_cases(scratch):
                   and fields["repair_task_id"] is None
                   and "recorded scripts/broken-test.py: case a anew on the failed suites record"
                       in output
-                  and "is not needed" in output,
+                  and "is not needed" in output
+                  and "Ask author-seat, with SendMessage, to complete task #" in output
+                  and "on its task list with TaskUpdate" in output,
                   f"exit {exit_code}\n{output}\n{fields}")
     finally:
         program.merged_branch_last_commit_author_name_read = saved_author
@@ -2366,7 +2392,7 @@ def main():
               exit_code == 2 and gate_calls == [] and gh_calls == []
               and "could not read the merge account's token at " in output
               and ": No such file or directory.\nTell the user this message as printed, from its "
-                  "STOP line, which says why the token is unusable, through this line: only the "
+                  "STOP line, which says why the token is unusable, to the end of this message: only the "
                   "user can restore the token." in output,
               f"exit {exit_code}\n{output}")
 
