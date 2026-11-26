@@ -1856,8 +1856,40 @@ def create_ghi_landing_path_for_ghi_md(number, title: str, source_name: str) -> 
             f"{_landed_name_without_number(title, source_name)}.md")
 
 
+def landed_file_of_merged_filing_pull_request(repo: str, number: int,
+                                              branch: str, main_commit: str,
+                                              repository_root: Path, runner):
+    """Main's one file for the issue when a pull request on the filing
+    branch has merged, else None. A resumed filing whose source is unchanged
+    still differs from main's copy when review changed the copy before it
+    merged, and the branch is deleted on merge, so without this a rerun
+    lands the file a second time. Raises when main holds other than one file
+    for the issue, since this run cannot tell which one the filing landed."""
+    listed = runner(["gh", "pr", "list", "--repo", repo, "--head", branch,
+                     "--state", "merged", "--json", "number"])
+    if not json.loads(listed.stdout or "[]"):
+        return None
+    paths = ghi_md_paths_for_issue(number, repository_root, runner,
+                                   revision=main_commit)
+    if len(paths) != 1:
+        held = ", ".join(paths) or "no file named for it"
+        raise Refused(
+            f"Not landed: the filing pull request on {branch} has merged, "
+            f"and main at {main_commit} holds {len(paths)} file(s) for issue "
+            f"{number}: {held}. This run cannot tell which one the filing "
+            "landed, so it stopped, and the issue's body keeps its "
+            "placeholder.\n"
+            f"Tell the user which files main holds for issue {number}; "
+            "which of them the filing landed is his to say. Then rerun "
+            f"create on that file: `scripts/ghi-issue-write.py create "
+            "<that file>`.\n"
+            "If you are a subagent, pass this to the agent that dispatched "
+            "you instead.", 1)
+    return paths[0]
+
+
 def land_file(repo: str, number: int, title: str, source: Path,
-              repository_root: Path, runner, report):
+              repository_root: Path, runner, report, resumed=False):
     """Step 4, in a throwaway worktree cut from a just-fetched origin/main,
     so the commit is never made against stale or dirty disk. Returns the
     path the issue's file has, or will have once step 4's pull request
@@ -1883,6 +1915,15 @@ def land_file(repo: str, number: int, title: str, source: Path,
                 read.stdout, staged):
             report(f"step 4 already done: main's copy of {landed} is this "
                    "file")
+            return landed
+
+    if resumed:
+        landed = landed_file_of_merged_filing_pull_request(
+            repo, number, branch, main_commit, repository_root, runner)
+        if landed is not None:
+            report(f"step 4 already done: the filing pull request on {branch} "
+                   f"has merged, and main's file for issue {number} is "
+                   f"{landed}")
             return landed
 
     on_remote = runner(
@@ -2110,25 +2151,44 @@ def ghi_md_paths_for_issue(number: int, repository_root: Path, runner,
 
 
 def landed_heading_the_title_lacks(repo: str, number: int, paths,
-                                   repository_root: Path, runner):
-    """The heading of the issue's one GHI-MD as main holds it, when the
-    issue's title differs from it, else None. The issue is titled with the
-    heading the file had at step 3, and its landing pull request can still
-    change that heading before it merges; no edit follows to carry the
-    change, since main's copy already has the new heading. Read from main,
-    not from the checkout, which can be older than the landing pull request
-    or hold a local edit. An issue with several GHI-MDs is left alone, as
-    `title_follows_heading_in_this_edit` leaves it."""
+                                   revision: str, repository_root: Path,
+                                   runner):
+    """The heading of the issue's one GHI-MD as main holds it at `revision`,
+    when the issue's title differs from it, else None. The issue is titled
+    with the heading the file had at step 3, and its landing pull request
+    can still change that heading before it merges; no edit follows to carry
+    the change, since main's copy already has the new heading. Read from
+    main, not from the checkout, which can be older than the landing pull
+    request or hold a local edit, and at the commit `paths` was listed from,
+    since another worktree's fetch can move origin/main between the two. An
+    issue with several GHI-MDs is left alone, as
+    `title_follows_heading_in_this_edit` leaves it.
+
+    A heading that gained a date in review is not made the title, for the
+    reason `refuse_heading_with_date` gives; it raises DatedHeading so that
+    the caller links the body and says how to clear the date."""
     if len(paths) != 1:
         return None
-    shown = runner(["git", "show", f"origin/main:{paths[0]}"],
+    shown = runner(["git", "show", f"{revision}:{paths[0]}"],
                    cwd=str(repository_root))
     heading = first_heading(shown.stdout)
     viewed = runner(["gh", "issue", "view", str(number), "--repo", repo,
                      "--json", "title"])
     if json.loads(viewed.stdout)["title"] == heading:
         return None
+    date = ISO_DATE_IN_HEADING.search(heading)
+    if date:
+        raise DatedHeading(heading, date.group(), paths[0])
     return heading
+
+
+class DatedHeading(Exception):
+    """Main's heading for the issue differs from its title and carries a
+    date, so step 5 links the body and leaves the title as it is."""
+
+    def __init__(self, heading: str, date: str, path: str):
+        super().__init__(heading)
+        self.heading, self.date, self.path = heading, date, path
 
 
 def link_body(repo: str, number: int, repository_root: Path, runner, report,
@@ -2149,7 +2209,9 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
     report then tells the author no file for this issue is on main yet —
     which, the fetch having failed, this run cannot know."""
     runner(["git", "fetch", "origin", "main"], cwd=str(repository_root))
-    paths = ghi_md_paths_for_issue(number, repository_root, runner)
+    main_commit = origin_main_commit_hash(repository_root, runner)
+    paths = ghi_md_paths_for_issue(number, repository_root, runner,
+                                   revision=main_commit)
     if not paths:
         report(f"step 5 not done: no file for issue {number} is on main yet, "
                "so its body keeps the placeholder.")
@@ -2158,8 +2220,12 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
         return False
     # The title goes in the same call as the body: the body edit removes
     # the pairing key, after which no rerun can come back to set it.
-    heading = landed_heading_the_title_lacks(repo, number, paths,
-                                             repository_root, runner)
+    dated = None
+    try:
+        heading = landed_heading_the_title_lacks(
+            repo, number, paths, main_commit, repository_root, runner)
+    except DatedHeading as raised:
+        heading, dated = None, raised
     command = ["gh", "issue", "edit", str(number), "--repo", repo,
                "--body", links_body(repo, paths)]
     if heading is not None:
@@ -2168,6 +2234,12 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
     report(f"body is now {len(paths)} link(s): " + ", ".join(paths))
     if heading is not None:
         report(f"title is now: {heading}")
+    if dated is not None:
+        report(f"title left as it is: main's first heading of {dated.path} "
+               f"carries the date {dated.date}, and a title carries no date.")
+        report(f"Remove {dated.date} from that heading with "
+               f"`scripts/ghi-issue-write.py edit {dated.path}`; that edit "
+               "sets the title to the new heading.")
     return True
 
 
@@ -2228,7 +2300,7 @@ def create(path: Path, repo: str, repository_root: Path, runner, report):
         number = file_issue(repo, title, key, runner, report)
 
     destination = land_file(repo, number, title, path, repository_root,
-                            runner, report)
+                            runner, report, resumed=bool(existing))
     finished = link_body(repo, number, repository_root, runner, report,
                          destination)
     report_open_ruling_questions(
