@@ -333,7 +333,7 @@ class Machine:
         return ([json.loads(path.read_text()) for path in sorted(pending.glob("*.json"))]
                 if pending.is_dir() else [])
 
-    def run(self, minutes, *extra, path_has_fake=True, github_budget_spent=False, runner_source=None):
+    def run(self, minutes, *extra, path_has_fake=True, runner_source=None):
         environment = dict(os.environ)
         environment["HOME"] = str(self.home)
         # Python finds the user's site-packages from HOME, and on the Mac markdown-it-py is installed there.
@@ -347,8 +347,6 @@ class Machine:
         environment["FAKE_CLAUDE_CALLS"] = str(self.calls)
         environment["FAKE_CLAUDE_ANSWERS"] = str(self.answers)
         environment["FAKE_CLAUDE_PROJECTS"] = str(self.projects)
-        if github_budget_spent:
-            runner_source = GITHUB_BUDGET_SPENT_RUNNER
         runner = ["-c", runner_source] if runner_source else []
         completed = subprocess.run(
             [sys.executable, *runner, str(PROGRAM), "--now", at(minutes), "--handoff-directory",
@@ -2019,7 +2017,7 @@ task_file = machine.tasks / "nedsnodes-alpha-tasks" / "1.json"
 task_file.write_text(json.dumps({**json.loads(task_file.read_text()),
                                  "metadata": {"prerequisites": [{"pr_merged": 50}]}}))
 machine.script(judged(False, reason="r"))
-code, output = machine.run(0, github_budget_spent=True)
+code, output = machine.run(0, runner_source=GITHUB_BUDGET_SPENT_RUNNER)
 skipped = [{"kind": "pr_merged", "number": 50}]
 check("a prerequisite the GitHub budget left unasked: logged by name",
       code == 0 and [(event["agent_seat"], event["conditions"]) for event in
