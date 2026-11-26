@@ -28,17 +28,13 @@ worktree: its program,
 scripts/git-client-side-hooks-post-checkout-new-worktree-owner-file-write.py,
 says which owner it names and which worktrees get none. A program that makes a
 worktree in a clone whose core.hooksPath does not name that hook writes it
-through worktree_owner_file_write or the `write` command below. A subagent's
-worktree is made by Claude Code, which locks it while the subagent runs with
-the reason "claude agent agent-<id> (pid N start M)", N being the dispatching
-agent-session's `claude` process, and unlocks it when the subagent finishes;
-when the hook wrote no owner file there,
-scripts/uncommitted-work-snapshot-hook.py writes the agent-session's owner
-file after the subagent's Edit, Write, NotebookEdit or Bash calls there,
-while that lock still names the process. The cleaner removes a worktree with
-no owner file only once nothing in it has changed for 2 days and it holds no
-uncommitted or untracked file, or, for a merge-lane review checkout, a worktree
-in ~/.cache/merge-lane-review-worktrees, once its pull request has been merged
+through worktree_owner_file_write or the `write` command below. Claude Code
+makes a subagent's worktree through its `WorktreeCreate` hook,
+nn-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py,
+which writes the owner file naming the dispatching agent-session. The cleaner
+removes a worktree with no owner file only once nothing in it has changed for 2
+days and it holds no uncommitted or untracked file, or, for a merge-lane review
+checkout, a worktree in ~/.cache/merge-lane-review-worktrees, once its pull request has been merged
 or closed for 24 hours.
 
 It refuses to write into the reference-checkout, whose git directory is the
@@ -64,8 +60,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
-from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -77,14 +71,6 @@ OWNER_AGENT_SESSION = "agent-session"
 RUNNING = "running"
 STOPPED = "stopped"
 UNKNOWN = "unknown"
-
-# Claude Code's lock reason on a subagent's worktree while the subagent runs. On Linux, start is
-# field 22 of /proc/<pid>/stat, the process's start in clock ticks after boot; on macOS it is the
-# process's start in local time as `ps -o lstart=` prints it, such as "Tue Nov  3 21:24:32 2026".
-CLAUDE_CODE_SUBAGENT_WORKTREE_LOCK_REASON = re.compile(
-    r"^claude agent agent-([0-9A-Za-z]+) \(pid (\d+) start "
-    r"(\d+|[A-Z][a-z]{2} [A-Z][a-z]{2} +\d{1,2} \d{2}:\d{2}:\d{2} \d{4})\)$")
-MACOS_LOCK_START_FORMAT = "%a %b %d %H:%M:%S %Y"
 
 # Claude Code makes a subagent's worktree directly inside .claude/worktrees/ of the reference-checkout and
 # names its directory agent-a followed by 16 lowercase hex digits; other worktrees there, such as an
@@ -291,86 +277,6 @@ def worktree_owner_running_state(record, handoff_directory=None):
     return agent_session_running_state(record["owner_key"])
 
 
-@dataclass(frozen=True)
-class ClaudeCodeSubagentWorktreeLock:
-    """Claude Code's lock reason on a subagent's worktree: the subagent's id, as in agent-<id>,
-    and the dispatching `claude` process's id and start."""
-    agent_id: str
-    process_id: int
-    start_ticks: str
-
-
-def claude_code_subagent_worktree_lock_reason_parse(lock_reason):
-    """The ClaudeCodeSubagentWorktreeLock in Claude Code's lock reason, or None for any other."""
-    match = CLAUDE_CODE_SUBAGENT_WORKTREE_LOCK_REASON.match((lock_reason or "").strip())
-    if match is None:
-        return None
-    return ClaudeCodeSubagentWorktreeLock(match.group(1), int(match.group(2)), match.group(3))
-
-
-def claude_code_subagent_worktree_lock_macos_start_seconds(lock):
-    """The macOS lock's start as whole seconds since 1970, the form
-    nn-systems/handoff/uncommitted-work-snapshots.py's macos_start_seconds gives; raises ValueError
-    when the start is not the date `ps -o lstart=` prints."""
-    started = time.strptime(" ".join(lock.start_ticks.split()), MACOS_LOCK_START_FORMAT)
-    return str(int(time.mktime(started)))
-
-
-def claude_code_subagent_worktree_lock_dispatching_process_running_state(lock, proc_root="/proc",
-                                                                         platform=sys.platform,
-                                                                         macos_start_seconds=None):
-    """Return (state, explanation): whether the `claude` process the lock names, the process with
-    its id that started at its start, runs; UNKNOWN when that cannot be read, and on any platform
-    but Linux and macOS. On macOS both starts are local times, so a time-zone change between
-    the lock's writing and this check, or a TZ that differs between claude and this program,
-    reads a live claude process as STOPPED."""
-    snapshots = load_uncommitted_work_snapshots_module_once()
-    if platform == "darwin":
-        try:
-            lock_started = claude_code_subagent_worktree_lock_macos_start_seconds(lock)
-        except ValueError:
-            return UNKNOWN, (f"Claude Code's lock names claude process {lock.process_id} with the "
-                             f"start {lock.start_ticks!r}, which is not the date macOS's ps prints")
-        try:
-            started = (macos_start_seconds or snapshots.macos_start_seconds)(lock.process_id)
-        except Exception as error:
-            return UNKNOWN, (f"whether claude process {lock.process_id} runs could not be read: "
-                             f"{type(error).__name__}: {error}")
-        if started == lock_started:
-            return RUNNING, (f"Claude Code's lock names claude process {lock.process_id}, "
-                             f"started at {lock.start_ticks}, which runs")
-        return STOPPED, (f"Claude Code's lock names claude process {lock.process_id}, started at "
-                         f"{lock.start_ticks}, which has ended")
-    if not platform.startswith("linux"):
-        return UNKNOWN, (f"whether claude process {lock.process_id} runs is read only on Linux "
-                         f"and macOS")
-    try:
-        started = snapshots.linux_start_ticks(lock.process_id, proc_root)
-    except (FileNotFoundError, ProcessLookupError):
-        started = None
-    except (OSError, IndexError) as error:
-        return UNKNOWN, (f"whether claude process {lock.process_id} runs could not be read: "
-                         f"{type(error).__name__}: {error}")
-    if started == lock.start_ticks:
-        return RUNNING, (f"Claude Code's lock names claude process {lock.process_id}, "
-                         f"started at {lock.start_ticks}, which runs")
-    return STOPPED, (f"Claude Code's lock names claude process {lock.process_id}, started at "
-                     f"{lock.start_ticks}, which has ended")
-
-
-def claude_code_subagent_worktree_lock_ended_agent_session_owner_key(lock, proc_root="/proc",
-                                                                   platform=sys.platform):
-    """The owner key of the ended agent-session a lock names, in the form
-    nn-systems/handoff/uncommitted-work-snapshots.py writes for the platform; after a reboot the
-    Linux boot id differs from the process's, and the key still reads as stopped. On macOS the
-    key holds the lock's start in seconds, which no later process with that id matches, so it
-    reads as stopped too; raises ValueError when that start cannot be read."""
-    if platform == "darwin":
-        return f"{lock.process_id}-{claude_code_subagent_worktree_lock_macos_start_seconds(lock)}"
-    snapshots = load_uncommitted_work_snapshots_module_once()
-    return f"{snapshots.linux_boot_id(proc_root)}-{lock.process_id}-{lock.start_ticks}"
-
-
 def agent_seats_whose_claude_code_transcripts_name_subagent(agent_id, agents_root=None,
                                                             handoff_directory=None,
                                                             projects_root=None):
@@ -402,17 +308,6 @@ def nearest_claude_parent_process_owner_key():
             "no process named claude is among this program's parent processes, "
             "so there is no agent-session to name")
     return snapshots.owner_key_of_process(process_id)
-
-
-def worktree_lock_reason_read(worktree):
-    """The worktree's `git worktree lock` reason, "" for a lock with none, or None when unlocked."""
-    own, _ = git_directories(worktree)
-    try:
-        return (own / "locked").read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return None
-    except OSError as error:
-        raise WorktreeOwnerFileError(f"{own / 'locked'} could not be read: {error}") from None
 
 
 def worktree_of_current_directory():
