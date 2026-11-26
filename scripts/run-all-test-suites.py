@@ -4981,6 +4981,55 @@ def run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_pr
                 RUN_CASE_TIMES_SUITE_RESOURCES_JUNIT_XML_OR_FAILURE_HISTORY_NOT_WRITTEN_LINE_PREFIX)) for line in lines))
 
 
+def suites_on_runner_lines(lines, prefix):
+    """Each suite on a line opening with prefix, with its log when a line names one."""
+    suites = {}
+    for line in lines:
+        if line.startswith(prefix):
+            words = line[len(prefix):].split()
+            if words:
+                log = line.partition(SUITE_LINE_LOG_MARK)[2].strip() or None
+                suites[words[0]] = log or suites.get(words[0])
+    return suites
+
+
+def run_verdicts_by_suite(lines, junit_file):
+    """{suite: verdict} for each suite the run judged, and what went wrong reading junit_file, or
+    None.
+
+    A verdict holds "failed", {test: log}; "passed", the set of tests that passed; "skipped", the
+    text of each SKIP line; and "ran_to_the_end", whether the suite ended on its own after every
+    case it would run. This program names each test in junit.xml, a suite that printed no case
+    line being the one test named for the suite; a suite NOT RUN or stopped by the run has no
+    verdict."""
+    logs = suites_on_runner_lines(lines, FAILED_SUITE_LINE_PREFIX)
+    try:
+        root = xml.etree.ElementTree.parse(junit_file).getroot()
+    except FileNotFoundError:
+        return {}, f"{junit_file} does not exist"
+    except (OSError, xml.etree.ElementTree.ParseError) as caught:
+        return {}, f"{junit_file} could not be read: {caught}"
+    verdicts = {}
+    for element in root.iter("testsuite"):
+        if element.get("judged") == "false":
+            continue
+        suite = element.get("name")
+        verdict = verdicts.setdefault(suite, {"failed": {}, "passed": set(), "skipped": [],
+                                              "ran_to_the_end": True})
+        verdict["ran_to_the_end"] = (verdict["ran_to_the_end"]
+                                     and element.get("ran_to_the_end") == "true")
+        for case in element.iter("testcase"):
+            if case.find("skipped") is not None:
+                verdict["skipped"].append(case.get("name"))
+            elif case.find("failure") is not None:
+                verdict["failed"][case.get("name")] = logs.get(suite)
+            else:
+                verdict["passed"].add(case.get("name"))
+    for verdict in verdicts.values():
+        verdict["passed"] -= set(verdict["failed"])
+    return verdicts, None
+
+
 def run_all_test_suites_output_timed_out_suites_and_limits_parse(text):
     """[(suite, limit seconds)] for each suite whose FAIL line says it ran past its limit.
 

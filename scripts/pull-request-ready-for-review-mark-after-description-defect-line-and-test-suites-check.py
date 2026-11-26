@@ -21,7 +21,12 @@ foreground command at its time limit. In order, it:
    recording no longer matches the checkout, as when a recording made on main read main's copy of
    a file or listed a new file this checkout lacks, in a scratch worktree of the pushed
    nn-head-commit, with that worktree's own scripts/run-all-test-suites.py, waiting for the
-   machine's test lock where the runner takes one, and refuses when any fails;
+   machine's test lock where the runner takes one, and refuses when any fails, unless every
+   failing test case is main's: main's failed suites record, which
+   scripts/merge-lane-failed-after-merge-test-suites-on-main-record.py reads, holds it, and the
+   nn-head-commit holds the main commit whose after-merge test run first failed it, as the merge
+   program judges a merge into a branch other than main. Such a run counts as passing only when
+   failing suites were its one problem and each suite ran to the end, and the cases are named;
 5. reads the pull request again, and refuses when its nn-head-commit is no longer the commit
    tested;
 6. marks the pull request ready for review with gh pr ready.
@@ -38,6 +43,7 @@ import argparse
 import importlib.util
 import json
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -53,6 +59,11 @@ _test_suite_runner_spec = importlib.util.spec_from_file_location(
     "run_all_test_suites", SCRIPTS_DIRECTORY / "run-all-test-suites.py")
 test_suite_runner = importlib.util.module_from_spec(_test_suite_runner_spec)
 _test_suite_runner_spec.loader.exec_module(test_suite_runner)
+_failed_suites_record_spec = importlib.util.spec_from_file_location(
+    "merge_lane_failed_after_merge_test_suites_on_main_record",
+    SCRIPTS_DIRECTORY / "merge-lane-failed-after-merge-test-suites-on-main-record.py")
+failed_suites_record = importlib.util.module_from_spec(_failed_suites_record_spec)
+_failed_suites_record_spec.loader.exec_module(failed_suites_record)
 
 EXIT_MARKED_READY = 0
 EXIT_MARK_READY_REFUSED_OR_FAILED = 1
@@ -119,10 +130,11 @@ def run_command(argv, runner, timeout, what, instructions):
     return completed.stdout or ""
 
 
-def test_run_status_in_scratch_worktree(commit, merge_base, runner, output, retry):
+def test_run_status_in_scratch_worktree(commit, merge_base, runner, output, retry, log_dir):
     """The test runner's exit status on a detached scratch worktree of commit, so a change to this
-    checkout while the runner waits for the machine's test lock does not reach the run. A failure
-    to remove the worktree is printed and does not change the status."""
+    checkout while the runner waits for the machine's test lock does not reach the run; the run's
+    logs go to log_dir. A failure to remove the worktree is printed and does not change the
+    status."""
     with tempfile.TemporaryDirectory(prefix="ready-command-test-suites-") as scratch:
         checkout = str(Path(scratch) / "checkout")
         run_command(["git", "worktree", "add", "--quiet", "--detach", checkout, commit], runner,
@@ -130,7 +142,7 @@ def test_run_status_in_scratch_worktree(commit, merge_base, runner, output, retr
                     "making the scratch worktree the test suites run in", retry)
         try:
             command = [*selective_test_run_command(checkout, merge_base),
-                       *TEST_RUNNER_MACHINE_LOCK_WAIT_ARGUMENTS]
+                       *TEST_RUNNER_MACHINE_LOCK_WAIT_ARGUMENTS, "--log-dir", str(log_dir)]
             output.write(MESSAGE_PREFIX + f"running, in a scratch worktree of {commit[:12]}, "
                          + " ".join(command[1:]) + "\n")
             output.flush()
@@ -148,6 +160,50 @@ def test_run_status_in_scratch_worktree(commit, merge_base, runner, output, retr
                 output.write(MESSAGE_PREFIX + f"the scratch worktree {checkout} was not removed: "
                              f"{cause}. The test result stands.\n"
                              "If git worktree list still names it: run git worktree prune.\n")
+
+
+def failing_test_cases_already_failing_on_main_and_why_not_all_are(log_dir, head, runner, git_failed):
+    """(the failed test cases of the run whose logs are in log_dir that are main's, as "suite: case"
+    names, and why not every failure of the run is main's, or None when every one is)."""
+    report_file = log_dir / test_suite_runner.REPORT_FILE_NAME
+    try:
+        report = report_file.read_text(encoding="utf-8", errors="replace")
+    except OSError as error:
+        return [], f"{report_file} could not be read ({error}), so its failing test cases are not named"
+    if not test_suite_runner.run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(
+            TEST_RUNNER_EXIT_SOME_SUITE_FAILED, report):
+        return [], ("the run reported a problem besides failing suites, or did not reach its "
+                    "SUMMARY line")
+    verdicts, junit_error = test_suite_runner.run_verdicts_by_suite(
+        report.splitlines(), log_dir / test_suite_runner.JUNIT_XML_FILE_NAME)
+    if junit_error:
+        return [], f"its failing test cases could not be named: {junit_error}"
+    cut_short = sorted(suite for suite, verdict in verdicts.items() if not verdict["ran_to_the_end"])
+    if cut_short:
+        return [], (f"{', '.join(cut_short)} did not run to the end, so its later cases have no "
+                    "verdict")
+    try:
+        recorded = failed_suites_record.failed_after_merge_test_suites_on_main_record_read()
+    except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
+        return [], f"main's failed suites record could not be read: {error}"
+    mains, not_mains = [], []
+    for suite, verdict in sorted(verdicts.items()):
+        on_record = recorded.get(suite, {}).get("failed_tests", {})
+        for test in sorted(verdict["failed"]):
+            name = suite if test == suite else f"{suite}: {test}"
+            first_failed = on_record.get(test, {}).get("commit")
+            if first_failed and git_answers_yes(
+                    ["git", "merge-base", "--is-ancestor", first_failed, head], runner,
+                    f"asking git whether {head[:12]} holds {first_failed[:12]}, the main commit "
+                    f"whose after-merge test run first failed {name}", git_failed):
+                mains.append(name)
+            else:
+                not_mains.append(name)
+    if not_mains or not mains:
+        return mains, ("main's failed suites record does not hold these failing test cases at a "
+                       "main commit the nn-head-commit holds: "
+                       + ("; ".join(not_mains) or "junit.xml names none, though the run failed"))
+    return mains, None
 
 
 def read_pull_request(number, runner):
@@ -318,27 +374,45 @@ def check_and_mark_ready(number, runner, output):
         "then run this again.\n"
         "If git gave any other error, or none: "
         + RETRY_THEN_USER_INSTRUCTION.format(number=number)).strip()
+    log_dir = Path(tempfile.mkdtemp(prefix="ready-command-test-run-logs-"))
     status = test_run_status_in_scratch_worktree(
         head, merge_base, runner, output,
-        NOTHING_CHANGED_LINE + "\n" + RETRY_THEN_USER_INSTRUCTION.format(number=number))
+        NOTHING_CHANGED_LINE + "\n" + RETRY_THEN_USER_INSTRUCTION.format(number=number), log_dir)
     stays_a_draft = (f"so {name} stays a draft pull request: its pushed commits must pass the "
                      "test suites before it is marked ready for review, which starts their review.")
+    mains, why_not_every_failure_is_mains = [], None
     if status == TEST_RUNNER_EXIT_SOME_SUITE_FAILED:
+        mains, why_not_every_failure_is_mains = failing_test_cases_already_failing_on_main_and_why_not_all_are(
+            log_dir, head, runner,
+            NOTHING_CHANGED_LINE + "\n"
+            "If git's error says the commit is not a valid commit name: run git fetch origin main, "
+            "then run this again.\n"
+            "If git gave any other error: " + RETRY_THEN_USER_INSTRUCTION.format(number=number))
+    if why_not_every_failure_is_mains:
         raise StepFailed(
             f"the test suites exited with status {status}, {stays_a_draft} The failing suites "
-            "are named above.\n"
-            "Fix the cause of each suite's failure and commit the fix; then push, and run this "
+            f"are named above, and their logs are in {log_dir}. A failing test case counts as "
+            "main's, and lets the pull request be marked ready, only when main's failed suites "
+            "record holds it at a main commit the nn-head-commit holds, and here "
+            f"{why_not_every_failure_is_mains}.\n"
+            "Fix the cause of each failure that is not main's and commit the fix; then push, and run this "
             "again: it runs the test suites on the pushed fix, keeps the pull request a draft "
             "while any fails, and marks it ready for review when they pass.\n"
             "If git or a pre-push hook refuses the push: do what its message says, push again, then "
             "run this again; if it names nothing to do, tell the user, or the agent that dispatched you, "
             "what it printed.")
-    if status != 0:
+    if status not in (0, TEST_RUNNER_EXIT_SOME_SUITE_FAILED):
         raise StepFailed(
             f"scripts/run-all-test-suites.py exited with status {status}, before judging every "
             "suite, "
-            f"{stays_a_draft} Its error is above.\n"
+            f"{stays_a_draft} Its error is above, and its logs are in {log_dir}.\n"
             + RETRY_THEN_USER_INSTRUCTION.format(number=number))
+    shutil.rmtree(log_dir, ignore_errors=True)
+    if mains:
+        output.write(MESSAGE_PREFIX + "every failing test case is main's, so the test suites "
+                     "count as passing: main's failed suites record holds each one at a main "
+                     "commit the nn-head-commit holds:\n"
+                     + "".join(f"  {test}\n" for test in mains))
     head_after_tests = read_pull_request(number, runner)["headRefOid"]
     if head_after_tests != head:
         raise StepFailed(

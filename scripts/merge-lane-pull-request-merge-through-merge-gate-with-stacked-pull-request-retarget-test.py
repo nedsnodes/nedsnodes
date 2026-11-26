@@ -2029,7 +2029,7 @@ def failed_suites_kept_in_view_cases(scratch):
     junit_file.write_text('<testsuites><testsuite name="scripts/x-test.py" judged="false" '
                           'ran_to_the_end="false"><testcase name="scripts/x-test.py">'
                           '<failure message="x"/></testcase></testsuite></testsuites>')
-    verdicts, error = program.run_verdicts_by_suite([], junit_file)
+    verdicts, error = program.common.run_all_test_suites.run_verdicts_by_suite([], junit_file)
     check("a suite NOT RUN or stopped by the run gives no verdict, not even a failure",
           verdicts == {} and error is None, f"{verdicts} {error}")
 
