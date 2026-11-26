@@ -303,7 +303,7 @@ REFUSAL_OPENING_TEMPLATE = (
     "[rule walk-me-through-agent-question-to-user-outside-walk-items-refused] approval-walk question check: this "
     "hook refused to end your turn, because a line of your reply seems to ask the user something outside the items "
     "of the open approval-walk {walk} ({decided}): \"{sentence}\". His next letter answers only the waiting item, "
-    "item {waiting}, so he could not tell which question it answers.")
+    "item {waiting}, so it cannot also answer this line's question.")
 DECIDED_BY_MODEL_NOTICE = "the model judged that it asks him something"
 MODEL_CHECK_FAILED_NOTICE = ("the hook's `claude -p` call that has the model judge this question-like text failed, "
                              "{failure}, so the hook treats the text as a question")
@@ -312,7 +312,7 @@ REFUSAL_INSTRUCTIONS = (
     "{closing_lines_named} below and nothing after it. {not_in_backticks}\n{closing_lines_no_item_added}{no_page}",
     "Otherwise run this command, with the question's point as its title, the category for how soon its work must "
     "happen, one of {categories}, as the walk-me-through skill's section \"Re-planning\" says, and, for each item it "
-    "must follow, a `--waits-on` with that item's heading without `## ` or `Item N of M: `, then do what it prints; "
+    "must follow, a `--waits-on` with that item's heading without its `## ` and any `Item N of M: `, then do what it prints; "
     "do not show the new item now, since the walk shows it when its turn comes:\n{command}",
 )
 QUESTION_INSERT_COMMAND_TITLE_ARGUMENT_PLACEHOLDER = "<the point of the question>"
