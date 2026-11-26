@@ -17,6 +17,7 @@ Usage, from the agent-session's checkout:
                                       --now-over-later-already-decided and --moved-on)
   walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py check --bump ITEM
       [--user-reply-as-typed REPLY]
+  walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py check --bump-to-settle-without-asking ITEM
   walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py close
       [--hold-answer-until-new-item-answered]
   walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py approval-walk-waiting-item-cold-read-fast-read
@@ -53,6 +54,9 @@ nothing, an ITEM no item heading has, and one already shown, which is every
 numbered item, decided or not; and it refuses, writing nothing, while close
 has not yet recorded the last answer check wrote, since close would then take
 that answer as the answer to ITEM too.
+--bump-to-settle-without-asking ITEM does what --bump does, for an item the agent
+brings up itself to settle with --already-decided or --not-asked, and its
+minutes line says the agent bumped it, not the user.
 --moved-on-no-decision records that the user moved on from an
 item that asks for no decision, such as a summary item: it needs no
 `#case_against` line, runs no fast read, and close records the item as `<moved on, no
@@ -992,7 +996,10 @@ BUMP_ANSWER_NOT_CLOSED = (
     "it names next: in place of that, run `{bump_command}` and do what it prints, so that the item the user "
     "bumped is shown next.")
 BUMP_MINUTES = "Bumped by the user: {bumped} is shown next, before {waiting}, which waits again after it.{words}"
-BUMP_MINUTES_LINE = re.compile(r"^Bumped by the user: (?P<bumped>items? .+?) is shown next, before "
+BUMP_TO_SETTLE_MINUTES = ("Bumped by the agent, to settle it without asking the user: {bumped} is the waiting item, "
+                          "before {waiting}, which waits again after it.")
+BUMP_MINUTES_LINE = re.compile(r"^Bumped by (?:the user|the agent, to settle it without asking the user): "
+                               r"(?P<bumped>items? .+?) is (?:shown next|the waiting item), before "
                                r"(?P<waiting>items? .+?), which waits again after it\.")
 BUMP_DONE = (
     "{bumped} is now the waiting item, and {waiting} comes right after it.\n"
@@ -2638,7 +2645,7 @@ def now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
 
 
 def check(arguments):
-    if arguments.bump is not None:
+    if arguments.bump is not None or arguments.bump_to_settle_without_asking is not None:
         return bump(arguments)
     if arguments.now_over_later_already_decided:
         arguments.already_decided = NOW_OVER_LATER_USER_RULING_CITATION
@@ -4651,13 +4658,16 @@ def ruling_given_comments_posted(walk_name, rulings, top, gh_program, timeout):
 def bump(arguments):
     """Make the unshown item arguments.bump names the waiting item, standing right before the item that waited,
     as the docstring's --bump paragraph says."""
+    by_agent = arguments.bump_to_settle_without_asking is not None
+    flag, named_item = (("--bump-to-settle-without-asking", arguments.bump_to_settle_without_asking) if by_agent
+                        else ("--bump", arguments.bump))
     walk_finder = load_walk_finder()
     top, minutes, value, parser = the_open_walk(walk_finder, arguments.cwd)
     pending = unclosed_last_answer(walk_finder, minutes, parser)
     if pending:
-        bump_command = check_command_with_cwd(top, "--bump", arguments.bump,
+        bump_command = check_command_with_cwd(top, flag, named_item,
                                               *(["--user-reply-as-typed", arguments.user_reply_as_typed]
-                                                if arguments.user_reply_as_typed else []))
+                                                if arguments.user_reply_as_typed and not by_agent else []))
         raise Failure(BUMP_ANSWER_NOT_CLOSED.format(minutes=minutes, item=pending["item"],
                                                     close_command=step_command_with_cwd(top, "close"),
                                                     bump_command=bump_command))
@@ -4666,7 +4676,7 @@ def bump(arguments):
                                                   "check --bump", top, stamp=False)
     document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
     lines = document.read_text(encoding="utf-8").split("\n")
-    title = heading_title(walk_finder, "## " + arguments.bump.strip().lstrip("# "))
+    title = heading_title(walk_finder, "## " + named_item.strip().lstrip("# "))
     named = [unit for unit in units if heading_title(walk_finder, lines[unit[3]]) == title]
     unshown = [unit for unit in named if unit[3] in placing]
     if not unshown:
@@ -4677,8 +4687,8 @@ def bump(arguments):
             raise Failure(BUMP_ALREADY_SHOWN.format(heading=lines[named[0][3]].strip(), document=document,
                                                     state=state))
         example = next((lines[first].strip().lstrip("#").strip() for first in placing), "the point of the item")
-        raise Failure(BUMP_NOT_FOUND.format(document=document, title=arguments.bump.strip(),
-                                            command=check_command_with_cwd(top, "--bump", example)))
+        raise Failure(BUMP_NOT_FOUND.format(document=document, title=named_item.strip(),
+                                            command=check_command_with_cwd(top, flag, example)))
     first, end = unshown[0][3], unshown[0][4]
     _, waiting_units = walk_finder.waiting_item_units(document, value, numbers, total, parser, units)
     before = waiting_units[0][3]
@@ -4694,8 +4704,9 @@ def bump(arguments):
     document.write_text(text, encoding="utf-8")
     bumped = items_named([str(number)], count)
     words = " ".join((arguments.user_reply_as_typed or "").split())
-    append_to_minutes(minutes, [BUMP_MINUTES.format(bumped=bumped, waiting=waiting,
-                                                    words=USER_WORDS.format(words=words) if words else ""),
+    append_to_minutes(minutes, [BUMP_TO_SETTLE_MINUTES.format(bumped=bumped, waiting=waiting) if by_agent
+                                else BUMP_MINUTES.format(bumped=bumped, waiting=waiting,
+                                                         words=USER_WORDS.format(words=words) if words else ""),
                                 NEXT_MARKER_LINE.format(value=bumped)])
     print(BUMP_DONE.format(bumped=bumped, waiting=waiting, command=read_step_command_with_cwd(top)))
     return 0
@@ -4874,6 +4885,9 @@ def main(argv=None):
     answer.add_argument("--bump", metavar="ITEM",
                         help="check: the user said bump and named ITEM, an item not yet shown, by its heading's title; "
                              "show it next, before the waiting item")
+    answer.add_argument("--bump-to-settle-without-asking", metavar="ITEM",
+                        help="check: as --bump, for an item not yet shown that you bring up to settle with "
+                             "--already-decided or --not-asked; the minutes say the agent bumped it, not the user")
     answer.add_argument("--not-asked", type=not_asked_kind, metavar="KIND",
                         help="check: the user is not asked; settle the item as the row KIND of the no-answer "
                              "table at the end of this help, if its evidence lines pass")

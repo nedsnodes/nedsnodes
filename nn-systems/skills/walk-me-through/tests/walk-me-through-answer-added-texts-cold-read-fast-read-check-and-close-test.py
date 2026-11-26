@@ -5835,7 +5835,7 @@ def test_every_answer_flag_is_covered_by_the_rerun_command_cases():
     flags = set(re.findall(r"--[\w-]+", group[1])) if group else set()
     check("the rerun command cases cover every answer flag of check's --help",
           usage.returncode == 0 and flags == {*ANSWER_FLAGS_TAKING_A_REPLY, "--not-asked", "--already-decided", NOW_OVER_LATER,
-                                                         "--moved-on", "--bump"},
+                                                         "--moved-on", "--bump", "--bump-to-settle-without-asking"},
           f"--help answer flags {sorted(flags)}, {described(usage)}")
 
 
@@ -7428,6 +7428,24 @@ def test_bump_shows_the_named_unshown_item_next_and_the_waiting_item_after_it():
     check("check --bump refuses an item the minutes decide",
           again.returncode == 1 and "has already been shown, and the minutes record it as decided" in again.stderr,
           described(again))
+
+
+def test_an_item_the_agent_bumps_to_settle_without_asking_names_no_user_action_and_the_waiting_item_comes_back():
+    case = Case(next_to_present="item 1 of 9", document=bump_walk())
+    bumped = case.run("check", "--bump-to-settle-without-asking", "three", reply=None)
+    minutes = case.minutes.read_text()
+    check("check --bump-to-settle-without-asking makes the named unshown item the waiting item",
+          bumped.returncode == 0 and marker(case) == "#next_to_present item 2 of 4"
+          and re.search(r"^## Item 2 of 4: three$", walk_document(case), re.M), described(bumped) + walk_document(case))
+    check("its minutes line says the agent bumped the item to settle it, and names no user action",
+          "Bumped by the agent, to settle it without asking the user: item 2 of 4 is the waiting item, before item 1 of 9, "
+          "which waits again after it." in minutes and "Bumped by the user" not in minutes, minutes)
+    settled = case.run("check", "--already-decided", "the user's ruling in item 7 of an earlier walk", reply=None)
+    closed = case.run("close")
+    check("once the agent settles the bumped item, the item that waited is the waiting item again",
+          settled.returncode == 0 and closed.returncode == 0 and marker(case) == "#next_to_present item 1 of 4"
+          and "Bumped by the user" not in case.minutes.read_text(),
+          described(settled) + described(closed) + case.minutes.read_text())
 
 
 def test_a_bumped_item_answered_gives_way_to_the_once_deferred_item_it_suspended_not_to_another_unshown_item():
