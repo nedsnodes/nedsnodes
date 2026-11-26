@@ -195,6 +195,25 @@ def first_read_skips(seat, paths, now, since, *rest):
 sweep.verdicts_print.verdict_for_seat = first_read_skips
 sys.exit(sweep.main(sys.argv[2:]))
 '''
+# A budget that lets one gh call through per invocation; each call gives the answer that replaces
+# ANSWER, and its number is appended to the file whose path replaces ASKED_FILE.
+GITHUB_BUDGET_OF_ONE_CALL_RUNNER = r'''
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("sweep", sys.argv[1])
+sweep = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sweep)
+checker_class = sweep.verdicts_print.due_task_hook.GitHubConditionChecker
+asked = []
+def ask_gh(kind, number, timeout_seconds):
+    asked.append(number)
+    with open("ASKED_FILE", "a") as stream:
+        stream.write(json.dumps(number) + "\n")
+    return ANSWER
+checker_class.ask_gh = staticmethod(ask_gh)
+checker_class.clock = staticmethod(
+    lambda: sweep.verdicts_print.due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS + 1 if asked else 0)
+sys.exit(sweep.main(sys.argv[2:]))
+'''
 
 
 def judged(send, message="", reason="r", raised=()):
@@ -2040,6 +2059,48 @@ check("a budget skip the first read found and a new agent-session's reread did n
       code == 0 and [(event["agent_seat"], event["conditions"]) for event in
                      machine.events("github_conditions_skipped_for_budget")] == [("alpha", skipped)],
       (code, output, machine.events()))
+
+# alpha's prerequisite is checked before beta's at every invocation; with a budget of one gh call,
+# beta's is asked only if alpha's answer is kept from the invocation before.
+machine = Machine()
+asked_file = machine.root / "gh-asked.jsonl"
+for seat, number in (("alpha", 50), ("beta", 51)):
+    machine.seat(seat, DONE_TURN)
+    machine.task(seat, "1")
+    task_file = machine.tasks / f"nedsnodes-{seat}-tasks" / "1.json"
+    task_file.write_text(json.dumps({**json.loads(task_file.read_text()),
+                                     "metadata": {"prerequisites": [{"pr_merged": number}]}}))
+budget_of_one = GITHUB_BUDGET_OF_ONE_CALL_RUNNER.replace("ASKED_FILE", str(asked_file)).replace(
+    "ANSWER", repr({"met": False}))
+machine.script(judged(False), judged(False))
+first_code, first_output = machine.run(0, runner_source=budget_of_one)
+machine.script(judged(False), judged(False))
+second_code, second_output = machine.run(1, runner_source=budget_of_one)
+asked = [json.loads(line) for line in asked_file.read_text().splitlines()]
+second_skips = [(event["agent_seat"], event["conditions"]) for event in
+                machine.events("github_conditions_skipped_for_budget")
+                if event["agent_seat_idle_sweep_invocation_started_at"] == at(1)]
+check("a prerequisite the GitHub budget left unasked: asked at the next invocation, as the answers "
+      "of the invocation before are kept",
+      (first_code, second_code) == (0, 0) and asked == [50, 51] and second_skips == [],
+      (first_output, second_output, asked, machine.events()))
+
+machine = Machine()
+asked_file = machine.root / "gh-asked.jsonl"
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+task_file = machine.tasks / "nedsnodes-alpha-tasks" / "1.json"
+task_file.write_text(json.dumps({**json.loads(task_file.read_text()),
+                                 "metadata": {"prerequisites": [{"pr_merged": 50}]}}))
+gh_fails = GITHUB_BUDGET_OF_ONE_CALL_RUNNER.replace("ASKED_FILE", str(asked_file)).replace(
+    "ANSWER", repr({"gh_failure": "gh timed out"}))
+machine.script()
+machine.run(0, runner_source=gh_fails)
+machine.script()
+machine.run(1, runner_source=gh_fails)
+asked = [json.loads(line) for line in asked_file.read_text().splitlines()]
+check("a prerequisite gh failed to answer: asked again at the next invocation, not answered from "
+      "the kept answers", asked == [50, 50], (asked, machine.events()))
 
 # --- rule 1: a usage limit ------------------------------------------------------------------------
 RESET_PASSED = int(START.timestamp()) - 60

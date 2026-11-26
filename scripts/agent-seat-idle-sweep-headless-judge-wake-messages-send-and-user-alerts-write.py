@@ -13,8 +13,11 @@ Each invocation, under a lock that keeps two from overlapping:
    checked.
 2. Takes slice 1's verdict for each agent-seat, by calling verdict_for_seat in
    scripts/agent-seat-idle-sweep-verdicts-print.py, which is the only reader of the transcripts,
-   walk-minutes and task lists. Each prerequisite a verdict names as not asked of GitHub because
-   the time budget for GitHub calls was spent is logged, at every invocation that skips it, as a
+   walk-minutes and task lists. GitHub's answers about task prerequisites are kept in the state
+   directory, so each condition is asked at most once in the due-task hook's recheck interval and
+   the budget goes to the conditions not answered in it, those it skipped among them. Each
+   prerequisite a verdict names as not asked of GitHub because the time budget for GitHub calls
+   was spent is logged, at every invocation that skips it, as a
    github_conditions_skipped_for_budget event.
 3. When `oauthAccount.accountUuid` in ~/.claude.json differs from the account last logged, sends
    every agent-seat with a running agent-session the account-change notice, through one headless
@@ -157,6 +160,10 @@ STATE_DIRECTORY = (Path.home() / ".local" / "state" / "nedsnodes"
 # The folder's name is the name the receiving agent-seat sees the message come from.
 HEADLESS_WORKING_DIRECTORY_NAME = "agent-seat-idle-sweep"
 RUN_FAILURES_ALERTED_FILE_NAME = "run-failures-alerted.txt"
+# Kept between invocations, so an answer is not asked again within the recheck interval and the
+# GitHub budget reaches the conditions it skipped before.
+TASK_PREREQUISITE_GITHUB_CONDITION_ANSWERS_CACHE_FILE_NAME = (
+    "task-prerequisite-github-condition-answers-cache.json")
 # The agent-seat that owns this program: each failure of the program goes to its task list, and
 # the user hears of one only through that agent-seat, or when the task cannot be written.
 OWNING_AGENT_SEAT = "reboot-test"
@@ -1935,7 +1942,11 @@ def sweep(arguments, now):
     run = Sweep(log, now, paths, Path(arguments.state_directory).expanduser(),
                 arguments.headless_timeout_seconds, machine)
     seats = verdicts_print.agent_seats(paths.handoff_directory)
-    checker = verdicts_print.due_task_hook.GitHubConditionChecker({}, now.timestamp())
+    answers_file = (Path(arguments.state_directory).expanduser()
+                    / TASK_PREREQUISITE_GITHUB_CONDITION_ANSWERS_CACHE_FILE_NAME)
+    due_task_hook = verdicts_print.due_task_hook
+    checker = due_task_hook.GitHubConditionChecker(
+        due_task_hook.read_state(answers_file)["checks"], now.timestamp())
     parser = verdicts_print.walk_finder.markdown_parser()
     verdicts, read_times = {}, {}
     for seat in seats:
@@ -1961,6 +1972,11 @@ def sweep(arguments, now):
         if budget_skips:
             run.record({"event": fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, "agent_seat": seat,
                         "conditions": budget_skips})
+    if checker.changed:
+        # A failed answer is not kept, since the checker would replay it, and the agent-seat's read
+        # failure with it, at every invocation in the recheck interval.
+        due_task_hook.write_state_atomically(answers_file, {"checks": {
+            key: answer for key, answer in checker.checks.items() if "gh_failure" not in answer}})
     run.account_change(verdicts)
     run.delivery_checks(verdicts)
     for seat, verdict in verdicts.items():
