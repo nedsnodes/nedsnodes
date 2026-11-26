@@ -18,8 +18,11 @@ prints one line opening with its outcome state, checked in this order:
                      and a stopped notice now say so; nothing was started
   STARTED            a merge batch was started; its log is merge-batch.log
   NOT STARTED        the merge batch could not be started; the line says why (exit 1)
-With --quiet, STOPPED and ALREADY RUNNING print nothing. merge-batch-run-in-queue-order,
-run directly, makes the same DIED MID-MERGE check once it holds merge-batch.lock.
+With --quiet, STOPPED and ALREADY RUNNING print nothing. The DIED MID-MERGE check is made
+only while merge-batch.lock is held: by merge-batch-start, by merge-batch-run-in-queue-order
+run directly, and by a merge batch each time it takes the lock back. When the last two find
+the stop file too, which merge-batch-start reports as STOPPED before this check, the check
+quotes it and leaves it as it is.
 
 The merge queue file is read as merge-lane-2's lanes write it: the last line for a pull
 request decides its state. "<pr> <nn-head-commit> <review commissioned at> <author> (...)"
@@ -71,10 +74,14 @@ and a stopped notice naming its outcome.
 merge-batch-list-waiting prints, without merging, each waiting pull request with its state
 on GitHub and its base branch.
 
+Each path option is made absolute where it enters, and the merge-batch-resume command that
+a STOPPED line and a stopped notice print names the merge queue file and both directories
+in use.
+
 Exit codes: 0 done as printed, including a merge batch that stopped for any reason exit 1
-does not name; 1 a file or GitHub could not be read or written, whether a merge batch then
-stopped or another subcommand failed, or the merge batch could not be started, as printed;
-2 a refusal, as printed.
+does not name; 1 a file or GitHub could not be read or written, the stop file or a stopped
+notice included, whether a merge batch then stopped or another subcommand failed, or the
+merge batch could not be started, as printed; 2 a refusal, as printed.
 """
 import argparse
 import datetime
@@ -83,6 +90,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -120,7 +128,6 @@ MERGE_PROGRAM_EXIT_MEANINGS = {
     2: "it could not run, and merged nothing",
     3: "it merged, but a step after the merge, such as main's after-merge test run, did not pass",
     4: "whether it merged is unknown"}
-RESUME_COMMAND = f"python3 {Path(__file__).resolve()} merge-batch-resume [--merge-only <pull request>]"
 
 APPROVED_LINE = re.compile(r"^(?P<hold>HOLD-\S+ )?(?P<pr>[0-9]+) (?P<head>[0-9a-f]{40}) "
                            r"(?P<since>\S+) (?P<author>\S+)")
@@ -152,15 +159,20 @@ def now():
     return f"{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}"
 
 
+def absolute_path(text):
+    # The merge program runs in its own checkout, so a relative path would name another file there.
+    return Path(text).resolve()
+
+
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--merge-queue-file", type=Path, default=DEFAULT_MERGE_QUEUE_FILE)
-    parser.add_argument("--merge-batches-directory", type=Path,
+    parser.add_argument("--merge-queue-file", type=absolute_path, default=DEFAULT_MERGE_QUEUE_FILE)
+    parser.add_argument("--merge-batches-directory", type=absolute_path,
                         default=DEFAULT_MERGE_BATCHES_DIRECTORY)
-    parser.add_argument("--merge-program-outputs-directory", type=Path,
+    parser.add_argument("--merge-program-outputs-directory", type=absolute_path,
                         default=common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY)
-    parser.add_argument("--merge-program", type=Path, default=MERGE_PROGRAM)
-    parser.add_argument("--follow-up-program", type=Path, default=FOLLOW_UP_PROGRAM)
+    parser.add_argument("--merge-program", type=absolute_path, default=MERGE_PROGRAM)
+    parser.add_argument("--follow-up-program", type=absolute_path, default=FOLLOW_UP_PROGRAM)
     parser.add_argument("--gh", default="gh")
     subcommands = parser.add_subparsers(dest="subcommand", required=True)
     start = subcommands.add_parser("merge-batch-start")
@@ -285,14 +297,25 @@ class MergeQueuePullRequestMergeBatchRunner:
                                     f"it said: {text.splitlines()[0]}") from None
         self.log(f"notice {name}: {text.splitlines()[0]}")
 
+    def resume_command(self):
+        return " ".join(shlex.quote(part) for part in (
+            "python3", str(Path(__file__).resolve()),
+            "--merge-queue-file", str(self.arguments.merge_queue_file),
+            "--merge-batches-directory", str(self.directory),
+            "--merge-program-outputs-directory", str(self.arguments.merge_program_outputs_directory),
+            "merge-batch-resume")) + " [--merge-only <pull request>]"
+
     def stopped(self, reason, write_stop_file=True):
-        """Write the stop file and a STOPPED notice, each failure said in the log."""
+        """Write the stop file and a STOPPED notice, each failure said in the log; return
+        whether every write succeeded."""
+        written = True
         stop_text = f"{reason}, {now()}"
         if write_stop_file:
             try:
                 self.stop_file.parent.mkdir(parents=True, exist_ok=True)
                 self.stop_file.write_text(stop_text + "\n")
             except OSError as error:
+                written = False
                 reason += (f"\nThe stop file {self.stop_file} could not be written ({error}), so "
                            f"a later merge-batch-start may merge again: append a HOLD- line for "
                            f"each waiting pull request until main is handled.")
@@ -310,10 +333,12 @@ class MergeQueuePullRequestMergeBatchRunner:
                         f"{self.arguments.merge_queue_file}, under flock on "
                         f"{self.arguments.merge_queue_file}.lock: HOLD-<reason> followed by "
                         f"its last approved line, or DROPPED-<reason> <pull request number>.\n"
-                        f"Then run, which removes the stop file: {RESUME_COMMAND}\n")
+                        f"Then run, which removes the stop file: {self.resume_command()}\n")
         except Stop as unwritable:
+            written = False
             self.log(f"STOPPED, and {unwritable}")
         self.log(f"STOPPED {reason}")
+        return written
 
     # One merge batch
 
@@ -326,8 +351,8 @@ class MergeQueuePullRequestMergeBatchRunner:
             self.log("ALREADY RUNNING: another merge batch holds the lock")
             return 0
         try:
-            if self.died_mid_merge_stopped():
-                return 0
+            if (written := self.died_mid_merge_stopped()) is not None:
+                return 0 if written else 1
             while True:
                 size = os.path.getsize(self.arguments.merge_queue_file)
                 while self.one_pass(merge_only):
@@ -341,33 +366,38 @@ class MergeQueuePullRequestMergeBatchRunner:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     return 0
+                # Another merge batch may have held the lock and died meanwhile.
+                if (written := self.died_mid_merge_stopped()) is not None:
+                    return 0 if written else 1
         except StopFileFound as found:
             self.log(f"the stop file exists, so the merge batch ends: {found}")
-            self.stopped(f"{self.stop_file}, written outside this merge batch, says: {found}",
-                         write_stop_file=False)
-            return 0
+            return 0 if self.stopped(f"{self.stop_file}, written outside this merge batch, "
+                                     f"says: {found}", write_stop_file=False) else 1
         except (ReadOrWriteFailed, OSError) as failed:
             self.stopped(str(failed))
             return 1
         except Stop as stop:
-            self.stopped(str(stop))
-            return 0
+            return 0 if self.stopped(str(stop)) else 1
         finally:
             lock.close()
 
     def died_mid_merge_stopped(self):
-        """Return the in-progress file's text, after writing the stop file and a stopped notice,
-        when a merge batch left it; otherwise return None.
+        """When a merge batch left the in-progress file, write a stopped notice and return
+        whether every write succeeded; otherwise return None.
 
-        Called only when no other merge batch holds merge-batch.lock, since a running batch
-        holds the file through each of its merges.
+        Called only while this process holds merge-batch.lock, since a running batch writes
+        the file under that lock and holds it through each merge. A stop file found here is
+        quoted and kept, since it holds the reason the merge program gave.
         """
         if not self.in_progress_file.exists():
             return None
         left = self.in_progress_file.read_text().strip()
-        self.stopped(f"a merge batch ended during a merge, so main is untested: "
-                     f"{self.in_progress_file} says {left}")
-        return left
+        died = (f"a merge batch ended during a merge, so main is untested: "
+                f"{self.in_progress_file} says {left}")
+        if self.stop_file.exists():
+            return self.stopped(f"{died}; {self.stop_file} says: "
+                                f"{self.stop_file.read_text().strip()}", write_stop_file=False)
+        return self.stopped(died)
 
     def one_pass(self, merge_only):
         """Try each waiting pull request once; return whether any line was appended.
@@ -529,7 +559,7 @@ class MergeQueuePullRequestMergeBatchRunner:
         raise Stop(f"pull request {number}: the merge program exited {exit_code} and GitHub "
                    f"says {merged_state.get('state')}: "
                    f"{MERGE_PROGRAM_EXIT_MEANINGS.get(exit_code, 'an exit code it does not document')}"
-                   f"; its output is {output_file}" + (f"\n{report}" if report else "")
+                   f"; its output is in {output_file}" + (f"\n{report}" if report else "")
                    + merge_notice)
 
     def follow_up_request(self, number):
@@ -570,20 +600,25 @@ class MergeQueuePullRequestMergeBatchRunner:
                          "merge queue: read that run's output, find the cause and handle it")
                 print(f"STOPPED: nothing was started, because {self.stop_file} says: "
                       f"{self.stop_file.read_text().strip()}\n"
-                      f"{where}; then run: {RESUME_COMMAND}")
+                      f"{where}; then run, which removes the stop file: {self.resume_command()}")
             return 0
-        if self.lock_held():
-            if not quiet:
-                print("ALREADY RUNNING: a merge batch holds the lock and will read any new "
-                      "line before it ends; nothing needs doing")
-            return 0
-        if self.in_progress_file.exists():
-            print(f"DIED MID-MERGE: {self.in_progress_file} was left by a merge batch that ended "
-                  f"during a merge, so that merge's outcome and main's after-merge test run are "
-                  f"unchecked; nothing was started. The stop file and a stopped notice in "
-                  f"{self.notices} now say so: handle that notice as it says.")
-            self.died_mid_merge_stopped()
-            return 0
+        self.directory.mkdir(parents=True, exist_ok=True)
+        with open(self.directory / MERGE_BATCH_LOCK_FILE_NAME, "a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if not quiet:
+                    print(f"ALREADY RUNNING: a merge batch holds {MERGE_BATCH_LOCK_FILE_NAME} and "
+                          f"will read any new line of {self.arguments.merge_queue_file} before it "
+                          f"ends; nothing needs doing")
+                return 0
+            if self.in_progress_file.exists():
+                print(f"DIED MID-MERGE: {self.in_progress_file} was left by a merge batch that "
+                      f"ended during a merge, so that merge's outcome and main's after-merge test "
+                      f"run are unchecked; nothing was started. The stop file and a stopped "
+                      f"notice in {self.notices} now say so: handle that notice as it says.")
+                return 0 if self.died_mid_merge_stopped() else 1
+        # Released before the merge batch starts, since that batch takes the lock itself.
         command = [sys.executable, str(Path(__file__).resolve()),
                    "--merge-queue-file", str(self.arguments.merge_queue_file),
                    "--merge-batches-directory", str(self.directory),
