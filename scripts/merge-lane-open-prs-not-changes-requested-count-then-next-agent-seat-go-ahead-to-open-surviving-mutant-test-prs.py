@@ -282,7 +282,7 @@ def release_message_send_problems(state_directory, agent_seat, text):
     prompt = idle_sweep.SENDER_PROMPT.format(
         seat=agent_seat, text=text,
         find_the_entry=idle_sweep.FIND_THE_ENTRY.format(seat=agent_seat, ref=ref),
-        keep_the_last_sentence=idle_sweep.KEEP_THE_LAST_SENTENCE)
+        send_the_text_as_it_stands=idle_sweep.SEND_THE_TEXT_AS_IT_STANDS)
     outcome = idle_sweep.run_headless(prompt, idle_sweep.SEND_ANSWER_SCHEMA,
                                       idle_sweep.SENDING_TOOLS,
                                       state_directory / SENDER_WORKING_DIRECTORY_NAME,
