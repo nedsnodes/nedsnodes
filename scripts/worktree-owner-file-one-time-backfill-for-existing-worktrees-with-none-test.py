@@ -188,8 +188,9 @@ def run_cases(root):
           and "for the user" not in line_of(output, "locked-subagent"), output)
     check("a subagent's worktree locked in another form is named with the cleaner keeping it",
           owner("hand-locked-subagent") is None
-          and "scripts/clean-worktrees.py --remove keeps it, so nothing needs doing now: locked "
-              "with git worktree lock (kept by hand)" in line_of(output, "hand-locked-subagent"),
+          and "scripts/clean-worktrees.py --remove keeps every locked worktree, so it stays "
+              "until someone unlocks it (lock reason: kept by hand)"
+              in line_of(output, "hand-locked-subagent"),
           output)
     check("an unlocked subagent's worktree whose subagent one agent-seat's transcripts name is "
           "given an owner file naming that agent-seat",

@@ -29,9 +29,10 @@ scripts/git-client-side-hooks-post-checkout-new-worktree-owner-file-write.py,
 says which owner it names and which worktrees get none. A program that makes a
 worktree in a clone whose core.hooksPath does not name that hook writes it
 through worktree_owner_file_write or the `write` command below. Claude Code
-makes a subagent's worktree through its `WorktreeCreate` hook,
+makes a subagent's worktree, and the worktree of `claude --worktree` or the
+EnterWorktree tool, through its `WorktreeCreate` hook,
 nn-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py,
-which writes the owner file naming the dispatching agent-session. The cleaner
+which writes the owner file naming the agent-session that asked for the worktree. The cleaner
 removes a worktree with no owner file only once nothing in it has changed for 2
 days and it holds no uncommitted or untracked file, or, for a merge-lane review
 checkout, a worktree in ~/.cache/merge-lane-review-worktrees, once its pull request has been merged

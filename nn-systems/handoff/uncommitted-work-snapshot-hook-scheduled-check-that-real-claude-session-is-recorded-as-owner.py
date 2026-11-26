@@ -21,10 +21,11 @@ nn-systems/general-tools/scheduled-jobs-on-each-machine.json.
 WHAT ONE RUN DOES, in order.
 
   1. Makes a scratch clone holding the hook and every file under scripts/ and
-     nn-systems/ that loading the hook's module MODULE_RELATIVE reads, as the
-     working tree has them; a probe that loads that module finds the files, so
-     the clone follows the module's imports without a list kept by hand. The
-     clone has one commit and sits in a temporary directory.
+     nn-systems/ that loading the hook's module,
+     nn-systems/handoff/uncommitted-work-snapshots.py, reads, as the working
+     tree has them; a probe that loads that module finds the files, so the clone
+     follows the module's imports without a list kept by hand. The clone has one
+     commit and sits in a temporary directory.
   2. Runs `claude -p` on Haiku from that clone, with the hook registered for
      Bash calls through --settings, and asks it to run one shell command that
      writes the file LIVE_CHECK_FILE_NAME.

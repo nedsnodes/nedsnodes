@@ -210,8 +210,9 @@ def main(argv=None):
             continue
         if action == "subagent":
             print(f"{worktree}: given no owner file, since it is {why}; "
-                  f"scripts/clean-worktrees.py --remove keeps it, so nothing needs doing now: "
-                  f"locked with git worktree lock ({record.locked_reason or 'no reason given'})")
+                  f"scripts/clean-worktrees.py --remove keeps every locked worktree, so it stays "
+                  f"until someone unlocks it (lock reason: "
+                  f"{record.locked_reason or 'no reason given'})")
             continue
         if action == "for the user":
             print(f"{worktree}: given no owner file, since {why}; for the user to keep or delete: "
