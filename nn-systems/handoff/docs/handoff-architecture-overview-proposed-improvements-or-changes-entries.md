@@ -1257,3 +1257,17 @@ The claim check's evidence:
 > - The writer takes them from the supervisor, not from the module: handoff-write-and-check-supervisor.py:152-154.
 > - Ranked fix-later: renaming one of these fields still takes one edit, in handoff-supervisor.py, and a search finds it.
 State: open
+
+## E108 — possible problem: an assertion of the overview is contradicted
+
+Claim: When recover-crashed-seats.py starts a ned-box tmux server itself, it uses a scope of the user's systemd manager so the test suites yield CPU to the agent-seat. The exception: the merge program's after-merge test runs get as much CPU as the agent-seat. If the manager is unreachable, it starts outside and says so.
+Found by: the overview claim check of 2026-11-26 against commit c51f61cdc01acd6dde4c74db3220850e677337d9; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/8c591923162caf474b96f516d093e93d5fb1796f-2026-11-26T04-56-24-926799Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - Contradicts the exception: `scripts/run-all-test-suites.py:393-397` "Every scope is in one slice of the user's systemd, TEST_SUITE_CGROUP_SLICE, at CPU weight 10, a sibling of app.slice and of the tmux-spawn scopes tmux puts agent-seats in, whose weight is 100: while an agent-seat in such a scope wants the CPU, the suites together get a tenth of its share."
+> - `:1197-1198` every suite scope gets "--slice={TEST_SUITE_CGROUP_SLICE}" with no exception
+> - The after-merge run is a plain run-all-test-suites.py call: `scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py:979-984`
+> - A Grep for slice, weight, nice or systemd in that merge program found nothing, and no Grep found an after-merge slice or weight.
+> - The rest is supported: `recover-crashed-seats.py:138-147`, `:830-853`.
+State: open
