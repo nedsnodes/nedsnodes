@@ -367,7 +367,7 @@ class Fixture:
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 code = program.main([*self.arguments(clone), *extra_arguments], now=now,
                                     monotonic=lambda: clock[0])
-        except Exception as error:  # every one fails the case that reads the result
+        except BaseException as error:  # every one, an interrupt included, fails the case that reads the result unless it expects it
             raised = error
         finally:
             os.environ["PATH"] = original_path
@@ -960,22 +960,64 @@ def run_cases_on_ned_box(workspace: Path):
           and fixture_git(fixture.clone, "for-each-ref", ref) == "",
           (repr(result), git_calls))
 
+    def run_with_git(stand_in_git):
+        program.git = stand_in_git
+        try:
+            return fixture.run()
+        finally:
+            program.git = real_git
+
     def interrupted_at_rev_parse(clone, *arguments):
         if arguments[:1] == ("rev-parse",):
             raise KeyboardInterrupt
         return real_git(clone, *arguments)
 
-    program.git = interrupted_at_rev_parse
-    try:
-        fixture.run()
-        outcome = "returned"
-    except KeyboardInterrupt:
-        outcome = "interrupted"
-    finally:
-        program.git = real_git
+    result = run_with_git(interrupted_at_rev_parse)
     check("an interrupt after the fetch still deletes the ref main was fetched into",
-          outcome == "interrupted" and fixture_git(fixture.clone, "for-each-ref", ref) == "",
-          outcome)
+          isinstance(result.raised, KeyboardInterrupt)
+          and fixture_git(fixture.clone, "for-each-ref", ref) == "",
+          repr(result))
+
+    def interrupted_after_the_fetch_wrote_the_ref(clone, *arguments):
+        fetched = real_git(clone, *arguments)
+        if arguments[:1] == ("fetch",):
+            raise KeyboardInterrupt
+        return fetched
+
+    result = run_with_git(interrupted_after_the_fetch_wrote_the_ref)
+    check("an interrupt that lands after git fetch wrote the ref, before the fetch returns, "
+          "still deletes the ref",
+          isinstance(result.raised, KeyboardInterrupt)
+          and fixture_git(fixture.clone, "for-each-ref", ref) == "",
+          repr(result))
+
+    def interrupted_at_rev_parse_and_ref_delete_fails(clone, *arguments):
+        if arguments[:1] == ("rev-parse",):
+            raise KeyboardInterrupt
+        return ref_delete_fails(clone, *arguments)
+
+    result = run_with_git(interrupted_at_rev_parse_and_ref_delete_fails)
+    check("a failed ref delete while an interrupt unwinds is printed with the command that "
+          "deletes the ref, since the interrupt writes no record",
+          isinstance(result.raised, KeyboardInterrupt)
+          and f"git update-ref -d {ref} failed in {fixture.clone}" in result.stderr
+          and f"delete the ref with: env -u GIT_DIR -u GIT_WORK_TREE git -C {fixture.clone} "
+              f"update-ref -d {ref}\n" in result.stderr,
+          repr(result))
+    fixture_git(fixture.clone, "update-ref", "-d", ref)
+
+    def interrupted_at_the_ref_delete(clone, *arguments):
+        if arguments[:2] == ("update-ref", "-d"):
+            raise KeyboardInterrupt
+        return real_git(clone, *arguments)
+
+    result = run_with_git(interrupted_at_the_ref_delete)
+    check("an interrupt during the ref delete, after the worktree was added, still removes "
+          "the worktree",
+          isinstance(result.raised, KeyboardInterrupt) and not fixture.worktree.exists()
+          and str(fixture.worktree) not in fixture_git(fixture.clone, "worktree", "list"),
+          (repr(result), fixture_git(fixture.clone, "worktree", "list")))
+    fixture_git(fixture.clone, "update-ref", "-d", ref)
 
 
 def run_cases_on_the_mac(workspace: Path):

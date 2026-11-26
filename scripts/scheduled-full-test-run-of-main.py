@@ -58,9 +58,10 @@ WHAT ONE RUN DOES, in order.
      nothing rests on FETCH_HEAD, which another agent's fetch can move. A
      worktree a killed run left at the same path is removed first. Only then
      does it delete the ref, also when the worktree add fails or the run is
-     interrupted, so a gc between the two cannot prune the commit; a failed
-     delete is written to the record and makes the run exit 4, though the
-     suites still run.
+     interrupted, even during the fetch, so a gc between the two cannot prune
+     the commit; a failed delete is written to the record and makes the run
+     exit 4, though the suites still run, and on an interrupt, which writes no
+     record, it is printed to stderr instead.
   3. Runs `<the Python running this program>
      <worktree>/scripts/run-all-test-suites.py --log-dir <logs>
      --record-inputs-with-strace --wait-for-lock-seconds 3600` from the
@@ -72,7 +73,8 @@ WHAT ONE RUN DOES, in order.
      3 after that hour, the record says the lock was not released within it.
      The verdict is the runner's exit code and its `SUMMARY:` line, read from
      the runner's own captured output and never from a pipeline.
-  4. Removes the worktree, whatever step 3 did. When `git worktree remove
+  4. Removes the worktree, whatever step 3 did, and also when an interrupt
+     lands during step 2's ref delete. When `git worktree remove
      --force` leaves the directory, because the run left a directory in it
      that its owner may not write to, this program gives the owner read,
      write and search permission on every directory in the worktree and
@@ -507,46 +509,59 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
     seconds_waiting_for_lock = 0
 
     fetch_destination = scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(directory)
-    fetched = git(clone, "fetch", "--no-write-fetch-head", "--no-tags", "--refmap=", "origin",
-                  f"+refs/heads/main:{fetch_destination}")
+    fetched = None
     added = None
-    if fetched.returncode != 0:
-        steps_failed.append((
-            f"not run — git fetch origin failed in {clone}: "
-            f"{git_output.git_stderr_first_error_message_else_last_line(fetched.stderr)}",
-            "Fix what git reports, then run this again."))
-    else:
+    unwinding = True
+
+    def cleanup_step_failed(what_failed, instruction):
+        steps_failed.append((what_failed, instruction))
+        # An unwinding interrupt skips the stderr report and the record below, so this is
+        # the one place the leftover and its remedy can be printed.
+        if unwinding:
+            print(f"{PROGRAM}: {what_failed}\n{instruction}", file=sys.stderr)
+
+    try:
         # The ref is deleted only once the worktree's detached HEAD holds the commit, so a
-        # gc between the two cannot prune it; the finally also deletes it on an interrupt.
+        # gc between the two cannot prune it; the finally also deletes it on an interrupt,
+        # one that lands while git fetch runs included.
         try:
-            resolved = git(clone, "rev-parse", "--verify", "--quiet",
-                           f"{fetch_destination}^{{commit}}")
-            if resolved.returncode != 0 or not resolved.stdout.strip():
+            fetched = git(clone, "fetch", "--no-write-fetch-head", "--no-tags", "--refmap=",
+                          "origin", f"+refs/heads/main:{fetch_destination}")
+            if fetched.returncode != 0:
                 steps_failed.append((
-                    f"not run — git cannot resolve {fetch_destination}, "
-                    f"fetched from origin's main, in {clone}",
-                    "Fix the clone's origin remote, then run this again."))
+                    f"not run — git fetch origin failed in {clone}: "
+                    f"{git_output.git_stderr_first_error_message_else_last_line(fetched.stderr)}",
+                    "Fix what git reports, then run this again."))
             else:
-                commit = resolved.stdout.strip()
-                remove_worktree_of_main(clone, worktree)
-                added = git(clone, "worktree", "add", "--detach", str(worktree), commit)
-                if added.returncode != 0:
+                resolved = git(clone, "rev-parse", "--verify", "--quiet",
+                               f"{fetch_destination}^{{commit}}")
+                if resolved.returncode != 0 or not resolved.stdout.strip():
                     steps_failed.append((
-                        f"not run — git worktree add --detach {worktree} {commit} failed in "
-                        f"{clone}: "
-                        f"{git_output.git_stderr_first_error_message_else_last_line(added.stderr)}",
-                        "Fix what git reports, then run this again."))
+                        f"not run — git cannot resolve {fetch_destination}, "
+                        f"fetched from origin's main, in {clone}",
+                        "Fix the clone's origin remote, then run this again."))
+                else:
+                    commit = resolved.stdout.strip()
+                    remove_worktree_of_main(clone, worktree)
+                    added = git(clone, "worktree", "add", "--detach", str(worktree), commit)
+                    if added.returncode != 0:
+                        steps_failed.append((
+                            f"not run — git worktree add --detach {worktree} {commit} failed in "
+                            f"{clone}: "
+                            f"{git_output.git_stderr_first_error_message_else_last_line(added.stderr)}",
+                            "Fix what git reports, then run this again."))
         finally:
-            deleted = git(clone, "update-ref", "-d", fetch_destination)
-            if deleted.returncode != 0:
-                steps_failed.append((
-                    f"git update-ref -d {fetch_destination} failed in {clone}: "
-                    f"{git_output.git_stderr_first_error_message_else_last_line(deleted.stderr)}",
-                    f"Fix what git reports, then delete the ref with: "
-                    f"{PRINTED_GIT_COMMAND_IGNORING_THE_READERS_GIT_DIR} "
-                    f"-C {shlex.quote(str(clone))} update-ref -d {fetch_destination}"))
-    if added is not None and added.returncode == 0:
-        try:
+            # A fetch that failed wrote no ref, so there is none to delete.
+            if fetched is None or fetched.returncode == 0:
+                deleted = git(clone, "update-ref", "-d", fetch_destination)
+                if deleted.returncode != 0:
+                    cleanup_step_failed(
+                        f"git update-ref -d {fetch_destination} failed in {clone}: "
+                        f"{git_output.git_stderr_first_error_message_else_last_line(deleted.stderr)}",
+                        f"Fix what git reports, then delete the ref with: "
+                        f"{PRINTED_GIT_COMMAND_IGNORING_THE_READERS_GIT_DIR} "
+                        f"-C {shlex.quote(str(clone))} update-ref -d {fetch_destination}")
+        if added is not None and added.returncode == 0:
             shutil.rmtree(logs, ignore_errors=True)
             command = [
                 sys.executable,
@@ -577,15 +592,18 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
                     f"and printed no {run_all_test_suites.SUMMARY_LINE_PREFIX} line, "
                     f"which is no verdict",
                     "Read the runner's stderr in the record, then run this again."))
-        finally:
+        unwinding = False
+    finally:
+        # Encloses the ref delete too, so an interrupt there does not leave the worktree.
+        if added is not None and added.returncode == 0:
             not_removed = remove_worktree_of_main(clone, worktree)
             if not_removed is not None:
-                steps_failed.append((
+                cleanup_step_failed(
                     f"the worktree {worktree} was not removed: {not_removed}",
                     f"Remove it with: chmod -R u+rwx {shlex.quote(str(worktree))} && "
                     f"rm -rf {shlex.quote(str(worktree))} && "
                     f"{PRINTED_GIT_COMMAND_IGNORING_THE_READERS_GIT_DIR} "
-                    f"-C {shlex.quote(str(clone))} worktree prune"))
+                    f"-C {shlex.quote(str(clone))} worktree prune")
 
     record_lines = [
         f"{PROGRAM}: {machine}, {pacific_date} in {mark.PACIFIC_TIME_ZONE_NAME}, started "
