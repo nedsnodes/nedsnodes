@@ -53,13 +53,14 @@ WHAT ONE RUN DOES, in order.
      provided"; a hand run with another --temporary-directory holds another
      lock, so it gets another ref too. A failed fetch stops the run and is
      written to the record.
-  2. Resolves that ref to its full commit hash and deletes the ref; a failed
+  2. Resolves that ref to its full commit hash and makes a detached worktree
+     at that hash (`git worktree add --detach`), so no branch is made and
+     nothing rests on FETCH_HEAD, which another agent's fetch can move. A
+     worktree a killed run left at the same path is removed first. Only then
+     does it delete the ref, also when the worktree add fails or the run is
+     interrupted, so a gc between the two cannot prune the commit; a failed
      delete is written to the record and makes the run exit 4, though the
-     suites still run. It then makes a
-     detached worktree at that hash (`git worktree add --detach`), so no
-     branch is made and nothing rests on FETCH_HEAD, which another agent's
-     fetch can move. A worktree a killed run left at the same path is removed
-     first.
+     suites still run.
   3. Runs `<the Python running this program>
      <worktree>/scripts/run-all-test-suites.py --log-dir <logs>
      --record-inputs-with-strace --wait-for-lock-seconds 3600` from the
