@@ -347,7 +347,6 @@ def run_missing_launcher_case(workspace: Path):
             "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py",
             "mac-reference-checkout-launcher-scripts-directory-path-constant-common.py",
             "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py",
-            "pull-request-conflict-with-main-rebase-or-replace-answer-common.py",
             "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py"):
         (general_tools_home / general_tools_module).write_text(
             (SUPERVISOR_SCRIPT.parents[1] / "general-tools" / general_tools_module)
