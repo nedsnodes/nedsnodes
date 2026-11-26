@@ -130,7 +130,7 @@ class Fixture:
         self.git("commit", "-q", "--allow-empty", "-m", message)
         return self.git("rev-parse", "HEAD")
 
-    def commit_overview(self, checked_against=None, body="# Example overview\n\nThe example system.\n"):
+    def commit_overview(self, checked_against=None, body="# Example overview\n\nthe program exists\n"):
         line = "" if checked_against is False else "\n" + claim_check.overview_path_reader.CHECKED_AGAINST_LINE_TEMPLATE.format(
             commit=checked_against or self.code_commit) + "\n"
         self.write(OVERVIEW, body + line)
@@ -250,11 +250,27 @@ def run_unit_cases():
           claim_check.claims_from_fresh_agent_report(GOOD_REPORT, ["a", "b"])
           == (None, "malformed: 1 VERDICT lines, for 2 assertion(s) given"))
     check("no assertions to judge and no report give no claims and no malformed result",
-          claim_check.result_from_fresh_agent_report("", [], kept_claims=[claim_check.Claim(None, "supported", None, "a", "")])
+          claim_check.result_from_fresh_agent_report("", [])
           == ([], all_supported))
-    claims, _ = claim_check.claims_from_fresh_agent_report(GOOD_REPORT, ["The overview's own sentence."])
-    check("a claim takes its text from the assertion it was given, not from the fresh-agent's restatement",
-          claims[0].assertion == "The overview's own sentence.", claims)
+    claims, _ = claim_check.claims_from_fresh_agent_report(
+        "VERDICT 1 supported:   the  program exists \nCOUNTS supported=1 contradicted=0 unsupported=0\n",
+        ["the program exists"])
+    check("a claim takes its text from the assertion it was given, and a restatement differing only in whitespace "
+          "is accepted", claims[0].assertion == "the program exists", claims)
+    check("a restatement other than the assertion given its number makes the report malformed",
+          claim_check.claims_from_fresh_agent_report(GOOD_REPORT, ["The overview's own sentence."])
+          == (None, "malformed: VERDICT 1 restates an assertion other than assertion 1 given"))
+    check("swapped VERDICT blocks, numbered in order, make the report malformed instead of binding a must-fix verdict "
+          "to the other claim",
+          claim_check.claims_from_fresh_agent_report(
+              "VERDICT 1 supported: B\nVERDICT 2 contradicted must-fix: A\n"
+              "COUNTS supported=1 contradicted=1 unsupported=0\n", ["A", "B"])
+          == (None, "malformed: VERDICT 1 restates an assertion other than assertion 1 given"))
+    check("a ``` line inside a ~~~ fence does not close it",
+          [text for _, text in claim_check.overview_claims_split_from_text(
+              "~~~\nA --> B\n```\nB --> C\n~~~\nProse. More.\n")] == ["A --> B", "```", "B --> C", "Prose.", "More."])
+    check("a full stop inside a double-backtick span ends no sentence",
+          claim_check.sentences_split_outside_backtick_spans("Run ``v1. Next`` now. Done.") == ["Run ``v1. Next`` now.", "Done."])
     claims, _ = claim_check.claims_from_fresh_agent_report(
         "VERDICT 1 contradicted fix-later: a\n  x.py:3 `y`\nVERDICT 2 supported: b\n  z.py:1 `w`\n"
         "COUNTS supported=1 contradicted=1 unsupported=0\n", ["a", "b"])
@@ -811,7 +827,7 @@ def run_program_cases(fixture):
           claim_check.find_newest_architecture_overview_claim_check_report_path_and_result_for_overview_git_blob(fixture.reports, OVERVIEW, blob)
           == (reports[0], claim_check.OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_ALL_CLAIMS_SUPPORTED) if reports else False)
     check("the fresh-agent runs once, at the checked-against commit, with the overview's text in place",
-          len(calls) == 1 and "The example system." in calls[0]["overview_there"]
+          len(calls) == 1 and "the program exists" in calls[0]["overview_there"]
           and fixture.code_commit in calls[0]["stdin"] and claim_check.HOW_TO_PAGE in calls[0]["stdin"], calls)
     check("the fresh-agent's whole tool set is Read, Grep and Glob, so it cannot start subagents, and hooks are off",
           len(calls) == 1 and calls[0]["argv"][calls[0]["argv"].index("--tools") + 1] == "Read,Grep,Glob"

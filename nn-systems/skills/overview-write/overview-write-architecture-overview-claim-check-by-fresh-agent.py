@@ -83,7 +83,9 @@ find_newest_architecture_overview_claim_check_report_path_and_result_for_overvie
 Does not handle: counting rounds (the page stops the check at round 3 and
 sends what is left to the user; no report records what he decides); a
 supported claim made false by a change to a file it does not rest on, which
-keeps its verdict; an
+keeps its verdict; a claim whose meaning depends on another sentence, such as
+"the same file" after a sentence naming the file, which keeps its verdict when
+only that other sentence changes; an
 overview not on the path the page gives; a run on the Mac, where the
 log-store is not local; a repository without origin/main, which is refused;
 another claim check appending the same claim between this run's last read of
@@ -195,10 +197,10 @@ COUNTS_LINE = re.compile(r"^COUNTS supported=(\d+) contradicted=(\d+) unsupporte
 Claim = collections.namedtuple("Claim", "number verdict rank assertion evidence")
 
 CLAIM_RECORDS_SECTION_HEADING = "# Claim records, one JSON object per line"
-FENCED_BLOCK_DELIMITER = re.compile(r"^\s*(```|~~~)")
+FENCED_BLOCK_DELIMITER = re.compile(r"^\s*(`{3,}|~{3,})")
 LIST_ITEM_MARKER = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 TABLE_DELIMITER_ROW = re.compile(r"^[\s|:-]+$")
-BACKTICK_SPAN = re.compile(r"`[^`]*`")
+BACKTICK_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 # A sentence ends at . ! or ? followed by a space and a capital, a backtick, an asterisk or an opening quote or
 # bracket; a full stop inside a path or a backtick span ends nothing.
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z`*\"'(\[])")
@@ -367,7 +369,9 @@ def claims_from_fresh_agent_report(report, assertions):
     """Return (the report's claims, None), or (None, a result saying why the report is malformed).
 
     assertions are the texts the fresh-agent was given, numbered from 1; each claim takes its text from them, not
-    from the fresh-agent's restatement, so that its key matches the overview's sentence."""
+    from the fresh-agent's restatement, so that its key matches the overview's sentence. A restatement that differs
+    from the assertion given its number, whitespace aside, makes the report malformed, because the verdict could
+    then belong to another assertion."""
     if not assertions and not report:
         return [], None
     matches = list(VERDICT_LINE.finditer(report))
@@ -385,6 +389,8 @@ def claims_from_fresh_agent_report(report, assertions):
     for index, match in enumerate(matches):
         number, verdict, rank = int(match.group(1)), match.group(2), match.group(3)
         assertion = assertions[number - 1]
+        if normalized_claim(match.group(4)) != normalized_claim(assertion):
+            return None, f"malformed: VERDICT {number} restates an assertion other than assertion {number} given"
         if verdict == "supported" and rank is not None:
             return None, f"malformed: VERDICT {number} is supported but has the rank {rank}"
         if verdict != "supported" and rank not in RANKS:
@@ -435,27 +441,30 @@ def claims_ranked_after_recheck(claims, recheck_reports):
     return ranked, None
 
 
-def result_from_fresh_agent_report(report, assertions, recheck_reports=None, kept_claims=()):
+def result_from_fresh_agent_report(report, assertions, recheck_reports=None):
     """Return the judged claims after the recheck, or None for a malformed report, and the result for the report's
-    header, which counts the kept claims too."""
+    header; a kept claim is always supported with no rank, so it changes neither."""
     claims, malformed = claims_from_fresh_agent_report(report, assertions)
     if malformed:
         return None, malformed
     claims, malformed = claims_ranked_after_recheck(claims, recheck_reports or {})
     if malformed:
         return None, malformed
-    return claims, result_from_ranked_claims([*claims, *kept_claims])
+    return claims, result_from_ranked_claims(claims)
 
 
 def overview_claims_split_from_text(text):
     """Return the overview's claims in order, each once: every sentence outside a fenced block and every non-blank
     line inside one, leaving out headings, table delimiter rows, the **Checked against:** line and the pointer line
     to the proposed-improvements-or-changes-file, which this program asks for."""
-    claims, in_fenced_block = [], False
+    claims, opening_fence = [], None
     for line in text.splitlines():
-        if FENCED_BLOCK_DELIMITER.match(line):
-            in_fenced_block = not in_fenced_block
+        fence = FENCED_BLOCK_DELIMITER.match(line)
+        if fence and (opening_fence is None or (fence.group(1)[0] == opening_fence[0]
+                                                and len(fence.group(1)) >= len(opening_fence))):
+            opening_fence = fence.group(1) if opening_fence is None else None
             continue
+        in_fenced_block = opening_fence is not None
         if not line.strip() or (not in_fenced_block and (
                 line.lstrip().startswith("#") or TABLE_DELIMITER_ROW.fullmatch(line)
                 or line.startswith(overview_path_reader.CHECKED_AGAINST_PREFIX)
@@ -507,7 +516,7 @@ def repository_paths_named_in_text(text, blobs):
 def overview_claim_cited_file_blob_hashes_by_path(assertion, evidence, blobs, overview_path):
     """Return {path: blob} of the files a claim rests on: the paths its text names in backticks and those its
     evidence names, the overview itself left out, since its text at the commit is not the text checked."""
-    named = {path for span in BACKTICK_SPAN.findall(assertion) for path in repository_paths_named_in_text(span, blobs)}
+    named = {path for span in BACKTICK_SPAN.finditer(assertion) for path in repository_paths_named_in_text(span.group(0), blobs)}
     named |= set(repository_paths_named_in_text(evidence or "", blobs))
     return {path: blobs[path] for path in sorted(named - {overview_path})}
 
@@ -853,16 +862,14 @@ def check_overview_claims(arguments):
                       f"{worktree}`, then check that `git -C {repository} worktree list` no longer shows {worktree}; if it does, tell "
                       "the user.", file=sys.stderr)
 
-    kept_claims = [Claim(None, record["verdict"], record["rank"], record["claim"], record["evidence"])
-                   for record in kept_records.values()]
-    claims, result = result_from_fresh_agent_report(report, assertions, recheck_reports, kept_claims)
+    claims, result = result_from_fresh_agent_report(report, assertions, recheck_reports)
     new_fix_later_claims, covering_entries, covering_answer, decided_text = (
         fix_later_claims_uncovered_by_unsettled_entries_after_judge_run(repository, overview_path, claims) if claims
         else ([], {}, None, None))
     destination_directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S-%fZ")
     destination = destination_directory / f"{blob}-{stamp}.md"
-    ranks = (", ".join(f"{count} {rank}" for rank, count in rank_counts([*claims, *kept_claims]).items())
+    ranks = (", ".join(f"{count} {rank}" for rank, count in rank_counts(claims).items())
              if claims is not None else "none")
     appended_sections = "".join(f"\n\n# Recheck of VERDICT {number}, which the report above ranks must-fix\n\n{recheck}"
                                 for number, recheck in sorted(recheck_reports.items()))
