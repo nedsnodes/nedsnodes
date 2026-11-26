@@ -5,8 +5,8 @@ the two patterns in MARKER_PATTERNS.
 Standing instructions hold what an agent must do. A line that records when the
 user decided tells the agent nothing to do; that history belongs in the commit
 message and the pull request. The files checked are every git-tracked
-CLAUDE.md, AGENTS.md, SKILL.md and reusable-prompt (a *-instructions.md or
-*-prompt.md that is not a GHI-MD), the agent definitions in .claude/agents/ and
+CLAUDE.md, AGENTS.md, SKILL.md and reusable-prompt (a *.instructions.md or
+*.prompt.md that is not a GHI-MD), the agent definitions in .claude/agents/ and
 the cold-read prompts in .claude/skills/cold-read/prompts/.
 
 Links and paths are not checked: a date inside a markdown link target, a URL,
@@ -53,7 +53,7 @@ _reusable_prompt_rule_spec.loader.exec_module(_reusable_prompt_rule)
 REPOSITORY = Path(__file__).resolve().parent.parent
 SUITE = "scripts/standing-instructions-carry-no-citations-test.py"
 
-# git's pathspec `*` crosses directories, so `*-prompt.md` finds the file at any depth.
+# git's pathspec `*` crosses directories, so `*.prompt.md` finds the file at any depth.
 STANDING_INSTRUCTION_PATHSPECS = ("CLAUDE.md", "*/CLAUDE.md", "AGENTS.md", "*/AGENTS.md",
                                   "SKILL.md", "*/SKILL.md",
                                   *(f"*{suffix}" for suffix in _reusable_prompt_rule.REUSABLE_PROMPT_SUFFIXES),
@@ -74,7 +74,7 @@ POINTER_PATTERNS = (
 EXCEPTIONS = {
     (".claude/skills/explain/SKILL.md", "a `(user-ruled …)` line in a file"):
         "tells the agent the form a recorded ruling takes in a file, so the agent can find one",
-    ("nn-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md",
+    ("nn-systems/skills/explain/explain-how-to-write-an-identifier.instructions.md",
      '`ruled 2026-09-15 at "<which walk or'):
         "an example of a citation's form, which the agent copies when it cites a ruling",
     (".claude/skills/cold-read/SKILL.md", "`--user-ruled-cold-read-full-run-count-restart`"):
@@ -131,11 +131,11 @@ def the_file_listing_takes_exactly_the_standing_instruction_files():
     with tempfile.TemporaryDirectory() as scratch:
         scratch = Path(scratch)
         subprocess.run(["git", "init", "-q", str(scratch)], check=True)
-        names = ["CLAUDE.md", "x/CLAUDE.md", "x/y/SKILL.md", "a-instructions.md",
-                 "x/b-prompt.md", "AGENTS.md", "x/AGENTS.md", ".claude/agents/d.md",
+        names = ["CLAUDE.md", "x/CLAUDE.md", "x/y/SKILL.md", "a.instructions.md",
+                 "x/b.prompt.md", "x/c-prompt.md", "AGENTS.md", "x/AGENTS.md", ".claude/agents/d.md",
                  ".claude/skills/cold-read/prompts/e.md", "c-design.md", "NOTCLAUDE.md",
-                 "docs/issues/4080-fix-the-arbitrator-agent-instructions.md",
-                 "docs/issues/AGENTS.md", "docs/issues/queue/x-prompt.md",
+                 "docs/issues/4080-fix-the-arbitrator-agent.instructions.md",
+                 "docs/issues/AGENTS.md", "docs/issues/queue/x.prompt.md",
                  "x/SKILL.md.bak", ".claude/skills/other/prompts/f.md", ".claude/g.md"]
         for name in names:
             (scratch / name).parent.mkdir(parents=True, exist_ok=True)
@@ -143,8 +143,8 @@ def the_file_listing_takes_exactly_the_standing_instruction_files():
         subprocess.run(["git", "-C", str(scratch), "add", "--", *names], check=True)
         listed = standing_instruction_paths(scratch)
     return listed == sorted(["CLAUDE.md", "x/CLAUDE.md", "x/y/SKILL.md",
-                             "a-instructions.md", "x/b-prompt.md", "AGENTS.md", "x/AGENTS.md",
-                             "docs/issues/AGENTS.md", "docs/issues/queue/x-prompt.md",
+                             "a.instructions.md", "x/b.prompt.md", "AGENTS.md", "x/AGENTS.md",
+                             "docs/issues/AGENTS.md", "docs/issues/queue/x.prompt.md",
                              ".claude/agents/d.md", ".claude/skills/cold-read/prompts/e.md"])
 
 

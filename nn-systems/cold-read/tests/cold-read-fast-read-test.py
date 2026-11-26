@@ -64,7 +64,7 @@ WHAT IS PINNED HERE.
     the edit substituted and no placeholder left.
 
   - That embedded template is current: it is byte-for-byte the text of
-    .claude/skills/cold-read/prompts/fast-clarify-prompt.md, the editable source of
+    .claude/skills/cold-read/prompts/fast-clarify.prompt.md, the editable source of
     truth the user ruled on 2026-09-07. The constant in the script is a
     derived copy of that file, and this is the case that holds the two in
     step.
@@ -190,13 +190,13 @@ def script_under_test_module():
 # root). One pair today, because only the fast cell has a second copy of its
 # prompt: the user's ruling that the reviewer's instructions live in the .py
 # that runs the cell was made about the fast cell. The other cold-read
-# prompts -- defect-hunt-prompt.md, terminology-prompt.md -- are read from the
+# prompts -- defect-hunt.prompt.md, terminology.prompt.md -- are read from the
 # skill at run time and have no second copy anywhere, so nothing about them
 # belongs here. If another cell ever embeds its prompt the same way, the same
 # shape covers it: one more pair, on one more line.
 EMBEDDED_PROMPT_COPY_AND_SOURCE_PAIRS = (
     ("FAST_CLARIFY_PROMPT_TEMPLATE",
-     ".claude/skills/cold-read/prompts/fast-clarify-prompt.md"),
+     ".claude/skills/cold-read/prompts/fast-clarify.prompt.md"),
 )
 
 # The stub `agy`: the model from --model, the prompt from --print's value,
@@ -525,7 +525,7 @@ with tempfile.TemporaryDirectory() as scratch:
     record_directory_name = name_module.record_directory_name_for_target
     clock_at_1042 = datetime.datetime(2026, 9, 16, 10, 42)
     skill_target = Path("/r/.claude/skills/cold-read/SKILL.md")
-    terminology_target = Path("/r/.claude/skills/cold-read/prompts/terminology-prompt.md")
+    terminology_target = Path("/r/.claude/skills/cold-read/prompts/terminology.prompt.md")
     check("a skill's document part is SKILL, a hyphen, and the skill's name",
           record_name(skill_target) == "SKILL-cold-read", record_name(skill_target))
     check("a skill's prompt file is its stem alone, like any other document",
@@ -2280,7 +2280,7 @@ root = warning_module.REPO_ROOT
 check("a skill is in the class",
       class_of(root / ".claude/skills/cold-read/SKILL.md") == "a skill or a skill's prompt")
 check("a skill's prompt is in the class",
-      class_of(root / ".claude/skills/cold-read/prompts/terminology-prompt.md")
+      class_of(root / ".claude/skills/cold-read/prompts/terminology.prompt.md")
       == "a skill or a skill's prompt")
 check("a file under docs/agents/ is in the class",
       class_of(root / "docs/agents/pr-reviewer-instructions.md") == "a file under docs/agents/")

@@ -561,7 +561,7 @@ def main():
         out_path.write_text("occupied", encoding="utf-8")
         with contextlib.redirect_stdout(buffer):
             runner_gate.run_cell(
-                "cut", "claude", "docs/agents/sanity-checker-cut-adversarial-prompt.md",
+                "cut", "claude", "docs/agents/sanity-checker-cut-adversarial.prompt.md",
                 [], pathlib.Path("unused-problem-statement.md"),
                 pathlib.Path(scratch), {}, ())
     output = buffer.getvalue()
@@ -777,7 +777,7 @@ def main():
         with tempfile.TemporaryDirectory() as scratch:
             runner_exit.RECORDS_ROOT = pathlib.Path(scratch) / "sanity-check-records"
             sys.argv = [str(RUNNER_SCRIPT), "--adversarial-prompt", "cut", "--target",
-                        "docs/agents/sanity-checker-cut-adversarial-prompt.md"]
+                        "docs/agents/sanity-checker-cut-adversarial.prompt.md"]
             buffer = io.StringIO()
             try:
                 with contextlib.redirect_stdout(buffer):
@@ -1029,7 +1029,7 @@ def main():
           and "Writing the problem statement" in requester.stdout,
           f"rc={requester.returncode}")
     cell_view = sp.run([str(RUNNER_SCRIPT), "--print", "cut",
-                        "--target", "docs/agents/sanity-checker-cut-adversarial-prompt.md"],
+                        "--target", "docs/agents/sanity-checker-cut-adversarial.prompt.md"],
                        capture_output=True, text=True)
     check("--print cut emits the assembled cell prompt",
           cell_view.returncode == 0
@@ -3929,7 +3929,7 @@ sys.exit(module.main())
     with tempfile.TemporaryDirectory() as scratch:
         runner_git_main.RECORDS_ROOT = pathlib.Path(scratch) / "sanity-check-records"
         sys.argv = [str(RUNNER_SCRIPT), "--adversarial-prompt", "cut", "--runtime", "claude",
-                    "--target", "docs/agents/sanity-checker-cut-adversarial-prompt.md"]
+                    "--target", "docs/agents/sanity-checker-cut-adversarial.prompt.md"]
         sys_argv_of_the_baseline_case = list(sys.argv)
         printed, errors = io.StringIO(), io.StringIO()
         try:
@@ -3982,7 +3982,7 @@ sys.exit(module.main())
         with tempfile.TemporaryDirectory() as scratch:
             runner_cell_git.RECORDS_ROOT = pathlib.Path(scratch) / "sanity-check-records"
             sys.argv = [str(RUNNER_SCRIPT), "--adversarial-prompt", "cut", "--runtime", "claude",
-                        "--target", "docs/agents/sanity-checker-cut-adversarial-prompt.md"]
+                        "--target", "docs/agents/sanity-checker-cut-adversarial.prompt.md"]
             printed = io.StringIO()
             try:
                 with contextlib.redirect_stdout(printed):
@@ -3999,7 +3999,7 @@ sys.exit(module.main())
               and "WARNING: the runner could not check" in printed.getvalue()
               and runner_cell_git.git_failure_next_step_lines(
                   runner_cell_git.rerun_command_for_cell(
-                      "cut", "claude", "docs/agents/sanity-checker-cut-adversarial-prompt.md",
+                      "cut", "claude", "docs/agents/sanity-checker-cut-adversarial.prompt.md",
                       [], None), runner_cell_git.CELL_GIT_CHECK_FAILED_AGAIN,
                   "a git failure this case made") in printed.getvalue()
               and "a git failure this case made" in printed.getvalue(),

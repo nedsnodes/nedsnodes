@@ -137,7 +137,7 @@ through --prompt-file from a temporary file, with --cell fast-clarify naming
 the pass. The cold-read-cell's provenance stamp therefore carries
 a `prompt_file=` field naming that temporary file; its basename
 says where the text came from. The template is the user's own text:
-.claude/skills/cold-read/prompts/fast-clarify-prompt.md as he walked and ruled
+.claude/skills/cold-read/prompts/fast-clarify.prompt.md as he walked and ruled
 it, landed by PR #274 on 2026-09-07, copied here verbatim. A change to the
 instructions is a one-hunk change to that one constant; outside it, this file
 knows only the three placeholders it fills itself (see THE EDIT and THE
@@ -386,7 +386,7 @@ EXIT_BAD_INVOCATION = 64
 # `prompt_file=` stamp field, so it says where the text came from.
 EMBEDDED_PROMPT_FILE_NAME = "cold-read-fast-read-embedded-fast-clarify-prompt.md"
 
-# The user's text (see the docstring): .claude/skills/cold-read/prompts/fast-clarify-prompt.md,
+# The user's text (see the docstring): .claude/skills/cold-read/prompts/fast-clarify.prompt.md,
 # verbatim. {TARGET_PATH} and {REPORT_PATH} are substituted by the
 # cold-read-cell launcher; {CHANGED_SENTENCE_IDS}, {REMOVED_TEXT} and
 # {TEXT_INTENDED_READER_CATEGORY} by

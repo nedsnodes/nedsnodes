@@ -43,7 +43,7 @@ read_marker_approval = _guard_approval_marker_common.read_marker_approval
 
 PROTECTED_BASENAMES = ("CLAUDE.md", "CLAUDE.local.md")
 PROTECTED_DIRECTORY = ".claude"
-REUSABLE_PROMPT_SUFFIXES = ("-prompt.md", "-instructions.md")
+REUSABLE_PROMPT_SUFFIXES = (".prompt.md", ".instructions.md")
 PROMPT_SCRATCH_DIRECTORY_PREFIXES = ((".claude", "jobs"), (".claude", "handoffs"))
 REVIEWED_DOCUMENT_SUFFIX = ".md"
 REVIEWED_HOME_DIRECTORY_PREFIXES = (("docs", "agents"), ("docs", "nedsnodes-wiki"), ("nn-systems", "skills"))
@@ -135,7 +135,7 @@ def guarded_write_deny_message(guarded_kind: str, draft_lines: str = "") -> str:
 
 
 REUSABLE_PROMPT_DENY_MESSAGE = guarded_write_deny_message(
-    "a reusable prompt, a file named -prompt.md or -instructions.md in a checkout,",
+    "a reusable prompt, a file named .prompt.md or .instructions.md in a checkout,",
     "\nIf the prompt is a one-off, write it outside the checkout, in your scratchpad.\n"
     "If it is a draft for the user's approval-walk, write it in a queue directory or "
     "docs/drafts/.")

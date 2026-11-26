@@ -103,11 +103,11 @@ On 2026-10-30 at 14:00 the user approved item 5 of approval-walk md-skills-seat-
 
 > Choice 1: a skill, in `.claude/skills/write-test-plan/`, for any agent writing tests; the test-design-writing agent-instructions point to it.
 
-So the build produces a skill, `.claude/skills/write-test-plan/`, for any agent writing tests, and the agent-instructions of design-to-main's `test-design-writing` node, drafted at `docs/agents/queue/design-to-main-test-design-writing-agent-instructions.md`, point to it rather than repeating it.
+So the build produces a skill, `.claude/skills/write-test-plan/`, for any agent writing tests, and the agent-instructions of design-to-main's `test-design-writing` node, drafted at `docs/agents/queue/design-to-main-test-design-writing-agent.instructions.md`, point to it rather than repeating it.
 
 ## Next action
 
-Build the skill `.claude/skills/write-test-plan/`, with the riders and rules in this file as its content. When it lands, the draft at `docs/agents/queue/design-to-main-test-design-writing-agent-instructions.md` points to it, and the failure-test rule held in CLAUDE.md moves into it, as "2026-10-10: a failure-test rule held in CLAUDE.md until this build lands" says. CLAUDE.md's "Before pushing" bullet words that rule today as "Code that handles a failure, such as an `except` block or an exit-code check, gets a test that causes that failure, checked by mutation testing."
+Build the skill `.claude/skills/write-test-plan/`, with the riders and rules in this file as its content. When it lands, the draft at `docs/agents/queue/design-to-main-test-design-writing-agent.instructions.md` points to it, and the failure-test rule held in CLAUDE.md moves into it, as "2026-10-10: a failure-test rule held in CLAUDE.md until this build lands" says. CLAUDE.md's "Before pushing" bullet words that rule today as "Code that handles a failure, such as an `except` block or an exit-code check, gets a test that causes that failure, checked by mutation testing."
 
 ## Evidence of record
 

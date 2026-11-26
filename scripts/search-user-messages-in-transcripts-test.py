@@ -261,7 +261,7 @@ with tempfile.TemporaryDirectory() as directory:
         supervisor_module.RESUME_PROMPT_WHEN_A_SESSION_ENDED_WITHOUT_A_HANDOFF,
         no_handoff_yet,
         supervisor_module.first_prompt_from_launch_command_marked_not_typed_by_the_user(
-            "You are the git-infra seat. Read docs/agents/seat-first-prompt.md."),
+            "You are the git-infra seat. Read docs/agents/seat-first.prompt.md."),
         no_handoff_yet + "\n\nLeftover work-snapshots: 1 copy(ies) of uncommitted work left by an agent of this "
         "agent-seat whose `claude` process is gone, and no longer in its worktree:",
         supervisor_module.build_ignition_prompt(
@@ -285,7 +285,7 @@ with tempfile.TemporaryDirectory() as directory:
 
 # Written out, not read from the handoff-supervisor, so that dropping the earlier wording from it fails here.
 first_prompt_ending_with_the_earlier_not_typed_by_the_user_line = (
-    "You are the git-infra seat. Read docs/agents/seat-first-prompt.md.\n\n"
+    "You are the git-infra seat. Read docs/agents/seat-first.prompt.md.\n\n"
     "The handoff-supervisor was given this first prompt with --first-prompt-file or --first-prompt; "
     "the user did not type it.")
 check("a first prompt that ends with the earlier wording of the not-typed-by-the-user line is still a program's",

@@ -209,9 +209,9 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     result = run_hook(decoy, workspace, str(worktree / ".claude" / "hooks" / "some-hook.py"))
     check("a worktree's own .claude machinery is still blocked", result.returncode == 2)
 
-    # Reusable prompts (2026-09-29): a file named -prompt.md or -instructions.md
+    # Reusable prompts (2026-09-29): a file named .prompt.md or .instructions.md
     # anywhere in a checkout, except where drafts and working files are written.
-    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "fleet-instructions.md"))
+    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "fleet.instructions.md"))
     check("a seat brief in docs/agents/ is blocked", result.returncode == 2)
     check("the block says it is a reusable prompt", "reusable prompt" in result.stderr, result.stderr)
     check("the block sends a one-off prompt to the scratchpad", "scratchpad" in result.stderr,
@@ -221,17 +221,20 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           result.stderr)
     check("the reusable-prompt block sends a session in the reference checkout to its own worktree",
           REFERENCE_CHECKOUT_LINE in " ".join(result.stderr.split()), result.stderr)
-    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "seat-first-prompt.md"))
+    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "seat-first.prompt.md"))
     check("a first prompt in docs/agents/ is blocked", result.returncode == 2)
     skills = workspace / "nn-systems" / "skills" / "cold-read"
-    result = run_hook(decoy, workspace, str(skills / "defect-hunt-prompt.md"))
+    result = run_hook(decoy, workspace, str(skills / "defect-hunt.prompt.md"))
     check("a skill prompt under nn-systems/skills/ is blocked", result.returncode == 2)
-    result = run_hook(decoy, workspace, str(skills / "docs" / "cold-read-cell-instructions.md"))
+    result = run_hook(decoy, workspace, str(skills / "docs" / "cold-read-cell.instructions.md"))
     check("a skill's instructions in its docs/ are blocked", result.returncode == 2)
-    result = run_hook(decoy, workspace, str(workspace / "nn-systems" / "handoff" / "handoff-prompt.md"))
+    result = run_hook(decoy, workspace, str(workspace / "nn-systems" / "handoff" / "handoff.prompt.md"))
     check("a program's prompt beside it is blocked", result.returncode == 2)
+    result = run_hook(decoy, workspace, str(workspace / "nn-systems" / "handoff" / "handoff-prompt.md"))
+    check("a name ending -prompt.md, outside the reviewed homes, passes: the endings take a dot",
+          result.returncode == 0, result.stderr)
     result = run_hook(decoy, workspace,
-                      str(worktree / "docs" / "agents" / "fleet-instructions.md"))
+                      str(worktree / "docs" / "agents" / "fleet.instructions.md"))
     check("a reusable prompt inside a worktree checkout is still blocked", result.returncode == 2)
     result = run_hook(decoy, workspace, str(skills / "cold-read-grid.py"))
     check("a skill's code passes", result.returncode == 0, result.stderr)
@@ -240,23 +243,23 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           result.returncode == 0, result.stderr)
     result = run_hook(decoy, workspace, str(workspace / "docs" / "prompt-writing-notes.md"))
     check("a file merely mentioning prompt passes", result.returncode == 0, result.stderr)
-    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "queue" / "new-instructions.md"))
+    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "queue" / "new.instructions.md"))
     check("a draft in docs/agents/queue/ passes", result.returncode == 0, result.stderr)
-    result = run_hook(decoy, workspace, str(workspace / "docs" / "issues" / "queue" / "x-prompt.md"))
+    result = run_hook(decoy, workspace, str(workspace / "docs" / "issues" / "queue" / "x.prompt.md"))
     check("a draft in docs/issues/queue/ passes", result.returncode == 0, result.stderr)
-    result = run_hook(decoy, workspace, str(workspace / "nn-queue" / "x-prompt.md"))
+    result = run_hook(decoy, workspace, str(workspace / "nn-queue" / "x.prompt.md"))
     check("a prompt in nn-queue/, which is not a draft place, is blocked", result.returncode == 2, result.stderr)
-    result = run_hook(decoy, workspace, str(workspace / "docs" / "drafts" / "x-instructions.md"))
+    result = run_hook(decoy, workspace, str(workspace / "docs" / "drafts" / "x.instructions.md"))
     check("a draft in docs/drafts/ passes", result.returncode == 0, result.stderr)
-    result = run_hook(decoy, workspace, str(workspace / ".claude" / "jobs" / "ab12" / "tmp" / "x-prompt.md"))
+    result = run_hook(decoy, workspace, str(workspace / ".claude" / "jobs" / "ab12" / "tmp" / "x.prompt.md"))
     check("a background job's scratch prompt passes", result.returncode == 0, result.stderr)
     outside = tmp / "scratchpad-outside-any-checkout"
     outside.mkdir()
-    result = run_hook(decoy, workspace, str(outside / "subagent-prompt.md"))
+    result = run_hook(decoy, workspace, str(outside / "subagent.prompt.md"))
     check("a one-off prompt outside any checkout passes", result.returncode == 0, result.stderr)
     marker = workspace / ".walk-approved"
     marker.write_text("y\n", encoding="utf-8")
-    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "fleet-instructions.md"))
+    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "fleet.instructions.md"))
     check("an approved change to a reusable prompt passes once", result.returncode == 0, result.stderr)
     check("the marker is consumed by the prompt's pass", not marker.exists())
 
@@ -346,7 +349,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         ("a CLAUDE.md copy in a sanity-check record",
          workspace / "sanity-check-records" / "2026-10-18-claude" / "CLAUDE.md"),
         ("a reusable prompt's copy in a cold-read record",
-         workspace / "cold-read-records" / "fleet-2026-10-18" / "target" / "fleet-instructions.md"),
+         workspace / "cold-read-records" / "fleet-2026-10-18" / "target" / "fleet.instructions.md"),
         ("a .claude/ file's copy in an md-review record",
          workspace / "md-review-records" / "skill-2026-10-18" / ".claude" / "skills" / "x" / "SKILL.md"),
     ]
@@ -357,7 +360,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                       str(workspace / "docs" / "cold-read-records" / "x-2026-10-18" / "CLAUDE.local.md"))
     check("a CLAUDE.local.md in a record-named directory below the checkout's top is blocked",
           result.returncode == 2, str(result.returncode))
-    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "fleet-instructions.md"))
+    result = run_hook(decoy, workspace, str(workspace / "docs" / "agents" / "fleet.instructions.md"))
     check("a reusable prompt in a reviewed home keeps the reusable-prompt message",
           "reusable prompt" in result.stderr, result.stderr)
     reviewed_worktree = workspace / ".claude" / "worktrees" / "a-real-worktree"
@@ -393,7 +396,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     # The pre-approved-change form: `#pre_approved_change`, then the exception or "on neither list".
     for label, target in (
             ("an instruction file", workspace / "CLAUDE.md"),
-            ("a reusable prompt", workspace / "docs" / "agents" / "some-seat-instructions.md"),
+            ("a reusable prompt", workspace / "docs" / "agents" / "some-seat.instructions.md"),
             ("a reviewed document", workspace / "docs" / "nedsnodes-wiki" / "a-page.md")):
         result = run_hook(decoy, workspace, str(target))
         check(f"the refusal for {label} names the approval page by its path",
@@ -533,7 +536,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     (debris_root / ".git").mkdir(parents=True)
     scratch_under_debris = debris_root / "a-subagent-scratchpad"
     scratch_under_debris.mkdir()
-    result = run_hook(decoy, workspace, str(scratch_under_debris / "subagent-prompt.md"))
+    result = run_hook(decoy, workspace, str(scratch_under_debris / "subagent.prompt.md"))
     check("a one-off prompt under an empty .git passes, being outside any checkout",
           result.returncode == 0, result.stderr)
     marker = workspace / ".walk-approved"
@@ -566,7 +569,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "his exact words for this change with the session and time he wrote them."]
     for label, target in (
             ("an instruction file", workspace / "CLAUDE.md"),
-            ("a reusable prompt", workspace / "docs" / "agents" / "some-seat-instructions.md"),
+            ("a reusable prompt", workspace / "docs" / "agents" / "some-seat.instructions.md"),
             ("a reviewed document", workspace / "docs" / "nedsnodes-wiki" / "a-page.md")):
         result = run_hook(decoy, workspace, str(target))
         check(f"the refusal for {label} ends with the four route-around lines",
@@ -582,7 +585,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "If the edit then does not happen, delete .walk-approved."]
     for label, target in (
             ("an instruction file", workspace / "CLAUDE.md"),
-            ("a reusable prompt", workspace / "docs" / "agents" / "some-seat-instructions.md"),
+            ("a reusable prompt", workspace / "docs" / "agents" / "some-seat.instructions.md"),
             ("a reviewed document", workspace / "docs" / "nedsnodes-wiki" / "a-page.md")):
         result = run_hook(decoy, workspace, str(target))
         check(f"the refusal for {label} carries the two obvious-fix marker lines",
@@ -601,7 +604,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     asking_words = "If the change needs his approval, or you cannot tell whether it does"
     for label, target in (
             ("an instruction file", workspace / "CLAUDE.md"),
-            ("a reusable prompt", workspace / "docs" / "agents" / "some-seat-instructions.md"),
+            ("a reusable prompt", workspace / "docs" / "agents" / "some-seat.instructions.md"),
             ("a reviewed document", workspace / "docs" / "nedsnodes-wiki" / "a-page.md")):
         result = run_hook(decoy, workspace, str(target))
         check(f"the refusal for {label} asks for a cold read just before its steps for asking the user",
@@ -638,7 +641,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     checkout_in_scratchpad.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(checkout_in_scratchpad)], check=True)
     for relative in (".claude/guard-hooks/a-guard.py", "CLAUDE.md",
-                     "docs/agents/a-seat-instructions.md"):
+                     "docs/agents/a-seat.instructions.md"):
         payload = json.dumps({"cwd": str(checkout_in_scratchpad), "session_id": session_id,
                               "tool_input": {"file_path": str(checkout_in_scratchpad / relative)}})
         result = subprocess.run(
