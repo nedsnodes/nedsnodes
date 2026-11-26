@@ -1389,7 +1389,10 @@ def context_lines_for(answer, walk, walk_error):
         no_walk_prefix = [line.format(rest=answer["rest"]) for line in WALK_ME_THROUGH_USER_SHORT_ANSWER_WITH_USER_ADDED_WORDS_WHEN_NO_APPROVAL_WALK_IS_OPEN_AGENT_INSTRUCTION_LINES]
     if walk_error is not None:
         lines = [WALK_UNKNOWN_OPENING_LINE.format(answer=answer["answer"], error=repr(walk_error)), WALK_UNKNOWN_FIND]
-        lines += prefix + [IF_WALK_OPEN] + walk_prefix
+        # Both branches open with the same added-words line; quote it once, above them.
+        lines += prefix + walk_prefix[:1]
+        walk_prefix, no_walk_prefix = walk_prefix[1:], no_walk_prefix[1:]
+        lines += [IF_WALK_OPEN] + walk_prefix
         lines += meaning_lines(answer, WalkState("", "the waiting item", [], None, {}, None), True)
         lines += [IF_NO_WALK] + no_walk_prefix + meaning_lines(answer, None, False)
     else:

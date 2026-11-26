@@ -1666,6 +1666,9 @@ def test_added_words_with_no_walk_or_an_unknown_walk_are_not_made_a_walk_item():
           and next_item in lines[walk_open:no_walk] and next_item not in lines[:walk_open] + lines[no_walk:]
           and "Act on the answer as the lines below say, then act on what he added." in lines[no_walk:]
           and "If what he added cannot be done this turn, record it as a task." in lines[no_walk:], f"lines {lines!r}")
+    added = "The user added to the answer: \"and also rename the flag\"."
+    check("when the walk state cannot be read, the added words are quoted once, above both branches",
+          walk_open is not None and lines.count(added) == 1 and lines.index(added) < walk_open, f"lines {lines!r}")
 
 def test_e_points_at_the_explain_skill():
     lines = Case(next_to_present="item 3 of 9").lines("e")
