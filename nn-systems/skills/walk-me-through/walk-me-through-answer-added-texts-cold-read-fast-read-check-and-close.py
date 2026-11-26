@@ -523,9 +523,10 @@ the item's title and no other item's. A read outcome written before outcomes
 said whether their number was expected counts as such a read ahead. A text is
 kept from its first line that is not blank, its indentation and all, so an
 indented code block stays code. A text is left out when, without its
-heading line and with its whitespace runs squeezed, it is empty, is the live
-version's text, or is already below the live version, as an agent may have
-kept it by hand. So every text a fast read read, a text the agent then changed
+heading line, its Markdown source as written, line endings and the blank
+lines and spaces at its ends aside, is empty, is the live version's, or is
+a version already below the live version; a copy an agent kept by hand
+counts only when written exactly so. So every text a fast read read, a text the agent then changed
 to apply that read's findings included, stays in the walk-document, except a
 read ahead no read step used whose item another item now shares a title with;
 the walk finder reads an item only up to its first Withdrawn heading. An item
@@ -1700,11 +1701,13 @@ PROPOSED_TEXT_REVISIONS_NOT_WRITTEN = (
     "there whole, with the text it replaced kept below as a withdrawn version.\n"
     "Make {reads} writable, then run `{command}` again.")
 FRESH_AGENT_REWRITE_REFUSED = (
-    "nothing written and no cold-read-fast-read run: {rewrite_file}, the fresh-agent's text for {item}, {problem}, "
-    "so it cannot take the place of {item}'s text in {document}.\n"
-    "If the fresh-agent wrote its text somewhere else, or in its reply, put that text in {rewrite_file}, with no "
-    "Markdown heading line in it, then run `{command}` again.\n"
-    "Otherwise run `{read_command}`, which prints the fresh-agent's brief again, and do what its lines say.")
+    "nothing written and no cold-read-fast-read run: {rewrite_file}, the fresh-agent's text for {item}, cannot take "
+    "the place of {item}'s text in {document}, because it {problem}.\n"
+    "When you have changed {rewrite_file} as that says, or put in it the text the fresh-agent wrote elsewhere or in "
+    "its reply, with no Markdown heading line, no `#approval_walk_item_` line and no paragraph opening with a bold "
+    "running count, run `{command}` again.\n"
+    "When the fresh-agent left no text to use, run `{read_command}`, which prints the fresh-agent's brief again, and "
+    "do what its lines say.")
 FRESH_AGENT_REWRITE_MISSING = "does not exist or cannot be read ({error})"
 FRESH_AGENT_REWRITE_EMPTY = "is empty"
 FRESH_AGENT_REWRITE_SHARED_HEADING = (
@@ -1714,11 +1717,12 @@ FRESH_AGENT_REWRITE_ITEMS_CHANGED = (
     "would change which items the walk-document holds, from {before} to {after}, as an unclosed code fence in the "
     "rewrite does by turning the headings below it into code, or a paragraph opening with a bold running count, such "
     "as `**Item 3 of 10 revised:**`, does by starting another version of an item; close or remove the fence, and "
-    "remove the count")
+    "delete that bold running count from the paragraph's start, keeping its other words")
 FRESH_AGENT_REWRITE_ITEM_START_MOVED = (
-    "would make the walk-document read {item} as starting at line {line}, not at its heading `{heading}`, as a "
-    "paragraph opening with a bold running count, such as `**Item 3 of 10 revised:**`, does by starting another "
-    "version of the item; remove the count")
+    "would make the walk-document, once written, read {item} as starting at its line {line}, not at its heading "
+    "`{heading}`, as a paragraph opening with a bold running count, such as `**Item 3 of 10 revised:**`, does by "
+    "starting another version of the item; delete that bold running count from the paragraph's start, keeping its "
+    "other words")
 FRESH_AGENT_REWRITE_WITHDRAWN_HEADING_NOT_READ = (
     "would leave `{heading}`, under which the replaced text is kept, read as something other than a heading, as an "
     "unclosed code fence in the rewrite does; close or remove the fence")
@@ -2121,11 +2125,11 @@ def approval_walk_item_word_counted_line_ranges(walk_finder, text, tokens, parse
 
 
 def approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value, numbers, total, parser, item, command,
-                                                    skipped_start=None):
+                                                    skipped=None):
     """Raise Failure when an item's text up to its first `###` sub-step, a sub-step, or the text of a heading
     several items or sub-steps share above the first of them, has more words than APPROVAL_WALK_ITEM_WORD_LIMIT,
-    naming the first such text; the text starting at line skipped_start, such as a sub-step about to be rewritten,
-    is not counted. A sub-step is a `###` heading, numbered or not; a deeper heading is part of the text it falls
+    naming the first such text; a text starting within skipped, a (first, end) line range such as a sub-step's
+    about to be rewritten, is not counted. A sub-step is a `###` heading, numbered or not; a deeper heading is part of the text it falls
     in."""
     document, text, tokens, _, spans = item_line_ranges(walk_finder, minutes, value, numbers, total, parser)
     lines = text.split("\n")
@@ -2134,7 +2138,7 @@ def approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value,
     for first, end in approval_walk_item_word_counted_line_ranges(walk_finder, text, tokens, parser, spans, numbers):
         starts = sorted({first} | {line for line in sub_steps if first < line < end})
         for start, stop in zip(starts, starts[1:] + [end]):
-            if start == skipped_start:
+            if skipped and skipped[0] <= start < skipped[1]:
                 continue
             count = sum(len(APPROVAL_WALK_ITEM_WORD.findall(line)) for line in lines[start:stop]
                         if not APPROVAL_WALK_ITEM_WORD_COUNT_LEFT_OUT_LINE.match(line))
@@ -2287,9 +2291,11 @@ def squeezed(text):
 
 
 def as_written_key(text):
-    """Return text as written, with only its line endings and its leading and trailing blank lines made uniform, so
-    that two versions compare equal only when their Markdown source is the same."""
-    return blank_lines_stripped(text.replace("\r\n", "\n").replace("\r", "\n"))
+    """Return text as written, with only its line endings, its leading and trailing blank lines and the spaces ending
+    its last line made uniform, so that two versions compare equal only when their Markdown source is the same.
+    item_text strips the spaces ending an item's last line, and a rewrite keeps the line as the walk-document has it;
+    spaces ending a block's last line change nothing Markdown shows."""
+    return blank_lines_stripped(text.replace("\r\n", "\n").replace("\r", "\n")).rstrip()
 
 
 def walk_fast_read_name(walk_name, *parts):
@@ -3338,7 +3344,7 @@ def withdrawn_versions_inserted_below_live_version(walk_finder, parser, lines, f
         kept_bodies = {as_written_key("\n".join(lines[found[1]:end])):
                        lines[found[0]].strip()
                        for found, end in zip(withdrawn, [*(later[0] for later in withdrawn[1:]), below])}
-        if squeezed(body) in (squeezed(heading_body(walk_finder, live_text)), ""):
+        if as_written_key(body) in (as_written_key(heading_body(walk_finder, live_text)), ""):
             continue
         kept_heading = kept_bodies.get(as_written_key(body))
         if kept_heading is not None:
@@ -3368,28 +3374,28 @@ def approval_walk_item_and_sub_steps_live_units(walk_finder, parser, document, w
     """Return (the walk-document's text, the units of the live versions of the whole item whole_number and its
     sub-steps, as waiting_item_units and approval_walk_item_sub_step_units_below_item_in_walk_document find them), so
     that a sub-step under a Withdrawn heading, or of an older version, is left out; a unit ends at the first Withdrawn
-    heading below it. When no heading counts the whole item, the units are its sub-steps' that the same rule takes
-    from the first of the run of sub-step units waiting_unit is in, whatever M each gives."""
+    heading below it. When no heading counts the whole item, the units are those the same rule takes from the first
+    sub-step unit whose run, as that rule takes it, holds waiting_unit."""
     text = document.read_text(encoding="utf-8")
     units = walk_finder.item_unit_spans(text, parser)
     try:
         whole = walk_finder.waiting_item_units(document, f"item {whole_number}", [whole_number], total, parser,
                                                units)[1][0]
     except walk_finder.UnusableRange:
-        # Under a heading with no running count, such as `## Item 3: the plan`, the sub-steps are taken from the
-        # first of their run, so reading 3.1 and then 3.2 compares the same texts.
-        position = start = units.index(waiting_unit)
-        while position:
-            position -= 1
-            if any(number.startswith(whole_number + ".") for number in units[position][0]):
-                start = position
-            elif not walk_finder.approval_walk_unit_is_unnumbered_item(units[position]):
+        # Under a heading with no running count, such as `## Item 3: the plan`, the sub-steps are those the forward
+        # finder takes from the first sub-step unit whose run holds waiting_unit, so reading 3.1 and then 3.2 compares
+        # the same texts, whatever units stand between them.
+        for first in units:
+            if first[3] > waiting_unit[3]:
                 break
-        first = units[start]
-        whole = ([whole_number], first[1], None, first[3] - 1, first[3])
-        family = walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(units, whole,
-                                                                                           [whole_number])
-        return text, family if waiting_unit in family else [*family, waiting_unit]
+            if not any(number.startswith(whole_number + ".") for number in first[0]):
+                continue
+            whole = ([whole_number], first[1], None, first[3] - 1, first[3])
+            family = walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(units, whole,
+                                                                                               [whole_number])
+            if waiting_unit in family:
+                return text, family
+        return text, [waiting_unit]
     return text, [whole, *walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(
         units, whole, [whole_number])]
 
@@ -3966,7 +3972,7 @@ def waiting_item_read(arguments, sub_step_of=None):
         # A read that started from the whole item checks the whole item, as the read without a rewrite does before
         # it turns to the sub-step: the other sub-steps before anything is written, the rewrite once it is in place.
         for above in (sub_step_of[2] if sub_step_of else []):
-            approval_walk_item_text_over_word_limit_refused(*above[:6], above[7], command, skipped_start=unit[3])
+            approval_walk_item_text_over_word_limit_refused(*above[:6], above[7], command, skipped=unit[3:5])
         # Run again, this command finds the rewrite already in place and only counts, so it is the one to repeat.
         rewrite_command = read_step_command_with_cwd(top, FRESH_AGENT_REWRITE_FLAG, str(rewrite_file),
                                                      *rechecked_words)
