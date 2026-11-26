@@ -587,11 +587,12 @@ def test_named(suite, test):
 
 
 def repair_task_opened(arguments, merge_commit, seat, failed_tests):
-    """Open one repair task on seat's list for {suite: {test: log}}; return (seat, id, why none)."""
+    """Open one repair task on seat's list for {suite: {test: log}}; return (seat, id, why none,
+    the writer's error when it raised after writing the task, else None)."""
     task_list = Path.home() / ".claude" / "tasks" / f"nedsnodes-{seat}-tasks"
     if not seat or not task_list.is_dir() or not (Path.home() / "agents" / seat).is_dir():
         return None, None, (f"the merged branch's author, {seat or 'unknown'}, has no task "
-                            f"list or no checkout on this machine")
+                            f"list or no checkout on this machine"), None
     named = " ".join(sorted(failed_tests))
     logs = "\n".join(f"- {test_named(suite, test)}: {log}"
                      for suite, tests in sorted(failed_tests.items())
@@ -617,11 +618,9 @@ def repair_task_opened(arguments, merge_commit, seat, failed_tests):
         written = [found for found in repair_task_written_ids(task_list, subject, description)
                    if found not in there_before]
         if written:
-            print(f"Repair task #{written[-1]} was written to {task_list}, but the task writer "
-                  f"then failed: {error}. The failed suites record names that task.")
-            return seat, written[-1], None
-        return None, None, f"the repair task could not be written to {task_list}: {error}"
-    return seat, task_id, None
+            return seat, written[-1], None, (task_list, error)
+        return None, None, f"the repair task could not be written to {task_list}: {error}", None
+    return seat, task_id, None, None
 
 
 def repair_task_written_ids(task_list, subject, description):
@@ -850,8 +849,12 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
         return kept
 
     task_of_test = {}
+    writer_failed_after_writing = []
     for seat, tests_of_seat in sorted(to_open["again"].items()):
-        _, task_id, why_none = repair_task_opened(arguments, merge_commit, seat, tests_of_seat)
+        _, task_id, why_none, writer_error = repair_task_opened(arguments, merge_commit, seat,
+                                                                tests_of_seat)
+        if writer_error:
+            writer_failed_after_writing.append((seat, task_id, writer_error))
         if task_id is None:
             could_not_open_again.append((seat, tests_of_seat, why_none))
             task_of_test.update({(suite, test): closed_task_of_test[(suite, test)]
@@ -862,8 +865,10 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                              for suite, tests in tests_of_seat.items() for test in tests})
     if to_open["new_tests"]:
         author = merged_branch_last_commit_author_name_read(worktree, merge_commit, environment)
-        seat, task_id, why_none = repair_task_opened(arguments, merge_commit, author,
-                                                     to_open["new_tests"])
+        seat, task_id, why_none, writer_error = repair_task_opened(
+            arguments, merge_commit, author, to_open["new_tests"])
+        if writer_error:
+            writer_failed_after_writing.append((seat, task_id, writer_error))
         kept.update(new_tests=to_open["new_tests"], seat=seat, task_id=task_id,
                     why_none=why_none)
         if task_id is not None:
@@ -872,38 +877,73 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                                  for test in tests})
 
     changed_since_first_save = {}
+    named_by_second_save = set()
 
     def tasks_named(suites):
         changed_since_first_save.clear()
+        named_by_second_save.clear()
         for (suite, test), (seat, task_id) in task_of_test.items():
             fields = suites.get(suite, {}).get("failed_tests", {}).get(test)
-            if (fields is None or fields["repair_task_id"] is not None
-                    or (fields["commit"], fields["failed_at"]) != left_by_first_save[(suite, test)]):
-                changed_since_first_save[(suite, test)] = (seat, task_id)
-                continue
-            fields["repair_task_agent_seat"], fields["repair_task_id"] = seat, task_id
+            if fields is None:
+                changed_since_first_save[(suite, test)] = (seat, task_id, "took {} off the failed suites record")
+            elif (fields["repair_task_id"] is not None
+                  or (fields["commit"], fields["failed_at"]) != left_by_first_save[(suite, test)]):
+                changed_since_first_save[(suite, test)] = (
+                    seat, task_id,
+                    "recorded {} anew on the failed suites record, or named another repair task on its entry")
+            else:
+                fields["repair_task_agent_seat"], fields["repair_task_id"] = seat, task_id
+                named_by_second_save.add((seat, task_id))
 
     if task_of_test:
         try:
             left = failed_suites_record.failed_after_merge_test_suites_on_main_record_change_apply_under_lock(
                 tasks_named)
         except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
-            print(f"STOP: merged, but the failed suites record does not name the repair tasks "
-                  f"just opened, so merge-gate.sh shows those tests with no repair task: "
-                  f"{error}\n{tell_the_user}")
+            # The first save cleared each closed task's id, so no later merge sees one to reopen.
+            names = "; ".join(f"{test_named(suite, test)} (task #{task_id} on {seat}'s task list)"
+                              for (suite, test), (seat, task_id) in sorted(task_of_test.items()))
+            print(f"STOP: merged, but the second save of the failed suites record failed: "
+                  f"{error}\n"
+                  f"So the record does not name the repair tasks just opened, and merge-gate.sh "
+                  f"shows those tests with no repair task. The record now holds no repair task for these tests, and no later merge "
+                  f"opens one for them, because a merge opens a repair task only for a test new "
+                  f"to the record or one whose recorded task is closed: {names}.\n{tell_the_user}")
             kept["complete"] = False
+            # The writer runs change() before it writes, so these name what was never saved.
             changed_since_first_save.clear()
-    for (suite, test), (seat, task_id) in sorted(changed_since_first_save.items()):
+            named_by_second_save.clear()
+    for (suite, test), (seat, task_id, how) in sorted(changed_since_first_save.items()):
         if closed_task_of_test.get((suite, test)) == (seat, task_id):
             continue
-        print(f"STOP: merged, but another merge's test run changed {test_named(suite, test)} on "
-              f"the failed suites record after this run saved it, so the record does not name "
-              f"repair task #{task_id} on {seat}'s task list, opened for it by this run. The run "
-              f"that changed it either took the test off the record or recorded it anew and "
-              f"opened its own repair task, so task #{task_id} is not needed.\n"
-              f"Complete task #{task_id} on {seat}'s task list, with a note that the run of the "
-              f"merge after pull request {arguments.pull_request} handles the test. If you are a "
-              f"subagent, tell the agent that dispatched you instead.")
+        named = test_named(suite, test)
+        if (seat, task_id) in named_by_second_save:
+            # The task still covers the record's other tests, so nothing needs doing.
+            print(f"Another merge's test run {how.format(named)} after this run saved the "
+                  f"record, so the record does not tie {named} to repair task "
+                  f"#{task_id} on {seat}'s task list. Task #{task_id} stays open, because the "
+                  f"record ties it to other tests.")
+            continue
+        print(f"STOP: merged, but another merge's test run {how.format(named)} after this run "
+              f"saved the record. So repair task #{task_id} on {seat}'s task list, "
+              f"which this run opened for {named}, is tied to no test on the record and is not "
+              f"needed.\n"
+              f"Complete task #{task_id} on {seat}'s task list, with a note that another merge's "
+              f"test run {how.format(named)}. If you are a subagent, tell the agent that "
+              f"dispatched you instead.")
+        kept["complete"] = False
+    for seat, task_id, (task_list, error) in writer_failed_after_writing:
+        on_record = ("The failed suites record names it."
+                     if (seat, task_id) in named_by_second_save else
+                     "The failed suites record does not name it; the lines above say why and "
+                     "what to do about it.")
+        print(f"STOP: merged, but the task writer wrote repair task #{task_id} to {task_list} "
+              f"and then failed: {error}. Task #{task_id} stands on {seat}'s task list. "
+              f"{on_record}\n"
+              f"If the error names a cause you can fix, such as a full disk, fix it; the task "
+              f"writer need not be run again. Otherwise tell the user this message as printed, "
+              f"from its STOP line through this line. If you are a subagent, tell the agent that "
+              f"dispatched you instead.")
         kept["complete"] = False
     for name, error in sorted(undecided.items()):
         print(f"STOP: merged, but {name} stays on the failed suites record: git could not say "
