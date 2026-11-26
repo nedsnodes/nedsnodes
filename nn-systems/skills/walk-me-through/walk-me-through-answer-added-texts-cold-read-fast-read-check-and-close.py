@@ -644,10 +644,11 @@ QUOTATION_LINE = re.compile(r"^\s*>")
 QUOTATION_MARKERS = re.compile(r"^\s*(?:>\s?)*")
 ANSWER_LINE = re.compile(r"^(?P<item>items? .+?): (?P<settled>the user answered|settled without asking the user,|"
                          r"shown to the user,) "
-                         r"(?P<answered>.+?)(?: #approved_(?:obvious|after_advisor))?(?: #case_against_[a-z_]+)? "
+                         r"(?P<answered>.+?)(?: #approved_(?:obvious|after_advisor)#?)?(?: #case_against_[a-z_]+#?)? "
                          r"\([^)]*\)(?: in his words \".*\")?, which makes (?:its change\. Fast reads:|no change\.)$",
                          re.I)
-MARKER_END = r"(?=[*_`]*(?:[:\s]|$))"
+# A marker is read with or without the closing `#` a hashtag takes.
+MARKER_END = r"#?(?=[*_`]*(?:[:\s]|$))"
 # Any list or quotation marks, then any emphasis or code marks, ahead of a marker; the list and quotation mark rule is
 # the walk finder's, which the `#new` mark pattern is built from too, so every marker line takes the same list and
 # quotation marks; only that rule is shared, and each marker keeps its own emphasis rule.
@@ -4757,6 +4758,12 @@ def gh_failure(command, top, gh_program, timeout):
     return result.stdout, None
 
 
+def held_on_ruling_line_without_closing_hash(line):
+    """line with the closing `#` of its opening hashtag removed, so `#held_on_ruling# w item 3` reads as
+    `#held_on_ruling w item 3`."""
+    return re.sub(r"^(#[a-z][a-z0-9_]*)#(?=\s|$)", r"\1", line)
+
+
 def pull_requests_held_on(lines, top, gh_program, timeout):
     """Return ({held line: [the open pull requests whose review holds that line on a line of its own]}, None), or
     (None, what went wrong) when the open pull requests cannot be listed."""
@@ -4767,7 +4774,8 @@ def pull_requests_held_on(lines, top, gh_program, timeout):
         pull_requests = json.loads(output)
         held = {line: [] for line in lines}
         for pull_request in pull_requests:
-            found = {line.strip() for review in pull_request["reviews"] for line in (review["body"] or "").split("\n")}
+            found = {held_on_ruling_line_without_closing_hash(line.strip())
+                     for review in pull_request["reviews"] for line in (review["body"] or "").split("\n")}
             for line in lines:
                 if line in found:
                     held[line].append(pull_request["number"])

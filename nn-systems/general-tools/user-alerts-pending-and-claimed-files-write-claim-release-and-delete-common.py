@@ -41,7 +41,7 @@ CLAIM_LIMIT_SECONDS = 30 * 60
 # An agent-seat the user seldom types in, so an approval-walk there holds only these alerts and is easy to spot.
 USER_ALERT_AGENT_SEAT_WHEN_ALERT_NAMES_NONE = "merge-lane-1"
 AGENTS_RELATIVE_TO_HOME = Path("agents")
-USER_ALERT_LINE = re.compile(r"#user_alert\s+(\S+)")
+USER_ALERT_LINE = re.compile(r"#user_alert#?\s+(\S+)")
 # Walk-minutes on ned-box, relative to the home directory: closed ones in the log-store, open ones under
 # docs/walk/ of each checkout, which are agent-homes, the worktrees beside or inside them, and the
 # reference-checkout and its worktrees.

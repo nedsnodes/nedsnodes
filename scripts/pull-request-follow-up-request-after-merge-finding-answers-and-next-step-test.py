@@ -238,6 +238,10 @@ def test_block_parsing():
           request.number == NUMBER and request.text == BLOCK and request.finding_count == 2, request.text)
     check("text without the request line holds no block",
           program.parse_follow_up_request_blocks_from_message_text("1. a\n2. b\n") == [])
+    closed_block = BLOCK.replace("#follow_up_request pull request", "#follow_up_request# pull request", 1)
+    [closed] = program.parse_follow_up_request_blocks_from_message_text(closed_block)
+    check("a request line in the closed form, `#follow_up_request# pull request <number>`, opens a block",
+          closed.number == NUMBER and closed.finding_count == 2, closed.text)
     [ended] = program.parse_follow_up_request_blocks_from_message_text(BLOCK + "thanks\n3. a numbered line after\n")
     check("a numbered line after the block's end is not a finding", ended.text == BLOCK, ended.text)
     for label, text in (("no findings", f"#follow_up_request pull request {NUMBER}\nthanks\n"),

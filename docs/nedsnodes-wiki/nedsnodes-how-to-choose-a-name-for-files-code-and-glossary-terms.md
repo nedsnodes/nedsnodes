@@ -40,6 +40,8 @@ Look in three places, in this order:
 
 If an existing name fails the naming criterion, reuse it anyway, but tell the user it should be renamed: renaming it is a separate change, and a second name for the same thing is worse than one weak name.
 
+Name a hashtag by `docs/nedsnodes-wiki/nedsnodes-hashtag-glossary.md`, which lists every hashtag and what it means.
+
 ## Step 2: build the name from three questions
 
 A name that meets the naming criterion usually answers three questions by itself. Each answer is one part of the name, and a part may be one word or several: `main-gatekeeper-check-in-request-holder` has three parts and six words.
