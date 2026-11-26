@@ -872,7 +872,7 @@ Found by: the overview claim check of 2026-11-14 against commit 8b7af67ce5344461
 Fixed by: regular maintenance, in the overview.
 Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
-> - docs/nedsnodes-wiki/nedsnodes-glossary.md:60: "**domain-guide** — ... It is not an agent-seat: a script runs it one question at a time, with no seat-brief and no handoffs". ghi-guide is a domain-guide (glossary:56), so `ghi-guide-ask.py` is not an exception to a rule about agent-seats; the "apart from" clause wrongly implies that ghi-guide is an agent-seat.
+> - docs/nedsnodes-wiki/nedsnodes-glossary.md:60: "**guide-agent** — ... It is not an agent-seat: a script runs it one question at a time, with no seat-brief and no handoffs". ghi-guide is a guide-agent (glossary:56), so `ghi-guide-ask.py` is not an exception to a rule about agent-seats; the "apart from" clause wrongly implies that ghi-guide is an agent-seat.
 > - The rule itself holds. A search for `--resume` in *.py found these callers outside the handoff-system: ghi-guide-ask.py:580, merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py:394 and run-codex-task-from-brief.py. None of them starts an agent-seat's agent-session.
 > - No agent would act wrongly on it: the wording is loose, not wrong.
 State: open
