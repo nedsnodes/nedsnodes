@@ -778,7 +778,7 @@ seat.task("68", metadata=MET)
 result = seat.run(environment_changes={"CLAUDE_CODE_SESSION_ATTENDED": "0"})
 check("unattended session (a claude -p child): silent", silent(result), result)
 result = seat.run(environment_changes={
-    "NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER": "scripts/ghi-guide-agent-ask.py"})
+    "NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER": "scripts/ghi-guide-ask.py"})
 check("session whose caller owns its reincarnation: silent", silent(result), result)
 check("silenced sessions record nothing, so the seat's own session still raises the task",
       not seat.state_path.exists(), seat.state_path)
@@ -901,9 +901,9 @@ result = seat.stop()
 text = context_of(result) or ""
 check("next-action: idle seat gets the prompt, exit 0",
       result.returncode == 0 and text.startswith(NEXT_ACTION_FIRST_LINE), result)
-check("next-action: the prompt restores the many-parts exception and names ghi-guide-agent",
+check("next-action: the prompt restores the many-parts exception and names ghi-guide",
       "more than 16 only for one large thing with many parts" in text
-      and "scripts/ghi-guide-agent-ask.py" in text, text)
+      and "scripts/ghi-guide-ask.py" in text, text)
 check("next-action: an unheld task is listed, a held one is counted, not listed",
       '- task 5 "Free task"' in text and "Waits on a PR" not in text
       and "1 more open task(s) are not listed: each waits on" in text, text)

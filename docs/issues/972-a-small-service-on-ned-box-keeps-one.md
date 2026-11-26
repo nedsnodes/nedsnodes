@@ -125,7 +125,7 @@ The same approval-walk, `ghi-972-agent-seat-database-service-design-mac-task-lis
 - GHI [recover-crashed-seats.py: the six changes ruled 2026-09-02](https://github.com/nedsnodes/nedsnodes/issues/242): recovery's verdicts about an agent-seat.
 - GHI [Seat mailboxes across machines and runtimes](https://github.com/nedsnodes/nedsnodes/issues/749): the nearest design whose parts run on both machines.
 - GHI [Relaunch stopped agent-seats with open tasks daily](https://github.com/nedsnodes/nedsnodes/issues/936): narrower work the build-slice 5 view would serve.
-- Search receipt: ghi-guide-agent, 2026-10-02, open and closed GHIs: no GHI proposes a database of agent-seats.
+- Search receipt: ghi-guide, 2026-10-02, open and closed GHIs: no GHI proposes a database of agent-seats.
 - Supporting document: the Codex survey of every seat record, `nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/fleet-restart-at-login/agent-seat-records-survey-2026-10-02.md`.
 
 ## Deferred-decisions

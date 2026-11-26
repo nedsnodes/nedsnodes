@@ -26,7 +26,7 @@ A history that cannot tell a caught defect from a flaky failure cannot show whic
 
 ## Related
 
-On 2026-10-30, `scripts/ghi-guide-agent-ask.py --include-closed`, asked for a GHI on these three additions, found none. The nearest are on other matters: GHI [#1206](https://github.com/nedsnodes/nedsnodes/issues/1206), on what the daily full test runs report to the user; GHI [#1830](https://github.com/nedsnodes/nedsnodes/issues/1830), on test cases timed against a wall-clock limit that fail on a busy machine; and GHI [#2135](https://github.com/nedsnodes/nedsnodes/issues/2135), on mutation testing.
+On 2026-10-30, `scripts/ghi-guide-ask.py --include-closed`, asked for a GHI on these three additions, found none. The nearest are on other matters: GHI [#1206](https://github.com/nedsnodes/nedsnodes/issues/1206), on what the daily full test runs report to the user; GHI [#1830](https://github.com/nedsnodes/nedsnodes/issues/1830), on test cases timed against a wall-clock limit that fail on a busy machine; and GHI [#2135](https://github.com/nedsnodes/nedsnodes/issues/2135), on mutation testing.
 
 ## Next action
 

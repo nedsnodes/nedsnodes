@@ -34,7 +34,7 @@ for name, environment, expected in (
         ("CLAUDE_CODE_SESSION_ATTENDED=0: no user", {"CLAUDE_CODE_SESSION_ATTENDED": "0"}, True),
         ("CLAUDE_CODE_SESSION_ATTENDED empty: attended", {"CLAUDE_CODE_SESSION_ATTENDED": ""}, False),
         ("caller owns the session: no user",
-         {"NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER": "scripts/ghi-guide-agent-ask.py"}, True),
+         {"NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER": "scripts/ghi-guide-ask.py"}, True),
         ("caller variable empty: attended", {"NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER": ""}, False),
         ("caller owns it though attended=1: no user",
          {"NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER": "1", "CLAUDE_CODE_SESSION_ATTENDED": "1"}, True)):

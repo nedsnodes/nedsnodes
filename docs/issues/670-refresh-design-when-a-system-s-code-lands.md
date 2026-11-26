@@ -33,7 +33,7 @@ The user ruled the three bullets below in merge-lane-2's agent-session on ned-bo
 
 No page defines a refresh of a design or a build-slice plan, so the five bullets of the section "What is decided: the refresh as a nightly maintenance-job" decide, and the sections after this one, which record the rulings those bullets rest on, stand only where the bullets are silent.
 
-**The glossary gets its entry only when the step exists.** The user's words, 2026-09-23: "I would not add this to the glossary yet. I'd try to keep the glossary true now, not true eventually. Instead I'd make a GHI for it, assuming there isn't one." Until it is built, this GHI is where the definition lives. A search on 2026-09-23 found no issue for it: `scripts/ghi-guide-agent-ask.py --include-closed` over open and closed issues, and `gh issue list --state all --search 'refresh-design OR "refresh design" OR overview OR BIPP OR "design lifecycle"'`.
+**The glossary gets its entry only when the step exists.** The user's words, 2026-09-23: "I would not add this to the glossary yet. I'd try to keep the glossary true now, not true eventually. Instead I'd make a GHI for it, assuming there isn't one." Until it is built, this GHI is where the definition lives. A search on 2026-09-23 found no issue for it: `scripts/ghi-guide-ask.py --include-closed` over open and closed issues, and `gh issue list --state all --search 'refresh-design OR "refresh design" OR overview OR BIPP OR "design lifecycle"'`.
 
 ## The draft definition, as put to the user on 2026-09-23
 

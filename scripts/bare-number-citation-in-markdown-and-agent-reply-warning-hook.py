@@ -32,7 +32,7 @@ matches. Not scanned: fenced code blocks, a block quote's included, inline
 code spans, a whole Markdown link `[text](target "title")` (its text included:
 a link is already a citation that can be opened), a bare URL, and a line a
 program reads: one that starts with `supports-issues:` or `issue-marker:`, or
-is, whole, one of the answer lines ghi-guide-agent-ask.py prints
+is, whole, one of the answer lines ghi-guide-ask.py prints
 (`verdict: related #<n>,#<m>`, `read #<n>, #<m>`). A fence opened inside a
 block quote closes where the block quote ends. A skipped span is blanked to a
 barrier character no match can cross, so `PR [title](url) 2 hours` is not read
@@ -147,7 +147,7 @@ BARE_REFERENCE_PATTERN = re.compile(
     re.IGNORECASE)
 FENCE_PATTERN = re.compile(r"^\s*(?:>\s?)*\s*(?:[-*+]\s+|\d+[.)]\s+)?(`{3,}|~{3,})")
 ISSUE_NUMBER_LIST = r"#\d+(?:[ \t]*,[ \t]*#\d+)*"
-# ghi-guide-agent-ask.py tags each closed issue in a reading list with "(closed <date>)" after its number.
+# ghi-guide-ask.py tags each closed issue in a reading list with "(closed <date>)" after its number.
 READING_LIST_ENTRY = r"#\d+(?:[ \t]*\(closed[ \t]+\d{4}-\d{2}-\d{2}\))?"
 READING_LIST = READING_LIST_ENTRY + r"(?:[ \t]*,[ \t]*" + READING_LIST_ENTRY + r")*"
 # Its two answer shapes count only as whole lines, so a sentence that starts "Read #<n> before ..." is still read.

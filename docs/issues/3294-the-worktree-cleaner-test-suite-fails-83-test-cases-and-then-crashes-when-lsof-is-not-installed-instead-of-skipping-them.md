@@ -22,4 +22,4 @@ Make the suite check for `lsof` once at its start. When `lsof` is missing, skip 
 
 ## Search receipts
 
-`scripts/ghi-guide-agent-ask.py` on 2026-11-11, open issues: no issue names `scripts/clean-worktrees-test.py` or `lsof`; #1055 and #1121 are the nearest.
+`scripts/ghi-guide-ask.py` on 2026-11-11, open issues: no issue names `scripts/clean-worktrees-test.py` or `lsof`; #1055 and #1121 are the nearest.

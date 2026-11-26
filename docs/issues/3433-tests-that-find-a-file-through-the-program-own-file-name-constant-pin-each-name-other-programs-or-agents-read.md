@@ -19,7 +19,7 @@ On main at c0e19b69a, `grep -rlE "[a-z_]+\.[A-Z][A-Z_]*_(FILE_NAME|FILENAME|DIRE
 | Test file | Matching lines |
 |---|---|
 | `scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open-test.py` | 40 |
-| `scripts/ghi-guide-agent-ask-test.py` | 23 |
+| `scripts/ghi-guide-ask-test.py` | 23 |
 | `scripts/standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write-test.py` | 18 |
 | `scripts/run-all-test-suites-machine-wide-test-suite-admission-test.py` | 15 |
 | `scripts/ghi-mirror-refresh-test.py` | 14 |

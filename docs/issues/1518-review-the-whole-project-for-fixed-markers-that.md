@@ -68,7 +68,7 @@ The user ruled on 2026-10-27, answering item 1 of the approval-walk issue-design
 - GHI [Regular maintenance: the list of maintenance jobs, how often each runs, and how each reaches the user](https://github.com/nedsnodes/nedsnodes/issues/1058): its daily check for names a reader cannot understand away from where they are defined already lists short fixed-set values such as the walk-minutes classes. Step 5's maintenance-job joins that GHI's list of maintenance jobs and reaches the user by its route.
 - GHI [Type definitions for the project's kinds of markdown: what each contains, leaves out, and how long it runs](https://github.com/nedsnodes/nedsnodes/issues/1080): the natural home for any marker convention per kind of document.
 
-ghi-guide-agent, asked on 2026-10-15 whether an issue covers conventions for fixed markers or hashtags (`scripts/ghi-guide-agent-ask.py --include-closed`), found none: "No open or closed issue proposes a general convention for fixed line-start labels, VERDICT lines, or `#hashtag`-style markers as a reusable pattern across the project."
+ghi-guide, asked on 2026-10-15 whether an issue covers conventions for fixed markers or hashtags (`scripts/ghi-guide-ask.py --include-closed`), found none: "No open or closed issue proposes a general convention for fixed line-start labels, VERDICT lines, or `#hashtag`-style markers as a reusable pattern across the project."
 
 ## Next action
 

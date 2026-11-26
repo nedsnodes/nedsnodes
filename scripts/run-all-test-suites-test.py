@@ -2704,8 +2704,8 @@ for arguments, consulted in (
         (["merge-base", "--is-ancestor", "01a20a3", "HEAD"], []),
         (["merge-base", "origin/main", "HEAD"], []),
         (["ls-remote", "--heads", "/tmp/elsewhere/remote.git", "ghi-570-edit-*"], []),
-        (["check-ignore", "-q", ".ghi-guide-agent-state.json"],
-         [".ghi-guide-agent-state.json", ".gitignore"])):
+        (["check-ignore", "-q", ".ghi-guide-state.json"],
+         [".ghi-guide-state.json", ".gitignore"])):
     call = {"arguments": arguments, "directory": str(TOP) + "",
             "GIT_DIR": None, "GIT_WORK_TREE": None}
     answer = module.work_tree_paths_a_git_call_not_tied_to_the_file_list_consults(call, TOP)

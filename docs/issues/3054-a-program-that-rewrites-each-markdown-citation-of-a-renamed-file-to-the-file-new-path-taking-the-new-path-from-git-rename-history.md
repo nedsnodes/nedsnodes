@@ -25,7 +25,7 @@ Today the reminder hook `nn-systems/general-tools/claude-code-bash-git-push-of-m
 
 ## Supporting documents
 
-- Search receipt: `scripts/ghi-guide-agent-ask.py --include-closed`, 2026-11-10, asked for a GHI, open or closed, for a check that applies git's rename detection so that a renamed file's citations in Markdown are found and updated; it found none. The nearest are GHI [Reference-integrity checker: links resolve and cited revision-paths exist — pure-code review check (and the home for what-else-can-code-check)](https://github.com/nedsnodes/nedsnodes/issues/42), which checks that links resolve and reports, and GHI [Nothing reports Markdown that still cites a constant or function by a name a pull request renamed or removed](https://github.com/nedsnodes/nedsnodes/issues/2841), which covers renamed code names, not file paths.
+- Search receipt: `scripts/ghi-guide-ask.py --include-closed`, 2026-11-10, asked for a GHI, open or closed, for a check that applies git's rename detection so that a renamed file's citations in Markdown are found and updated; it found none. The nearest are GHI [Reference-integrity checker: links resolve and cited revision-paths exist — pure-code review check (and the home for what-else-can-code-check)](https://github.com/nedsnodes/nedsnodes/issues/42), which checks that links resolve and reports, and GHI [Nothing reports Markdown that still cites a constant or function by a name a pull request renamed or removed](https://github.com/nedsnodes/nedsnodes/issues/2841), which covers renamed code names, not file paths.
 
 ## Next action
 

@@ -18,7 +18,7 @@ An agent that reads a stale GHI-MD plans work that is already done, or relies on
 
 Decide when the check runs and what it judges, then build it. The case above shows that a check run only when a GHI-MD changes is not enough: the pull request that made the GHI-MD stale changed only code, so the check must also run when code a GHI-MD describes changes, or on a schedule.
 
-None of the open issues below checks a GHI-MD's statements against code; ghi-guide-agent, asked on 2026-11-14 whether an open issue covers such a check, named them as the nearest. Read them first, and build the check by extending the one whose machinery fits best rather than as a new mechanism, or record in this file why none fits:
+None of the open issues below checks a GHI-MD's statements against code; ghi-guide, asked on 2026-11-14 whether an open issue covers such a check, named them as the nearest. Read them first, and build the check by extending the one whose machinery fits best rather than as a new mechanism, or record in this file why none fits:
 
 - issue [2532](https://github.com/nedsnodes/nedsnodes/issues/2532), the claim check that judges an nn-architecture-overview's claims against the files they cite;
 - issue [2189](https://github.com/nedsnodes/nedsnodes/issues/2189), the daily maintenance-job in which an agent rates each changed GHI-MD;

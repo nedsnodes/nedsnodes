@@ -92,8 +92,8 @@ WHAT IT CANNOT SEE, so nobody mistakes a choice for an oversight:
 - The GHI write tool's own `gh` calls are subprocesses, below the Bash tool,
   so this hook never sees them; running the tool is `python3
   scripts/ghi-issue-write.py ...`, whose program is python3.
-- ghi-guide-agent's headless sessions run with `--setting-sources user`
-  (`scripts/ghi-guide-agent-ask.py`), so this project's hooks do not load there, and
+- ghi-guide's headless sessions run with `--setting-sources user`
+  (`scripts/ghi-guide-ask.py`), so this project's hooks do not load there, and
   its link-repair edits are untouched.
 - A `gh` behind `ssh`, `sh -c`, `eval`, or in a heredoc body is not
   recognised; one behind a wrapper the shared shell module knows, such as

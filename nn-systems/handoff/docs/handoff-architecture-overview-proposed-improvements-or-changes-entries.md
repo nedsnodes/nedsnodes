@@ -202,12 +202,12 @@ State: open
 
 ## E21 — possible problem: an assertion of the overview is contradicted
 
-Claim: `NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER`: set by `scripts/ghi-guide-agent-ask.py` for the `claude` it starts; silences `handoff-context-threshold-hook.py`; removed by the supervisor from every agent-session it starts.
+Claim: `NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER`: set by `scripts/ghi-guide-ask.py` for the `claude` it starts; silences `handoff-context-threshold-hook.py`; removed by the supervisor from every agent-session it starts.
 Found by: the overview claim check of 2026-11-05 against commit d08dc058fd63a331f346678ce36f067e533aa856; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4f1e208f47643e513f48ee18957408dc1df2de05-2026-11-05T22-27-21-827479Z.md.
 Fixed by: regular maintenance, in the overview.
 Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
-> - The setter, the threshold-hook read and the removal hold: ghi-guide-agent-ask.py:575; handoff-context-threshold-hook.py:513-514 `if os.environ.get(REINCARNATION_OWNED_BY_CALLER_VARIABLE): return 0`; handoff-supervisor.py:325.
+> - The setter, the threshold-hook read and the removal hold: ghi-guide-ask.py:575; handoff-context-threshold-hook.py:513-514 `if os.environ.get(REINCARNATION_OWNED_BY_CALLER_VARIABLE): return 0`; handoff-supervisor.py:325.
 > - It silences more hooks than the threshold hook: agent-seat-due-task-raise-hook.py:754 `if environment.get(REINCARNATION_OWNED_BY_CALLER_VARIABLE):`, absence-claim-locator-reminder-hook.py:460, cold-read-fast-read-due-for-linked-document-reminder-hook.py:509, ned-box-path-in-agent-reply-unclickable-on-mac-warning-hook.py:268, and nn-systems/general-tools/shell-command-tree-sitter-bash-reader-common.py:474.
 > - An agent renaming or changing the variable from this entry alone would miss them.
 State: open
@@ -867,13 +867,13 @@ State: open
 
 ## E74 — possible problem: an assertion of the overview is contradicted
 
-Claim: Invariant: no program but the handoff-supervisor starts or resumes an agent-seat's agent-session, apart from `scripts/ghi-guide-agent-ask.py`, which starts and resumes the ghi-guide-agent's agent-sessions itself.
+Claim: Invariant: no program but the handoff-supervisor starts or resumes an agent-seat's agent-session, apart from `scripts/ghi-guide-ask.py`, which starts and resumes the ghi-guide's agent-sessions itself.
 Found by: the overview claim check of 2026-11-14 against commit 8b7af67ce5344461608f1b010f4a1ef2a2845c10; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/79ff41aec0a056755c485ecb8d1cbd4d082ddd85-2026-11-14T11-55-04-444110Z.md.
 Fixed by: regular maintenance, in the overview.
 Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
-> - docs/nedsnodes-wiki/nedsnodes-glossary.md:60: "**guide-agent** — ... It is not an agent-seat: a script runs it one question at a time, with no seat-brief and no handoffs". ghi-guide-agent is a guide-agent (glossary:56), so `ghi-guide-agent-ask.py` is not an exception to a rule about agent-seats; the "apart from" clause wrongly implies that ghi-guide-agent is an agent-seat.
-> - The rule itself holds. A search for `--resume` in *.py found these callers outside the handoff-system: ghi-guide-agent-ask.py:580, merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py:394 and run-codex-task-from-brief.py. None of them starts an agent-seat's agent-session.
+> - docs/nedsnodes-wiki/nedsnodes-glossary.md:60: "**guide-agent** — ... It is not an agent-seat: a script runs it one question at a time, with no seat-brief and no handoffs". ghi-guide is a guide-agent (glossary:56), so `ghi-guide-ask.py` is not an exception to a rule about agent-seats; the "apart from" clause wrongly implies that ghi-guide is an agent-seat.
+> - The rule itself holds. A search for `--resume` in *.py found these callers outside the handoff-system: ghi-guide-ask.py:580, merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py:394 and run-codex-task-from-brief.py. None of them starts an agent-seat's agent-session.
 > - No agent would act wrongly on it: the wording is loose, not wrong.
 State: open
 
