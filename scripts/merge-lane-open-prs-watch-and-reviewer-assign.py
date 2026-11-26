@@ -115,9 +115,12 @@ task saying how to repair it, and never becomes a new baseline, which would
 drop the events since the last run; --poll-once-write-baseline makes the first
 state file. Each successful poll also assigns reviews as above; its
 REVIEW-ASSIGNED lines, and a WATCH line saying assignment stopped, go to the
-event file, the WATCH line once per case as the state file records. A run that
-cannot append them puts the assignment file back as it was, so the next run
-that can append deals those pull requests again. A failed
+event file, the WATCH line once per case as the state file records. A run whose
+append fails keeps the deal of each pull request whose REVIEW-ASSIGNED line the
+event file holds, or of every one when the file cannot be read back, names those
+pull requests in its failure task, since a failed append may not survive a crash,
+and puts the rest back out of the assignment file, so the next run that can
+append deals them again. A failed
 poll keeps the state, assigns nothing, and only
 WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK failed polls in a row open a task.
 Not detected: a run killed between writing the assignment file and appending
@@ -714,11 +717,13 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
     """Deal the pull requests with no assignment, write them to the assignment file, and return
     a REVIEW-ASSIGNED event line for each one the file holds afterwards. A failure passes a WATCH
     line to report_stop each time its case differs from the last poll's, as state records.
-    record_assigned_lines, when given, is called with those lines while the lock is held; when it
-    raises OSError, the assignment file is put back as it was and the error raised again, so the
-    next poll deals those pull requests again, unless the error is EventLinesWrittenButNotSynced,
-    whose lines were recorded, so the deal stands. When putting it back fails too, the raised OSError
-    names the pull requests the file keeps with no REVIEW-ASSIGNED line recorded."""
+    record_assigned_lines, when given, is called with those lines while the lock is held. When it
+    raises OSError, the assignment file keeps the deal of each pull request whose line the error
+    names as in the event file (EventLinesAppendFailed.written_lines), or every deal when the
+    event file could not be read back, and loses the others, so the next poll deals those again;
+    the OSError raised then names the kept pull requests, whose lines a failed append may not keep
+    through a crash. When putting the file back fails too, it names the pull requests the file
+    keeps with no REVIEW-ASSIGNED line recorded."""
 
     def stop(case, message):
         if state.get("stopped") != case:
@@ -772,21 +777,38 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
         if record_assigned_lines is not None:
             try:
                 record_assigned_lines(assigned_lines)
-            except EventLinesWrittenButNotSynced:
-                # The lines reached the event file, so the deal stands; putting the file back
-                # would deal these pull requests again, perhaps to other agent-seats.
-                raise
             except OSError as error:
-                try:
-                    merge_lane_pull_request_review_assignments_file_write(path, text)
-                except OSError as put_back_error:
-                    raise OSError(
-                        f"{error}; and the assignment file {path} could not be put back as it was "
-                        f"({put_back_error}), so it assigns these pull requests although no "
-                        f"REVIEW-ASSIGNED line for them was recorded: "
-                        + "; ".join(assigned_lines)
-                        + ". Send each to its merge-lane agent-seat yourself") from error
-                raise
+                written = getattr(error, "written_lines", [])
+                read_back = getattr(error, "read_back", True)
+                # A deal whose line reached, or may have reached, the event file stands: dealing it
+                # again could send the pull request to a second agent-seat.
+                kept = [(deal, line) for deal, line in zip(dealt, assigned_lines)
+                        if line in written or not read_back]
+                put_back = [line for _, line in zip(dealt, assigned_lines)
+                            if line not in written and read_back]
+                message = str(error)
+                if kept:
+                    message += (
+                        f". The assignment file {path} keeps these pull requests, whose "
+                        f"REVIEW-ASSIGNED lines the event file "
+                        + ("held" if read_back else "may hold")
+                        + " after the failed append: " + "; ".join(line for _, line in kept)
+                        + ". Those lines may not survive a crash, because the append failed. For "
+                        "each one the event file does not hold, forward the line to its merge-lane "
+                        "agent-seat as you forward REVIEW-ASSIGNED lines")
+                if put_back:
+                    try:
+                        merge_lane_pull_request_review_assignments_file_write(
+                            path, text + separator + "".join(
+                                f"{pull_request['number']} {lane}\n" for (pull_request, lane), _ in kept))
+                    except OSError as put_back_error:
+                        raise OSError(
+                            f"{message}; and the assignment file {path} could not be put back "
+                            f"({put_back_error}), so it assigns these pull requests although no "
+                            f"REVIEW-ASSIGNED line for them was recorded: "
+                            + "; ".join(put_back)
+                            + ". Send each to its merge-lane agent-seat yourself") from error
+                raise OSError(message) from error
         return assigned_lines
 
 
@@ -993,39 +1015,60 @@ def event_file_line_count(path):
         return 0
 
 
-class EventLinesWrittenButNotSynced(OSError):
-    """The event file holds every line of the append, but the append then failed, such as at
-    fsync, so the lines are there yet may not survive a crash."""
+class EventLinesAppendFailed(OSError):
+    """An append to the event file failed after it opened the file. written_lines holds the lines
+    of the append the file holds whole at the append's offset, in order, which may not survive a
+    crash; read_back is False when the file could not be read back, so any line may be there."""
+
+    def __init__(self, message, written_lines, read_back):
+        super().__init__(message)
+        self.written_lines = written_lines
+        self.read_back = read_back
 
 
 def event_lines_append(path, lines, now):
-    """Append the lines, each after the UTC time. Raises EventLinesWrittenButNotSynced when the
-    append fails after the event file already holds all of them, and OSError otherwise."""
+    """Append the lines, each after the UTC time. Raises EventLinesAppendFailed when the append
+    fails after the file is opened, and OSError when it cannot be opened."""
     if not lines:
         return
     stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    payload = "".join(f"{stamp} {redact_secrets(line)}\n" for line in lines).encode("utf-8", errors="replace")
+    encoded = [f"{stamp} {redact_secrets(line)}\n".encode("utf-8", errors="replace") for line in lines]
     start = None
     try:
         with path.open("ab") as events:
             start = events.tell()
-            events.write(payload)
+            events.write(b"".join(encoded))
             events.flush()
             os.fsync(events.fileno())
     except OSError as error:
-        if start is not None and event_file_holds_payload_at_offset(path, start, payload):
-            raise EventLinesWrittenButNotSynced(
-                f"{error}, after the event file {path} already held every line of this append") from error
-        raise
+        if start is None:
+            raise
+        held = event_file_count_of_appended_lines_found_whole_from_append_offset(path, start, encoded)
+        if held is None:
+            raise EventLinesAppendFailed(
+                f"{error}; the event file {path} could not be read back, so it may hold any of "
+                f"this append's {len(lines)} lines", [], read_back=False) from error
+        raise EventLinesAppendFailed(
+            f"{error}; the event file {path} holds {held} of this append's {len(lines)} lines",
+            lines[:held], read_back=True) from error
 
 
-def event_file_holds_payload_at_offset(path, offset, payload):
+def event_file_count_of_appended_lines_found_whole_from_append_offset(path, offset, encoded_lines):
+    """Return how many of the encoded lines the file holds whole, in order, from the offset, or
+    None when it cannot be read."""
     try:
         with path.open("rb") as events:
             events.seek(offset)
-            return events.read(len(payload)) == payload
+            found = events.read(sum(len(line) for line in encoded_lines))
     except OSError:
-        return False
+        return None
+    held = 0
+    for line in encoded_lines:
+        if not found.startswith(line):
+            break
+        found = found[len(line):]
+        held += 1
+    return held
 
 
 def open_task_with_subject_exists(task_list_directory, subject):

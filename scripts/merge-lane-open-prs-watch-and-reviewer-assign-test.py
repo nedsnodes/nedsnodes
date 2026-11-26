@@ -1203,21 +1203,37 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               in errors, errors)
 
         real_lock = watcher_module.merge_lane_pull_request_review_assignments_file_lock
-        locked = []
+        real_read = watcher_module.merge_lane_pull_request_review_assignments_file_read
+        held = []
+        read_while_held = []
 
-        def lock_and_note(path):
-            lock = real_lock(path)
-            locked.append(path)
-            return lock
+        class NotedLock:
+            def __init__(self, lock):
+                self.lock = lock
 
-        watcher_module.merge_lane_pull_request_review_assignments_file_lock = lock_and_note
+            def __enter__(self):
+                held.append(True)
+                return self.lock.__enter__()
+
+            def __exit__(self, *exc):
+                held.pop()
+                return self.lock.__exit__(*exc)
+
+        def read_and_note(path):
+            read_while_held.append(bool(held))
+            return real_read(path)
+
+        watcher_module.merge_lane_pull_request_review_assignments_file_lock = (
+            lambda path: NotedLock(real_lock(path)))
+        watcher_module.merge_lane_pull_request_review_assignments_file_read = read_and_note
         try:
             exit_code, lines, errors = look_up("merge-lane-1", [open_at_lookup])
         finally:
             watcher_module.merge_lane_pull_request_review_assignments_file_lock = real_lock
-        check("the lookup reads the assignment file under its lock, so it never sees a deal a "
-              "failed append is about to put back",
-              exit_code == 0 and locked == [assignments], f"{locked} {errors}")
+            watcher_module.merge_lane_pull_request_review_assignments_file_read = real_read
+        check("the lookup reads the assignment file while it holds the file's lock, so it never "
+              "sees a deal a failed append is about to put back",
+              exit_code == 0 and read_while_held == [True], f"{read_while_held} {errors}")
 
         def lock_fails(path):
             raise OSError("injected: the lock file cannot be opened")
@@ -2155,6 +2171,7 @@ def run_poll_once_cases(scratch_root, token_file):
     finally:
         watcher_module.os.fsync = real_fsync
     kept = machine.assignments.read_text(encoding="utf-8")
+    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
     second = machine.run()
     assigned = [line for line in machine.event_lines() if " REVIEW-ASSIGNED " in line]
     check("when the append writes every line and then fsync fails, the run exits 1 but keeps the "
@@ -2162,10 +2179,94 @@ def run_poll_once_cases(scratch_root, token_file):
           (first, second) == (1, 0) and [line.split()[0] for line in kept.splitlines()] == ["1"]
           and [line.split()[2] for line in assigned] == ["#1"],
           f"{(first, second)} {kept!r} {assigned} {machine.errors}")
+    check("when the append writes every line and then fsync fails, the failure task names each "
+          "kept pull request and its lane, and says its line may not survive a crash",
+          "PR #1 REVIEW-ASSIGNED" in description and "may not survive a crash" in description
+          and "forward the line to its merge-lane agent-seat" in description,
+          description)
 
-    check("an event file that cannot be read back counts as not holding the lines, so the deal "
-          "is put back",
-          watcher_module.event_file_holds_payload_at_offset(machine.directory / "absent.log", 0, b"x\n") is False)
+    machine = machine_for("append-stops-after-the-first-review-assigned-line")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+    real_open = watcher_module.Path.open
+
+    class FirstLineOnly:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.handle.close()
+            return False
+
+        def tell(self):
+            return self.handle.tell()
+
+        def write(self, payload):
+            end = payload.index(b"\n", payload.index(b" REVIEW-ASSIGNED ")) + 1
+            self.handle.write(payload[:end])
+            self.handle.flush()
+            raise OSError("injected: no space left after the first REVIEW-ASSIGNED line")
+
+    def open_first_line_only(path, mode="r", *args, **kwargs):
+        handle = real_open(path, mode, *args, **kwargs)
+        if path == machine.events_path and mode == "ab":
+            return FirstLineOnly(handle)
+        return handle
+
+    watcher_module.Path.open = open_first_line_only
+    try:
+        first = machine.run()
+    finally:
+        watcher_module.Path.open = real_open
+    kept = machine.assignments.read_text(encoding="utf-8")
+    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+    machine.complete_tasks()
+    second = machine.run()
+    assigned = [line for line in machine.event_lines() if " REVIEW-ASSIGNED " in line]
+    check("when the append stops after one whole REVIEW-ASSIGNED line, the run keeps that deal, "
+          "names it in the failure task, and puts the other back, so the next run deals only the "
+          "other and no pull request gets a second REVIEW-ASSIGNED line",
+          (first, second) == (1, 0) and [line.split()[0] for line in kept.splitlines()] == ["1"]
+          and "PR #1 REVIEW-ASSIGNED" in description and "PR #2" not in description
+          and [line.split()[2] for line in assigned] == ["#1", "#2"],
+          f"{(first, second)} {kept!r} {description!r} {assigned} {machine.errors}")
+
+    machine = machine_for("append-fails-and-cannot-be-read-back")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1)]
+    real_fsync = watcher_module.os.fsync
+    real_held = watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset
+
+    def fsync_fails(descriptor):
+        raise OSError("injected: fsync failed")
+
+    watcher_module.os.fsync = fsync_fails
+    watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset = lambda *arguments: None
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.os.fsync = real_fsync
+        watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset = real_held
+    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+    check("when the failed append's event file cannot be read back, the run keeps the deal, so "
+          "no later poll deals it again, and the failure task names it as a line the event file "
+          "may hold",
+          code == 1
+          and [line.split()[0] for line in
+               machine.assignments.read_text(encoding="utf-8").splitlines()] == ["1"]
+          and "could not be read back" in description and "may hold after the failed append" in description
+          and "PR #1 REVIEW-ASSIGNED" in description,
+          f"{code} {description!r} {machine.errors}")
+    check("an event file that cannot be read back gives no count of the lines it holds",
+          watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset(
+              machine.directory / "absent.log", 0, [b"x\n"]) is None)
 
     machine = machine_for("append-and-put-back-fail")
     machine.assignments.write_text("", encoding="utf-8")
