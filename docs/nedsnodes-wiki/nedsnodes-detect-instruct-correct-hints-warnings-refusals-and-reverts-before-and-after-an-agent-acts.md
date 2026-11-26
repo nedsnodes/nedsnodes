@@ -1,5 +1,15 @@
 # Detect-instruct-correct
 
+An agent can make the same mistake again and again, even when its instructions forbid it. Say a hook tells it once, slightly late, after the act has already run. That still pays: an agent remembers what it is told for a long stretch of work, by one estimate the next 100,000 tokens, so it redoes the work now if needed, and does it right the next time. The programs on this page keep an agent to a rule this way, and because they check every act, they do not rely on its memory alone.
+
+A program answers an act in one of three ways.
+
+- **Refusing**: the program stops the act before it runs: when it is sure the act breaks a rule, or when the act may break one and the harm could not be put right afterward, and in this second case the agent may run the act again once its own check shows the act breaks no rule.
+- **Hinting**: the program lets the act run and says what may be wrong. The hint comes too late to change that act, but it changes the next act of the same kind, and can tell the agent to redo the work now. A hint that is often wrong still pays if it fires seldom enough that the agent does not learn to skip it.
+- **Correcting**: after the act, the program finds a fault, or warns of one it is unsure of. When it can undo the act safely, it undoes it and says what it undid and why; otherwise the agent checks, then undoes or fixes the act, or asks the user when only he may decide.
+
+The rest of the page sets out each case in detail.
+
 The glossary defines detect-instruct-correct (DIC). This page sets out the cases that definition covers, before the agent's act and after it, says which of them are built, and lists the detection techniques and undo techniques the project uses. DIC keeps an agent to a rule without trusting the agent to remember the rule; the [enforcement ladder](nedsnodes-enforcement-ladder.md) names the other ways, such as making the wrong act impossible, and says why a program that detects the act usually serves a rule better than another line of text.
 
 Read this page before you add a hook, a test or a maintenance-job that answers an agent's act, and before you add a rule to standing-agent-instructions. How to word what the program says to the agent is in [How to write a tool-message-to-agent](nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md); this page says what the program and the agent do, not how the message is worded. Below, "the act" means what that page means by it: what the agent did, or tried to do, that the program answers, such as a tool call, a reply, a commit, or the agent's attempt to end its turn.
