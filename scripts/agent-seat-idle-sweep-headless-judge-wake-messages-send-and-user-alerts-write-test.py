@@ -3762,6 +3762,114 @@ check("an events task's wait past its user-alert, the task completed and a new e
       and machine.events("message_sent")[-1]["text"].startswith("Task 2 on your task list"),
       (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
 
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant("Still waiting.", when=at(1)), turn_end(at(1)))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(16)
+machine.script()
+machine.run(32)
+told = [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
+machine.seat("beta", DONE_TURN, session="s-beta")
+machine.task("beta", "1")
+machine.script(usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+machine.run(33)
+paused = len(machine.events("headless_usage_limit_pause")) == 1
+events_task(machine, status="completed")
+events_task(machine, task_id="2")
+machine.handoff_put_off()
+machine.script()
+machine.run(34)
+sends_in_pause = len(machine.events("message_sent"))
+machine.script(judged(False), sent_ok(EVENTS_SEAT))
+machine.run(61)
+check("an events task's wait past its user-alert, replaced by a new events task while a usage-limit "
+      "pause holds, with a deferred handoff not yet reminded of: after the reset the new task's wake "
+      "is sent, not the handoff text",
+      told and paused and sends_in_pause == 2
+      and machine.events("message_sent")[-1]["text"].startswith("Task 2 on your task list")
+      and not any(event["text"].startswith("Your handoff was put off")
+                  for event in machine.events("message_sent")),
+      (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+machine.handoff_put_off()
+machine.script({"sends": [send_to(EVENTS_SEAT, is_error=True)],
+                "answer": {"sent": False, "reason": "r"}})
+machine.run(0)
+machine.append(EVENTS_SEAT, assistant("Still waiting.", when=at(1)), turn_end(at(1)))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(16)
+machine.script()
+machine.run(32)
+told = [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
+machine.append(EVENTS_SEAT, user("more", at(41)), assistant("Back to it.", at(41.5)),
+               turn_end(at(42)))
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(48)
+check("a deferred-handoff wait whose nudge failed to send, ended by tokens spent after its "
+      "user-alert, with an events task open: the events task's wake is sent, not the handoff text "
+      "again",
+      told and [event["why"] for event in machine.events("wait_ended")][-1:]
+      == ["it spent tokens after the step that follows the escalation"]
+      and machine.events("message_sent")[-1]["text"].startswith("Task 1 on your task list"),
+      (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+machine.handoff_put_off()
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+check("no wait open, a deferred handoff not yet reminded of and an events task open: the events "
+      "task's wake is sent, not the handoff text",
+      [event["text"][:6] for event in machine.events("message_sent")] == ["Task 1"],
+      machine.events("message_sent"))
+
+HELD_BY_AN_UNDECIDED_WALK_ITEM = {"prerequisites": [{"approval_walk_item_decided": {
+    "approval_walk_minutes_file_path": "/nonexistent/docs/walk/held-walk-minutes.md",
+    "approval_walk_item_heading": "An item not yet decided"}}]}
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine, metadata=HELD_BY_AN_UNDECIDED_WALK_ITEM)
+machine.script()
+machine.run(0)
+machine.run(16)
+check("no wait open and the only open task an events task its prerequisites hold: no wake, on this "
+      "run or the next",
+      not machine.events("message_sent") and not machine.claude_calls(),
+      (machine.events("message_sent"), machine.claude_calls()))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+machine.handoff_put_off()
+events_task(machine, metadata=HELD_BY_AN_UNDECIDED_WALK_ITEM)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+check("no wait open, a deferred handoff not yet reminded of and an events task its prerequisites "
+      "hold: the handoff text is sent, not the events task's wake",
+      [event["text"].startswith(HANDOFF_TEXT_START) for event in machine.events("message_sent")]
+      == [True], machine.events("message_sent"))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, [user("go"), assistant(PROMISE), turn_end()])
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+check("no wait open, an unbacked promise and an events task open: rule 2 comes first, so the "
+      "promise message is sent and opens the wait, and the events task's wake waits for it",
+      [event["step"] for event in machine.events("message_sent")] == ["nudge"]
+      and PROMISE in machine.events("message_sent")[-1]["text"]
+      and not machine.events("message_sent")[-1]["text"].startswith("Task 1 on your task list"),
+      machine.events("message_sent"))
+
 
 # --- no reminder of a wait on the user, and no repeat until the user types ----------------------
 def typed_by_the_user(text, when):

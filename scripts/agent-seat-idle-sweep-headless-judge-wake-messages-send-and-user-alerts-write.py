@@ -1309,16 +1309,12 @@ class Sweep:
             self.end_wait(seat, "it spent tokens after the step that follows the escalation")
             wait = None
         events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
-        if (wait and TELL_USER in wait and events_task
-                and not self.woken_for_pull_request_events_task(seat, events_task)
-                and not self.headless_usage_limit_pause_holds()):
-            # The user already has that wait's alert; a new events task must not wait behind it.
-            # Its wake is sent here, not through this verdict's rule: under rule 3, a handoff nudge
-            # whose send failed was never logged as reminded, so the rule would send the handoff
-            # text again in place of the wake. This runs before the check below, which would end a
-            # wait whose events task was replaced and leave the new task's wake to the rule.
+        due_wake = self.pull_request_events_task_due_a_wake(seat, verdict) if wait and TELL_USER in wait else None
+        if due_wake and not self.headless_usage_limit_pause_holds():
+            # The user already has that wait's alert, so it has no step left to hold the wake back.
+            # With no wait open, nudge sends the wake.
             self.end_wait(seat, "a new pull-request events task opened after the user was told")
-            self.wake_for_pull_request_events_task(seat, verdict, stretch, events_task)
+            self.wake_for_pull_request_events_task(seat, verdict, stretch, due_wake)
             return
         # The task may be completed by a subagent, whose calls the main transcript lacks. Rule 2
         # sentences on the wait are logged as checked, so ending the wait would lose them: it stays
@@ -1566,27 +1562,38 @@ class Sweep:
         return None
 
     def nudge(self, seat, verdict, rule, text, stretch):
-        if rule == 3:
+        """The message for an agent-seat with no open wait. An events task's wake comes first,
+        whichever rule the verdict picked, since the user was told this wake happens: under rule 3,
+        a handoff nudge whose send failed was never logged as reminded, so the rule would send the
+        handoff text again in its place."""
+        events_task = self.pull_request_events_task_due_a_wake(seat, verdict)
+        if events_task:
+            self.wake_for_pull_request_events_task(seat, verdict, stretch, events_task)
+        elif rule == 3:
             subject = f"handoff put off: {text}"
             if subject in self.reminded_subjects(seat, verdict):
                 if (verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS)
                         or open_pull_request_events_task(seat, self.paths.tasks_root)):
-                    self.idle_seat_open_work(
+                    self.judge_idle_seat(
                         seat, {**verdict, fields.HANDOFF_DEFERRED_MARKER: None}, stretch)
                 return
             self.start_wait(seat, verdict, stretch, text, 3)
             self.reminder_sent(seat, verdict, self.send(seat, verdict, text, NUDGE), [subject])
         elif rule == 5:
-            self.idle_seat_open_work(seat, verdict, stretch)
-
-    def idle_seat_open_work(self, seat, verdict, stretch):
-        """Wake merge-lane-2 in code for an events task it was not yet woken for, since the user
-        was told this wake happens; ask the judge about everything else."""
-        events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
-        if events_task and not self.woken_for_pull_request_events_task(seat, events_task):
-            self.wake_for_pull_request_events_task(seat, verdict, stretch, events_task)
-        else:
             self.judge_idle_seat(seat, verdict, stretch)
+
+    def pull_request_events_task_due_a_wake(self, seat, verdict):
+        """The open events task no agent-session of the agent-seat was woken for, or None. When
+        nothing runs, the verdict lists the open tasks nothing holds, prerequisites included, and
+        the task must be among them; while something runs the verdict asks GitHub nothing, so only
+        the task's blockers are checked."""
+        task = open_pull_request_events_task(seat, self.paths.tasks_root)
+        if not task or self.woken_for_pull_request_events_task(seat, task):
+            return None
+        free = verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS)
+        if free is not None and task["id"] not in {entry["id"] for entry in free}:
+            return None
+        return task
 
     def woken_for_pull_request_events_task(self, seat, task):
         """Whether any agent-session of the agent-seat was woken for this task: one wake per task,
