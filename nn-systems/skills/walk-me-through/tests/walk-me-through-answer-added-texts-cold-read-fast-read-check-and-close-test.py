@@ -1162,7 +1162,7 @@ def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
             ("## __Item 3 of 9 revised__: the first", "revised: the first",
              "the word `revised` ending at a closing emphasis is no label, so the title keeps it"),
             ("## Item 3 of 9: revised the first", "revised the first",
-             "`revised` followed by a word is the title's, so the title search and the item finder agree"),
+             "`revised` followed by a word stays in the title, though the item finder reads the heading as revised"),
             ("## **Item 3 of 9: Keep this** (but not that)", "Keep this (but not that)",
              "a heading's text after its emphasis closes is part of its title"),
             ("- __Item 3 of 9: Fix foo__bar__ More detail.", "Fix foo__bar",
@@ -1178,6 +1178,14 @@ def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
         check(f"a heading `{later}`, whose `revised` is followed by `_` or an emphasis delimiter, does not supersede "
               f"the earlier heading for item 3 as a revision, so the finder refuses the two loudly",
               [span[3] for span in spans if "3" in span[0]] == [0, 4], repr(spans))
+    for later in ("## **Item 3 of 10 revised**: New", "## Item 3 of 10 (revised again): New",
+                  "## Item 3 of 10, revised again: New", "## Item 3 of 10, revised twice: New"):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "walk.md"
+            path.write_text(f"# A walk\n\n## Item 3 of 9: Old\n\nThe first.\n\n{later}\n\nThe second.\n")
+            total, units = finder.waiting_item_units(path, "item 3 of 9", ["3"], "9", finder.markdown_parser())
+        check(f"a later heading `{later}` with another total is a revision, so the minutes' `item 3 of 9` finds it, "
+              f"not the superseded `## Item 3 of 9: Old`", [unit[1] for unit in units] == ["10"], repr(units))
     for line, title in (("- __Item 3 of 9: Fix foo___ More detail.", "Fix foo"),
                         ("**Item 3 of 9: x ** 2 is small** More.", "x ** 2 is small")):
         found = program.item_title(finder, line)

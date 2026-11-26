@@ -203,12 +203,13 @@ APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = 
 SUB_STEP_NO_DECISION_CLOSING_LINE = re.compile(
     rf"^\s*(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\((\S+)\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
 CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*)?", re.S)
-# The `revised` label: `(revised)`, or the word followed by a separator or the line's end, as in `, revised:`; so a
-# title opening with the word, as in `: revised the first`, keeps it. Every reader of the label reads it through
-# this pattern.
+# The words item_title takes off a title as the `revised` label: `(revised)`, or the word followed by a separator or
+# the line's end, as in `, revised:`; so a title such as `: Revised estimates` keeps its first word. REVISED, which
+# decides whether a heading supersedes another, reads more forms; a title it reads as revised can keep the word.
 APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX = r"(?:\(revised\)|revised(?=\s*(?:[:,.;\-\u2013\u2014]|$)))"
-# Only right after the count, so a title that uses the word drops nothing.
-REVISED = re.compile(rf"^[*_\s(,:;.\-\u2013\u2014]*{APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX}", re.I)
+# Only right after the count, as in `(revised again)`, `, revised twice:` or `**Item 3 of 9 revised**:`; a word
+# character straight after it, as in `revised_estimates` or `revised__estimates`, makes it no label.
+REVISED = re.compile(r"^[*_\s(,:;.\-\u2013\u2014]*revised\b", re.I)
 WITHDRAWN_HEADING = re.compile(r"^[*_\s(]*withdrawn\b", re.I)
 APPROVAL_WALK_ITEM_TAG_LINE = re.compile(r"^\s*#approval_walk_item_", re.I)
 RUNNING_COUNT_TOTAL = re.compile(rf"\b(items?\s+{NUMBER_LIST})\s+of\s+\d+\b", re.I)
