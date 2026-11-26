@@ -2347,19 +2347,19 @@ def run_poll_once_cases(scratch_root, token_file):
     machine.run("--poll-once-write-baseline")
     machine.poll = [poll_once_pull_request(1)]
     real_fsync = watcher_module.os.fsync
-    real_held = watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset
+    real_held = watcher_module.open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole
 
     def fsync_fails(descriptor):
         raise OSError("injected: fsync failed")
 
     watcher_module.os.fsync = fsync_fails
-    watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset = lambda *arguments: None
+    watcher_module.open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole = lambda *arguments: None
     open_generic_task(machine)
     try:
         code = machine.run()
     finally:
         watcher_module.os.fsync = real_fsync
-        watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset = real_held
+        watcher_module.open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole = real_held
     kept_tasks = [task for task in machine.tasks_read() if "#1" in task["subject"]]
     description = kept_tasks[0]["description"] if kept_tasks else ""
     check("when the failed append's event file cannot be read back, the run keeps the deal, so "
@@ -2372,7 +2372,7 @@ def run_poll_once_cases(scratch_root, token_file):
           and "PR #1 REVIEW-ASSIGNED" in description,
           f"{code} {description!r} {machine.errors}")
     check("an event file that cannot be read back gives no count of the lines it holds",
-          watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset(
+          watcher_module.open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole(
               machine.directory / "absent.log", 0, [b"x\n"]) is None)
 
     machine = machine_for("append-and-put-back-fail")

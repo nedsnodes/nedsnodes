@@ -1098,7 +1098,7 @@ def event_lines_append(path, lines, now):
     except OSError as error:
         if start is None:
             raise
-        held = event_file_count_of_appended_lines_found_whole_from_append_offset(path, start, encoded)
+        held = open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole(path, start, encoded)
         if held is None:
             raise EventLinesAppendFailed(
                 f"{error}; the event file {path} could not be read back, so it may hold any of "
@@ -1108,7 +1108,7 @@ def event_lines_append(path, lines, now):
             lines[:held], read_back=True) from error
 
 
-def event_file_count_of_appended_lines_found_whole_from_append_offset(path, offset, encoded_lines):
+def open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole(path, offset, encoded_lines):
     """Return how many of the encoded lines the file holds whole, in order, from the offset, or
     None when it cannot be read."""
     try:
