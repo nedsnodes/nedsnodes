@@ -1528,10 +1528,10 @@ RULING_GIVEN_DEFERRED, RULING_GIVEN_MOVED_ON, RULING_GIVEN_PART_ANSWERS = "defer
 GH_PROGRAM = "gh"
 GH_TIMEOUT_SECONDS = 60  # pragma: no mutate, a limit a second longer or shorter behaves the same
 HELD_PULL_REQUESTS_LIST = ("pr", "list", "--state", "open", "--limit", "1000", "--json", "number,reviews")
-# Reads a review line as line_with_leading_closed_form_hashtag_turned_into_open_form does.
-HELD_PULL_REQUESTS_BY_HAND_JQ = ('.[] | select(any(.reviews[].body | split("\\n")[] | gsub("^\\\\s+|\\\\s+$"; "") '
-                                 '| sub("^(?<hashtag>#[a-z][a-z0-9_]*)#(?=\\\\s|$)"; "\\(.hashtag)"); '
-                                 '. == {line})) | .number')
+# Reads a review line as pull_requests_held_on does. `gh --jq` runs gojq, whose regular expressions lack some of
+# jq's, such as lookahead.
+HELD_PULL_REQUESTS_BY_HAND_JQ = ('.[] | select(any(.reviews[].body | split("\\n")[] | gsub("^\\\\s+|\\\\s+$"; ""); '
+                                 '. == {line} or . == {closed_form_line})) | .number')
 RULING_GIVEN_POSTED = "The ruling on item {number} is posted as `{ruling}` on pull request {pull_request}, held on it."
 RULING_GIVEN_LOOKUP_FAILED = (
     "The minutes record the answer to item {number}, but the open pull requests merge-lane-2 holds until that item "
@@ -2643,7 +2643,10 @@ def not_asked_problems(kind, rating, lines, marks, top, item):
 
 
 def not_system_glossary_problems(touched, top, item):
-    """Return a problem for each touched path that is not a system glossary git tracks in the checkout at top."""
+    """Return a problem for each touched path that is not a system glossary git tracks in the checkout at top.
+
+    Not handled: the hashtag glossary, which lists hashtags, not system-terms, is taken as a system glossary here, so an
+    item touching only it can settle as kind 7."""
     glossaries_listed = load_module("system_glossaries_listed_on_the_project_glossary_test",
                                     SYSTEM_GLOSSARIES_LISTED_FILE)
     project_glossary = glossaries_listed.PROJECT_GLOSSARY_RELATIVE_PATH
@@ -2682,7 +2685,10 @@ def marker_reader_pattern(marker):
 
 
 def glossary_term_or_marker_problems(found, touched, top, item):
-    """Return why a kind 6 item, a glossary term put in or a hashtag marker added to Markdown prose, cannot settle."""
+    """Return why a kind 6 item, a glossary term put in or a hashtag marker added to Markdown prose, cannot settle.
+
+    Not handled: an item that adds a hashtag no page uses yet. The hashtag glossary test then needs the hashtag
+    glossary to list it, and naming that glossary in `#not_asked_touches` is refused here, so such an item is asked."""
     problems = []
     terms = [name for value in found[GLOSSARY_TERM] for name in rename_names(value)]
     markers = [HASHTAG_MARKER_CLOSING_HASH.sub(r"\1", value) for value in words(found[ADDED_HASHTAG_MARKER])]
@@ -4761,10 +4767,9 @@ def gh_failure(command, top, gh_program, timeout):
     return result.stdout, None
 
 
-def line_with_leading_closed_form_hashtag_turned_into_open_form(line):
-    """line with the closing `#` of its leading hashtag removed, so `#held_on_ruling# w item 3` reads as
-    `#held_on_ruling w item 3`."""
-    return re.sub(r"^(#[a-z][a-z0-9_]*)#(?=\s|$)", r"\1", line)
+def pull_request_review_held_on_ruling_hashtag_line_rewritten_with_closing_hash_after_the_hashtag(line):
+    """line, a HELD_ON_RULING_LINE, with its hashtag in the closed form, as in `#held_on_ruling# w item 3`."""
+    return line.replace(" ", "# ", 1)
 
 
 def pull_requests_held_on(lines, top, gh_program, timeout):
@@ -4776,11 +4781,11 @@ def pull_requests_held_on(lines, top, gh_program, timeout):
     try:
         pull_requests = json.loads(output)
         held = {line: [] for line in lines}
+        closed_form = pull_request_review_held_on_ruling_hashtag_line_rewritten_with_closing_hash_after_the_hashtag
         for pull_request in pull_requests:
-            found = {line_with_leading_closed_form_hashtag_turned_into_open_form(line.strip())
-                     for review in pull_request["reviews"] for line in (review["body"] or "").split("\n")}
+            found = {line.strip() for review in pull_request["reviews"] for line in (review["body"] or "").split("\n")}
             for line in lines:
-                if line in found:
+                if line in found or closed_form(line) in found:
                     held[line].append(pull_request["number"])
     except (ValueError, TypeError, KeyError) as error:
         return None, f"printed what is not a list of pull requests with their reviews: {error!r}"
@@ -4794,13 +4799,15 @@ def ruling_given_comments_posted(walk_name, rulings, top, gh_program, timeout):
     lines = {HELD_ON_RULING_LINE.format(walk=walk_name, number=number): (number, word) for number, word in rulings}
     held, error = pull_requests_held_on(list(lines), top, gh_program, timeout)
     in_top = f"cd {shlex.quote(str(top))} && gh "
+    closed_form = pull_request_review_held_on_ruling_hashtag_line_rewritten_with_closing_hash_after_the_hashtag
     output, failed = [], bool(error)
     for line, (number, word) in lines.items():
         body = RULING_GIVEN_LINE.format(walk=walk_name, number=number, word=word)
         values = {"number": number, "walk": walk_name, "word": word}
         if error:
-            list_command = (in_top + shlex.join(HELD_PULL_REQUESTS_LIST) + " --jq "
-                            + shlex.quote(HELD_PULL_REQUESTS_BY_HAND_JQ.format(line=json.dumps(line))))
+            jq = HELD_PULL_REQUESTS_BY_HAND_JQ.format(line=json.dumps(line),
+                                                      closed_form_line=json.dumps(closed_form(line)))
+            list_command = in_top + shlex.join(HELD_PULL_REQUESTS_LIST) + " --jq " + shlex.quote(jq)
             output += [text.format(error=error, list_command=list_command, **values,
                                    comment_command=in_top + "pr comment <number> --body " + shlex.quote(body))
                        for text in RULING_GIVEN_LOOKUP_FAILED]

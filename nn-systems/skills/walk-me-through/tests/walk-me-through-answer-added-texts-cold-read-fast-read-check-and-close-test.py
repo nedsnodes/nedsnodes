@@ -19,6 +19,7 @@ import argparse
 import contextlib
 import datetime
 import errno
+import http.server
 import importlib.util
 import io
 import json
@@ -30,6 +31,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import types
@@ -1160,11 +1162,10 @@ def test_every_walk_hashtag_is_read_in_its_closed_form_as_in_its_open_form():
                                        "(2026-11-26 01:00Z) in his words \"AO\", which makes its change. Fast reads:")
     check("an answer line with closed hashtags gives the answer word alone",
           answer is not None and answer.group("answered") == "approved", repr(answer and answer.groupdict()))
-    check("a held-on-ruling line in the closed form is read as the open form the program looks for",
-          [program.line_with_leading_closed_form_hashtag_turned_into_open_form(line)
-           for line in ("#held_on_ruling# w item 3", "#held_on_ruling w item 3")]
-          == ["#held_on_ruling w item 3"] * 2,
-          program.line_with_leading_closed_form_hashtag_turned_into_open_form("#held_on_ruling# w item 3"))
+    closed = program.pull_request_review_held_on_ruling_hashtag_line_rewritten_with_closing_hash_after_the_hashtag(
+        "#held_on_ruling w item 3")
+    check("a held-on-ruling line's closed form closes its hashtag alone",
+          closed == "#held_on_ruling# w item 3", repr(closed))
 
 
 def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
@@ -7466,6 +7467,36 @@ def held_pull_requests(*held):
     return json.dumps([{"number": number, "reviews": [{"body": body} for body in bodies]} for number, bodies in held])
 
 
+def gh_jq_run_on(jq, response):
+    """Run `gh api --jq jq` on response, served by a local stand-in for GitHub, since `gh --jq` runs gojq, whose
+    regular expressions differ from standalone jq's."""
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = response.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *arguments):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    proxy = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with tempfile.TemporaryDirectory() as configuration:
+            # gh sends a request for the host github.localhost over plain http, so it goes through HTTP_PROXY.
+            return subprocess.run(["gh", "api", "pulls", "--jq", jq], capture_output=True, text=True, timeout=60,
+                                  env=dict(os.environ, HTTP_PROXY=proxy, http_proxy=proxy, NO_PROXY="", no_proxy="",
+                                           GH_HOST="github.localhost", GH_TOKEN="stand-in",
+                                           GH_CONFIG_DIR=configuration))
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def gh_environment(pull_requests="[]", mode="", comment_fails=""):
     return dict(os.environ, GH_STAND_IN_PULL_REQUESTS=pull_requests, GH_STAND_IN_MODE=mode,
                 GH_STAND_IN_COMMENT_FAILS=comment_fails)
@@ -7580,11 +7611,10 @@ def test_the_by_hand_lookup_command_lists_exactly_the_pull_requests_held_on_the_
     closed = case.run("close", environment=gh_environment(mode="list-fails"))
     command = re.search(r"--jq ('[^']*')", closed.stdout)
     jq = shlex.split(command.group(1))[0] if command else ""
-    program = shutil.which("jq")
-    if not program:
-        print("SKIP  the by-hand lookup's filter is run only where jq is installed")
+    if not shutil.which("gh"):
+        print("SKIP  the by-hand lookup's filter is run only where gh is installed, since it runs gh's own jq")
         return
-    listed = subprocess.run([program, "-r", jq], capture_output=True, text=True, input=held_pull_requests(
+    listed = gh_jq_run_on(jq, held_pull_requests(
         (101, [f"x\n  {HELD_ON_ITEM_4} \ny"]), (103, [f"#held_on_ruling {WALK_NAME} item 44"]), (106, []),
         (108, [HELD_ON_ITEM_4.replace("#held_on_ruling ", "#held_on_ruling# ")]),
         (109, [f"#held_on_ruling# {WALK_NAME} item 44"])))
