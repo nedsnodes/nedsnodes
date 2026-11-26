@@ -852,7 +852,7 @@ def run_cases_on_ned_box(workspace: Path):
     finally:
         program.git = real_git_for_overlap
     refspecs_of_other_run = [argument for argument in (other_run_fetches or [()])[0]
-                             if argument.startswith("+refs/heads/main:")]
+                             if argument.removeprefix("+").startswith("refs/heads/main:")]
     ref_of_other_run = (refspecs_of_other_run[0].split(":", 1)[1]
                         if other_result.code == 0 and len(refspecs_of_other_run) == 1 else None)
     check("a run with another --temporary-directory fetches main into one ref of its own",
@@ -873,7 +873,8 @@ def run_cases_on_ned_box(workspace: Path):
     call = result.runner_calls[0] if result.runner_calls else {}
     check("a run with another --temporary-directory that fetches between this run's fetch and "
           "its rev-parse does not change the commit this run tests",
-          result.code == 0 and call.get("commit") == fixture.commit_of_main, repr(result))
+          ref_of_other_run is not None and result.code == 0
+          and call.get("commit") == fixture.commit_of_main, repr(result))
 
     real_git = program.git
 
@@ -900,6 +901,29 @@ def run_cases_on_ned_box(workspace: Path):
                                     "is at 1 but expected 2")
                   for line in record_lines)
           and "error: cannot lock ref" in result.stderr and "From https" not in result.stderr,
+          (repr(result), record_lines))
+
+    def ref_delete_fails(clone, *arguments):
+        if arguments[:2] == ("update-ref", "-d"):
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(clone), *arguments], 1, "",
+                f"error: cannot lock ref '{arguments[2]}': Permission denied\n")
+        return real_git(clone, *arguments)
+
+    program.git = ref_delete_fails
+    try:
+        result = fixture.run()
+    finally:
+        program.git = real_git
+    record_lines = (fixture.record("ned-box") or "").splitlines()
+    ref = program.scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(
+        fixture.temporary / program.SCHEDULED_FULL_TEST_RUN_DIRECTORY_NAME)
+    check("a failed delete of the ref main was fetched into is recorded, printed with the "
+          "command that deletes it, and makes the run exit 4 although the suites ran",
+          result.code == 4 and len(result.runner_calls) == 1
+          and f"git update-ref -d {ref} failed in {fixture.clone}: error: cannot lock ref "
+              f"'{ref}': Permission denied" in record_lines
+          and f"delete the ref with: git -C {fixture.clone} update-ref -d {ref}\n" in result.stderr,
           (repr(result), record_lines))
 
 

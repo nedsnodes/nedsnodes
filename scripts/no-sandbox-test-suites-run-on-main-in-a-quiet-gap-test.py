@@ -578,11 +578,38 @@ with tempfile.TemporaryDirectory() as directory:
           and "git fetch origin failed" in state["last_run"]["reason"], (code, printed, state))
     gate_call = ["--print-merge-gate-notice-of-last-failed-or-stopped-run", "--clone", str(s.clone)]
     gate_out = io.StringIO()
-    with constants(DEFAULT_STATE_FILE=s.state_file), contextlib.redirect_stdout(gate_out):
+
+    def parse_arguments_refused(argv):
+        raise AssertionError(f"merge-gate.sh's call went to parse_arguments: {argv}")
+
+    with constants(DEFAULT_STATE_FILE=s.state_file, parse_arguments=parse_arguments_refused), \
+            contextlib.redirect_stdout(gate_out):
         gate_code = program.main(gate_call)
     check("merge-gate.sh's call, read without argparse, prints what the full parse prints",
           gate_code == program.EXIT_DONE and "git fetch origin failed" in gate_out.getvalue()
           and gate_out.getvalue() == s.notice(), (gate_code, gate_out.getvalue()))
+    bare_flag_parsed, full_parse = [], program.parse_arguments
+    with constants(DEFAULT_STATE_FILE=s.state_file,
+                   parse_arguments=lambda argv: bare_flag_parsed.append(argv) or full_parse(argv)), \
+            contextlib.redirect_stdout(io.StringIO()):
+        program.main(gate_call[:1])
+    check("the notice flag alone goes to parse_arguments; only merge-gate.sh's exact call skips it",
+          bare_flag_parsed == [gate_call[:1]], bare_flag_parsed)
+    real_gettempdir = tempfile.gettempdir
+
+    def no_writable_temporary_directory():
+        raise FileNotFoundError("No usable temporary directory found")
+
+    tempfile.gettempdir = no_writable_temporary_directory
+    try:
+        with constants(DEFAULT_STATE_FILE=s.state_file), \
+                contextlib.redirect_stdout(io.StringIO()) as unwritable_out:
+            unwritable_code = program.main(gate_call[:1])
+    finally:
+        tempfile.gettempdir = real_gettempdir
+    check("with no writable temporary directory, the notice flag alone still prints the notice",
+          unwritable_code == program.EXIT_DONE and unwritable_out.getvalue() == s.notice(),
+          (unwritable_code, unwritable_out.getvalue()))
     with contextlib.redirect_stderr(io.StringIO()):
         try:
             program.main(gate_call[:2])

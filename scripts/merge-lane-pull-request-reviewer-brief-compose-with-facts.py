@@ -24,7 +24,7 @@ makes useless a point fix or workaround they kept. For each pull request a
 in it, the facts give merge-lane-2's follow-up request block for that pull
 request as --review-tools-worktree-at-main's FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME
 prints it, so the reviewer can check the answers against the findings' own
-text. The facts end with the pull request's description, which the brief
+text, or, when that program refuses to print it, its refusal. The facts end with the pull request's description, which the brief
 quotes as the author's claims. The reviewer runs with no GitHub login, so the
 brief is where it reads the description and the follow-up request blocks. The brief is written to
 briefs/brief-<tag>-mac-claude.md under the worktrees and outputs directory, and
@@ -114,12 +114,18 @@ def parse_arguments(argv):
     return common.resolve_path_options(parser.parse_args(argv))
 
 
-def run(command, gh_token=None):
+class Refused(Exception):
+    """A program run refused, exiting 1 with standard error opening `REFUSED: `; the text is that error."""
+
+
+def run(command, gh_token=None, refusal_allowed=False):
     environment = run_all_test_suites.environment_without_git_redirecting_variables()
     if gh_token is not None:
         environment["GH_TOKEN"] = gh_token
     completed = subprocess.run(
         command, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=environment)
+    if refusal_allowed and completed.returncode == 1 and completed.stderr.startswith("REFUSED: "):
+        raise Refused(completed.stderr.strip())
     if completed.returncode != 0:
         raise StepFailed(f"{' '.join(command)} exited {completed.returncode}: "
                          f"{completed.stderr.strip()}")
@@ -202,11 +208,20 @@ def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
     in a "#follow_up_request pull request <number>", lowest number first."""
     texts = []
     for followed_up in sorted({int(number) for number in FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER.findall(description)}):
-        block = run([sys.executable, str(review_tools_worktree / "scripts" / FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME),
-                     str(followed_up), "print-follow-up-request-block-from-merge-lane-2-reviews"], gh_token).strip()
-        texts.append(f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description "
-                     f"names, as `scripts/{FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME} {followed_up} "
-                     "print-follow-up-request-block-from-merge-lane-2-reviews` prints it from merge-lane-2's reviews"
+        program = f"`scripts/{FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME} {followed_up} " \
+                  "print-follow-up-request-block-from-merge-lane-2-reviews`"
+        fact = f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description names"
+        try:
+            block = run([sys.executable, str(review_tools_worktree / "scripts" / FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME),
+                         str(followed_up), "print-follow-up-request-block-from-merge-lane-2-reviews"], gh_token,
+                        refusal_allowed=True).strip()
+        except Refused as refusal:
+            # A refused block is one merge-lane-2 writes by hand, so the brief is still composed, with the refusal
+            # in the block's place.
+            texts.append(f"{fact}: {program} refused to print it from merge-lane-2's reviews, saying:\n\n"
+                         + quoted(str(refusal)) + "\n")
+            continue
+        texts.append(f"{fact}, as {program} prints it from merge-lane-2's reviews"
                      + (":\n\n" + quoted(block) + "\n" if block else
                         ": it printed no finding, so merge-lane-2's reviews of that pull request hold no "
                         "non-blocking finding."))

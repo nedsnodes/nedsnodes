@@ -3,7 +3,7 @@
 
 Usage:
   scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py <pull request number>
-      <base commit> [--expected-head-commit COMMIT] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
+      <base commit> [--expected-head-commit COMMIT] [--main-commit COMMIT] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
 The base commit is the merge base for a first review, or the nn-head-commit
 reviewed before for a fix-round, unless that fix-round merged main or rewrote
@@ -32,7 +32,10 @@ With --expected-head-commit, the run refuses before the review when pr<n>-head
 holds another commit, since the review would record the wrong one. When
 pr<n>-head holds another commit after the review than before it, because
 another run rebuilt the worktree meanwhile, the run is recorded with exit
-code 2, since Codex may have reviewed the other commit.
+code 2, since Codex may have reviewed the other commit. Its message prints
+the commands that rebuild the worktrees and review again only when
+--main-commit names the main commit pr<n>-merged was built on, as the review
+program passes it.
 merge-lane-pull-request-reviewer-review-post-and-read-back.py
 reads it to tell a Codex run that found nothing from one that failed.
 gh reads the description with the merge account's token, the one file every
@@ -77,6 +80,9 @@ def parse_arguments(argv):
                              "rewrote history, the nn-head-commit reviewed before")
     parser.add_argument("--expected-head-commit",
                         help="refuse unless pr<n>-head holds this commit")
+    parser.add_argument("--main-commit",
+                        help="the main commit pr<n>-merged was built on, for the rebuild command printed "
+                             "when pr<n>-head moves during the review")
     common.add_directory_options(parser, "cx/")
     return common.resolve_path_options(parser.parse_args(argv))
 
@@ -114,27 +120,38 @@ def main(argv=None):
                      else f"has a head commit that could not be read: {head_after.stderr.strip()}")
         directory_options = common.directory_options_argv(arguments)
         commit_to_review = arguments.expected_head_commit or head.stdout.strip()
-        # The review tools worktree is checked out at the main commit the merged worktree was built on.
-        main_commit = subprocess.run(
-            ["git", "-C", str(arguments.review_tools_worktree_at_main), "rev-parse", "--verify", "HEAD^{commit}"],
-            capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL).stdout.strip()
-        rebuild = shlex.join([str(Path(__file__).resolve().with_name(
-            "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py")), str(number), commit_to_review,
-            main_commit or "MAIN_COMMIT_FROM_git_rev-parse_origin/main", *directory_options])
-        rerun = shlex.join([str(Path(__file__).resolve()), str(number),
-                            base, "--expected-head-commit", commit_to_review, *directory_options])
+        if arguments.main_commit:
+            rebuild = shlex.join([str(Path(__file__).resolve().with_name(
+                "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py")), str(number), commit_to_review,
+                arguments.main_commit, *directory_options])
+            rerun = shlex.join([str(Path(__file__).resolve()), str(number), base, "--expected-head-commit",
+                                commit_to_review, "--main-commit", arguments.main_commit, *directory_options])
+            steps = (f"1. Rebuild the worktrees: {rebuild}\n"
+                     f"   If it fails, do what it prints.\n"
+                     f"2. Then review again: {rerun}\n")
+        else:
+            steps = (f"This run was given no --main-commit naming the main commit that "
+                     f"{common.pull_request_merged_worktree(arguments, number)} was built on, so it prints no "
+                     f"command to rebuild pr{number}-head and pr{number}-merged or to rerun this Codex review.\n"
+                     f"Do not run the review program, scripts/"
+                     f"merge-lane-pull-request-worktrees-reviewer-brief-codex-review-and-head-tests-run-without-"
+                     f"merge.py, again for this round: that program's Claude review step may already have posted "
+                     f"a review of {commit_to_review}. Send merge-lane-2 this output, word for word, with the "
+                     f"SendMessage tool; merge-lane-2 decides how this round's Codex review is run again.\n")
         print(f"PR {number}: the Codex review exited {exit_code}, but "
               f"{common.pull_request_head_worktree(arguments, number)} held commit {head.stdout.strip()} "
               f"when the review started and now {now_holds}, so the review may not be of "
               f"{head.stdout.strip()}. The run is recorded as failed, with exit code 2.\n"
               f"Something changed pr{number}-head during the review, such as another run of "
               f"merge-lane-pull-request-head-and-merged-worktrees-rebuild.py. To review {commit_to_review}:\n"
-              f"1. Rebuild the worktrees: {rebuild}\n"
-              f"   If it fails, do what it prints.\n"
-              f"2. Then review again: {rerun}\n"
-              f"If `gh pr view {number} --json headRefOid` shows a newer head commit, use that commit in place of "
-              f"{commit_to_review} in both commands.\n"
-              f"If the review fails this way a second time, do not retry: send both messages to merge-lane-2.")
+              f"{steps}"
+              f"Use these steps only for {commit_to_review}; never put a newer head of the pull request into them, "
+              f"because they keep this run's base and Codex would review main's changes as the pull request's. "
+              f"A newer head is reviewed as a new round, by scripts/"
+              f"merge-lane-pull-request-worktrees-reviewer-brief-codex-review-and-head-tests-run-without-merge.py, "
+              f"which works out its base again.\n"
+              f"If the review fails this way a second time, do not retry: send merge-lane-2 this message and the "
+              f"second run's, with the SendMessage tool.")
         exit_code = 2
     temporary = record.with_name(f"{record.name}.{os.getpid()}.tmp")
     try:

@@ -15,11 +15,13 @@ printed. That run makes real model calls and asserts nothing; it exits 1 only
 when `claude` is not on PATH.
 """
 
+import ast
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -454,7 +456,7 @@ def test_a_question_like_line_goes_to_the_model():
           and "--no-session-persistence" in argv, calls)
     check("the model is given the labelling prompt and, as JSON, the question-like line, the message, the waiting "
           "item's text and the message that started the turn with who sent it",
-          calls and calls[0]["stdin"].startswith(hook.MODEL_PROMPT)
+          calls and calls[0]["stdin"].startswith(hook.QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT)
           and judged_entry(calls[0]) == {
               "id": "L1", "line": "The fix has a second part, and I recommend building it next.",
               "turn_started_by": "human", "message_that_started_the_turn": "A",
@@ -472,7 +474,7 @@ def test_a_question_like_line_goes_to_the_model():
 
 
 def judged_entry(call):
-    return json.loads(call["stdin"][len(hook.MODEL_PROMPT):])[0]
+    return json.loads(call["stdin"][len(hook.QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT):])[0]
 
 
 def judged_line(call):
@@ -542,7 +544,8 @@ def test_a_question_about_something_other_than_the_waiting_item_still_blocks():
 
 
 def judgement(lines, **keywords):
-    return hook.model_judgement(lines, lines, "## Item 2 of 10", "human", "A", **keywords)
+    index, failure = hook.model_judgement(lines, range(len(lines)), "## Item 2 of 10", "human", "A", **keywords)
+    return None if index is None else lines[index], failure
 
 
 def test_a_failed_model_check_blocks():
@@ -595,10 +598,11 @@ def test_a_failed_model_check_blocks():
         check("each question-like line is judged in a call of its own, numbered by its place",
               sorted((judged_entry(call)["id"], judged_line(call)) for call in calls)
               == [("L1", "a"), ("L2", "b"), ("L3", "c")], calls)
-        argv = calls[-1]["argv"] if calls else []
         check("each call is sent the labelling schema and system prompt",
-              json.loads(argv[argv.index("--json-schema") + 1]) == hook.MODEL_SCHEMA
-              and argv[argv.index("--system-prompt") + 1] == hook.MODEL_SYSTEM_PROMPT, argv)
+              len(calls) == 3 and all(
+                  json.loads(argv[argv.index("--json-schema") + 1]) == hook.MODEL_SCHEMA
+                  and argv[argv.index("--system-prompt") + 1] == hook.MODEL_SYSTEM_PROMPT
+                  for argv in (call["argv"] for call in calls)), calls)
         os.environ["FAKE_CLAUDE_MODE"] = "sleep:3"
         started = time.monotonic()
         line, failure = judgement(["a", "b", "c"], timeout_seconds=20)
@@ -801,16 +805,52 @@ def test_line_marks_strips_the_list_and_quotation_marks_and_keeps_a_mark_only_sp
           hook.normalized(" #new x") == "new x", repr(hook.normalized(" #new x")))
 
 
+def walk_finder_rule_replaced_in(tree, rule):
+    """Sets the value of the module-level assignment that binds the walk finder's list or quotation mark rule to
+    rule, whether the assignment is plain, annotated or chained; fails this case and returns False unless exactly
+    one such assignment exists."""
+    assignments = [node for node in tree.body
+                   if (isinstance(node, ast.Assign) and any(getattr(target, "id", None)
+                       == "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT" for target in node.targets))
+                   or (isinstance(node, ast.AnnAssign) and node.value is not None and getattr(node.target, "id", None)
+                       == "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT")]
+    check("the walk finder assigns its list or quotation mark rule once, at module level",
+          len(assignments) == 1, len(assignments))
+    if len(assignments) != 1:
+        return False
+    assignments[0].value = ast.copy_location(ast.Constant(rule), assignments[0].value)
+    return True
+
+
+def test_the_rule_replacement_finds_the_finder_constant_however_it_is_assigned():
+    name = "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT"
+    for form, source in (("plain", f"{name} = 'old'"), ("annotated", f"{name}: str = 'old'"),
+                         ("chained", f"OTHER = {name} = 'old'")):
+        tree = ast.parse(source)
+        replaced = walk_finder_rule_replaced_in(tree, "new")
+        namespace = {}
+        exec(compile(ast.fix_missing_locations(tree), "<finder variant>", "exec"), namespace)
+        check(f"the rule replacement sets the {form} assignment's value", replaced and namespace[name] == "new",
+              namespace.get(name))
+    failures_before = len(failures)
+    with contextlib.redirect_stdout(io.StringIO()):
+        replaced = walk_finder_rule_replaced_in(ast.parse("OTHER = 'old'"), "new")
+    recorded = failures[failures_before:]
+    del failures[failures_before:]
+    check("a finder with no assignment of the rule makes the replacement report False", replaced is False, replaced)
+    check("a finder with no assignment of the rule fails the once-at-module-level case",
+          recorded == ["the walk finder assigns its list or quotation mark rule once, at module level"], recorded)
+
+
 def modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(rule):
     """The walk finder, this hook and the walk check program, each loaded afresh while the walk finder's source
     holds rule in place of its list or quotation mark rule, so a pattern that spells the rule out by hand, rather
-    than building from the finder's constant, still reads the real marks and not rule."""
+    than building from the finder's constant, still reads the real marks and not rule; None when the finder's
+    rule assignment cannot be found, which has already failed a case."""
     finder_file = hook.WALK_FINDER_FILE.resolve()
-    source = finder_file.read_text(encoding="utf-8")
-    assignment = re.compile(r"^(MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT = ).*$", re.M)
-    check("the walk finder assigns its list or quotation mark rule on one line this test can replace",
-          len(assignment.findall(source)) == 1, assignment.findall(source))
-    replaced = assignment.sub(lambda match: match.group(1) + repr(rule), source)
+    replaced = ast.parse(finder_file.read_text(encoding="utf-8"), str(finder_file))
+    if not walk_finder_rule_replaced_in(replaced, rule):
+        return None
 
     class ReplacedFinderLoader(importlib.machinery.SourceFileLoader):
         def get_code(self, fullname):
@@ -839,8 +879,10 @@ def modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(rul
 
 
 def test_every_pattern_reading_list_or_quotation_marks_follows_the_walk_finder_rule():
-    finder, replaced_hook, close = modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(
-        r"(?:Q\s+)")
+    modules = modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(r"(?:Q\s+)")
+    if modules is None:
+        return
+    finder, replaced_hook, close = modules
     patterns = (("the `#new` mark pattern", finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN, "#new x"),
                 ("the walk check program's `#case_against` line", close.CASE_AGAINST_LINE, "#case_against weak"),
                 ("the walk check program's evidence line", close.EVIDENCE_LINE, "#not_asked_test x"),
@@ -861,6 +903,42 @@ def test_the_final_message_from_the_payload_is_checked():
     check_blocked("a question only in the payload's last_assistant_message blocks",
                   case.run(last_assistant_message="Do you want me to merge it?"), '"Do you want me to merge it?"')
     check_silent("a turn with no text in the transcript or the payload passes", case.run())
+
+
+def test_the_final_message_already_in_the_transcript_is_checked_once():
+    case = Case()
+    case.reply("Should I merge it?")
+    check_blocked("a question in the final message blocks", case.run(last_assistant_message="Should I merge it?"),
+                  '"Should I merge it?"')
+    check("the payload's final message, already the transcript's last assistant text, is judged once, not twice",
+          [judged_line(call) for call in case.model_calls()] == ["Should I merge it?"], case.model_calls())
+
+
+def test_a_long_message_is_cut_around_the_line_as_the_benchmark_cut_it():
+    case = Case()
+    before = "\n".join(f"Report line {number} is done." for number in range(400))
+    after = "\n".join(f"Closing note {number} is filed." for number in range(200))
+    line = "I recommend building the second part next."
+    case.reply(f"{before}\n{line}\n{after}")
+    case.run(model="no")
+    calls = case.model_calls()
+    message = judged_entry(calls[0])["agent_message_holding_the_line"] if calls else ""
+    at = message.find(line)
+    check("a long message's entry holds only the window around the line, marked as cut on both sides",
+          len(calls) == 1 and message.startswith("[...] ") and message.endswith(" [...]")
+          and at == len("[...] ") + hook.AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE
+          and len(message) - at - len(line) == hook.AGENT_MESSAGE_CHARACTERS_KEPT_AFTER_THE_LINE + len(" [...]"),
+          (len(message), at))
+    shared_start = "The second part of the fix is ready, and every test for it passes"
+    case.reply(f"{shared_start}.\n{before}\n{shared_start}; should I merge it?\n{after}")
+    calls_before = len(case.model_calls())
+    case.run(model="no")
+    calls = case.model_calls()[calls_before:]
+    message = judged_entry(calls[0])["agent_message_holding_the_line"] if calls else ""
+    check("the window is cut around the judged line, not around an earlier line that starts with the same text",
+          len(calls) == 1 and message.startswith("[...] ")
+          and message.find(f"{shared_start}; should I merge it?")
+          == len("[...] ") + hook.AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE, (len(message), message[:80]))
 
 
 def test_the_shown_item_and_quotes_from_it_are_not_checked():
@@ -1028,7 +1106,10 @@ def test_a_new_text_line_shown_as_if_you_approve_the_new_text_is_the_items_own_t
              "If you approve, the new text: the hook waits for the list."),
             ("a `#new` line that opens with a quote mark passes shown after `If you approve, the new text:`",
              "> #new The new text: the hook waits for the quote.",
-             "If you approve, the new text: the hook waits for the quote.")):
+             "If you approve, the new text: the hook waits for the quote."),
+            ("a `#new` line after a part's `Part 1.` passes shown as `Part 1. If you approve, the new text:`",
+             "Part 1. #new The new text: the hook waits for the part.",
+             "Part 1. If you approve, the new text: the hook waits for the part.")):
         varied = Case(minutes="#next_to_present item 1.2 of 6",
                       document=document.replace(HANDOFF_WALK_ITEM_1_2_LINES[2], document_line))
         varied.reply(HANDOFF_WALK_ITEM_1_2_REPLY.replace(HANDOFF_WALK_ITEM_1_2_REPLY.split("\n\n")[4], shown_line))
@@ -1055,6 +1136,19 @@ def test_every_turn_is_checked_whoever_started_it():
                  text_record("Noted.\n\nItem 2 of 10 is waiting for your answer."))
     check_silent("a question from an earlier turn is not checked again when the newer turn's start has no "
                  "turnOrigin", case.run())
+    scheduled_prompt = opening_prompt("scheduled", "Hourly stall check.", isMeta=True, promptSource="system")
+    case.records(USER_PROMPT, text_record("Should I open the pull request?"), scheduled_prompt,
+                 text_record("The stall check found nothing. I recommend merging PR 1922 next."))
+    calls_before = len(case.model_calls())
+    check_blocked("a scheduled turn after the user's turn is checked", case.run(model="yes"),
+                  "I recommend merging PR 1922 next.")
+    calls = case.model_calls()[calls_before:]
+    check("a scheduled turn's own opening prompt, not the user's earlier one, starts the turn the model is given, "
+          "and the earlier turn's question is not judged again",
+          [(judged_entry(call)["turn_started_by"], judged_entry(call)["message_that_started_the_turn"],
+            judged_line(call)) for call in calls]
+          == [("scheduled", "Hourly stall check.",
+               "The stall check found nothing. I recommend merging PR 1922 next.")], calls)
 
 
 def test_when_the_hook_stays_silent():
@@ -1113,6 +1207,9 @@ def test_which_line_is_flagged_and_how_lines_are_joined():
     case.reply("Should I run one of these:\n- `delete-all.py`\n- **keep.py**")
     check_blocked("a flagged list is named as written, line by line, marks included", case.run(),
                   '"Should I run one of these:\n- `delete-all.py`\n- **keep.py**"')
+    case.reply("Should I run `delete-all.py`?\n\nShould I run `keep.py`?")
+    check_blocked("of two lines checked alike but written differently, the one the model flags is named as written",
+                  case.run(model="yes:2"), '"Should I run `keep.py`?"')
     case.reply("Should I merge the café page now?")
     case.run()
     check("the log keeps a sentence's letters as written", "café" in case.log.read_text(encoding="utf-8"),

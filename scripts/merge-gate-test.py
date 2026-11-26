@@ -160,6 +160,9 @@ scratch = Path(tempfile.mkdtemp(prefix="merge-gate-test-"))
 
 # Launched about 1300 times a test run: the interpreter's own path, without site or the
 # environment's PYTHON variables, starts about 8 ms faster than /usr/bin/env python3.
+# Not handled: an interpreter whose path holds a space, which a shebang line cannot name.
+# -IS also keeps out the runner's input recorder, so the stand-in must open no fixture:
+# run_gate reads each route's file here, where the recorder sees it, and passes the text.
 GH_STAND_IN = f'#!{sys.executable} -IS\n' + r'''import json, os, re, sys
 argv = sys.argv[1:]
 with open(os.environ["MERGE_GATE_TEST_GH_CALL_LOG"], "a") as log:
@@ -182,7 +185,7 @@ route = routes.get(key)
 if route is None:
     sys.stderr.write("merge-gate-test stand-in: unarranged gh call %r\n" % (argv,))
     sys.exit(97)
-sys.stdout.buffer.write(open(route["stdout_file"], "rb").read())
+sys.stdout.buffer.write(route["stdout"].encode("utf-8", "surrogateescape"))
 sys.stderr.write(route.get("stderr", ""))
 sys.exit(route.get("exit", 0))
 '''
@@ -417,6 +420,9 @@ def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=
         (stand_in_dir / "python3").chmod(0o755)
     routes = dict(routes)
     routes.setdefault("body", {"stdout_file": str(captured(DESCRIPTION_WITH_ROOT_CAUSE))})
+    routes = {key: {**route, "stdout": Path(route["stdout_file"]).read_text(
+                  encoding="utf-8", errors="surrogateescape")}
+              for key, route in routes.items()}
     routes_file = case_dir / "routes.json"
     routes_file.write_text(json.dumps(routes))
     call_log = case_dir / "gh-calls.jsonl"
@@ -519,6 +525,33 @@ def case_gate_run_from_another_directory_finds_its_reader(gate):
     elsewhere = Path(tempfile.mkdtemp(dir=scratch))
     run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(), cwd=elsewhere)
     return run.code == 0 and "gate passed" in run.stdout, run.summary()
+
+
+fixtures_opened_here = None
+
+
+def fixture_open_noted(event, arguments):
+    if event == "open" and fixtures_opened_here is not None and isinstance(arguments[0], str):
+        fixtures_opened_here.add(arguments[0])
+
+
+sys.addaudithook(fixture_open_noted)
+
+
+def case_every_served_fixture_is_opened_by_the_suite_itself(gate):
+    """The runner's input recorder sees only this process: the -IS stand-in loads no recorder."""
+    global fixtures_opened_here
+    routes = base_routes()
+    fixtures_opened_here = set()
+    try:
+        run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], routes)
+    finally:
+        opened, fixtures_opened_here = fixtures_opened_here, None
+    # The routes run_gate served, its own defaults included, not the routes this case passed in.
+    served = json.loads((run.home.parent / "routes.json").read_text())
+    unopened = sorted({route["stdout_file"] for route in served.values()
+                       if route["stdout_file"] not in opened})
+    return run.code == 0 and not unopened, f"not opened by the suite: {unopened}; {run.summary()}"
 
 
 NEW_ACTIVITY_COUNT_OPTION = "--print-new-activity-count-after-reviewed-since-bound"
@@ -2072,6 +2105,8 @@ CASES = [
     ("MARKS the marks check failing could not run", case_marks_check_program_fails),
     ("G3 the gate run from a directory other than its own finds the description reader",
      case_gate_run_from_another_directory_finds_its_reader),
+    ("G4 the suite itself opens every fixture the gh stand-in serves, so the runner records it",
+     case_every_served_fixture_is_opened_by_the_suite_itself),
     ("H1 a not-fixed hashtag line whose #follow_up link is a Markdown citation passes",
      case_follow_up_hashtag_with_a_markdown_citation),
     ("H1 a #follow_up link that ends a sentence passes", case_follow_up_bare_link_ending_a_sentence),

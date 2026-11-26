@@ -1043,12 +1043,16 @@ def shown_words(markdown, parser, env=None):
 
 def new_text_as_shown(line):
     """A `#new` or `#new_if_d` source line, as the walk check program reads its mark, as an agent shows it to the
-    user: its mark replaced by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text
-    without a `The new text:` label; None for any other line."""
-    mark = load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(line.strip())
+    user: a part's opening `Part N.` kept, its mark replaced by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK
+    gives its kind, and its text without a `The new text:` label; None for any other line."""
+    walk_finder = load_walk_finder()
+    mark = walk_finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(line.strip())
     if not mark:
         return None
-    return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1]}` line']} {NEW_TEXT_LABEL.sub('', mark[2])}"
+    part = re.match(rf"^{walk_finder.MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*(Part \d+)\.\s",
+                    line.strip())
+    lead_in = LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f"`{mark[1]}` line"]
+    return f"{f'{part[1]}. ' if part else ''}{lead_in} {NEW_TEXT_LABEL.sub('', mark[2])}"
 
 
 def shown_text_parser(walk_finder):
