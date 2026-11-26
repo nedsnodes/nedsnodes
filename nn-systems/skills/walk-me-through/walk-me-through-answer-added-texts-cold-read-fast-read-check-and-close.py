@@ -1527,7 +1527,9 @@ RULING_GIVEN_DEFERRED, RULING_GIVEN_MOVED_ON, RULING_GIVEN_PART_ANSWERS = "defer
 GH_PROGRAM = "gh"
 GH_TIMEOUT_SECONDS = 60  # pragma: no mutate, a limit a second longer or shorter behaves the same
 HELD_PULL_REQUESTS_LIST = ("pr", "list", "--state", "open", "--limit", "1000", "--json", "number,reviews")
-HELD_PULL_REQUESTS_BY_HAND_JQ = ('.[] | select(any(.reviews[].body | split("\\n")[] | gsub("^\\\\s+|\\\\s+$"; ""); '
+# Reads a review line as line_with_leading_closed_form_hashtag_turned_into_open_form does.
+HELD_PULL_REQUESTS_BY_HAND_JQ = ('.[] | select(any(.reviews[].body | split("\\n")[] | gsub("^\\\\s+|\\\\s+$"; "") '
+                                 '| sub("^(?<hashtag>#[a-z][a-z0-9_]*)#(?=\\\\s|$)"; "\\(.hashtag)"); '
                                  '. == {line})) | .number')
 RULING_GIVEN_POSTED = "The ruling on item {number} is posted as `{ruling}` on pull request {pull_request}, held on it."
 RULING_GIVEN_LOOKUP_FAILED = (

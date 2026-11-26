@@ -7580,10 +7580,12 @@ def test_the_by_hand_lookup_command_lists_exactly_the_pull_requests_held_on_the_
         print("SKIP  the by-hand lookup's filter is run only where jq is installed")
         return
     listed = subprocess.run([program, "-r", jq], capture_output=True, text=True, input=held_pull_requests(
-        (101, [f"x\n  {HELD_ON_ITEM_4} \ny"]), (103, [f"#held_on_ruling {WALK_NAME} item 44"]), (106, [])))
-    check("the --jq filter the lookup failure prints picks the pull request whose review holds item 4's line, "
-          "and not one held on item 44",
-          listed.returncode == 0 and listed.stdout.split() == ["101"], described(listed) + jq)
+        (101, [f"x\n  {HELD_ON_ITEM_4} \ny"]), (103, [f"#held_on_ruling {WALK_NAME} item 44"]), (106, []),
+        (108, [HELD_ON_ITEM_4.replace("#held_on_ruling ", "#held_on_ruling# ")]),
+        (109, [f"#held_on_ruling# {WALK_NAME} item 44"])))
+    check("the --jq filter the lookup failure prints picks the pull requests whose review holds item 4's line, "
+          "with or without the hashtag's closing #, and not one held on item 44",
+          listed.returncode == 0 and listed.stdout.split() == ["101", "108"], described(listed) + jq)
 
 
 def test_a_lookup_that_prints_json_of_another_shape_or_fails_silently_is_reported():
