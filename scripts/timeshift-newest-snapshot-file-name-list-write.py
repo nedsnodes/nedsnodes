@@ -109,7 +109,7 @@ def main(argv=None):
               "because no list of the newest snapshot is in %s." % (finder.PROGRAM_PATH, args.list_directory),
               file=sys.stderr)
         print("If the backup drive is not mounted, mount it, then run this program again on ned-box: "
-              "python3 %s" % finder.TIMESHIFT_FILE_NAME_LIST_WRITER, file=sys.stderr)
+              "python3 %s" % finder.TIMESHIFT_FILE_NAME_LIST_WRITE_PROGRAM_PATH, file=sys.stderr)
         print("Otherwise run it again once; if it fails the same way, send the failure line above to the "
               "agent-seat that owns the job timeshift-newest-snapshot-file-name-list-write in "
               "nn-systems/general-tools/scheduled-jobs-on-each-machine.json.", file=sys.stderr)

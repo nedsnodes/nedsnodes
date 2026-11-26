@@ -1812,7 +1812,7 @@ with tempfile.TemporaryDirectory() as tmp:
           report.status == UNAVAILABLE
           and report.lines[0] == "not searched — the newest snapshot, 2026-08-15_09-00-00, has no file-name list "
                                  "in %s on nedlern@ned-box yet" % lists
-          and finder.TIMESHIFT_FILE_NAME_LIST_WRITER in report.lines[1], "%s %s" % (report.status, report.lines))
+          and finder.TIMESHIFT_FILE_NAME_LIST_WRITE_PROGRAM_PATH in report.lines[1], "%s %s" % (report.status, report.lines))
     shutil.rmtree(Path(snapshots, "2026-08-15_09-00-00"))
     Path(written).write_bytes(b"not gzip")
     report = timeshift("dispositions.md")

@@ -420,7 +420,7 @@ DEFAULT_BOX_SEARCH_ROOTS = (
 )
 # A bare-name search reads the newest snapshot's file-name list, which this program writes each hour,
 # because a find over a snapshot's trees takes minutes on the backup disk.
-TIMESHIFT_FILE_NAME_LIST_WRITER = "scripts/timeshift-newest-snapshot-file-name-list-write.py"
+TIMESHIFT_FILE_NAME_LIST_WRITE_PROGRAM_PATH = "scripts/timeshift-newest-snapshot-file-name-list-write.py"
 TIMESHIFT_FILE_NAME_LIST_DIRECTORY = "~/.cache/nedsnodes-timeshift-newest-snapshot-file-name-list"
 TIMESHIFT_FILE_NAME_LIST_SUFFIX = ".paths.gz"
 DEFAULT_TRANSCRIPTS_DIR = "~/.claude/projects"
@@ -1987,7 +1987,7 @@ def search_timeshift(wanted, box_ssh_host, snapshot_root, file_name_list_directo
             ["not searched — the newest snapshot, %s, has no file-name list in %s on %s yet"
              % (newest, file_name_list_directory, where),
              "%s lists each new snapshot within the hour; a full path, starting with /, searches every "
-             "snapshot now" % TIMESHIFT_FILE_NAME_LIST_WRITER],
+             "snapshot now" % TIMESHIFT_FILE_NAME_LIST_WRITE_PROGRAM_PATH],
         )
 
     hits = sorted({line[4:].strip() for line in records if line.startswith("HIT ")}, reverse=True)
