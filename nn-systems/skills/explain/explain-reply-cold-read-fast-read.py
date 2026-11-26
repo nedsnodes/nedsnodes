@@ -34,6 +34,8 @@ FAST_READ_PROGRAM_OVERRIDE_VARIABLE = "EXPLAIN_REPLY_COLD_READ_FAST_READ_PROGRAM
 FAST_READ_TIMEOUT_SECONDS = 540
 # An /explain reply is written for the user.
 FAST_READ_TEXT_INTENDED_READER_CATEGORY_ARGUMENTS = ("--text-intended-reader-category", "human-readable")
+# So the read's own word checks end in time for it to write its report before this program stops it.
+FAST_READ_CALLER_TIME_LIMIT_ARGUMENTS = ("--caller-time-limit-seconds", str(FAST_READ_TIMEOUT_SECONDS))
 DRAFT_FILE_STEM = "explain-reply-draft"
 # The handoff-supervisor sets nedsnodes-<seat name>-tasks in each seat's environment.
 SEAT_NAME_ENVIRONMENT_VARIABLE = "CLAUDE_CODE_TASK_LIST_ID"
@@ -117,7 +119,8 @@ def run_fast_read(draft_path: pathlib.Path):
     program = os.environ.get(FAST_READ_PROGRAM_OVERRIDE_VARIABLE) or str(FAST_READ_PROGRAM)
     try:
         process = subprocess.Popen(
-            [program, "--target", str(draft_path), *FAST_READ_TEXT_INTENDED_READER_CATEGORY_ARGUMENTS],
+            [program, "--target", str(draft_path), *FAST_READ_TEXT_INTENDED_READER_CATEGORY_ARGUMENTS,
+             *FAST_READ_CALLER_TIME_LIMIT_ARGUMENTS],
             cwd=REPO_ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, start_new_session=True)
     except OSError as error:

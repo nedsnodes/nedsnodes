@@ -80,10 +80,10 @@ def git_failure_text(subcommand: str, outcome: str, stderr: str = "") -> str:
     return f"git {subcommand} {outcome}" + (f": {first_line}" if first_line else "")
 
 
-def git(arguments, checkout: Path, allowed_exit_codes=(0,)) -> str:
+def git(arguments, checkout: Path, allowed_exit_codes=(0,), environment=None) -> str:
     try:
         finished = subprocess.run(["git", *arguments], cwd=str(checkout), capture_output=True,
-                                  text=True, check=False, timeout=GIT_CALL_TIMEOUT_SECONDS)
+                                  text=True, check=False, timeout=GIT_CALL_TIMEOUT_SECONDS, env=environment)
     except subprocess.TimeoutExpired as error:
         raise GitFailure(git_failure_text(arguments[0], "timed out")) from error
     except OSError as error:
@@ -180,10 +180,11 @@ def glossary_terms(text: str):
     return {match.group(1).strip() for match in GLOSSARY_ENTRY_PATTERN.finditer(text)}
 
 
-def every_glossary_term(checkout: Path):
+def every_glossary_term(checkout: Path, environment=None):
+    """`environment` is git's, os.environ when None."""
     terms = set()
     for path in git_output.nul_separated_fields(
-            git(["ls-files", "-z", f"*{GLOSSARY_FILE_SUFFIX}"], checkout)):
+            git(["ls-files", "-z", f"*{GLOSSARY_FILE_SUFFIX}"], checkout, environment=environment)):
         try:
             terms.update(term.lower() for term in glossary_terms((checkout / path).read_text()))
         except OSError:

@@ -288,7 +288,16 @@ one guesses the word's meaning from the word alone, the other answers
 MATCHES or DIFFERS against the meaning the cell gave. The report gains a
 section, before the sentence coverage, saying what became of each word; its
 entries are not findings, and take no finding outcome. A word whose check
-fails is listed there as not checked, and the read's exit is unchanged.
+fails is listed there as not checked, and the read's exit is unchanged. For
+an edit that only removed text the read checks no word, whatever the cell
+lists. A SIGTERM or SIGHUP during the checks stops their calls too.
+
+CALLER TIME LIMIT. A caller that stops the read after a set time, such as
+nn-systems/skills/explain/explain-reply-cold-read-fast-read.py, passes it as
+--caller-time-limit-seconds, and the word checks then end early enough for
+the read to write its report before then; a word whose check that cuts off
+is listed as not checked. A read run from the Mac on ned-box
+passes the option on to the read there.
 """
 
 from __future__ import annotations
@@ -308,6 +317,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import typing
 
 # This file sits in nn-systems/cold-read/, two directories below the root.
@@ -433,6 +443,9 @@ Write your report to {REPORT_PATH}, once, when your analysis is complete. That f
 # heading included. The heading is also the report section's.
 WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING = "## Question 4: What should be code"
 WITHOUT_QUESTION_4_OPTION = "--without-question-4"
+CALLER_TIME_LIMIT_SECONDS_OPTION = "--caller-time-limit-seconds"
+# After the word checks end, the read still waits for Question 4's cell, writes its report and ships the record.
+COLD_READ_FAST_READ_FINISH_AFTER_WORD_CHECKS_ALLOWANCE_SECONDS = 30
 WITHOUT_QUESTION_4_SECTION_LINE = (
     f"Question 4 was not asked: this fast read was run with {WITHOUT_QUESTION_4_OPTION}.")
 WHAT_SHOULD_BE_CODE_QUESTION = WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING + """
@@ -1752,13 +1765,24 @@ def what_should_be_code_section(cell: WhatShouldBeCodeQuestionCell) -> str:
     return f"\n{WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING}\n\n{failure}\n"
 
 
+def word_checks_deadline_for_caller_time_limit(read_started: float, caller_time_limit_seconds):
+    """The monotonic time by which the checks of the words with a meaning of their own must end, for a caller
+    that stops the read `caller_time_limit_seconds` after `read_started`, or None, their own limit, when the
+    caller sets none."""
+    if caller_time_limit_seconds is None:
+        return None
+    return min(time.monotonic() + new_words.NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS,
+               read_started + caller_time_limit_seconds
+               - COLD_READ_FAST_READ_FINISH_AFTER_WORD_CHECKS_ALLOWANCE_SECONDS)
+
+
 def fast_read_report_finish_and_print_path(
     *, report: pathlib.Path, cell_report: pathlib.Path, target: pathlib.Path, sentences: dict,
     marked_copy_kept, full_run_class_name, bare_references, launch_sha256: str,
     on_records_route: bool, backup_line: str,
     question_4_cell: typing.Optional[WhatShouldBeCodeQuestionCell], edit_changed_ids: list,
     edit_removed_units: list, text_intended_reader_category: str, scratch: pathlib.Path,
-    word_check_launcher: pathlib.Path, quota_line: str = "",
+    word_check_launcher: pathlib.Path, quota_line: str = "", word_checks_deadline: float = None,
 ) -> int:
     """Turn the cell's report, cell_report, into the read's, written once at
     report: wait for the Question 4 cell, if one was started, and add its section, attach the sentences, the
@@ -1771,9 +1795,11 @@ def fast_read_report_finish_and_print_path(
     answered or the new words were checked."""
     new_words_answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
         cell_report.read_text(encoding="utf-8"))
+    word_model_calls = new_words.NewWordModelCalls(word_check_launcher, scratch, deadline=word_checks_deadline)
     new_words_section, new_words_stderr_lines = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
         new_words_answer, whole_document=not (edit_changed_ids or edit_removed_units),
-        ask=new_words.cold_read_cell_launcher_call_function_factory_with_one_deadline_shared_by_all_calls(word_check_launcher, scratch))
+        edit_added_or_changed_no_sentence=bool(edit_removed_units) and not edit_changed_ids,
+        ask=word_model_calls, stop_model_calls=word_model_calls.stop_all)
     for line in new_words_stderr_lines:
         print(line, file=sys.stderr)
     question_4_section = (
@@ -1904,6 +1930,11 @@ def main() -> int:
         WITHOUT_QUESTION_4_OPTION, action="store_true",
         help="ask Questions 1 to 3 only; start no Question 4 cell")
     parser.add_argument(
+        CALLER_TIME_LIMIT_SECONDS_OPTION, type=int, metavar="SECONDS",
+        help="the seconds after which the caller stops this read; the checks of the words with a meaning of "
+             f"their own then end {COLD_READ_FAST_READ_FINISH_AFTER_WORD_CHECKS_ALLOWANCE_SECONDS} seconds "
+             "before that, or sooner, so the report is written in time")
+    parser.add_argument(
         TEXT_INTENDED_READER_CATEGORY_OPTION, choices=TEXT_INTENDED_READER_CATEGORIES,
         help="the reader the text is written for; human-and-agent-readable when not given.")
     parser.add_argument(
@@ -1915,6 +1946,7 @@ def main() -> int:
         help=f"with {finding_outcomes.FINDING_OUTCOMES_RECORD_OPTION}, once for each finding: "
              f"'Q2.1={finding_outcomes.APPLIED}' or 'Q4.1={finding_outcomes.DECLINED}: <reason>'")
     args = parser.parse_args()
+    read_started = time.monotonic()
     outcomes_record = getattr(args, finding_outcomes.FINDING_OUTCOMES_RECORD_OPTION[2:].replace("-", "_"))
     if (args.target is None) == (outcomes_record is None):
         parser.error(f"give --target, or {finding_outcomes.FINDING_OUTCOMES_RECORD_OPTION}, but not both")
@@ -1960,6 +1992,8 @@ def main() -> int:
         return cold_read_fast_read_run_on_ned_box_over_ssh(
             error.ned_box_target,
             ((WITHOUT_QUESTION_4_OPTION,) if args.without_question_4 else ())
+            + ((CALLER_TIME_LIMIT_SECONDS_OPTION, str(args.caller_time_limit_seconds))
+               if args.caller_time_limit_seconds is not None else ())
             + ((TEXT_INTENDED_READER_CATEGORY_OPTION, args.text_intended_reader_category)
                if args.text_intended_reader_category else ()))
     except CheckoutRootUnreadable as error:
@@ -2026,7 +2060,9 @@ def main() -> int:
             question_4_cell=question_4_cell, edit_changed_ids=edit_changed_ids,
             edit_removed_units=edit_removed_units,
             text_intended_reader_category=text_intended_reader_category,
-            scratch=pathlib.Path(scratch))
+            scratch=pathlib.Path(scratch),
+            word_checks_deadline=word_checks_deadline_for_caller_time_limit(
+                read_started, args.caller_time_limit_seconds))
         try:
             quota_error_line = ""
             for attempt in range(1, FAST_READ_ATTEMPTS + 1):  # pragma: no mutate, FAST_READ_ATTEMPTS is even, so | 1 gives + 1

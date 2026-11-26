@@ -25,6 +25,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import threading
 import time
 import typing
 
@@ -41,12 +42,18 @@ _new_shared_names_spec = importlib.util.spec_from_file_location(
     REPO_ROOT / "scripts" / "new-shared-names-in-changed-files-list.py")
 new_shared_names = importlib.util.module_from_spec(_new_shared_names_spec)
 _new_shared_names_spec.loader.exec_module(new_shared_names)
+_git_redirecting_removal_spec = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_variables_removal_common",
+    REPO_ROOT / "nn-systems" / "general-tools" / "git-redirecting-environment-variables-removal-common.py")
+git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
+_git_redirecting_removal_spec.loader.exec_module(git_redirecting_removal)
 
 PROGRAM = "cold-read-fast-read"
 NEW_WORDS_ANSWER_HEADING_TEXT = "Words with a meaning of their own"
 NEW_WORDS_ANSWER_HEADING = re.compile(r"^#{1,3}\s+" + re.escape(NEW_WORDS_ANSWER_HEADING_TEXT) + r"\s*$")
 ANY_HEADING = re.compile(r"^#{1,6}\s")
-CODE_FENCE = re.compile(r"^\s*(```|~~~)")
+CODE_FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+GLOSSARY_TERM_WITH_ALIASES = re.compile(r"^(.+?)\s*\(aka\s+(.+)\)$")
 NEW_WORD_LINE = re.compile(r"^- `([^`]+)`: (\S.*)$")
 NO_NEW_WORDS_LINE = "- none"
 PROVENANCE_STAMP = re.compile(r"\A\s*<!-- provenance:.*?-->\s*", re.DOTALL)
@@ -66,7 +73,6 @@ NEW_WORD_MEANING_COMPARE_COLD_READ_CELL_LABEL = "new-word-meaning-compare"
 # documents in 100 to 150 s; one word is far less.
 NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS = 10 * 60
 NEW_WORDS_CHECKED_AT_ONCE = 8
-
 NEW_WORD_MEANING_GUESS_PROMPT_TEMPLATE = (
     "{TARGET_PATH} holds one word or phrase, in backquotes, taken from instructions written for software "
     "agents. Read that file and nothing else: open, search or list no other file, and look nothing up, "
@@ -103,13 +109,21 @@ class NewWordCheck(typing.NamedTuple):
 def fast_clarify_cell_report_new_words_section_split_off_and_parse(report_text: str) -> NewWordsAnswer:
     """Take every section headed NEW_WORDS_ANSWER_HEADING_TEXT out of the fast-clarify cell's report and read its lines. A report
     about several documents may give one section per document, so every section is read."""
-    kept, answer_lines, fenced, inside, sections = [], [], False, False, 0
+    kept, answer_lines, inside, sections = [], [], False, 0
+    # The opening fence's delimiter while inside fenced code: only a line of the same character, at least as
+    # long and with nothing after it, closes it, so a shorter or other fence quoted inside does not.
+    open_fence = None
     # Lines of each section, so that a section with no line at all, not even `- none`, is caught: the
     # cell must say `- none` to say there is no such word.
     lines_in_section = []
     for line in report_text.split("\n"):
-        if CODE_FENCE.match(line):
-            fenced = not fenced
+        fence = CODE_FENCE.match(line)
+        if fence and open_fence is None:
+            open_fence = fence.group(1)
+        elif (fence and fence.group(1)[0] == open_fence[0] and len(fence.group(1)) >= len(open_fence)
+              and not line.strip()[len(fence.group(1)):].strip()):
+            open_fence = None
+        fenced = open_fence is not None or bool(fence)
         if not fenced and NEW_WORDS_ANSWER_HEADING.match(line):
             inside, sections = True, sections + 1
             lines_in_section.append(0)
@@ -144,10 +158,21 @@ def fast_clarify_cell_report_new_words_section_split_off_and_parse(report_text: 
 
 
 def known_words_in_glossaries_and_ordinary_hyphenated_words_list(checkout: pathlib.Path) -> set:
-    """Every term a glossary git tracks in `checkout` lists, and every word of the ordinary hyphenated words
-    list, lowercase. Raises new_shared_names.GitFailure when git cannot list the glossaries."""
-    return (new_shared_names.every_glossary_term(checkout)
-            | new_shared_names.ordinary_hyphenated_words(checkout))
+    """Every term a glossary git tracks in `checkout` lists, each alias an entry gives as `<term> (aka
+    <alias>)` included, and every word of the ordinary hyphenated words list, lowercase. Raises
+    new_shared_names.GitFailure when git cannot list the glossaries."""
+    # Without the variables, a read started inside a git command, such as a hook, lists `checkout`'s own glossaries.
+    terms = new_shared_names.every_glossary_term(
+        checkout, environment=git_redirecting_removal.environment_without_git_redirecting_variables())
+    known = set()
+    for term in terms:
+        with_aliases = GLOSSARY_TERM_WITH_ALIASES.match(term)
+        if with_aliases is None:
+            known.add(term)
+            continue
+        known.add(with_aliases.group(1).strip())
+        known.update(alias.strip() for alias in re.split(r",|\bor\b", with_aliases.group(2)) if alias.strip())
+    return known | new_shared_names.ordinary_hyphenated_words(checkout)
 
 
 def word_is_known(word: str, known: set) -> bool:
@@ -159,56 +184,126 @@ def answer_without_provenance_stamp(text: str) -> str:
     return PROVENANCE_STAMP.sub("", text, count=1).strip()
 
 
+class ModelCallsInFlight:
+    """The model-call processes the word checks have running, so that a read ended by a signal can stop them
+    all and start no further call: each runs in a session of its own, which a signal to the read misses."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.processes = set()
+        self.stopped = False
+
+    def start(self, command: list, **popen_arguments):
+        """The started process, or None once stop_all has run. Raises OSError when the process cannot start."""
+        with self.lock:
+            if self.stopped:
+                return None
+            process = subprocess.Popen(command, start_new_session=True, **popen_arguments)
+            self.processes.add(process)
+            return process
+
+    def finished(self, process) -> None:
+        with self.lock:
+            self.processes.discard(process)
+
+    def stop_all(self) -> None:
+        with self.lock:
+            self.stopped = True
+            running = list(self.processes)
+        for process in running:
+            cell_common.stop_process_tree(process)
+
+
+def model_call_process_run_until_deadline(calls: ModelCallsInFlight, command: list, *, what: str,
+                                          cwd: pathlib.Path, stdin_text, deadline: float) -> tuple:
+    """Run one model-call process to its end or to `deadline`. Returns (exit status, stdout, stderr), or
+    (None, the cause the call gave no answer, "")."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None, "the time limit for checking new words ran out before this call started", ""
+    try:
+        process = calls.start(command, stdin=subprocess.DEVNULL if stdin_text is None else subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, text=True)
+    except OSError as error:
+        return None, f"the {what} could not start: {error}", ""
+    if process is None:
+        return None, "the read was ended before this call started", ""
+    try:
+        try:
+            output, errors = process.communicate(input=stdin_text, timeout=remaining)
+        except subprocess.TimeoutExpired:
+            cell_common.stop_process_tree(process)
+            process.communicate()
+            return None, (f"stopped at the time limit for checking new words, "
+                          f"{NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS / 60:g} minutes"), ""
+    finally:
+        calls.finished(process)
+    if calls.stopped:
+        return None, "the read was ended while this call ran", ""
+    return process.returncode, output or "", errors or ""
+
+
 def cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause(launcher: pathlib.Path, cell_label: str, prompt_template: str,
                                        question_text: str, work_directory: pathlib.Path,
-                                       deadline: float) -> tuple:
+                                       deadline: float, calls: ModelCallsInFlight = None) -> tuple:
     """One model call through a cold-read-cell launcher on the fast cold-read-tier: `question_text` is the
     target, `prompt_template` the prompt. Returns (the answer without its provenance stamp, "") or (None, the
     cause of the failure). The launcher runs in a process group of its own, stopped at `deadline`."""
-    work_directory.mkdir(parents=True)
-    target = work_directory / f"{cell_label}-question.md"
-    target.write_text(question_text, encoding="utf-8")
-    prompt_file = work_directory / f"{cell_label}-prompt.md"
-    prompt_file.write_text(prompt_template, encoding="utf-8")
+    calls = calls or ModelCallsInFlight()
     # One directory below the work directory, so the launcher's misplaced-report recovery, which searches
     # the report's grandparent, sees no other call's report.
     report = work_directory / "answer" / f"{cell_label}-answer.md"
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        return None, "the time limit for checking new words ran out before this call started"
+    try:
+        work_directory.mkdir(parents=True)
+        target = work_directory / f"{cell_label}-question.md"
+        target.write_text(question_text, encoding="utf-8")
+        prompt_file = work_directory / f"{cell_label}-prompt.md"
+        prompt_file.write_text(prompt_template, encoding="utf-8")
+    except OSError as error:
+        return None, f"the {cell_label} call's files could not be written: {error}"
     command = [sys.executable, str(launcher), "--cell", cell_label, "--tier", NEW_WORD_MODEL_CALL_COLD_READ_TIER,
                "--target", str(target), "--report", str(report), "--prompt-file", str(prompt_file)]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               stdin=subprocess.DEVNULL, cwd=REPO_ROOT, text=True, start_new_session=True)
-    try:
-        output, _ = process.communicate(timeout=remaining)
-    except subprocess.TimeoutExpired:
-        cell_common.stop_process_tree(process)
-        process.communicate()
-        return None, (f"stopped at the time limit for checking new words, "
-                      f"{NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS / 60:g} minutes")
+    returncode, output, errors = model_call_process_run_until_deadline(
+        calls, command, what=f"{cell_label} call through {launcher.name}", cwd=REPO_ROOT, stdin_text=None,
+        deadline=deadline)
+    if returncode is None:
+        return None, output
+    output += errors
     # A launcher that exits 0 can still have warned, such as of a stray write, so its output always reaches stderr.
     if output:
         print(output, file=sys.stderr, end="" if output.endswith("\n") else "\n")
-    if process.returncode != 0:
+    if returncode != 0:
         lines = [line.strip() for line in output.splitlines() if line.strip()]
         causes = [line for line in lines if cell_common.CAUSE_PHRASE in line]
         detail = causes[-1] if causes else (lines[-1] if lines else "no output")
-        return None, f"the {cell_label} call through {launcher.name} exited {process.returncode}: {detail}"
-    return answer_without_provenance_stamp(report.read_text(encoding="utf-8")), ""
+        return None, f"the {cell_label} call through {launcher.name} exited {returncode}: {detail}"
+    try:
+        return answer_without_provenance_stamp(report.read_text(encoding="utf-8")), ""
+    except OSError as error:
+        return None, f"the {cell_label} call's answer could not be read: {error}"
 
 
-def cold_read_cell_launcher_call_function_factory_with_one_deadline_shared_by_all_calls(launcher: pathlib.Path, scratch_directory: pathlib.Path):
-    """The `ask` new_word_fresh_reader_meaning_guess_and_compare_with_text_meaning takes, making each call through `launcher` in a directory of its own
-    under `scratch_directory`, every call stopped at one deadline NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS from now."""
-    deadline = time.monotonic() + NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS
-    call_numbers = itertools.count(1)
+class NewWordModelCalls:
+    """The `ask` new_word_fresh_reader_meaning_guess_and_compare_with_text_meaning takes: each call through
+    `launcher` in a directory of its own under `scratch_directory`, every call stopped at one `deadline`,
+    NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS from now when None, and stop_all to stop them all."""
 
-    def ask(cell_label, prompt_template, question_text):
+    def __init__(self, launcher: pathlib.Path, scratch_directory: pathlib.Path, deadline: float = None):
+        self.launcher = launcher
+        self.scratch_directory = scratch_directory
+        self.deadline = (time.monotonic() + NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS
+                         if deadline is None else deadline)
+        self.calls = ModelCallsInFlight()
+        self.call_numbers = itertools.count(1)
+
+    def __call__(self, cell_label, prompt_template, question_text):
         return cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause(
-            launcher, cell_label, prompt_template, question_text,
-            scratch_directory / "new-word-checks" / f"call-{next(call_numbers)}", deadline)
-    return ask
+            self.launcher, cell_label, prompt_template, question_text,
+            self.scratch_directory / "new-word-checks" / f"call-{next(self.call_numbers)}", self.deadline,
+            self.calls)
+
+    def stop_all(self) -> None:
+        self.calls.stop_all()
 
 
 def new_word_fresh_reader_meaning_guess_and_compare_with_text_meaning(word: str, meaning: str, ask) -> NewWordCheck:
@@ -232,12 +327,23 @@ def new_word_fresh_reader_meaning_guess_and_compare_with_text_meaning(word: str,
     return NewWordCheck(word, meaning, verdict, guess, "")
 
 
+def one_line(text: str) -> str:
+    """`text` with its line breaks and runs of spaces made single spaces, so that a model's answer quoted in the
+    report cannot start a heading or list of its own that the findings parser would count."""
+    return " ".join(text.split())
+
+
 def new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(answer: NewWordsAnswer, *, whole_document: bool, ask,
-                                              known_words=None) -> tuple:
+                                              known_words=None, edit_added_or_changed_no_sentence: bool = False,
+                                              stop_model_calls=None) -> tuple:
     """Check every word `answer` lists and return (the report section, the lines for stderr). `known_words`
-    returns the set word_is_known looks words up in; `ask` is as new_word_fresh_reader_meaning_guess_and_compare_with_text_meaning takes it."""
+    returns the set word_is_known looks words up in; `ask` is as new_word_fresh_reader_meaning_guess_and_compare_with_text_meaning takes it.
+    When `edit_added_or_changed_no_sentence`, the edit only removed text, so no word is checked. When the checks
+    are ended by an exception, such as the SystemExit a signal raises, `stop_model_calls` stops every model
+    call still running, and no further call starts."""
     problems = list(answer.problems)
-    dropped, to_check = [], list(answer.words)
+    to_check = [] if edit_added_or_changed_no_sentence else list(answer.words)
+    dropped_pairs = []
     if to_check:
         try:
             known = (known_words or (lambda: known_words_in_glossaries_and_ordinary_hyphenated_words_list(REPO_ROOT)))()
@@ -245,12 +351,22 @@ def new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lin
             problems.append(f"the glossaries could not be listed, so no word was dropped as one a glossary "
                             f"has: {error}")
             known = set()
-        dropped = list(dict.fromkeys(word for word, _ in to_check if word_is_known(word, known)))
+        dropped_pairs = [(word, meaning) for word, meaning in to_check if word_is_known(word, known)]
         to_check = [(word, meaning) for word, meaning in to_check if not word_is_known(word, known)]
+    dropped = list(dict.fromkeys(word for word, _ in dropped_pairs))
     checks = []
     if to_check:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(to_check), NEW_WORDS_CHECKED_AT_ONCE)) as pool:
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(len(to_check), NEW_WORDS_CHECKED_AT_ONCE))
+        try:
             checks = list(pool.map(lambda pair: new_word_fresh_reader_meaning_guess_and_compare_with_text_meaning(pair[0], pair[1], ask), to_check))
+        except BaseException:
+            # Before the pool waits for its workers: their calls run in sessions of their own, which a signal to
+            # the read does not reach, and would run on to the deadline.
+            if stop_model_calls is not None:
+                stop_model_calls()
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
+        pool.shutdown()
     differs = [check for check in checks if check.verdict == NEW_WORD_MEANING_COMPARE_ANSWER_DIFFERS]
     matches = [check for check in checks if check.verdict == NEW_WORD_MEANING_COMPARE_ANSWER_MATCHES]
     not_checked = [check for check in checks if check.verdict == NOT_CHECKED]
@@ -260,19 +376,21 @@ def new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lin
              f"meaning of their own. For each word that neither a glossary nor the ordinary hyphenated words "
              f"list has, one model given only the word guessed its meaning, and a second compared that guess with "
              f"the meaning the text gives. The entries below are not findings and take no finding outcome.", ""]
-    if not answer.words and not problems:
+    if edit_added_or_changed_no_sentence:
+        lines += ["The edit removed or replaced text and added or changed no sentence, so no word was checked.", ""]
+    elif not answer.words and not problems:
         lines += ["The fast-clarify cell listed no such word.", ""]
     if differs:
         lines += ["A fresh reader takes these words another way. Rewrite each in plain words, dismiss it as "
                   "plain English, or propose it as a project-term:", ""]
         lines += [f"- `{check.word}`: the text means: {check.meaning} Given the word alone, a model took it to "
-                  f"mean: {check.guess}" for check in differs]
+                  f"mean: {one_line(check.guess)}" for check in differs]
         lines.append("")
     if not_checked or problems:
         lines += [f"Not checked. Ask a fresh subagent what each word means, given the word alone, as "
                   f"`{NAMING_PAGE}` says, and compare its answer with the meaning the text gives:", ""]
-        lines += [f"- `{check.word}`: {check.cause}." for check in not_checked]
-        lines += [f"- {problem}." for problem in problems]
+        lines += [f"- `{check.word}`: {one_line(check.cause)}." for check in not_checked]
+        lines += [f"- {one_line(problem)}." for problem in problems]
         lines.append("")
     if matches:
         lines += ["A fresh reader takes these words as the text means them: "
@@ -280,10 +398,11 @@ def new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lin
     if dropped:
         lines += ["A glossary or the ordinary hyphenated words list already has these words: "
                   + ", ".join(f"`{word}`" for word in dropped) + ".", ""]
+    unchecked_because_no_sentence = len(answer.words) if edit_added_or_changed_no_sentence else 0
     stderr_lines = [
-        f"{PROGRAM}: words with a meaning of their own: {len(answer.words)} listed, {len(dropped)} already in a glossary, "
+        f"{PROGRAM}: words with a meaning of their own: {len(answer.words)} listed, {len(dropped_pairs)} already in a glossary, "
         f"{len(matches)} read as the text means, {len(differs)} read another way, "
-        f"{len(not_checked) + len(problems)} not checked; the report's section "
+        f"{len(not_checked) + len(problems) + unchecked_because_no_sentence} not checked; the report's section "
         f"`{NEW_WORDS_REPORT_SECTION_HEADING}` lists each."]
     stderr_lines += [f"{PROGRAM}: word with a meaning of its own `{check.word}` not checked: {check.cause}." for check in not_checked]
     stderr_lines += [f"{PROGRAM}: words with a meaning of their own not checked: {problem}." for problem in problems]

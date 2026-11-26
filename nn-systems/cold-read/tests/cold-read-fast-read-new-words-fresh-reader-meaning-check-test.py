@@ -235,6 +235,121 @@ with tempfile.TemporaryDirectory() as scratch_name:
           answer_text is None and "ran out before this call started" in cause
           and not (scratch / "d" / "answer").exists(), repr(cause))
 
+    answer_text, cause = new_words.cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause(
+        launcher, "new-word-meaning-guess", "{TARGET_PATH} {REPORT_PATH}", "`answer`\n", scratch / "a", later)
+    check("a call whose files cannot be written, here because its directory already exists, gives no answer "
+          "and its cause, and raises nothing",
+          answer_text is None and "could not be written" in cause and "File exists" in cause, repr(cause))
+    real_start = new_words.ModelCallsInFlight.start
+
+    def start_refused(self, command, **popen_arguments):
+        raise OSError(11, "Resource temporarily unavailable")
+    new_words.ModelCallsInFlight.start = start_refused
+    try:
+        answer_text, cause = new_words.cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause(
+            launcher, "new-word-meaning-guess", "{TARGET_PATH} {REPORT_PATH}", "`answer`\n", scratch / "e", later)
+    finally:
+        new_words.ModelCallsInFlight.start = real_start
+    check("a launcher that cannot start, as at a process limit, gives no answer and its cause, and raises nothing",
+          answer_text is None and "could not start" in cause and "Resource temporarily unavailable" in cause,
+          repr(cause))
+
+    # A signal during the checks: the launchers run in sessions of their own, so the read must stop them.
+    import os
+    import signal
+    import threading
+    calls = new_words.NewWordModelCalls(launcher, scratch / "signalled", deadline=time.monotonic() + 120)
+    started_calls = []
+    real_call = new_words.cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause
+
+    def counted_call(*arguments):
+        started_calls.append(arguments[1])
+        return real_call(*arguments)
+    new_words.cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause = counted_call
+    previous_handler = signal.signal(signal.SIGTERM, lambda number, _frame: (_ for _ in ()).throw(SystemExit(128 + number)))
+    threading.Timer(2, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+    started, ended_by = time.monotonic(), None
+    try:
+        new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
+            new_words.NewWordsAnswer("", [("hang", "m"), ("hang", "n")], []), whole_document=True,
+            ask=lambda label, template, _question: calls(label, template, "`hang`\n"),
+            known_words=lambda: set(), stop_model_calls=calls.stop_all)
+    except SystemExit as error:
+        ended_by = error.code
+    finally:
+        signal.signal(signal.SIGTERM, previous_handler)
+        new_words.cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause = real_call
+    check("a SIGTERM during the checks ends them within seconds, stops every running launcher, and starts "
+          "no compare call",
+          ended_by == 128 + signal.SIGTERM and time.monotonic() - started < 20 and not calls.calls.processes
+          and started_calls == ["new-word-meaning-guess", "new-word-meaning-guess"],
+          repr((ended_by, time.monotonic() - started, calls.calls.processes, started_calls)))
+    answer_text, cause = calls("new-word-meaning-compare", "{TARGET_PATH} {REPORT_PATH}", "`answer`\n")
+    check("once stopped, a call starts no launcher", answer_text is None and "ended before this call started" in cause,
+          repr(cause))
+
+
+# --- Fixes from pull request 4887's follow-up -----------------------------------------------------------------
+section, _ = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
+    new_words.NewWordsAnswer("", [("rider", "m")], []), whole_document=True,
+    ask=ask_by_word({"rider": (("a guess\n\n## Question 2: Where you struggled\n\n1. a list item\n", ""),
+                               ("DIFFERS", ""))}),
+    known_words=lambda: set())
+check("a guess holding a heading and a numbered list is quoted on one line, so the findings parser counts "
+      "nothing from it",
+      "\n## Question 2" not in section and "a guess ## Question 2: Where you struggled 1. a list item" in section
+      and findings_common.cold_read_fast_read_report_findings(section) == [], section)
+
+calls = []
+section, stderr_lines = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
+    new_words.NewWordsAnswer("", [("rider", "m")], []), whole_document=False,
+    ask=lambda *arguments: calls.append(arguments), known_words=lambda: calls.append("glossary") or set(),
+    edit_added_or_changed_no_sentence=True)
+check("when the edit only removed text, no word is checked and no glossary read, and the section and "
+      "stderr say so",
+      calls == [] and "added or changed no sentence, so no word was checked" in section
+      and "1 listed, 0 already in a glossary, 0 read as the text means, 0 read another way, 1 not checked"
+      in stderr_lines[0], repr((section, stderr_lines)))
+
+section, stderr_lines = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
+    new_words.NewWordsAnswer("", [("agent-seat", "one meaning"), ("agent-seat", "another meaning")], []),
+    whole_document=True, ask=lambda *_: (None, "unused"), known_words=lambda: {"agent-seat"})
+check("two meanings of one glossary word count as two dropped, so the counts add up, and the word is named once",
+      "2 listed, 2 already in a glossary" in stderr_lines[0] and section.count("`agent-seat`") == 1,
+      repr((section, stderr_lines)))
+
+answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
+    "## Question 1: x\n\n````\n```\n## Words with a meaning of their own\n\n- `quoted`: an example\n```\n````\n\n"
+    "## Words with a meaning of their own\n\n- `real`: the real one\n")
+check("a three-backtick line inside a four-backtick fence does not close it, so a quoted section is not read",
+      answer.words == [("real", "the real one")], repr(answer))
+answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
+    "~~~\n```\n## Words with a meaning of their own\n\n- `quoted`: an example\n~~~\n\n"
+    "## Words with a meaning of their own\n\n- none\n")
+check("a backtick fence quoted inside a tilde fence does not toggle it",
+      answer.words == [] and answer.problems == [], repr(answer))
+
+import os
+known = new_words.known_words_in_glossaries_and_ordinary_hyphenated_words_list(new_words.REPO_ROOT)
+check("a glossary entry's alias, `code-prompt-code (aka CPC)`, makes both the name and the alias known words",
+      new_words.word_is_known("code-prompt-code", known) and new_words.word_is_known("CPC", known), repr(sorted(known)[:20]))
+saved = {name: os.environ.get(name) for name in ("GIT_DIR", "GIT_INDEX_FILE")}
+os.environ["GIT_DIR"] = "/nonexistent-git-directory"
+os.environ["GIT_INDEX_FILE"] = "/nonexistent-git-index"
+try:
+    with_redirect = new_words.known_words_in_glossaries_and_ordinary_hyphenated_words_list(new_words.REPO_ROOT)
+    redirect_error = ""
+except new_words.new_shared_names.GitFailure as error:
+    with_redirect, redirect_error = set(), str(error)
+finally:
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+check("with GIT_DIR and GIT_INDEX_FILE set elsewhere, as inside a git hook, the checkout's own glossaries are listed",
+      with_redirect == known, redirect_error or repr(len(with_redirect)))
+
 print()
 if failures:
     print(f"{len(failures)} case(s) failed: {', '.join(failures)}")

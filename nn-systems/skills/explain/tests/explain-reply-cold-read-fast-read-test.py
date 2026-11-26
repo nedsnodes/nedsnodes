@@ -342,9 +342,11 @@ def main() -> int:
         # Oracle: what the stand-in logged. Red: a different file name, text,
         # working directory or argument list than the program promises.
         check("the fast read gets exactly --target <file> --text-intended-reader-category "
-              "human-readable, since an /explain reply is written for the user",
+              "human-readable, since an /explain reply is written for the user, and "
+              "--caller-time-limit-seconds with this program's own limit, so its word checks end in time",
               logged is not None and logged["argv"][0] == "--target"
-              and logged["argv"][2:] == ["--text-intended-reader-category", "human-readable"],
+              and logged["argv"][2:] == ["--text-intended-reader-category", "human-readable",
+                                         "--caller-time-limit-seconds", "540"],
               str(logged))
         check("the draft file is named explain-reply-draft-<seat name>-<HHMMSS>.md",
               logged is not None and re.fullmatch(
