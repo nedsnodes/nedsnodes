@@ -246,8 +246,11 @@ with tempfile.TemporaryDirectory() as directory:
           texts == ["start", "y", "y"], texts)
 
 # Each prompt below comes from the program that writes it, so a prompt it adds or rewords is tested here.
-recover_module = search_module.crash_recovery
-supervisor_module = search_module.handoff_supervisor
+_recover_spec = importlib.util.spec_from_file_location(
+    "recover_crashed_seats", Path(__file__).with_name("recover-crashed-seats.py"))
+recover_module = importlib.util.module_from_spec(_recover_spec)
+_recover_spec.loader.exec_module(recover_module)
+supervisor_module = recover_module.supervisor
 with tempfile.TemporaryDirectory() as directory:
     handoffs = Path(directory)
     no_handoff_yet = supervisor_module.FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE.format(agent="MD-skills")
@@ -295,6 +298,16 @@ check("a first prompt that ends with the earlier wording of the not-typed-by-the
 quoting = "I said: You are MD-skills. No handoff exists yet; ask what to work on."
 check("the user's words that quote the no-handoff prompt after his own opening are still his",
       not search_module.written_by_a_program({"origin": {"kind": "human"}}, quoting))
+
+# Each quotes, inside a sentence of the user's own, words a launch prompt carries in a place of its own.
+for quoting in (
+        "Restart it as it does when a session is stopped on purpose.",
+        "Why does it say the previous session's conversation-tail is unavailable?",
+        "Keep \"The text above this line came from the handoff-supervisor's --first-prompt-file or --first-prompt; "
+        "the user did not type it.\" as the prompt's last line.",
+        "Look at (Recovered at supervisor boot: the previous session's conversation-tail is unavailable) there."):
+    check(f"the user's words that quote a launch prompt's words inside his own sentence are still his: {quoting!r}",
+          not search_module.written_by_a_program({"origin": {"kind": "human"}}, quoting))
 
 with tempfile.TemporaryDirectory() as directory:
     path = write_transcript(directory, [

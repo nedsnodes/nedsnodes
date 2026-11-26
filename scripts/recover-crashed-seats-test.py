@@ -1909,10 +1909,12 @@ with tempfile.TemporaryDirectory() as temporary:
     # the supervisor's actual source, so a wording change there fails HERE
     # (round-3 P3-3: the round-2 assertion covered only the first marker).
     source = SUPERVISOR_SCRIPT.read_text(encoding="utf-8")
-    check("F8: the no-handoff marker is verbatim in handoff-supervisor.py",
-          "No handoff exists yet" in source
+    no_handoff_prompt = supervisor_module.FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE.format(
+        agent="some-seat")
+    check("F8: the no-handoff marker is verbatim in the prompt handoff-supervisor.py gives a seat without a handoff",
+          "No handoff exists yet" in no_handoff_prompt
           and "No handoff exists yet" in recovery.EMPTY_SUCCESSOR_MARKERS,
-          recovery.EMPTY_SUCCESSOR_MARKERS)
+          (no_handoff_prompt, recovery.EMPTY_SUCCESSOR_MARKERS))
     check("F8: the ignition-opener literal is verbatim in handoff-supervisor.py",
           recovery.REINCARNATION_OPENER_MARKER in source
           and recovery.REINCARNATION_OPENER_MARKER

@@ -5,6 +5,7 @@ Each case runs the hook as a subprocess, its real stdin-to-stdout path, with HOM
 holding the alerts, in a scratch checkout. The hook claims alerts only on Linux, so each case sets the hook's
 sys.platform, and the suite passes on the Mac too. Prints one line per case and exits non-zero if any case fails.
 """
+import ast
 import importlib.util
 import json
 import os
@@ -244,6 +245,13 @@ def run_agent_seat_cases(root):
           result.stdout + result.stderr)
 
 
+def hook_module():
+    specification = importlib.util.spec_from_file_location("pending_user_alerts_hook", HOOK)
+    hook = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(hook)
+    return hook
+
+
 def run_not_typed_cases(root):
     for name, prompt in (
             ("task-notice", "<task-notification>\n<status>completed</status>\n</task-notification>"),
@@ -261,25 +269,50 @@ def run_not_typed_cases(root):
     case = Case(root, "recorded-peer")
     case.alert("alert-a")
     case.turn_record("peer", "please restart merge-lane-2")
-    case.run("please restart merge-lane-2")
-    check("a prompt the transcript records as another agent-seat's message claims nothing, whatever its text",
-          case.names("pending") == ["alert-a"], repr(case.names("claimed")))
+    result, context = case.run("please restart merge-lane-2")
+    check("a prompt the transcript records as another agent-seat's message claims nothing and prints nothing, "
+          "whatever its text",
+          result.returncode == 0 and result.stdout == "" and case.names("pending") == ["alert-a"],
+          result.stdout + result.stderr + repr(case.names("claimed")))
 
     case = Case(root, "handoff-first-prompt")
     case.alert("alert-a")
     first_prompt = ("Read /home/nedlern/.claude/handoffs/ned-box-helper-dialog-0058.md — the dialog from the session "
                     "you are continuing, written at 2026-11-25T20:32:08Z.")
     case.turn_record("human", first_prompt)
-    case.run(first_prompt)
-    check("the handoff-supervisor's first prompt, which the transcript records as human, claims nothing",
-          case.names("pending") == ["alert-a"], repr(case.names("claimed")))
+    result, context = case.run(first_prompt)
+    check("the handoff-supervisor's first prompt, which the transcript records as human, claims nothing and "
+          "prints nothing",
+          result.returncode == 0 and result.stdout == "" and case.names("pending") == ["alert-a"],
+          result.stdout + result.stderr + repr(case.names("claimed")))
+
+    case = Case(root, "typed-reply-quoting-launch-prompt-words")
+    case.alert("alert-a")
+    reply = ("D: restart it as it does when a session is stopped on purpose, and keep the line \"The text above "
+             "this line came from the handoff-supervisor's --first-prompt-file or --first-prompt; the user did not "
+             "type it.\" where it is")
+    case.turn_record("human", reply)
+    result, context = case.run(reply)
+    check("a reply the user typed that quotes a launch prompt's words inside his own sentence counts as typed: "
+          "exits 0 and claims the alert",
+          result.returncode == 0 and case.names("claimed") == ["alert-a"],
+          result.stdout + result.stderr + repr(case.names("claimed")))
+
+    speaker_test_source = Path(hook_module().SPEAKER_TEST_FILE).read_text(encoding="utf-8")
+    imported = sorted({alias.name for node in ast.walk(ast.parse(speaker_test_source))
+                       if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names})
+    check("the speaker test the hook loads on every prompt imports only re, and loads no repository module such "
+          "as the handoff-supervisor or crash recovery",
+          imported == ["re"] and "spec_from_file_location" not in speaker_test_source, repr(imported))
 
     case = Case(root, "stale-human-record")
     case.alert("alert-a")
     case.turn_record("human", "the user's previous prompt")
-    case.run("<task-notification>done</task-notification>")
-    check("a background-task notice claims nothing when the transcript's newest turn is the user's previous one",
-          case.names("pending") == ["alert-a"], repr(case.names("claimed")))
+    result, context = case.run("<task-notification>done</task-notification>")
+    check("a background-task notice claims nothing and prints nothing when the transcript's newest turn is the "
+          "user's previous one",
+          result.returncode == 0 and result.stdout == "" and case.names("pending") == ["alert-a"],
+          result.stdout + result.stderr + repr(case.names("claimed")))
 
     case = Case(root, "string-message-record")
     case.alert("alert-a")
@@ -294,9 +327,7 @@ def run_not_typed_cases(root):
     case = Case(root, "turn-duration-record")
     with case.transcript.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps({"type": "system", "subtype": "turn_duration", "turnOrigin": "peer"}) + "\n")
-    specification = importlib.util.spec_from_file_location("pending_user_alerts_hook", HOOK)
-    hook = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(hook)
+    hook = hook_module()
     try:
         typed, error = hook.typed_by_user({"prompt": "hello", "transcript_path": str(case.transcript)}), None
     except AttributeError as raised:
