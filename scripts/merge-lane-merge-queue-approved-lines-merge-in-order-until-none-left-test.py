@@ -178,7 +178,7 @@ class Case:
         saved = dict(os.environ)
         os.environ.update(self.environment, **(extra_environment or {}))
         output = io.StringIO()
-        watcher = program.open_pull_requests_watcher
+        watcher = program.open_pull_request_watcher
         real_assignments = watcher.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
         watcher.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = self.assignments
         runner = program.MergeQueuePullRequestMergeBatchRunner
@@ -1169,6 +1169,7 @@ def starting_cases(scratch):
 
 
 DIRTY = {"exit": 1, "output": "STOP: not merged: mergeStateStatus is DIRTY"}
+HELD_SUBJECT = f"Pull request 10, approved at {A[:12]}, is held: it conflicts with main"
 
 
 def tasks_on(task_list):
@@ -1187,9 +1188,10 @@ def conflict_hold_cases(scratch):
           "task list, saying to merge main in with no rebase, push once, and naming the lane "
           "that reviews the new nn-head-commit; the held notice records it, and the batch goes on",
           exit_code == 0 and len(tasks) == 1
-          and tasks[0]["subject"] == f"Pull request 10 is held: it conflicts with main at {A[:12]}"
-          and "merge origin/main into its branch, with no rebase" in tasks[0]["description"]
-          and "push once" in tasks[0]["description"]
+          and tasks[0]["subject"] == HELD_SUBJECT
+          and "git merge origin/main, with no rebase" in tasks[0]["description"]
+          and "Push once" in tasks[0]["description"]
+          and tasks[0]["description"].endswith("Complete this task once you have pushed.")
           and "merge-lane-3 reviews the new nn-head-commit" in tasks[0]["description"]
           and "This program opened task #1 on author-seat's task list" in notice
           and "SendMessage" not in notice and "MERGED 11" in case.queue_text()
@@ -1216,7 +1218,7 @@ def conflict_hold_cases(scratch):
     check("a queue line whose author is no agent-seat here gets the task on the agent-seat that "
           "authored the pull request's last commit",
           [task["subject"] for task in tasks_on(task_list)]
-          == [f"Pull request 10 is held: it conflicts with main at {A[:12]}"],
+          == [HELD_SUBJECT],
           tasks_on(task_list))
 
     case = Case(scratch, "conflict-hold-unknown-author", [approved(10, A, author="not-named")],
@@ -1230,8 +1232,9 @@ def conflict_hold_cases(scratch):
           "on the pull request, and with no assignment file it names that file in place of the "
           "lane and the held notice says the lane could not be read",
           len(comments) == 1 and comments[0][2] == "10"
-          and body.startswith(f"Pull request 10 is held: it conflicts with main at {A[:12]}")
-          and f"The merge-lane agent-seat that {case.assignments} names for it reviews" in body
+          and body.startswith(HELD_SUBJECT)
+          and f"the merge-lane agent-seat that {case.assignments} names for it reviews" in body
+          and "Complete this task" not in body
           and "posted the message to its author as a comment" in notice
           and "Its reviewing lane could not be read" in notice and "does not exist" in notice,
           f"{comments}\n{notice}")
@@ -1250,8 +1253,9 @@ def conflict_hold_cases(scratch):
           "merge-lane-2 to send, and the batch goes on",
           exit_code == 0 and tasks_on(task_list) == []
           and "TELLING THE AUTHOR FAILED: " in notice
-          and "send that agent-seat the message below with Claude Code's SendMessage tool" in notice
-          and f"Pull request 10 is held: it conflicts with main at {A[:12]}" in notice
+          and ("Send agent-seat author-seat, its author, the message between the dashed lines"
+               in notice)
+          and HELD_SUBJECT in notice
           and "merge-lane-3 reviews the new nn-head-commit" in notice
           and "telling its author of the conflict hold failed" in output
           and "MERGED 11" in case.queue_text(), f"{notice}\n{output}")

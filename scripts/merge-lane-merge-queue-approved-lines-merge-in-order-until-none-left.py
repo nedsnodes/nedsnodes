@@ -144,9 +144,9 @@ _review_plan_spec.loader.exec_module(review_plan)
 _watcher_spec = importlib.util.spec_from_file_location(
     "merge_lane_open_prs_watch_and_reviewer_assign",
     SCRIPTS / "merge-lane-open-prs-watch-and-reviewer-assign.py")
-open_pull_requests_watcher = importlib.util.module_from_spec(_watcher_spec)
-_watcher_spec.loader.exec_module(open_pull_requests_watcher)
-task_write = open_pull_requests_watcher.agent_seat_task_list
+open_pull_request_watcher = importlib.util.module_from_spec(_watcher_spec)
+_watcher_spec.loader.exec_module(open_pull_request_watcher)
+task_write = open_pull_request_watcher.agent_seat_task_list
 
 REPOSITORY = "nedsnodes/nedsnodes"
 MERGE_ACCOUNT = "ned-review-merge"
@@ -660,65 +660,73 @@ class MergeQueuePullRequestMergeBatchRunner:
                     f"The merge batch went on without it. {told}\n")
         return True
 
-    def conflict_hold_author_told(self, number, head, queued_author):
+    def conflict_hold_author_task_open_or_pull_request_comment_post(self, number, head,
+                                                                    queued_author):
         """Tell the author agent-seat of a pull request held for a conflict with main, by a task
         on its task list, or by a comment on the pull request when no such agent-seat is found;
         return what was done, or what failed with the message for merge-lane-2 to send."""
-        assignments_file = (open_pull_requests_watcher
+        assignments_file = (open_pull_request_watcher
                             .MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE)
         try:
-            lane = open_pull_requests_watcher.merge_lane_pull_request_review_assignments_file_read(
+            lane = open_pull_request_watcher.merge_lane_pull_request_review_assignments_file_read(
                 assignments_file).get(number)
             lane_unknown = None if lane else f"{assignments_file} has no line for it"
-        except open_pull_requests_watcher.MergeLanePullRequestReviewAssignmentsFileUnusable as error:
+        except open_pull_request_watcher.MergeLanePullRequestReviewAssignmentsFileUnusable as error:
             lane, lane_unknown = None, str(error)
-        reviewer = lane or f"The merge-lane agent-seat that {assignments_file} names for it"
-        subject = f"Pull request {number} is held: it conflicts with main at {head[:12]}"
-        description = (
-            f"The merge queue held pull request {number} "
+        reviewer = lane or f"the merge-lane agent-seat that {assignments_file} names for it"
+        subject = (f"Pull request {number}, approved at {head[:12]}, is held: it conflicts "
+                   f"with main")
+        message = (
+            f"merge-lane-2's merge queue held pull request {number} "
             f"(https://github.com/{REPOSITORY}/pull/{number}), approved at {head}, because it "
             f"conflicts with main (mergeStateStatus DIRTY), so it cannot merge.\n"
-            f"In its checkout, merge origin/main into its branch, with no rebase, since a rebase "
-            f"rewrites the commits its review covers; resolve the conflicts, run its test suites, "
-            f"and push once.\n"
+            f"In its checkout, run git fetch origin, then git merge origin/main, with no rebase, "
+            f"since a rebase rewrites the commits its review covers. Resolve the conflicts, then "
+            f"run python3 scripts/run-all-test-suites.py "
+            f"--only-suites-whose-recorded-inputs-changed-since origin/main, and fix any failure "
+            f"before you push. Push once: the push is the nn-head-commit that is reviewed.\n"
+            f"No one needs telling after the push: the open-pull-request watcher sees it, "
             f"{reviewer} reviews the new nn-head-commit, and the pull request merges once that "
-            f"lane appends a new approved line for it. Complete this task once you have pushed.")
+            f"review approves it.")
         lane_note = (f" Its reviewing lane could not be read, so the message names the assignment "
                      f"file instead: {lane_unknown}." if lane_unknown else "")
-        task_list = None
+        seat = None
         try:
-            seat = self.conflict_hold_author_agent_seat(number, queued_author)
+            seat = self.conflict_hold_pull_request_author_agent_seat_with_task_list_find(
+                number, queued_author)
             if seat is None:
                 self.gh("pr", "comment", str(number), "--repo", REPOSITORY,
-                        "--body", f"{subject}\n\n{description}")
+                        "--body", f"{subject}\n\n{message}")
                 return (f"No author agent-seat with a task list and an agent-home on ned-box was "
                         f"found, from the queue line or the last commit's author, so this program "
                         f"posted the message to its author as a comment on the pull request; "
                         f"nothing more needs sending.{lane_note}")
             task_list = Path.home() / ".claude" / "tasks" / f"nedsnodes-{seat}-tasks"
-            if open_pull_requests_watcher.open_task_with_subject_exists(task_list, subject):
+            if open_pull_request_watcher.open_task_with_subject_exists(task_list, subject):
                 return (f"{task_list} already holds an open task titled {subject!r}, so this "
                         f"program opened none; nothing more needs sending.{lane_note}")
             task_id = task_write.agent_seat_task_list_new_pending_task_write(
-                task_list, subject, description)
+                task_list, subject, f"{message}\nComplete this task once you have pushed.")
         except (Stop, OSError) as error:
             self.log(f"pull request {number}: telling its author of the conflict hold failed: "
                      f"{error}")
-            already = (f"When {task_list} holds an open task titled {subject!r}, the writer made it "
-                       f"before it failed, and nothing needs sending.\n" if task_list else "")
+            comment = (f"gh pr comment {number} --repo {REPOSITORY} --body-file <a file holding "
+                       f"the message>")
+            send = (f"Send agent-seat {seat}, its author, the message between the dashed lines "
+                    f"with Claude Code's SendMessage tool.\n"
+                    f"When SendMessage cannot reach {seat}, post the message on the pull request "
+                    f"instead: {comment}" if seat else
+                    f"Post the message between the dashed lines on the pull request: {comment}")
             return (f"TELLING THE AUTHOR FAILED: {error}\n"
                     f"Its author was not told that it conflicts with main, so it may wait for a "
-                    f"merge that cannot happen.\n{already}"
-                    f"When you can tell which agent-seat authored it, send that agent-seat the "
-                    f"message below with Claude Code's SendMessage tool.\n"
-                    f"When you cannot, post the message below on the pull request: gh pr comment "
-                    f"{number} --repo {REPOSITORY} --body-file <a file holding the message>\n"
-                    f"{subject}\n{description}")
+                    f"merge that cannot happen.\n{send}\n"
+                    f"-----\n{subject}\n{message}\n-----")
         return (f"This program opened task #{task_id} on {seat}'s task list, telling it to merge "
                 f"main in and push once, and that {lane or 'its lane'} reviews the new "
                 f"nn-head-commit; nothing more needs sending.{lane_note}")
 
-    def conflict_hold_author_agent_seat(self, number, queued_author):
+    def conflict_hold_pull_request_author_agent_seat_with_task_list_find(self, number,
+                                                                         queued_author):
         """The author agent-seat with a task list and an agent-home on this machine: the queue
         line's author, else the author of the pull request's last commit, whose name the
         agent-seat launchers set; None when neither is one."""
@@ -774,13 +782,13 @@ class MergeQueuePullRequestMergeBatchRunner:
             if "mergeStateStatus is DIRTY" in text:
                 why = ("conflicts with main (mergeStateStatus DIRTY): its author merges main "
                        "in, then the new nn-head-commit needs a new review")
-            else:
-                first = next((line for line in text.splitlines()
-                              if line.startswith(("GATE REFUSED", "STOP"))), "no reason printed")
-                why = f"refused: {first}"
-            return self.held(number, author, why, checked_line,
-                             author_told=(lambda: self.conflict_hold_author_told(
-                                 number, head, author)) if "DIRTY" in why else None)
+                return self.held(
+                    number, author, why, checked_line,
+                    author_told=lambda: self.conflict_hold_author_task_open_or_pull_request_comment_post(
+                        number, head, author))
+            first = next((line for line in text.splitlines()
+                          if line.startswith(("GATE REFUSED", "STOP"))), "no reason printed")
+            return self.held(number, author, f"refused: {first}", checked_line)
         merge_notice = ""
         if on_github:
             # Resuming never reaches a pull request already MERGED, so its merge notice is
