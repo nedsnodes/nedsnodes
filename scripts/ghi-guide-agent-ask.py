@@ -1108,10 +1108,11 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
       - `--seat-dir "$PWD"` after a successful cd means the box-side run
         runs in the directory the shell entered, which is the seat by
         construction, whatever DEFAULT_SEAT_DIR resolves to there.
-      - a failed cd keeps the shell's OWN diagnostic (which names the real
-        cause — missing, not a directory, unreadable) and adds the remedy
-        beside it. Suppressing the shell's line would make a permissions
-        failure read as "no seat", pointing the operator at the wrong fix.
+      - a failed cd puts the shell's own diagnosis, which names the real
+        cause (missing, not a directory, cannot be entered), and the remedy
+        on one stderr line, because scripts/ghi-issue-write.py reports one
+        line of a failed ask and the shell runs before any main() that keeps
+        the one-line rule.
     """
     # With `question_on_stdin` the caller hands ssh the question as stdin,
     # since one argument may not exceed 128 KiB on Linux.
@@ -1128,9 +1129,11 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
     invocation += ' --seat-dir "$PWD"'
     return "\n".join([
         'seat="$HOME/agents/ghi-guide-agent"',
-        'cd "$seat" || {',
+        'cd "$seat" 2>/dev/null || {',
+        '  cd_error=$(cd "$seat" 2>&1)',
+        '  cd_error=$(printf %s "$cd_error" | tr "\\n" " ")',
         '  echo "ghi-guide-agent-ask: could not enter the ghi-guide-agent seat at $seat on this box'
-        ' — bootstrap it (a checkout of this repository at that path), then retry" >&2',
+        ' ($cd_error) — make it a checkout of this repository that this user can enter, then retry" >&2',
         '  exit 1',
         '}',
         # Not `&&`: a failed fast-forward prints its line and the ask runs on, as

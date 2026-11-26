@@ -699,6 +699,42 @@ with tempfile.TemporaryDirectory() as temporary:
           and "ARG:[" not in missing_result.stdout,
           (missing_result.returncode, missing_result.stderr, missing_result.stdout))
 
+    # ned-box's login shell is bash. The shell's own diagnosis must reach the
+    # reason scripts/ghi-issue-write.py reports, so that an agent-home that
+    # exists but cannot be entered does not read as a missing one.
+    entry_cases = []
+    for case_name, diagnosis in (("missing", "No such file or directory"),
+                                 ("a file", "Not a directory"),
+                                 ("not enterable", "Permission denied")):
+        case_home = probe_root / ("entry-" + case_name.replace(" ", "-"))
+        (case_home / "agents").mkdir(parents=True)
+        case_seat = case_home / "agents" / "ghi-guide-agent"
+        if case_name == "a file":
+            case_seat.write_text("", encoding="utf-8")
+        elif case_name == "not enterable":
+            case_seat.mkdir()
+            case_seat.chmod(0o000)
+        entry_cases.append((case_name, diagnosis, case_home, case_seat))
+    try:
+        for case_name, diagnosis, case_home, case_seat in entry_cases:
+            entry_result = real_subprocess.run(
+                ["/bin/bash", "-c", replayed], capture_output=True, text=True,
+                env={"HOME": str(case_home), "PATH": "/usr/bin:/bin"})
+            reason = ghi_ask.ghi_issue_write.ghi_guide_agent_ask_failure_reason_from_stderr(
+                entry_result.stderr)
+            check(f"an agent-home that is {case_name}: the reason ghi-issue-write.py "
+                  f"reports holds the shell's '{diagnosis}', the path and the remedy",
+                  entry_result.returncode == 1 and reason is not None
+                  and diagnosis in reason and str(case_seat) in reason
+                  and "could not enter the ghi-guide-agent seat at" in reason
+                  and "then retry" in reason
+                  and "ARG:[" not in entry_result.stdout,
+                  (entry_result.returncode, entry_result.stderr, reason))
+    finally:
+        for case_name, _, _, case_seat in entry_cases:
+            if case_name == "not enterable":
+                case_seat.chmod(0o755)
+
 
 # --- main(): explicit --seat-dir skips SSH, missing seat-dir errors clean --
 mirror_orig = ghi_ask.mirror_refresh.refresh
