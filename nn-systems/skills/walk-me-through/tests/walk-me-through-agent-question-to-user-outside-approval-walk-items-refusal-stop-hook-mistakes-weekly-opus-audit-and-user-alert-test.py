@@ -8,6 +8,7 @@ never real: a fake `claude` first on PATH records each call and labels a line an
 LABELLER_ASK, fails its call as logged out when the text holds LABELLER_FAIL and with another error when it holds
 LABELLER_OTHER_FAIL, and labels it no ask otherwise.
 """
+import argparse
 import datetime
 import importlib.util
 import json
@@ -129,7 +130,7 @@ def test_a_week_the_hook_judged_as_the_labeller_does_writes_counts_and_no_alert(
     check("the record holds the counts",
           record["counts"] == {"lines_in_window": 60, "malformed_rows": 0, "refused_labelled": 20, "wrong_stops": 0,
                                "passed_labelled": 20, "missed_asks": 0, "labelling_failed": 0}, record["counts"])
-    check("no threshold crossed, no user-alert", case.alerts() == [] and record["user_alert_id"] is None, case.alerts())
+    check("no threshold crossed, no user-alert", case.alerts() == [], case.alerts())
     argv = calls[0]["argv"]
     check("the labeller is Opus, sent the hook's schema", argv[argv.index("--model") + 1] == job.LABELLER_MODEL
           and json.loads(argv[argv.index("--json-schema") + 1]) == job.hook.MODEL_SCHEMA, argv)
@@ -146,6 +147,7 @@ def test_a_week_the_hook_judged_as_the_labeller_does_writes_counts_and_no_alert(
 def test_which_rows_are_sampled():
     rows = [row("Old? [x]", True, days_ago=8), row("Failed call?", None), row("Twice?", True, session="s2"),
             row("Twice?", False, session="s2", days_ago=0.5), row("Twice?", True, session="s3"),
+            row("Line separator?", True, session="s4"),
             dict(row("Missing context?", True), agent_message_holding_the_line=7),
             dict(row("No time zone?", True), time="2026-11-29T06:00:00"), dict(row("No time?", True), time=None),
             dict(row("List session?", True), session=[]), row("No waiting item?", True)]
@@ -155,8 +157,8 @@ def test_which_rows_are_sampled():
     case.run()
     lines = sorted((item["row"]["line"], item["row"]["session"], item["row"]["ask"]) for item in case.record()["lines"])
     check("rows older than the week, rows with no verdict and malformed rows are left out; a line judged twice in "
-          "one agent-session counts once, with its newest verdict",
-          lines == [("Twice?", "s2", False), ("Twice?", "s3", True)], lines)
+          "one agent-session counts once, with its newest verdict; a line holding U+2028 is one row",
+          lines == [("Line separator?", "s4", True), ("Twice?", "s2", False), ("Twice?", "s3", True)], lines)
     check("malformed rows, a row with a time but no time zone, a row with no time, a session that is not a string "
           "and a row missing a field included, are counted",
           case.record()["counts"]["malformed_rows"] == 7, case.record()["counts"])
@@ -180,6 +182,14 @@ def test_a_now_without_a_time_zone_is_refused_before_anything_is_read():
     check("a --now with no time zone exits 2, naming the value, and writes no record",
           status == 2 and "has no time zone" in (case.root / "stderr.txt").read_text() and case.record() is None,
           status)
+    try:
+        job.time_with_time_zone("2026-11-30")
+        refusal = ""
+    except argparse.ArgumentTypeError as error:
+        refusal = str(error)
+    suggested = refusal.rsplit("as in ", 1)[-1]
+    check("a date-only --now is refused with a suggested value that is accepted",
+          refusal and job.time_with_time_zone(suggested).tzinfo is not None, refusal)
 
 
 def test_a_missed_ask_writes_one_user_alert():
@@ -187,8 +197,8 @@ def test_a_missed_ask_writes_one_user_alert():
     case = Case(rows)
     check("a run with a missed ask exits 0", case.run() == 0, case.stderr)
     alerts = case.alerts()
-    check("one user-alert is written, its id in the record",
-          len(alerts) == 1 and case.record()["user_alert_id"] == alerts[0]["id"], alerts)
+    check("one user-alert is written, after the record it names", len(alerts) == 1 and case.record() is not None,
+          alerts)
     text = alerts[0]["alert_text"] if alerts else ""
     check("the alert names the missed ask, both verdicts and the labeller's reason",
           "1 missed ask" in alerts[0]["title"] and "Tell me when to go." in text and "the hook's model: not an ask" in text
@@ -266,12 +276,12 @@ def test_an_alert_or_record_that_cannot_be_written_exits_1():
     (alerts_directory / "user-alerts").write_text("a file where the folder should be")
     check("a user-alert that cannot be written exits 1 and says so",
           case.run() == 1 and "the user-alert could not be written" in case.stderr, case.stderr)
-    check("the record is still written, with no alert id", case.record()["user_alert_id"] is None, case.record())
-    unrecorded = Case([row("Merge?", True)])
+    check("the record is still written", case.record() is not None, case.stderr)
+    unrecorded = Case([row(f"Go? {LABELLER_ASK}", False)])
     (unrecorded.log_store / job.COUNTS_DIRECTORY_NAME).write_text("a file where the folder should be")
-    check("a record that cannot be written exits 1 and says so",
-          unrecorded.run() == 1 and "The record of this run could not be written" in unrecorded.stderr,
-          unrecorded.stderr)
+    check("a record that cannot be written exits 1, says so, and writes no user-alert naming it",
+          unrecorded.run() == 1 and "The record of this run could not be written" in unrecorded.stderr
+          and unrecorded.alerts() == [], unrecorded.stderr)
 
 
 def main():
