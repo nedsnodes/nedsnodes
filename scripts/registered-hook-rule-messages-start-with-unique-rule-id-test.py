@@ -157,6 +157,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "PARTS_DIFFERENT_LETTERS_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "PARTS_NOT_RECORDABLE_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "PARTS_READ_LINE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "PARTS_DECIDED_BY_RULING_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "PARTS_REPEATED_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "PARTS_SAME_LETTER_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "PARTS_UNANSWERED_LINES"): LATER_PART,

@@ -1252,6 +1252,55 @@ def parts_read_line(pairs, item="item 4 of 9", last="3"):
             f"walk-me-through skill lets an item do; the answer gives each part it names its own letter: {pairs}.")
 
 
+def part_1_ruled_minutes(item="item 4 of 9", waiting="item 4 of 9"):
+    """Walk-minutes in which a ruling decided part 1 of item, as check --already-decided and close write them."""
+    return (f"#next_to_present {item}\n{item}: settled without asking the user, part 1 disapproved, already decided "
+            "by `walk x's minutes, item 4 (2026-11-20)` #case_against_none (2026-11-25 00:00Z), which makes its "
+            f"change. Fast reads:\n{item}: part 1 disapproved <rejected> already decided by `walk x's minutes, item 4 "
+            f"(2026-11-20)`; the walk shows the user only its other parts. <open>\n#next_to_present {waiting}")
+
+
+def parts_decided_by_ruling_line(decided="part 1", rest="part 2, part 3", item="item 4 of 9"):
+    # Case.lines writes the walk-minutes' path as <minutes>.
+    return (f"An earlier user-ruling already decided {decided} of {item}, as the walk-minutes <minutes> record, so "
+            f"this hook reads the user's answer as answering only {rest}, and the lines below act on those parts alone.")
+
+
+def test_a_numbered_answer_after_a_ruling_on_some_parts_answers_only_the_parts_left():
+    case = Case(next_to_present="item 4 of 9", document=PARTS_DOCUMENT)
+    case.minutes(part_1_ruled_minutes())
+    lines = case.lines("2 a 3 d")
+    check("'2 a 3 d' after a ruling decided part 1 answers parts 2 and 3, and gives --part-answer for those two only",
+          lines is not None and lines[1:] == [parts_read_line("part 2: A, part 3: D"), parts_decided_by_ruling_line()]
+          + parts_different_letters_lines("--part-answer 2=A --part-answer 3=D"), f"lines {lines!r}")
+    lines = case.lines("2 a 3 a")
+    check("one letter for every part left still answers only those parts, not the whole item over the ruling",
+          lines is not None and lines[1:] == [parts_read_line("part 2: A, part 3: A"), parts_decided_by_ruling_line()]
+          + parts_different_letters_lines("--part-answer 2=A --part-answer 3=A"), f"lines {lines!r}")
+    lines = case.lines("2 a 3 z")
+    check("a deferred part beside an answered one is still refused after a ruling",
+          lines is not None and lines[1:] == [parts_read_line("part 2: A, part 3: Z"), parts_decided_by_ruling_line()]
+          + parts_deferred_beside_answered_lines(), f"lines {lines!r}")
+    case = Case(next_to_present="item 2 of 9", document=PARTS_DOCUMENT.replace("## Item 4 of 9:", "## Item 2 of 9:"))
+    case.minutes(part_1_ruled_minutes(item="item 2 of 9", waiting="item 2 of 9").replace(
+        "part 1 disapproved <rejected> already decided", "part 1 disapproved <rejected>, part 3 approved <accepted> "
+        "already decided"))
+    lines = case.lines("2 a")
+    check("'2 a' while item 2 waits, after a ruling decided its parts 1 and 3, answers part 2 alone, not the whole "
+          "item over the ruling",
+          lines is not None and lines[1:] == [parts_read_line("part 2: A", item="item 2 of 9"),
+                                              parts_decided_by_ruling_line("part 1, part 3", "part 2", "item 2 of 9")]
+          + parts_different_letters_lines("--part-answer 2=A"), f"lines {lines!r}")
+    case = Case(next_to_present="item 4 of 9", document=PARTS_DOCUMENT.replace(
+        "## Item 8 of 9: no parts", "## Item 4 of 12: another item numbered 4\n\nPart 1. one\n\nPart 2. two\n\n"
+        "Part 3. three\n\nRecommendation: do it.\n\n## Item 8 of 9: no parts"))
+    case.minutes(part_1_ruled_minutes(item="item 4 of 12"))
+    lines = case.lines("1 a 2 d 3 a")
+    check("a ruling recorded for another heading's item 4, `item 4 of 12`, decides no part of `item 4 of 9`",
+          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: D, part 3: A")]
+          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=D --part-answer 3=A"), f"lines {lines!r}")
+
+
 def test_a_numbered_answer_within_the_waiting_items_parts_answers_the_parts():
     case = Case(next_to_present="item 4 of 9", document=PARTS_DOCUMENT)
     for prompt, pairs, flags in (

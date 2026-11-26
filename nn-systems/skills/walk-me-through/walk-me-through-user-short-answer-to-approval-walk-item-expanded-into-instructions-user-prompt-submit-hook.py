@@ -187,6 +187,7 @@ Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 """
 import collections
+import contextlib
 import datetime
 import functools
 import importlib.util
@@ -523,6 +524,9 @@ PARTS_REPEATED_LINES = (
     "Ask the user to answer every part of {item} again, giving each part's number once with its letter, as in "
     "`1 a 2 d`.",
 )
+PARTS_DECIDED_BY_RULING_LINE = (
+    "An earlier user-ruling already decided {decided} of {item}, as the walk-minutes {minutes} record, so this hook "
+    "reads the user's answer as answering only {rest}, and the lines below act on those parts alone.")
 PARTS_SAME_LETTER_LINE = (
     "Every part has the answer {letter}, so the answer is {letter} to the whole of {item}, and means what the "
     "lines below say.")
@@ -683,7 +687,7 @@ class WalkState:
 
     def __init__(self, name, item, numbers, total, recommendations, problem, recommendation_problems=None,
                  parts=None, pages=None, points=None, minutes=None, shown_texts=None, shown_text_problem=None,
-                 document=None, references=None, no_decision_numbers=None):
+                 document=None, references=None, no_decision_numbers=None, parts_decided=None):
         self.name, self.item, self.numbers, self.total = name, item, numbers, total
         # the waiting sub-steps that ask for no decision, whose closing line offers only N or next
         self.no_decision_numbers = no_decision_numbers or set()
@@ -701,7 +705,9 @@ class WalkState:
         self.problem = problem  # why recommendations could not be read, or None
         # item number -> why its recommendation is None, when the reason is not NO_RECOMMENDATION_PROBLEM
         self.recommendation_problems = recommendation_problems or {}
-        self.parts = parts or {}  # item number -> its part numbers, for the items that hold parts
+        self.parts = parts or {}  # item number -> its part numbers no ruling decided, for the items that hold parts
+        # item number -> the part numbers an earlier --already-decided ruling decided, for the waiting item
+        self.parts_decided = parts_decided or {}
 
 
 def read_walk(cwd):
@@ -750,12 +756,22 @@ def read_walk(cwd):
     recommendations, problems, parts = recommendations_in(
         walk_finder.prose_lines(text, parser, tokens), walk_finder.item_opening_lines(text, parser, tokens),
         spans, walk_finder, part_starts(tokens), stated)
+    parts_decided = {}
+    if len(numbers) == 1 and numbers[0] in parts:
+        # The program that records a ruling on some parts reads them with the same function, so the hook and it
+        # agree on which parts are left.
+        with contextlib.suppress(walk_finder.UnusableRange):
+            decided = walk_finder.approval_walk_waiting_item_part_numbers_decided_by_earlier_ruling(
+                minutes.read_text(encoding="utf-8"), parser, document, numbers, total, spans) & set(parts[numbers[0]])
+            if decided:
+                parts_decided[numbers[0]] = sorted(decided)
+                parts[numbers[0]] = [number for number in parts[numbers[0]] if number not in decided]
     if total is None:
         total = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(spans)
     return WalkState(name, count[0], numbers, total, recommendations, None, problems, parts, pages,
                      heading_points(text.split("\n"), [(own, *unit[1:]) for own, unit in zip(stated, spans)], parser),
                      minutes, shown_texts, shown_text_problem,
-                     document, references, no_decision_numbers)
+                     document, references, no_decision_numbers, parts_decided)
 
 
 def item_numbers_each_unit_states(spans, waiting_units, waiting_numbers):
@@ -921,8 +937,9 @@ def answered_parts(answer, walk):
     """The waiting item's part numbers when the numbered answer answers its parts, or None."""
     if answer["form"] != "numbered" or walk is None or len(walk.numbers) != 1 or answer["says item"]:
         return None
-    # Many items number their own number among their parts; `2 a` while item 2 waits answers the item.
-    if {number for number, _ in answer["pairs"]} == set(walk.numbers):
+    # Many items number their own number among their parts; `2 a` while item 2 waits answers the item, unless a ruling
+    # has decided some of its parts, when no answer may decide the whole item.
+    if {number for number, _ in answer["pairs"]} == set(walk.numbers) and not walk.parts_decided:
         return None
     parts = walk.parts.get(walk.numbers[0])
     if parts and all(number.isdigit() and int(number) in parts for number, _ in answer["pairs"]):
@@ -941,7 +958,11 @@ def parts_lines(answer, parts, walk):
     if repeated:
         return [line.format(parts=named(repeated), item=item) for line in PARTS_REPEATED_LINES]
     pairs = ", ".join(f"part {int(number)}: {letter}" for number, letter in answer["pairs"])
-    lines = [PARTS_READ_LINE.format(item=item, parts=f"1 to {parts[-1]}", pairs=pairs)]
+    decided = walk.parts_decided.get(walk.numbers[0], [])
+    lines = [PARTS_READ_LINE.format(item=item, parts=f"1 to {max(parts + decided)}", pairs=pairs)]
+    if decided:
+        lines.append(PARTS_DECIDED_BY_RULING_LINE.format(decided=named(decided), item=item, rest=named(parts),
+                                                         minutes=walk.minutes))
     first_repeat = next((number for number, letter in answer["pairs"] if letter == "R"), None)
     if first_repeat is not None:
         lines.append(repeat_line(f"{first_repeat} R", walk.numbers[0], walk))
@@ -951,9 +972,10 @@ def parts_lines(answer, parts, walk):
         return lines
     if unanswered:
         return lines + [line.format(unanswered=named(unanswered), item=item) for line in PARTS_UNANSWERED_LINES]
-    if len(letters) > 1 and "Z" in letters:
+    if (len(letters) > 1 or decided) and "Z" in letters:
         return lines + [line.format(program=CHECK_PROGRAM.name, item=item) for line in PARTS_NOT_RECORDABLE_LINES]
-    if len(letters) > 1:
+    # With some parts decided by a ruling, one letter for the rest still answers only the rest.
+    if len(letters) > 1 or decided:
         flags = " ".join(f"--part-answer {number}={letter}" for number, letter in sorted(deciding))
         return lines + [line.format(checkout=CHECKOUT, program=CHECK_PROGRAM.name, flags=flags)
                         for line in PARTS_DIFFERENT_LETTERS_LINES]

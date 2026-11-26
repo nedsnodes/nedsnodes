@@ -1013,3 +1013,38 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
         raise UnusableRange("its walk-document has " + "; and it has ".join(problems) + ".")
     shown_total = total if total is not None else approval_walk_item_total_shown_and_waiting_counted_from_walk_document(all_units)
     return shown_total, [unit for unit in all_units if unit in chosen]
+
+
+# The close step writes this line for a ruling that decides some of an item's parts. It decides nothing, so the item
+# stays waiting for the parts no ruling decides.
+APPROVAL_WALK_ITEM_SOME_PARTS_ALREADY_DECIDED_MINUTES_LINE_TEMPLATE = (
+    "{item}: {parts} already decided by {ruling}; the walk shows the user only its other parts. <open>")
+APPROVAL_WALK_ITEM_SOME_PARTS_ALREADY_DECIDED_MINUTES_LINE = re.compile(
+    r"^(items?\s[^:]*): (.+?) already decided by .*; the walk shows the user only its other parts\. <open>\s*$", re.I)
+APPROVAL_WALK_ITEM_PART_DECIDED_IN_MINUTES_LINE = re.compile(r"\bpart (\d+) ((?:dis)?approved)\b")
+
+
+def approval_walk_waiting_item_part_numbers_decided_by_earlier_ruling(minutes_text, parser, document, numbers, total,
+                                                                      all_units):
+    """Return the part numbers that the walk-minutes' APPROVAL_WALK_ITEM_SOME_PARTS_ALREADY_DECIDED_MINUTES_LINE lines
+    record as decided for the waiting items numbers, total and all_units as waiting_item_units takes them.
+
+    A line counts only when waiting_item_units finds, for its own running count, the same heading it finds for the
+    waiting items: a re-planned walk's new M for the same item still matches, and `item 2 of 9` does not match
+    `item 2 of 12`. Raise UnusableRange as waiting_item_units does for the waiting items."""
+    _, waiting = waiting_item_units(document, None, numbers, total, parser, all_units)
+    decided = set()
+    for line in prose_lines(minutes_text, parser):
+        match = APPROVAL_WALK_ITEM_SOME_PARTS_ALREADY_DECIDED_MINUTES_LINE.match(line)
+        if not match:
+            continue
+        try:
+            line_numbers, line_total = parse_items(match[1])
+            if set(line_numbers) != set(numbers):
+                continue
+            _, units = waiting_item_units(document, None, line_numbers, line_total, parser, all_units)
+        except UnusableRange:
+            continue
+        if units == waiting:
+            decided |= {int(number) for number, _ in APPROVAL_WALK_ITEM_PART_DECIDED_IN_MINUTES_LINE.findall(match[2])}
+    return decided

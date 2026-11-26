@@ -5307,7 +5307,9 @@ def test_an_item_an_earlier_ruling_decides_against_its_recommendation_is_recorde
 def test_already_decided_refuses_an_answer_no_ruling_gives_writing_nothing():
     for answers, expected in ((("AO",), "was given `AO` after USER_RULING, which is not an answer a ruling gives"),
                               (("Z",), "was given `Z` after USER_RULING"),
-                              (("1=A",), "was given `1=A` after USER_RULING"),
+                              (("1=AO",), "was given `1=AO` after USER_RULING"),
+                              (("D", "1=A"), "was given `D` `1=A` after USER_RULING"),
+                              (("1=A", "1=D"), "was given `1=A` `1=D` after USER_RULING"),
                               (("A", "D"), "was given `A` `D` after USER_RULING"),
                               (("D", "D"), "was given `D` `D` after USER_RULING")):
         case = Case(next_to_present="item 3 of 9")
@@ -5329,6 +5331,194 @@ def test_already_decided_refuses_an_answer_no_ruling_gives_writing_nothing():
     check("check --already-decided with D and a reply is refused, writing nothing",
           result.returncode == 1 and "--user-reply-as-typed was given with --already-decided" in result.stderr
           and case.minutes.read_text() == before, described(result))
+
+
+PARTS_DOCUMENT = WALK_DOCUMENT.replace("#case_against weak: the page grows by one line.\n",
+                                       "Part 1. Change the sentence.\n\nPart 2. Add the row.\n\n"
+                                       "Part 3. Add the note.\n\n#case_against weak: the page grows by one line.\n")
+PARTS_RULING = f"walk x's minutes, item 3 ({RECENT_RULING_DATE})"
+
+
+def some_parts_ruled_line(item, parts):
+    """The line close writes for a ruling that decides some of item's parts, parts as `part 1 approved <accepted>`."""
+    return (f"{item}: {parts} already decided by `{PARTS_RULING}`; the walk shows the user only its other parts. "
+            "<open>\n")
+
+
+def test_a_ruling_that_decides_some_parts_records_them_and_the_item_waits_for_the_rest():
+    case = Case(next_to_present="item 3 of 9", document=PARTS_DOCUMENT)
+    checked = case.run("check", "--already-decided", PARTS_RULING, "1=a")
+    check("check --already-decided with a part fast-reads the texts that part's answer adds and writes the part's "
+          "answer before the citation",
+          checked.returncode == 0 and case.calls.read_text() == NEW_TEXTS
+          and f"\nitem 3 of 9: settled without asking the user, part 1 approved, already decided by `{PARTS_RULING}` "
+              "#case_against_weak (" in case.minutes.read_text(), described(checked))
+    closed = case.run("close")
+    check("close records the part as already decided with its citation, decides nothing, keeps the item waiting and "
+          "says which parts to show",
+          closed.returncode == 0
+          and case.minutes.read_text().endswith(
+              some_parts_ruled_line("item 3 of 9", "part 1 approved <accepted>") + "#next_to_present item 3 of 9\n")
+          and closed.stdout.split("\n")[:3] == [
+              f"The walk-minutes {case.minutes} record item 3 of 9's part 1 as already decided, and item 3 of 9 stays "
+              "waiting for the user's answer to part 2, part 3.",
+              "The change that the user-ruling's answer to part 1 gives may now be made.",
+              "Show the user only part 2, part 3, then run "
+              f"`{check_command_for(case, '--part-answer', '2=<A|AO|D>', '--part-answer', '3=<A|AO|D>', '--user-reply-as-typed', '<his reply as typed>')}` "
+              "with the answer he gives each of those parts, A, AO or D, and his reply as he typed it."]
+          and case.gh_calls.read_text() == "", described(closed) + case.minutes.read_text())
+    case.run("check", "--already-decided", PARTS_RULING, "2=D")
+    closed = case.run("close")
+    check("a second ruling's part counts the part the first ruling decided, so the item waits only for part 3",
+          closed.returncode == 0 and marker(case) == "#next_to_present item 3 of 9"
+          and "stays waiting for the user's answer to part 3." in closed.stdout, described(closed))
+    checked = case.run("check", "--part-answer", "3=A", reply="3 a")
+    closed = case.run("close")
+    check("the user's answer to the last part decides the item and the walk moves on",
+          checked.returncode == 0 and closed.returncode == 0
+          and "\nitem 3 of 9: part 3 approved <accepted>; every text the change adds has had a fast read.\n"
+              in case.minutes.read_text()
+          and marker(case) == f"#next_to_present item 4 of {WALK_DOCUMENT_COUNTED_M}",
+          described(checked) + described(closed) + case.minutes.read_text())
+    case = Case(next_to_present="item 3 of 9", document=PARTS_DOCUMENT)
+    case.run("check", "--already-decided", PARTS_RULING, "1=A", "2=D", "3=A")
+    closed = case.run("close")
+    check("a ruling that decides every part decides the item, which is not shown",
+          closed.returncode == 0
+          and "\nitem 3 of 9: part 1 approved <accepted>, part 2 disapproved <rejected>, part 3 approved <accepted>; "
+              "every text the change adds has had a fast read.\n" in case.minutes.read_text()
+          and closed.stdout.split("\n")[:2] == [
+              "item 3 of 9 is recorded in the minutes as settled without being shown to the user.",
+              "Its change may now be made."]
+          and marker(case) == f"#next_to_present item 4 of {WALK_DOCUMENT_COUNTED_M}",
+          described(closed) + case.minutes.read_text())
+
+
+def test_already_decided_refuses_a_part_the_item_lacks_writing_nothing():
+    for document, answers, expected in (
+            (PARTS_DOCUMENT, ("4=A",), "--already-decided names part 4, but item 3 of 9 in "),
+            (PARTS_DOCUMENT, ("2=A", "5=D", "4=A"), "--already-decided names part 4, part 5, but item 3 of 9 in "),
+            (WALK_DOCUMENT, ("1=A",), "--already-decided names part 1, but item 3 of 9 in ")):
+        case = Case(next_to_present="item 3 of 9", document=document)
+        before = case.minutes.read_text()
+        result = case.run("check", "--already-decided", PARTS_RULING, *answers)
+        check(f"check --already-decided with {' '.join(answers)} is refused, writing nothing and running no fast read",
+              result.returncode == 1 and expected in result.stderr and case.minutes.read_text() == before
+              and case.calls.read_text() == "", described(result))
+    check("a part the item lacks is refused naming the parts it has, or that it has none",
+          "has part 1, part 2, part 3, as the walk-me-through" in Case(
+              next_to_present="item 3 of 9", document=PARTS_DOCUMENT).run(
+              "check", "--already-decided", PARTS_RULING, "4=A").stderr
+          and "has no parts, as the walk-me-through" in Case(next_to_present="item 3 of 9").run(
+              "check", "--already-decided", PARTS_RULING, "1=A").stderr)
+
+
+def parts_ruled_case(document=PARTS_DOCUMENT, next_to_present="item 3 of 9", ruled_item="item 3 of 9",
+                     parts="part 1 disapproved <rejected>"):
+    """A walk whose waiting item has had part 1 decided by a ruling, as check --already-decided and close leave it."""
+    case = Case(next_to_present=next_to_present, document=document)
+    with case.minutes.open("a") as minutes:
+        minutes.write(f"{ruled_item}: settled without asking the user, part 1 disapproved, already decided by "
+                      f"`{PARTS_RULING}` #case_against_weak (2026-11-25 00:00Z), which makes its change. Fast reads:\n"
+                      + some_parts_ruled_line(ruled_item, parts) + f"#next_to_present {next_to_present}\n")
+    return case
+
+
+def test_once_a_ruling_decides_some_parts_check_takes_only_answers_to_the_parts_left():
+    case = parts_ruled_case()
+    before = case.minutes.read_text()
+    result = case.run("check", "--part-answer", "2=A", reply="2 a")
+    check("--part-answer that leaves part 3 undecided, after a ruling decided part 1, is refused, writing nothing, "
+          "so close cannot decide the item with part 3 undecided",
+          result.returncode == 1
+          and "the answer leaves item 3 of 9's part 3 undecided, which no earlier --already-decided user-ruling "
+              "decides either" in result.stderr
+          and f"{check_command_for(case, '--part-answer', '2=A', '--part-answer', '3=<A|AO|D>', '--user-reply-as-typed', '2 a')}`"
+              in result.stderr
+          and f"{check_command_for(case, '--already-decided', '<citation>', '3=<A|D>')}`" in result.stderr
+          and case.minutes.read_text() == before, described(result))
+    whole = "and this answer would decide the whole item, over that user-ruling"
+    again = "item 3 of 9's part 1 is already decided by an earlier --already-decided user-ruling"
+    for flags, reply, expected, example in (
+            (("--part-answer", "1=A", "--part-answer", "2=A", "--part-answer", "3=D"), "1 a 2 a 3 d", again,
+             ("--part-answer", "2=A", "--part-answer", "3=D", "--user-reply-as-typed", "1 a 2 a 3 d")),
+            ((), "a", whole, ("--part-answer", "2=A", "--part-answer", "3=A", "--user-reply-as-typed", "a")),
+            (("--disapproved",), "d", whole, ("--part-answer", "2=D", "--part-answer", "3=D", "--user-reply-as-typed",
+                                              "d")),
+            (("--obvious",), "ao", whole, ("--part-answer", "2=AO", "--part-answer", "3=AO", "--user-reply-as-typed",
+                                           "ao")),
+            (("--not-asked", "none"), None, whole, ("--part-answer", "2=<A|AO|D>", "--part-answer", "3=<A|AO|D>",
+                                                    "--user-reply-as-typed", "<his reply as typed>")),
+            (("--already-decided", PARTS_RULING), None, whole,
+             ("--part-answer", "2=<A|AO|D>", "--part-answer", "3=<A|AO|D>", "--user-reply-as-typed",
+              "<his reply as typed>")),
+            (("--already-decided", PARTS_RULING, "1=A", "2=D"), None, again,
+             ("--already-decided", PARTS_RULING, "2=<A|D>"))):
+        case = parts_ruled_case()
+        before = case.minutes.read_text()
+        result = case.run("check", *flags, reply=reply)
+        check(f"after a ruling decided part 1, check {' '.join(flags) or 'with no flag'} is refused, writing nothing "
+              "and giving a command for the parts left, with the answers and reply it was given",
+              result.returncode == 1 and expected in result.stderr and case.minutes.read_text() == before
+              and f"{check_command_for(case, *example)}`" in result.stderr, described(result))
+    case = parts_ruled_case()
+    checked = case.run("check", "--part-answer", "2=A", "--part-answer", "3=D", reply="2 a 3 d")
+    closed = case.run("close")
+    check("answers to exactly the parts left decide the item, and the walk moves on",
+          checked.returncode == 0 and closed.returncode == 0
+          and "\nitem 3 of 9: part 2 approved <accepted>, part 3 disapproved <rejected>; every text the change adds has "
+              "had a fast read.\n" in case.minutes.read_text()
+          and marker(case) == f"#next_to_present item 4 of {WALK_DOCUMENT_COUNTED_M}",
+          described(checked) + described(closed))
+    case = parts_ruled_case()
+    deferred = case.run("check", "--deferred", reply="z")
+    check("the user may still defer an item a ruling has partly decided", deferred.returncode == 0, described(deferred))
+    case = Case(next_to_present="item 3 of 9", document=PARTS_DOCUMENT)
+    before = case.minutes.read_text()
+    result = case.run("check", "--part-answer", "1=A", "--part-answer", "2=D", reply="1 a 2 d")
+    check("with no ruling, --part-answer that leaves part 3 undecided is refused, writing nothing",
+          result.returncode == 1 and "the answer leaves item 3 of 9's part 3 undecided, and close would" in result.stderr
+          and f"{check_command_for(case, '--part-answer', '1=A', '--part-answer', '2=D', '--part-answer', '3=<A|AO|D>', '--user-reply-as-typed', '1 a 2 d')}`"
+          in result.stderr
+          and case.minutes.read_text() == before, described(result))
+
+
+TWO_ITEM_3_PARTS_DOCUMENT = PARTS_DOCUMENT.replace(
+    "## Item 4 of 9: no proposal here", "## Item 3 of 12: another item numbered 3\n\nPart 1. One.\n\nPart 2. Two.\n\n"
+    "Part 3. Three.\n\n#case_against weak: it is longer.\n\nRecommendation: do it.\n\n## Item 4 of 9: no proposal here")
+
+
+def test_a_ruling_on_part_of_one_heading_does_not_count_for_another_heading_with_the_same_number():
+    case = parts_ruled_case(document=TWO_ITEM_3_PARTS_DOCUMENT, next_to_present="item 3 of 12", ruled_item="item 3 of 9")
+    checked = case.run("check", "--already-decided", PARTS_RULING, "2=A", "3=A")
+    closed = case.run("close")
+    check("part 1 of item 3 of 9 decided by a ruling does not count toward item 3 of 12, so a ruling on its parts 2 "
+          "and 3 leaves it waiting for part 1",
+          checked.returncode == 0 and closed.returncode == 0 and marker(case) == "#next_to_present item 3 of 12"
+          and "stays waiting for the user's answer to part 1." in closed.stdout,
+          described(checked) + described(closed) + case.minutes.read_text())
+    case = parts_ruled_case(next_to_present="item 3 of 10", ruled_item="item 3 of 9")
+    checked = case.run("check", "--already-decided", PARTS_RULING, "2=A", "3=A")
+    closed = case.run("close")
+    check("a re-planned walk's new M for the same heading still counts the part the ruling decided",
+          checked.returncode == 0 and closed.returncode == 0
+          and marker(case) == f"#next_to_present item 4 of {WALK_DOCUMENT_COUNTED_M}",
+          described(checked) + described(closed) + case.minutes.read_text())
+
+
+def test_the_read_step_offers_no_whole_item_settling_once_a_ruling_decides_some_parts():
+    document = marks_document("Part 1. one\n\nPart 2. two\n\n#not_asked_touches\n").replace(
+        "#case_against weak: the page grows.", "#case_against none.")
+    unruled = Case(document=document).run(WAITING_ITEM_READ_STEP_NAME)
+    case = parts_ruled_case(document=document)
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("an item rated none is offered check --not-asked none, until a ruling decides part 1, when the read step "
+          "offers no settling of the whole item",
+          "check --not-asked none" in unruled.stdout
+          and result.returncode == 0 and "check --not-asked none" not in result.stdout
+          and "item 3 of 9 is not to be shown to the user" not in result.stdout
+          and NOW_OVER_LATER not in result.stdout and "Rows of the no-answer table" not in result.stdout,
+          described(unruled) + described(result))
 
 
 def test_check_refuses_a_second_settling_of_an_item_whose_settling_has_no_close_and_takes_his_own_answer():
