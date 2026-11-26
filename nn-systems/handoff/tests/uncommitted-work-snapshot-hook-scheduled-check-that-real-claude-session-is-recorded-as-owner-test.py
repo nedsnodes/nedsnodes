@@ -79,9 +79,6 @@ if mode == "breaks-clone":
     shutil.rmtree(clone / ".git")
     print(json.dumps({"is_error": False, "result": "done", "session_id": session}))
     sys.exit(0)
-if mode == "hook-without-owner-file-module-dependency":
-    (clone / "nn-systems" / "general-tools" / "agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py").unlink()
-    mode = "hook"
 if mode == "hook":
     (clone / "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner-marker-file-created-by-real-claude-session.txt").write_text("live\n")
     hook = subprocess.run(
@@ -164,7 +161,7 @@ def test_a_session_that_finds_itself_passes():
     completed, record = run_check("hook")
     check(completed.returncode == 0 and "VERDICT: PASSED" in record
           and "FAIL" not in record
-          and sum(line.startswith("PASS ") for line in record.splitlines()) == 6,
+          and sum(line.startswith("PASS ") for line in record.splitlines()) == 5,
           "a session that runs the scratch clone's hook, and whose hook wrote its own "
           "work-snapshot, passes, and the record says so",
           completed.stdout + completed.stderr)
@@ -401,9 +398,7 @@ def test_the_scratch_clone_makes_only_the_files_the_hook_loads_inputs_of_this_su
         ["git", "-C", str(clone), "ls-files"], capture_output=True, text=True,
         check=True).stdout.splitlines()) - {".gitignore"}
     needed = {"scripts/uncommitted-work-snapshot-hook.py",
-              "scripts/worktree-owner-file-read-and-write.py",
-              "nn-systems/handoff/uncommitted-work-snapshots.py",
-              "nn-systems/general-tools/agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py"}
+              "nn-systems/handoff/uncommitted-work-snapshots.py"}
     check(needed <= in_clone and in_clone <= reads and "scripts/merge-gate.sh" not in reads
           and not git_calls,
           "the scratch clone holds the hook and the modules it loads, and the suite's recorded "
@@ -414,14 +409,13 @@ def test_the_scratch_clone_makes_only_the_files_the_hook_loads_inputs_of_this_su
 
 
 def repository_whose_modules_load(module_text):
-    """A working tree whose hook modules load scripts/module.py, beside an unrelated file."""
+    """A working tree whose hook and hook module load scripts/module.py, beside an unrelated file."""
     repository = SCRATCH / f"repository-{len(list(SCRATCH.glob('repository-*')))}"
     loader = ("import importlib.util; from pathlib import Path; "
               "spec = importlib.util.spec_from_file_location('m', "
               "Path(__file__).resolve().parents[{depth}] / 'scripts' / 'module.py'); "
               "spec.loader.exec_module(importlib.util.module_from_spec(spec))\n")
-    for relative in (owner_check.MODULE_RELATIVE, owner_check.OWNER_FILE_MODULE_RELATIVE,
-                     owner_check.HOOK_RELATIVE):
+    for relative in (owner_check.MODULE_RELATIVE, owner_check.HOOK_RELATIVE):
         (repository / relative).parent.mkdir(parents=True, exist_ok=True)
         (repository / relative).write_text(loader.format(depth=len(relative.parts) - 1))
     (repository / "scripts" / "module.py").write_text(module_text)
@@ -485,14 +479,6 @@ def test_a_deleted_file_the_hook_loads_fails_the_check_naming_it():
           "the file", lines)
 
 
-def test_an_owner_file_module_that_does_not_load_fails_the_check():
-    completed, record = run_check("hook-without-owner-file-module-dependency")
-    check(completed.returncode == 1 and "VERDICT: FAILED" in record
-          and "FAIL the clone's scripts/worktree-owner-file-read-and-write.py does not load" in record,
-          "a clone whose owner-file module cannot load its own dependency fails the check "
-          "instead of passing over the hook's FileNotFoundError", record or completed.stderr)
-
-
 def test_a_check_that_cannot_run_fails():
     completed, record = run_check("breaks-clone")
     check(completed.returncode == 1 and "FAIL the check could not run: " in record,
@@ -549,7 +535,6 @@ def main():
                      test_the_scratch_clone_holds_uncommitted_edits_of_the_files_the_hook_loads,
                      test_a_deleted_file_the_hook_does_not_load_leaves_the_scratch_clone_whole,
                      test_a_deleted_file_the_hook_loads_fails_the_check_naming_it,
-                     test_an_owner_file_module_that_does_not_load_fails_the_check,
                      test_a_check_that_cannot_run_fails,
                      test_an_error_after_claude_started_is_not_reported_as_a_failed_start,
                      test_a_record_that_cannot_be_written_is_reported):

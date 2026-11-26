@@ -107,6 +107,25 @@ def squashed_branch(repository, changed_days_before_now=1, path="shared file.txt
     return replaced
 
 
+def advice_saves_a_staged_change_the_working_tree_undoes(directory):
+    """A staged change whose working tree is edited back to HEAD shows in no
+    `git diff HEAD`, so advice keyed on it saved nothing before the checkout."""
+    repository = Repository(directory)
+    repository.commit({"a.txt": "committed\n"}, "Base", 1)
+    (directory / "a.txt").write_text("staged\n")
+    repository.git("add", "a.txt")
+    (directory / "a.txt").write_text("committed\n")
+    status = repository.git("status", "--porcelain", "--", "a.txt")
+    staged = repository.git("diff", "--cached", "HEAD", "--", "a.txt")
+    unstaged = repository.git("diff", "--", "a.txt")
+    check("for a staged change the working tree undoes, the advice's test fires "
+          "though `git diff HEAD` prints nothing",
+          status.strip() != "" and repository.git("diff", "HEAD", "--", "a.txt") == "",
+          status)
+    check("and its two saved diffs together hold the staged change",
+          "+staged" in staged and "-staged" in unstaged, staged + unstaged)
+
+
 def main():
     scratch = Path(tempfile.mkdtemp(prefix="revert-check-test-")).resolve()
     try:
@@ -137,11 +156,15 @@ def run_cases(scratch):
           "`git checkout main -- <path>`" in done.stdout
           and "name the commit, by at least its first 12 characters" in done.stdout,
           done.stdout)
-    save_at = done.stdout.find(
-        "save it with `git diff HEAD -- <path> > <a file outside this checkout>`")
-    check("it says to save the file's uncommitted changes before the git checkout that "
-          "overwrites them",
-          0 <= save_at < done.stdout.find("`git checkout main -- <path>`"), done.stdout)
+    checkout_at = done.stdout.find("`git checkout main -- <path>`")
+    save_points = [done.stdout.find(text) for text in (
+        "if `git status --porcelain -- <path>` prints anything",
+        "`git diff --cached HEAD -- <path> > <a file outside this checkout>`",
+        "`git diff -- <path> > <another file outside this checkout>`")]
+    check("it says to save the file's staged and unstaged changes before the git "
+          "checkout that overwrites them",
+          all(0 <= at < checkout_at for at in save_points), done.stdout)
+    advice_saves_a_staged_change_the_working_tree_undoes(scratch / "staged")
 
     repository.git("commit", "--quiet", "--allow-empty", "-m",
                    "Undo %s on purpose" % replaced[:12])

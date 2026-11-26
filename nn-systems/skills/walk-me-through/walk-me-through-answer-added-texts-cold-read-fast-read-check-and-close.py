@@ -139,6 +139,20 @@ Given `none` for an item rated weak, or a `weak-` value for one rated none, it
 writes nothing and names the values that fit the rating. The minutes write the
 answer as `not asked, ` and the row's label.
 
+--already-decided refuses, writing nothing, a USER_RULING found only in
+walk-minutes or a handoff dialog and dated more than RULING_DAYS_APPLIED, 90,
+days before today, since the walk-me-through skill applies such a ruling only
+that long. A citation that names a standing document with a line or section
+in it, as STANDING_DOCUMENT_PLACE_CITED finds one, such as `GHI-MD 2118 line 63`,
+is taken at any age; a standing document only mentioned, or named inside a
+quotation, does not count. Any other citation's ruling is dated by the earliest
+YYYY-MM-DD date in it that is not part of a name, since dates after the ruling's,
+such as a merge's, often follow it; the date in `foo-2026-10-14-minutes.md` is
+not read. A citation holding no such date is refused too: its ruling is taken
+as too old, and the user is asked again unless the cited line holds the date.
+Today is the local date. The now-over-later citation the program
+supplies is not checked, since the program itself records that ruling.
+
 `--now-over-later-already-decided` is --already-decided with the citation
 supplied by the program, NOW_OVER_LATER_USER_RULING_CITATION, the user-ruling
 that he is always for building now when the agents recommend now over later;
@@ -695,6 +709,11 @@ def has_new_text_problems(found):
     return [] if proposed_texts(found.marks, {NEW_MARK}) else [MissingEvidenceLine(NOT_ASKED_NO_NEW_TEXT_PROBLEM)]
 
 
+def adds_nothing_problems(found):
+    # A `#new_if_d` text is what the alternative would add, so it stays; a `#new` text is what approving adds.
+    return [NOT_ASKED_ADDS_NOTHING_NEW_TEXT_PROBLEM] if proposed_texts(found.marks, {NEW_MARK}) else []
+
+
 def touched_files_exist_problems(found):
     return [NOT_ASKED_MISSING_PATH_PROBLEM.format(marker=TOUCHES, path=path, top=found.top)
             for path in found.touched if not (found.top / path).exists()]
@@ -793,7 +812,8 @@ EVERY_RATING = ("none", "weak", "medium", "strong", "very strong")
 DROPPED_PROPOSAL_VALUE = "proposed-check-dropped-search-found-no-case"
 DROPPED_PROPOSAL_GROUND = "that the problem the dropped proposal guarded against may still come, at any rating"
 HANDOFF_INTERNALS_VALUE = "handoff-internals"
-HANDOFF_INTERNALS_CITATION = "the user-ruling on the handoff's internals in nn-systems/handoff/handoff.system.design.md"
+HANDOFF_INTERNALS_CITATION = ("the user-ruling on the handoff's internals in nn-systems/handoff/handoff.system.design.md, "
+                              "section User-rulings")
 HANDOFF_INTERNALS_NAMED = re.compile(r"handoff|initial-agent-instructions", re.I)
 # The one list of what needs no answer from the user: a new kind is one new row here.
 NO_ANSWER_CASES = (
@@ -841,7 +861,7 @@ NO_ANSWER_CASES = (
     NoAnswerCase(NOT_ASKED_ADDS_NOTHING, NOT_ASKED_ADDS_NOTHING_LABEL,
                  "an item whose recommendation adds and changes nothing, such as leaving out a definition, a check or "
                  "a step that its alternative would add, whatever its case against is rated",
-                 EVERY_RATING, (), (), "none; any rating", None, NOT_ASKED_FLAG,
+                 EVERY_RATING, (), (adds_nothing_problems,), "no `#new` text; any rating", None, NOT_ASKED_FLAG,
                  "whether the item's recommendation adds and changes nothing"),
     NoAnswerCase(NOT_ASKED_RATED_NONE, "case against none",
                  "an item of none of these kinds whose case against is rated none, unless it adds words the user has "
@@ -1421,6 +1441,8 @@ NOT_ASKED_SEARCH_WINDOW_FUTURE_PROBLEM = ("- its `{marker}` line's search ends o
                                           "the last day actually searched.")
 NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM = ("- its `{marker}` line found {count} cases; a case found is the failure that "
                                         "has happened, so the proposal is shown to the user with those cases cited.")
+NOT_ASKED_ADDS_NOTHING_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add, so its recommendation adds "
+                                          "something and it is shown.")
 NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add; an item that drops a "
                                                "proposal adds no text, so it recommends something else and is shown.")
 # Fixed fields, not prose: a tally phrase such as `0 cases in total; will look in ...` holds an `in` that names no
@@ -1527,6 +1549,34 @@ ITEM_READ_RUN_FACTS = ", because your changes since its last cold-read-fast-read
 ITEM_READ_NOT_RUN = ("{item}: no new cold-read-fast-read: your changes since its last one ({report}) touch no "
                      "number, path, file or program name, link, or line holding \"Recommendation:\", "
                      "\"The alternative:\" or `#case_against`.")
+RULING_DAYS_APPLIED = 90
+STANDING_DOCUMENT_PLACE_CITED = re.compile(
+    r"(?:GHI-MD\s*\d+|[\w./-]*(?:CLAUDE|AGENTS|SKILL)\.md|docs/nedsnodes-wiki/[\w./&-]+|docs/issues/[\w./-]+"
+    r"|[\w./-]*design\.md|[\w./-]+-instructions\.md)`?(?:'s)?,?\s+(?:at\s+)?(?:lines?\s+\d+|section\b)")
+# A standing document named inside the user's quoted words is not what the citation cites.
+QUOTATION = re.compile(r'"[^"]*"|“[^”]*”')
+# A date glued to a hyphen, a letter or a slash is part of a name, such as a walk-minutes file's.
+RULING_DATE = re.compile(r"(?<![\w./-])(\d{4}-\d\d-\d\d)(?=T\d|[^\w-]|$)")
+RULING_TOO_OLD = (
+    "nothing written: --already-decided was refused for {item}, because its citation {citation} names no standing "
+    "document with a line or section in it, such as `GHI-MD 2118 line 63`, and the earliest date in it, {date}, is "
+    "{days} days before today; the walk-me-through skill applies a ruling found only in walk-minutes or a "
+    "handoff dialog for {limit} days.\n"
+    "If the ruling bears on {item}, quote it in the item with its date, show the item to the user, ask whether the "
+    "ruling still holds, and run check with the flag for his answer.\n"
+    "If a standing document records the same ruling, run check again citing that document and the line or section "
+    "that records it.")
+RULING_UNDATED = (
+    "nothing written: --already-decided was refused for {item}, because its citation {citation} names no standing "
+    "document with a line or section in it, such as `GHI-MD 2118 line 63`, and holds no date written "
+    "YYYY-MM-DD outside a name, so it is taken as too old; the walk-me-through skill applies a ruling found only in "
+    "walk-minutes or a handoff dialog for {limit} days.\n"
+    "If the walk-minutes line or session dialog line that records the ruling holds its date, add that date to the "
+    "citation, as in \"(2026-11-20)\", and run check again.\n"
+    "If the ruling has no date and bears on {item}, quote it in the item, show the item to the user, ask whether the "
+    "ruling still holds, and run check with the flag for his answer.\n"
+    "If a standing document records the same ruling, run check again citing that document and the line or section "
+    "that records it.")
 NOW_OVER_LATER_FLAG = "--now-over-later-already-decided"
 NOW_OVER_LATER_USER_RULING_CITATION = (
     "the user-ruling at line 361 of nedlern@ned-box:/home/nedlern/agents/cold-read-improvement/docs/walk/"
@@ -2630,6 +2680,25 @@ def now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
                       for problem, numbers in found.items() if numbers]
 
 
+def refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(citation, item, walk_finder):
+    """Raise Failure for an --already-decided citation that cites no place in a standing document and whose ruling
+    is older than RULING_DAYS_APPLIED days, or has no date this function can read."""
+    if STANDING_DOCUMENT_PLACE_CITED.search(QUOTATION.sub("", citation)):
+        return
+    dates = []
+    for text in RULING_DATE.findall(citation):
+        with contextlib.suppress(ValueError):
+            dates.append(datetime.date.fromisoformat(text))
+    spanned = walk_finder.text_wrapped_as_markdown_code_span(citation)
+    if not dates:
+        raise Failure(RULING_UNDATED.format(item=item, citation=spanned, limit=RULING_DAYS_APPLIED))
+    earliest = min(dates)
+    days = (datetime.date.today() - earliest).days
+    if days > RULING_DAYS_APPLIED:
+        raise Failure(RULING_TOO_OLD.format(item=item, citation=spanned, date=earliest.isoformat(), days=days,
+                                            limit=RULING_DAYS_APPLIED))
+
+
 def check(arguments):
     if arguments.bump is not None:
         return bump(arguments)
@@ -2660,6 +2729,9 @@ def check(arguments):
         raise Failure(NAVIGATION_WORD_REFUSED.format(words=words, item=item,
                                                      answered=answered_word(arguments, walk_finder),
                                                      command=moved_on_no_decision_command))
+    if arguments.already_decided is not None and not arguments.now_over_later_already_decided:
+        refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(arguments.already_decided, item,
+                                                                                    walk_finder)
     if arguments.now_over_later_already_decided:
         document, problems = now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
         if problems:
@@ -4852,7 +4924,9 @@ def main(argv=None):
                         help="check: the answer was O2 or O3, approving the item's \"Option N\" paragraph")
     answer.add_argument("--already-decided", metavar="USER_RULING",
                         help="check: not shown, since an earlier user-ruling decides the item as it recommends; "
-                             "USER_RULING cites it")
+                             "USER_RULING cites it; refused when it cites no line or section of a standing document, such "
+                             "as a GHI-MD, and its earliest YYYY-MM-DD date is missing or more than 90 days before "
+                             "today")
     answer.add_argument(NOW_OVER_LATER_FLAG, action="store_true",
                         help="check: not shown, since its only choice is whether to build something now or later "
                              "and it recommends now; records it as already decided by the user's answer to item 42 "

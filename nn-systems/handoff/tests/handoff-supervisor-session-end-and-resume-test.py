@@ -818,14 +818,10 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
     git_in(["add", "-A"], unlanded)
     git_in(["commit", "--quiet", "-m", "unlanded work"], unlanded)
     git_in(["branch", "orphaned-branch"], home)
-    # An Agent-tool subagent's worktree, clean and landed, made a moment ago: Claude Code
-    # locks it while the subagent runs.
-    live_subagent = home / ".claude" / "worktrees" / "agent-0123456789abcdef0"
-    git_in(["worktree", "add", "--quiet", "-b", "worktree-agent-0123456789abcdef0",
-            str(live_subagent)], home)
-    git_in(["worktree", "lock", "--reason",
-            f"claude agent agent-0123456789abcdef0 (pid {os.getpid()} start 1)",
-            str(live_subagent)], home)
+    # A worktree locked with `git worktree lock`, clean and merged, made a moment ago.
+    hand_locked = home / ".claude" / "worktrees" / "hand-locked-worktree"
+    git_in(["worktree", "add", "--quiet", "-b", "hand-locked-branch", str(hand_locked)], home)
+    git_in(["worktree", "lock", "--reason", "kept by hand", str(hand_locked)], home)
     # Everything the cleaner is to remove is made an hour and a half old.
     long_ago = time.time() - 5400
     os.utime(finished / ".git", (long_ago, long_ago))
@@ -843,8 +839,8 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
           unlanded.exists() and "unlanded-branch" in branches, f"{report} {branches}")
     check("WORKTREE CLEANUP: a branch with no worktree and nothing beyond main is deleted",
           "orphaned-branch" not in branches, f"{report} {branches}")
-    check("WORKTREE CLEANUP: a live Agent-tool subagent's clean, landed worktree is kept",
-          live_subagent.exists() and "worktree-agent-0123456789abcdef0" in branches,
+    check("WORKTREE CLEANUP: a locked worktree, clean and merged, is kept",
+          hand_locked.exists() and "hand-locked-branch" in branches,
           f"{report} {branches}")
     check("WORKTREE CLEANUP: the report counts what was removed and every branch deleted, "
           "and names the files a removal discarded",

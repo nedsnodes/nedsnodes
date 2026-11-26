@@ -63,6 +63,8 @@ _scratch_directory_common_spec.loader.exec_module(_scratch_directory_common)
 SUITE_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removing_killed_runs_leftovers(
     "answer-added-texts-fast-read-check-test-")
 WALK_NAME = "poem-page-2026-10-12"
+# check refuses a ruling from walk-minutes over 90 days old, so a citation that must pass is dated from today.
+RECENT_RULING_DATE = (datetime.date.today() - datetime.timedelta(days=10)).isoformat()
 FAILURE_PREFIX = "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close "
 LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE"
 AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_AGENT_HOMES_DIRECTORY_OVERRIDE"
@@ -697,7 +699,7 @@ def test_a_mark_whose_text_would_not_be_read_whole_is_refused_by_check_writing_n
 
 
 def test_a_mark_whose_text_would_not_be_read_whole_is_refused_for_every_answer_that_adds_texts():
-    for flags in (("--disapproved",), ("--already-decided", "ruling of 2026-10-01"), ("--not-asked", "5")):
+    for flags in (("--disapproved",), ("--already-decided", f"ruling of {RECENT_RULING_DATE}"), ("--not-asked", "5")):
         case = Case(document=marks_document("#new_if_d\n"))
         before = case.minutes.read_text()
         result = case.run("check", *flags)
@@ -4443,6 +4445,23 @@ def test_an_item_whose_recommendation_adds_nothing_settles_whatever_its_case_aga
           described(closed))
 
 
+def test_an_item_whose_recommendation_holds_a_new_text_is_refused_as_adding_nothing():
+    case = Case(next_to_present="item 1 of 3", document=RATED_NONE_DOCUMENT.replace(
+        "#case_against none.\n\nRecommendation: print it.",
+        "#new Print the total.\n\n#case_against strong: the total may mislead.\n\nRecommendation: print it.", 1))
+    before = case.minutes.read_text()
+    result = case.run("check", "--not-asked", "adds-nothing")
+    check("an item whose recommendation adds a `#new` text is refused as adding nothing, writing nothing",
+          result.returncode == 1 and "it has a `#new` line, which A would add" in result.stderr
+          and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
+    kept = Case(next_to_present="item 1 of 3", document=RATED_NONE_DOCUMENT.replace(
+        "#case_against none.\n\nRecommendation: print it.",
+        "#new_if_d Check the total.\n\n#case_against weak: a bad total gets through.\n\nThe alternative: check the "
+        "total.\n\nRecommendation: print it.", 1))
+    check("an item whose only marked text is the alternative's `#new_if_d` still settles as adding nothing",
+          (settled := kept.run("check", "--not-asked", "adds-nothing")).returncode == 0, described(settled))
+
+
 def test_an_item_of_no_kind_rated_none_settles_without_the_user_and_close_records_it_accepted():
     case = rated_none_case()
     result = case.run("check", "--not-asked", "none")
@@ -5191,17 +5210,17 @@ def test_a_not_asked_refusal_prints_a_retry_command_that_checks_the_walks_checko
 
 def test_an_item_an_earlier_ruling_decides_is_fast_read_recorded_and_not_shown():
     case = Case(next_to_present="item 3 of 9")
-    checked = case.run("check", "--already-decided", "walk x's minutes, item 3 (2026-10-20)")
+    checked = case.run("check", "--already-decided", f"walk x's minutes, item 3 ({RECENT_RULING_DATE})")
     check("check --already-decided fast-reads the `#new` texts, as A does, and writes a not-asked answer line",
           checked.returncode == 0 and case.calls.read_text() == NEW_TEXTS
           and re.search(r"\nitem 3 of 9: settled without asking the user, already decided by `walk x's minutes, item 3 "
-                        r"\(2026-10-20\)` #case_against_weak \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), which makes its change\. Fast reads:\n",
+                        rf"\({RECENT_RULING_DATE}\)` #case_against_weak \(\d{{4}}-\d\d-\d\d \d\d:\d\dZ\), which makes its change\. Fast reads:\n",
                         case.minutes.read_text()) is not None, described(checked))
     closed = case.run("close")
     lines = closed.stdout.rstrip("\n").split("\n")
     check("close records the item as already decided and accepted, and moves on",
           closed.returncode == 0
-          and "\nitem 3 of 9: already decided by `walk x's minutes, item 3 (2026-10-20)`; the walk does not come back to "
+          and f"\nitem 3 of 9: already decided by `walk x's minutes, item 3 ({RECENT_RULING_DATE})`; the walk does not come back to "
               "it. <accepted>\n" in case.minutes.read_text()
           and lines[:2] == ["item 3 of 9 is recorded in the minutes as settled without being shown to the user.",
                             "Its change may now be made."]
@@ -5209,6 +5228,80 @@ def test_an_item_an_earlier_ruling_decides_is_fast_read_recorded_and_not_shown()
           and marker(case) == f"#next_to_present item 4 of {WALK_DOCUMENT_COUNTED_M}",
           described(closed) + case.minutes.read_text())
 
+
+def days_ago(days):
+    return (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+
+
+def test_already_decided_refuses_a_ruling_from_walk_minutes_over_90_days_old_writing_nothing():
+    old = days_ago(91)
+    # The recent date is part of the walk-minutes file's name, not the ruling's date.
+    citation = f"walk-{days_ago(5)}-minutes.md line 12, item 3, the user {old}: \"Keep it.\""
+    case = Case(next_to_present="item 3 of 9")
+    before = case.minutes.read_text()
+    result = case.run("check", "--already-decided", citation)
+    lines = result.stderr.rstrip("\n").split("\n")
+    check("check --already-decided refuses a ruling found only in walk-minutes and dated 91 days ago, reading its "
+          "date outside the file name, and says what to do, writing nothing",
+          result.returncode == 1 and case.minutes.read_text() == before and case.calls.read_text() == ""
+          and lines[0].startswith(FAILURE_PREFIX + "check: nothing written: --already-decided was refused for item 3 "
+                                  "of 9, because its citation ")
+          and f"the earliest date in it, {old}, is 91 days before today;" in lines[0]
+          and lines[1].startswith("If the ruling bears on item 3 of 9, quote it in the item with its date")
+          and lines[2].startswith("If a standing document records the same ruling,"), described(result))
+
+
+def test_already_decided_dates_a_ruling_by_its_earliest_date_and_ignores_a_standing_document_only_mentioned():
+    for citation, why in (
+            (f"item 5 of walk y, approved {days_ago(120)}; built by PR 3131, merged {days_ago(3)}",
+             "a ruling 120 days old followed by a recent merge date"),
+            (f"walk y's minutes line 20, the user {days_ago(120)}: \"Revising GHI-MD 1121 line 4\"",
+             "a ruling 120 days old whose quoted words name a GHI-MD line"),
+            (f"walk y's minutes line 20, the user {days_ago(120)}, as code by CLAUDE.md's code-prompt-code rule",
+             "a ruling 120 days old that mentions CLAUDE.md with no line or section")):
+        case = Case(next_to_present="item 3 of 9")
+        before = case.minutes.read_text()
+        result = case.run("check", "--already-decided", citation)
+        check(f"check --already-decided refuses {why}, writing nothing",
+              result.returncode == 1 and case.minutes.read_text() == before
+              and f"the earliest date in it, {days_ago(120)}, is 120 days before today;" in result.stderr,
+              described(result))
+
+
+def test_already_decided_refuses_a_citation_with_no_readable_date_writing_nothing():
+    case = Case(next_to_present="item 3 of 9")
+    before = case.minutes.read_text()
+    result = case.run("check", "--already-decided", "walk-2026-01-02-minutes.md line 12, item 3")
+    check("check --already-decided refuses a walk-minutes citation whose only date is part of a name, writing "
+          "nothing",
+          result.returncode == 1 and case.minutes.read_text() == before
+          and "holds no date written YYYY-MM-DD outside a name, so it is taken as too old" in result.stderr
+          and ("session dialog line that records the ruling holds its date, add that date to the citation"
+               in result.stderr)
+          and ("If the ruling has no date and bears on item 3 of 9, quote it in the item, show the item to the "
+               "user, ask whether the ruling still holds" in result.stderr), described(result))
+
+
+def test_already_decided_takes_a_ruling_90_days_old_and_a_standing_document_at_any_age():
+    for citation, why in ((f"walk x's minutes, item 3, approved {days_ago(90)}T02:33:42Z", "dated 90 days ago"),
+                          (f"GHI-MD 2118 line 63, the user {days_ago(400)}", "in a GHI-MD, dated 400 days ago"),
+                          (f"`docs/nedsnodes-wiki/nedsnodes-glossary.md` line 12, the user {days_ago(400)}",
+                           "at a line of a wiki page, dated 400 days ago")):
+        case = Case(next_to_present="item 3 of 9")
+        checked = case.run("check", "--already-decided", citation)
+        check(f"check --already-decided takes a ruling {why}",
+              checked.returncode == 0 and "settled without asking the user, already decided by " in
+              case.minutes.read_text(), described(checked))
+
+
+
+def test_already_decided_takes_the_citation_the_handoff_row_prints():
+    usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True).stdout
+    found = re.search(r'\n  --already-decided "([^"]+)": ', usage)
+    case = Case(next_to_present="item 3 of 9")
+    checked = case.run("check", "--already-decided", found.group(1)) if found else None
+    check("check --already-decided takes the undated citation the no-answer table's handoff row prints",
+          checked is not None and checked.returncode == 0, described(checked) if checked else usage[-3000:])
 
 NOW_OVER_LATER = "--now-over-later-already-decided"
 NOW_OVER_LATER_DOCUMENT = (WALK_DOCUMENT.replace('If the sentence stays, a note follows it:\n\n#new_if_d "A note says '
@@ -5378,7 +5471,8 @@ def test_an_item_the_walk_moves_on_from_after_it_was_shown_is_recorded_as_shown(
 def test_nothing_the_program_prints_tells_the_agent_to_tell_the_user_of_an_item_settled_without_him():
     usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True)
     closed = {}
-    for flags in (("--moved-on", "the question went to walk y"), ("--already-decided", "walk x, item 1")):
+    for flags in (("--moved-on", "the question went to walk y"),
+                  ("--already-decided", f"walk x, item 1 ({RECENT_RULING_DATE})")):
         case = summary_case(next_to_present="item 1 of 5")
         checked = case.run("check", *flags)
         closed[flags[0]] = (checked, case.run("close"))
@@ -5394,7 +5488,7 @@ def test_nothing_the_program_prints_tells_the_agent_to_tell_the_user_of_an_item_
 
 def test_an_item_not_shown_needs_no_case_against_line():
     document = WALK_DOCUMENT.replace("#case_against weak: the page grows by one line.\n\n", "")
-    for flags in (("--already-decided", "walk x, item 3"), ("--moved-on", "it went to walk y")):
+    for flags in (("--already-decided", f"walk x, item 3 ({RECENT_RULING_DATE})"), ("--moved-on", "it went to walk y")):
         case = Case(document=document)
         checked = case.run("check", *flags)
         check(f"check {flags[0]} on an item with no `#case_against` line records the answer with no rating",
@@ -5458,10 +5552,11 @@ def test_closing_the_new_item_records_its_outcome_for_every_item_in_a_chain_of_h
 
 def test_the_check_rerun_a_failed_fast_read_names_repeats_the_already_decided_citation():
     case = Case()
-    result = case.run("check", "--already-decided", "walk x's minutes, item 3", mode="failed")
+    citation = f"walk x's minutes, item 3 ({RECENT_RULING_DATE})"
+    result = case.run("check", "--already-decided", citation, mode="failed")
     check("a failed fast read under --already-decided tells the agent to rerun check with the citation quoted",
           result.returncode == 1
-          and f"{check_command_for(case, '--already-decided', 'walk x' + chr(39) + 's minutes, item 3')}` again"
+          and f"{check_command_for(case, '--already-decided', citation)}` again"
           in result.stdout,
           described(result))
 
@@ -5677,7 +5772,7 @@ MARKER_TEXTS = ("a, keep #next_to_present exactly as it is", "a, #next_to_presen
 
 def test_a_marker_in_text_check_writes_is_not_read_as_the_walks_marker():
     for text in MARKER_TEXTS:
-        for flags in ((), ("--moved-on", text), ("--already-decided", text)):
+        for flags in ((), ("--moved-on", text), ("--already-decided", f"{text} ({RECENT_RULING_DATE})")):
             case = Case(next_to_present="item 4 of 9")
             checked = case.run("check", *flags, reply=None if flags else text)
             closed = case.run("close")
@@ -5686,7 +5781,8 @@ def test_a_marker_in_text_check_writes_is_not_read_as_the_walks_marker():
                   "marker and moves on to the next item",
                   checked.returncode == 0 and closed.returncode == 0
                   and marker(case) == f"#next_to_present item 6 of {WALK_DOCUMENT_COUNTED_M}"
-                  and load_program().load_walk_finder().text_wrapped_as_markdown_code_span(text) in minutes,
+                  and load_program().load_walk_finder().text_wrapped_as_markdown_code_span(flags[1] if flags else text)
+                  in minutes,
                   described(checked) + described(closed) + minutes)
     for text in ("Close the walk with #next_to_present none.", "Write `#approval_walk_paused` " + "x" * 60):
         case = Case(document=marks_document(f'#new "{text}"\n'))
@@ -5732,7 +5828,7 @@ def test_help_prints_every_row_of_the_no_answer_table():
               f"\n  --not-asked {value}: " in usage, usage[-3000:])
     check("--help lists the handoff row with its citation",
           '\n  --already-decided "the user-ruling on the handoff\'s internals in '
-          'nn-systems/handoff/handoff.system.design.md": ' in usage, usage[-3000:])
+          'nn-systems/handoff/handoff.system.design.md, section User-rulings": ' in usage, usage[-3000:])
     check("--help carries the rule to ask the advisor and to show the item on a refusal",
           "ask the advisor whether a later ruling or another open item overtakes it; if the program refuses, the "
           "advisor objects or the advisor call fails, show the item." in usage, usage[-3000:])
@@ -7111,7 +7207,7 @@ def test_close_posts_the_ruling_on_each_open_pull_request_held_on_the_answered_i
     for flags, word in (((), "approved"), (("--option", "2"), "approved"), (("--disapproved",), "disapproved"),
                         (("--deferred",), "deferred"), (("--moved-on-no-decision",), "moved_on"),
                         (("--part-answer", "1=A", "--part-answer", "2=D"), "part_answers"),
-                        (("--already-decided", "walk x, item 3"), "approved"),
+                        (("--already-decided", f"walk x, item 3 ({RECENT_RULING_DATE})"), "approved"),
                         (("--moved-on", "it went to walk y"), "moved_on")):
         # check refuses --moved-on-no-decision for an item that holds a recommendation.
         document = (WALK_DOCUMENT.replace(" Recommendation: leave it.", "") if "--moved-on-no-decision" in flags
@@ -7873,8 +7969,11 @@ def test_a_forked_run_whose_second_output_file_cannot_be_made_closes_the_first()
     os.open = second_disk_full
     try:
         case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
-    except OSError:
-        pass
+    except OSError as error:
+        check("a forked run whose second output file cannot be made raises the error that stopped it",
+              error.errno == errno.ENOSPC, repr(error))
+    else:
+        check("a forked run whose second output file cannot be made raises", False)
     finally:
         os.open = real_open
     try:
@@ -7893,6 +7992,9 @@ def test_a_forked_run_stopped_while_closing_its_copies_of_the_output_files_kills
     real_fork, real_close = os.fork, os.close
     children = []
 
+    class SimulatedStop(BaseException):
+        """Not SystemExit, so a real stop from the suite's SIGTERM handler is not taken for this one."""
+
     def recorded_fork():
         child = real_fork()
         if child:
@@ -7903,13 +8005,13 @@ def test_a_forked_run_stopped_while_closing_its_copies_of_the_output_files_kills
         if children and not getattr(stopped_on_first_close, "done", False):
             stopped_on_first_close.done = True
             real_close(descriptor)
-            raise SystemExit(1)
+            raise SimulatedStop
         return real_close(descriptor)
 
     os.fork, os.close = recorded_fork, stopped_on_first_close
     try:
         case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
-    except SystemExit:
+    except SimulatedStop:
         try:
             os.kill(children[0], 0)
             gone = False
@@ -7999,10 +8101,12 @@ def test_an_expired_copy_another_run_removed_first_counts_as_pruned():
     for number in range(1, 20):
         (root / WALK_NAME / f"2000-01-02T00-00-{number:02}.000000Z.md").write_bytes(b"old")
     real_unlink = Path.unlink
+    removals_by_another_run = []
 
     def unlink_after_another_run_removed_the_first_expired_copy(self, *args, **kwargs):
         if self == expired[0]:
             os.remove(self)
+            removals_by_another_run.append(self)
         return real_unlink(self, *args, **kwargs)
 
     Path.unlink = unlink_after_another_run_removed_the_first_expired_copy
@@ -8010,6 +8114,8 @@ def test_an_expired_copy_another_run_removed_first_counts_as_pruned():
         problem = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
     finally:
         Path.unlink = real_unlink
+    check("the prune met the copy another run had removed", removals_by_another_run == [expired[0]],
+          str(removals_by_another_run))
     check("the save succeeds although another run removed an expired copy first", problem is None, str(problem))
     check("the other expired copies are pruned", not any(path.exists() for path in expired))
     check("the newest 20 copies are kept", len(walk_copies(root)) == 20, str(len(walk_copies(root))))

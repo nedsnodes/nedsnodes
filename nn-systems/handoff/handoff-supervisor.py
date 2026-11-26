@@ -591,10 +591,11 @@ ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION = (
 
 WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE = (
     "Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
-    "{link}. Before your first message, open that page with the Artifact tool. If it is gone, publish "
-    "the item again from docs/walk/{walk}.md and append the line \"#item_page item {count} <new link>\" "
-    "to docs/walk/{walk}-minutes.md. Show the item in full, and end your first message with its closing "
-    "line, holding the link that opens."
+    "{link}. Before your first message, check, with the Artifact tool's read action, that the link "
+    "still works. If the read fails, publish the item again from docs/walk/{walk}.md and append the line "
+    "\"#item_page item {count} <new link>\" to docs/walk/{walk}-minutes.md. Show the item in full, and "
+    "end your first message with the item's closing line, holding the link that works: this one, or "
+    "the new link when you published again."
 )
 
 WAITING_APPROVAL_WALK_ITEM_WITHOUT_PAGE_LINK_INSTRUCTION_TEMPLATE = (
