@@ -943,6 +943,13 @@ def open_pull_request_events_task(seat, tasks_root):
     return None
 
 
+def task_is_open(seat, tasks_root, task_id):
+    """Whether the task is open on the agent-seat's task list, whatever holds it. Raises OSError."""
+    due_task_hook = verdicts_print.due_task_hook
+    task = due_task_hook.read_tasks(tasks_root / f"nedsnodes-{seat}-tasks").get(task_id)
+    return bool(task) and task.get("status") in due_task_hook.OPEN_TASK_STATUSES
+
+
 def owning_agent_seat_task_opened_unless_open(tasks_root, subject, description):
     """Open a task on OWNING_AGENT_SEAT's task list unless one with the subject that is not marked
     completed is there; return the new task's id, or None. Raises OSError."""
@@ -1311,7 +1318,10 @@ class Sweep:
             wait = None
         events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
         due_wake = self.pull_request_events_task_due_a_wake(seat, verdict) if wait and TELL_USER in wait else None
-        if due_wake and not self.headless_usage_limit_pause_holds():
+        # The user was told of this wait's own wake, so a wake whose send or delivery failed is
+        # not sent again every time a wait reaches its user-alert.
+        if due_wake and due_wake["id"] != wait[PULL_REQUEST_EVENTS_TASK_ID] and (
+                not self.headless_usage_limit_pause_holds()):
             # The user already has that wait's alert, so it has no step left to hold the wake back.
             # With no wait open, nudge sends the wake.
             self.end_wait(seat, "a new pull-request events task opened after the user was told")
@@ -1539,10 +1549,8 @@ class Sweep:
                     for sentence in message["sentences"] if (message["at"], sentence) in unbacked]
             if self.headless_usage_limit_pause_holds():
                 return None
-            open_events_task = (open_pull_request_events_task(seat, self.paths.tasks_root)
-                                if wait[PULL_REQUEST_EVENTS_TASK_ID] else None)
-            events_task_closed = bool(wait[PULL_REQUEST_EVENTS_TASK_ID]) and (
-                not open_events_task or open_events_task["id"] != wait[PULL_REQUEST_EVENTS_TASK_ID])
+            events_task_closed = bool(wait[PULL_REQUEST_EVENTS_TASK_ID]) and not task_is_open(
+                seat, self.paths.tasks_root, wait[PULL_REQUEST_EVENTS_TASK_ID])
             text = ESCALATION_TEXT.format(
                 minutes=minutes, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
                 quoted_nudge=quoted(wait["nudge_text"])) + (
@@ -1573,8 +1581,7 @@ class Sweep:
         elif rule == 3:
             subject = f"handoff put off: {text}"
             if subject in self.reminded_subjects(seat, verdict):
-                if (verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS)
-                        or open_pull_request_events_task(seat, self.paths.tasks_root)):
+                if verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS):
                     self.judge_idle_seat(
                         seat, {**verdict, fields.HANDOFF_DEFERRED_MARKER: None}, stretch)
                 return
