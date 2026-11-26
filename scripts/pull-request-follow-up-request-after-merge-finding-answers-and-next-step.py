@@ -552,9 +552,10 @@ def read_title_and_description(path):
 
 def build_pull_request_description_ending_with_follow_up_request_line(description, number):
     """The description, with the line "#follow_up_request pull request <number>" added at its end unless a line of it
-    already is that line."""
+    already is that line, with or without the hashtag's closing `#`."""
     request_line = f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"
-    if any(line.rstrip() == request_line for line in description.splitlines()):
+    if any((request := FOLLOW_UP_REQUEST_LINE_PATTERN.match(line)) and int(request.group(1)) == number
+           for line in description.splitlines()):
         return description
     return description.rstrip("\n") + f"\n\n{request_line}\n"
 
