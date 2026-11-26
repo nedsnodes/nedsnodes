@@ -244,11 +244,12 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
     check("precision with no hit and no FALSE is 0, not a division by zero",
           nothing_judged["precision"] == 0.0, str(nothing_judged))
 
-    # A parsed category is a new string object, so an identity comparison would miss it.
-    parsed_category = "".join(["TRUE_ONLY_OF_READER_", "CHECKOUT_NOT_OF_DRAFT"])
+    # classify_placement() returns this name as a literal, which CPython interns, so its real
+    # output passes even an `is` comparison. Only this decoded, distinct string catches one.
+    distinct_category = b"TRUE_ONLY_OF_READER_CHECKOUT_NOT_OF_DRAFT".decode()
     reader_checkout_only = scorer.summarize(
         [{"reviewer": "x", "id": "1", "quote": "q", "placement": "TRUE-ONLY",
-          "rows": set(), "category": parsed_category, "confidence": "sure", "reason": ""}],
+          "rows": set(), "category": distinct_category, "confidence": "sure", "reason": ""}],
         weights, total, 4)
     check("a category equal to the true-only-of-reader-checkout name, but not the "
           "same string object, counts as true only of the reader checkout",

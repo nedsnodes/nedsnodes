@@ -3,26 +3,32 @@
 
 Usage: python3 scripts/pull-request-ready-for-review-mark-after-description-defect-line-and-test-suites-check.py <pull request number>
 
-Run it from the pull request's own checkout, with its nn-head-commit checked out. In order, it:
+Run it from the pull request's own checkout, with its nn-head-commit checked out, as a background
+command: step 4 can wait up to an hour for the machine's test lock, and an agent's tool stops a
+foreground command at its time limit. In order, it:
 1. reads the pull request with gh, and stops when it is not open, or is already ready for review;
 2. refuses when the checkout's HEAD is not the pull request's pushed nn-head-commit, naming the
    one case that applies (another branch is checked out, the pushed commit has not been fetched,
    or the checkout is ahead, behind, or both), or when git status shows an uncommitted change or
-   an untracked file that is not ignored, whatever status.showUntrackedFiles says, because the
-   test suites would then test files other than the ones under review;
+   an untracked file that is not ignored, whatever status.showUntrackedFiles says, because such
+   a change may belong in the pull request, whose nn-head-commit becomes a frozen-head when it is
+   marked ready;
 3. refuses a description with no defect line (#root_cause, #root_cause_not_fixed or
    #no_defect_fixed), read by the same reader scripts/merge-gate.sh uses; a placeholder
    description has none;
-4. runs this checkout's test suites whose recorded inputs changed since the checkout's merge
-   base with origin/main, so a change main made after the branch started selects no suite unless
-   a suite's recording no longer matches the checkout, as when it read main's copy of a file or
-   listed a directory where main has since added a file, with this checkout's own
-   scripts/run-all-test-suites.py, and refuses when any fails;
-5. marks the pull request ready for review with gh pr ready.
+4. runs the test suites whose recorded inputs changed since the checkout's merge base with
+   origin/main, so a change main made after the branch started selects no suite unless a suite's
+   recording no longer matches the checkout, as when a recording made on main read main's copy of
+   a file or listed a new file this checkout lacks, in a scratch worktree of the pushed
+   nn-head-commit, with that worktree's own scripts/run-all-test-suites.py, waiting for the
+   machine's test lock where the runner takes one, and refuses when any fails;
+5. reads the pull request again, and refuses when its nn-head-commit is no longer the commit
+   tested;
+6. marks the pull request ready for review with gh pr ready.
 
 It does not check what scripts/merge-gate.sh checks again before merging, such as a not-fixed
 line's #follow_up link, and it does not stop anyone from marking a pull request ready for
-review on GitHub's page. Every refusal comes before step 5, so a refusal changes nothing on
+review on GitHub's page. Every refusal comes before step 6, so a refusal changes nothing on
 GitHub. A failure of gh, git or python3 is printed with its cause, and exits 1, like a refusal.
 
 Exit codes: 0 marked ready for review, or already was; 1 refused or failed; 2 bad arguments.
@@ -34,6 +40,7 @@ import json
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SCRIPTS_DIRECTORY = Path(__file__).resolve().parent
@@ -42,18 +49,25 @@ _defect_line_reader_spec = importlib.util.spec_from_file_location(
     SCRIPTS_DIRECTORY / "pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py")
 defect_line_reader = importlib.util.module_from_spec(_defect_line_reader_spec)
 _defect_line_reader_spec.loader.exec_module(defect_line_reader)
+_test_suite_runner_spec = importlib.util.spec_from_file_location(
+    "run_all_test_suites", SCRIPTS_DIRECTORY / "run-all-test-suites.py")
+test_suite_runner = importlib.util.module_from_spec(_test_suite_runner_spec)
+_test_suite_runner_spec.loader.exec_module(test_suite_runner)
 
 EXIT_MARKED_READY = 0
 EXIT_MARK_READY_REFUSED_OR_FAILED = 1
 GH_TIMEOUT_SECONDS = 60.0
 GIT_TIMEOUT_SECONDS = 30.0
+# git worktree add checks out the whole tree.
+SCRATCH_WORKTREE_GIT_TIMEOUT_SECONDS = 300.0
+TEST_RUNNER_MACHINE_LOCK_WAIT_ARGUMENTS = ["--wait-for-lock-seconds",
+                                           f"{test_suite_runner.MACHINE_LOCK_WAIT_SECONDS_SUGGESTED:g}"]
 GH_PR_VIEW_NOT_JSON_OUTPUT_ERROR_EXCERPT_CHARACTERS = 300
 TEST_RUNNER_EXIT_SOME_SUITE_FAILED = 1
 GIT_MERGE_BASE_IS_ANCESTOR_NO = 1
 # --untracked-files=normal overrides a status.showUntrackedFiles=no setting, which would hide
 # untracked files from the check.
 UNCOMMITTED_CHANGES_COMMAND = ["git", "status", "--porcelain", "--untracked-files=normal"]
-MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND = ["git", "merge-base", "origin/main", "HEAD"]
 MESSAGE_PREFIX = "pull request ready for review: "
 # Messages follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 NOTHING_CHANGED_LINE = "Nothing was changed on GitHub."
@@ -103,6 +117,37 @@ def run_command(argv, runner, timeout, what, instructions):
     if cause:
         raise StepFailed(f"{what} failed: {cause}.\n{instructions}")
     return completed.stdout or ""
+
+
+def test_run_status_in_scratch_worktree(commit, merge_base, runner, output, retry):
+    """The test runner's exit status on a detached scratch worktree of commit, so a change to this
+    checkout while the runner waits for the machine's test lock does not reach the run. A failure
+    to remove the worktree is printed and does not change the status."""
+    with tempfile.TemporaryDirectory(prefix="ready-command-test-suites-") as scratch:
+        checkout = str(Path(scratch) / "checkout")
+        run_command(["git", "worktree", "add", "--quiet", "--detach", checkout, commit], runner,
+                    SCRATCH_WORKTREE_GIT_TIMEOUT_SECONDS,
+                    "making the scratch worktree the test suites run in", retry)
+        try:
+            command = [*selective_test_run_command(checkout, merge_base),
+                       *TEST_RUNNER_MACHINE_LOCK_WAIT_ARGUMENTS]
+            output.write(MESSAGE_PREFIX + f"running, in a scratch worktree of {commit[:12]}, "
+                         + " ".join(command[1:]) + "\n")
+            output.flush()
+            try:
+                return runner(command, cwd=checkout, stdin=subprocess.DEVNULL,
+                              check=False).returncode
+            except OSError as error:
+                raise StepFailed("running the test suites failed: python3 could not be run "
+                                 f"({error}). {retry}") from None
+        finally:
+            _, cause = run_or_failure_cause(
+                ["git", "worktree", "remove", "--force", checkout], runner,
+                SCRATCH_WORKTREE_GIT_TIMEOUT_SECONDS, (0,))
+            if cause:
+                output.write(MESSAGE_PREFIX + f"the scratch worktree {checkout} was not removed: "
+                             f"{cause}. The test result stands.\n"
+                             "If git worktree list still names it: run git worktree prune.\n")
 
 
 def read_pull_request(number, runner):
@@ -213,7 +258,7 @@ def check_and_mark_ready(number, runner, output):
     if len(printed) != 2:
         raise StepFailed("reading this checkout's HEAD failed: git rev-parse --show-toplevel HEAD "
                          f"printed {len(printed)} lines, not 2.\n{rev_parse_failed}")
-    checkout, head = printed
+    _, head = printed
     if head != pull_request["headRefOid"]:
         raise StepFailed(
             f"this checkout's HEAD, {head[:12]}, is not {name}'s pushed nn-head-commit, "
@@ -225,8 +270,9 @@ def check_and_mark_ready(number, runner, output):
         "reading this checkout's uncommitted changes", rev_parse_failed).splitlines()
     if changed:
         raise StepFailed(
-            f"this checkout has {len(changed)} uncommitted change(s), so the test suites would "
-            f"test files that are not in {name}'s pushed commits. {NOTHING_CHANGED_LINE}\n"
+            f"this checkout has {len(changed)} uncommitted change(s), which {name}'s pushed commits "
+            "do not hold and which may belong in them; marking it ready makes its nn-head-commit "
+            f"a frozen-head. {NOTHING_CHANGED_LINE}\n"
             "The changes, as git status --porcelain lists them:\n"
             + "".join(f"  {line.strip()}\n" for line in changed)
             + "If the changes belong in the pull request: commit them, push with git push origin "
@@ -265,22 +311,16 @@ def check_and_mark_ready(number, runner, output):
             f"file with gh pr edit {number} --body-file <file>, which replaces the whole "
             "description, and run this again.")
     merge_base = run_command(
-        MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND, runner, GIT_TIMEOUT_SECONDS,
+        ["git", "merge-base", "origin/main", head], runner, GIT_TIMEOUT_SECONDS,
         "finding this checkout's merge base with origin/main",
         NOTHING_CHANGED_LINE + "\n"
         "If git's error says origin/main is not a valid object name: run git fetch origin main, "
         "then run this again.\n"
         "If git gave any other error, or none: "
         + RETRY_THEN_USER_INSTRUCTION.format(number=number)).strip()
-    command = selective_test_run_command(checkout, merge_base)
-    output.write(MESSAGE_PREFIX + "running " + " ".join(command[1:]) + "\n")
-    output.flush()
-    try:
-        status = runner(command, check=False).returncode
-    except OSError as error:
-        raise StepFailed(f"running the test suites failed: python3 could not be run ({error}). "
-                         f"{NOTHING_CHANGED_LINE}\n"
-                         + RETRY_THEN_USER_INSTRUCTION.format(number=number)) from None
+    status = test_run_status_in_scratch_worktree(
+        head, merge_base, runner, output,
+        NOTHING_CHANGED_LINE + "\n" + RETRY_THEN_USER_INSTRUCTION.format(number=number))
     stays_a_draft = (f"so {name} stays a draft pull request: its pushed commits must pass the "
                      "test suites before it is marked ready for review, which starts their review.")
     if status == TEST_RUNNER_EXIT_SOME_SUITE_FAILED:
@@ -299,6 +339,14 @@ def check_and_mark_ready(number, runner, output):
             "suite, "
             f"{stays_a_draft} Its error is above.\n"
             + RETRY_THEN_USER_INSTRUCTION.format(number=number))
+    head_after_tests = read_pull_request(number, runner)["headRefOid"]
+    if head_after_tests != head:
+        raise StepFailed(
+            f"{name}'s pushed nn-head-commit moved from {head[:12]} to "
+            f"{str(head_after_tests)[:12]} while the test suites ran, so they did not test it, "
+            f"{stays_a_draft} {NOTHING_CHANGED_LINE}\n"
+            "Run this command again: it tests the new nn-head-commit, or names what to do first "
+            "when this checkout is not at it.")
     run_command(
         ["gh", "pr", "ready", str(number)], runner, GH_TIMEOUT_SECONDS,
         f"marking {name} ready for review",
