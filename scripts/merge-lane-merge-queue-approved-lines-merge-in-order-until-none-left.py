@@ -642,6 +642,16 @@ class MergeQueuePullRequestMergeBatchRunner:
 
     def resume(self, merge_only):
         self.directory.mkdir(parents=True, exist_ok=True)
+        # Checked before the lock: a merge batch that found the lock held while resume read the
+        # queue file would exit ALREADY RUNNING, and a refused resume would then start nobody.
+        if merge_only is not None:
+            numbers = [int(line["pr"]) for line in self.waiting(self.queue_lines())]
+            if merge_only not in numbers:
+                print(f"REFUSED: pull request {merge_only} is not waiting in the merge queue "
+                      f"file, so it cannot merge first; the stop file is left in place.\n"
+                      f"Name a pull request that this program's merge-batch-list-waiting "
+                      f"subcommand prints.")
+                return 2
         # The files are removed under the lock, so a batch that takes it cannot have its live
         # in-progress file removed.
         with open(self.directory / MERGE_BATCH_LOCK_FILE_NAME, "a") as lock:
@@ -653,14 +663,6 @@ class MergeQueuePullRequestMergeBatchRunner:
                       f"{self.directory / MERGE_BATCH_LOG_FILE_NAME}, and run merge-batch-resume "
                       f"only after a stopped notice appears in {self.notices}.")
                 return 2
-            if merge_only is not None:
-                numbers = [int(line["pr"]) for line in self.waiting(self.queue_lines())]
-                if merge_only not in numbers:
-                    print(f"REFUSED: pull request {merge_only} is not waiting in the merge queue "
-                          f"file, so it cannot merge first; the stop file is left in place.\n"
-                          f"Name a pull request that this program's merge-batch-list-waiting "
-                          f"subcommand prints.")
-                    return 2
             self.stop_file.unlink(missing_ok=True)
             self.in_progress_file.unlink(missing_ok=True)
         return self.start(quiet=False, merge_only=merge_only)

@@ -780,6 +780,33 @@ def starting_cases(scratch):
           exit_code == 2 and output.startswith("REFUSED: pull request 99 is not waiting")
           and case.stop_text() == "stopped\n", output)
 
+    case = Case(scratch, "resume-merge-only-reads-the-queue-before-the-lock", [approved(10, A)],
+                {"10": pr(A)})
+    (case.outputs / STOP_FILE_NAME).write_text("stopped\n")
+    real_queue_lines = program.MergeQueuePullRequestMergeBatchRunner.queue_lines
+    lock_free_during_read = []
+
+    def a_batch_tries_the_lock_while_resume_reads_the_queue(self):
+        case.batches.mkdir(parents=True, exist_ok=True)
+        with open(case.batches / program.MERGE_BATCH_LOCK_FILE_NAME, "a") as other:
+            try:
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(other, fcntl.LOCK_UN)
+                lock_free_during_read.append(True)
+            except BlockingIOError:
+                lock_free_during_read.append(False)
+        return real_queue_lines(self)
+    program.MergeQueuePullRequestMergeBatchRunner.queue_lines = \
+        a_batch_tries_the_lock_while_resume_reads_the_queue
+    try:
+        exit_code, output = case.run("merge-batch-resume", "--merge-only", "99")
+    finally:
+        program.MergeQueuePullRequestMergeBatchRunner.queue_lines = real_queue_lines
+    check("resume --merge-only reads the queue file before it takes merge-batch.lock, so a merge "
+          "batch arriving then is not sent away ALREADY RUNNING by a resume that is refused",
+          exit_code == 2 and lock_free_during_read and all(lock_free_during_read),
+          f"{output}\n{lock_free_during_read}")
+
     case = Case(scratch, "start-cannot-start", [approved(10, A)], {"10": pr(A)})
     real_popen = program.subprocess.Popen
 
