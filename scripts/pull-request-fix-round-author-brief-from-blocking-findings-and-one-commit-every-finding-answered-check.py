@@ -96,7 +96,9 @@ that changes the code it describes names a commit earlier than the overview edit
 one git merge-tree --write-tree makes of its two parents with no conflict, since a conflict resolved by hand,
 or any other change made in the merge, would not show in a review of the fix commit; a conflict sends the
 pull request to the replace route. The answers file holds one entry per blocking finding
-and per nit, each starting "<n>. " on its own line, optionally followed by "(finding <comment ID>) "; an entry that starts with MOVED_TO_PULL_REQUEST_PREFIX_PATTERN,
+and per nit, each starting "<n>. " on its own line, optionally followed by "(finding <comment ID>) ", with its answer
+starting on that line; a tagged entry answers the finding its tag names, whatever its number, and a tag
+naming no finding of the round is refused; an entry that starts with MOVED_TO_PULL_REQUEST_PREFIX_PATTERN,
 in any case, must go on with MOVED_TO_PULL_REQUEST_PATTERN naming a pull request gh pr view finds, or --check refuses it;
 --check also refuses when, for any file of that pull request's gh pr diff, the file's whole patch reversed
 applies cleanly to the checked commit's tree, since the moved change is then still on this branch. A file
@@ -860,20 +862,29 @@ def answers_file_parse(text):
 
 
 def answered(lines):
-    return any(line.strip() for line in lines)
+    # The answer starts on the entry's numbered line, so a note under an entry left empty answers nothing.
+    return bool(lines[0].strip())
 
 
-def answer_entries(text):
-    """({finding number: the answer's non-blank lines, stripped}, numbers with more than one answer) of an answers
-    file's text; an entry with no answer, such as the line the brief writes, is left out."""
-    entries, repeated = {}, []
-    for number, _finding_id, lines in answers_file_parse(text)[0]:
+def answer_entries(text, finding_ids):
+    """({finding number: the answer's non-blank lines, stripped}, numbers with more than one answer, tags naming
+    no finding of finding_ids) of an answers file's text. A tagged entry is the answer to the finding its tag
+    names, numbered as finding_ids orders them; an untagged entry is the answer to the finding of its number. An
+    entry with no answer, such as the line the brief writes, is left out."""
+    numbers = {finding_id: number for number, finding_id in enumerate(finding_ids, 1)}
+    entries, repeated, unknown_tags = {}, [], []
+    for number, finding_id, lines in answers_file_parse(text)[0]:
         if not answered(lines):
             continue
+        if finding_id is not None:
+            if finding_id not in numbers:
+                unknown_tags.append(finding_id)
+                continue
+            number = numbers[finding_id]
         if number in entries:
             repeated.append(number)
         entries[number] = [line.strip() for line in lines if line.strip()]
-    return entries, repeated
+    return entries, repeated, unknown_tags
 
 
 def review_submitted_timestamp(review_submitted_at):
@@ -881,18 +892,22 @@ def review_submitted_timestamp(review_submitted_at):
     return datetime.datetime.fromisoformat(review_submitted_at.replace("Z", "+00:00")).timestamp()
 
 
-def answers_file_answers_every_finding_of_round(path, finding_count, review_submitted_at):
+def answers_file_answers_every_finding_of_round(path, finding_ids, review_submitted_at):
     """Whether the answers file at path was written after the round's review was submitted and has an entry for
-    every finding; a review GitHub gives no submitted_at leaves the file's round unknown, so False."""
+    every finding of finding_ids; a review GitHub gives no submitted_at leaves the file's round unknown, and a
+    file that is not text answers nothing, so both are False."""
     if not review_submitted_at or not path.exists():
         return False
     try:
         if path.stat().st_mtime < review_submitted_timestamp(review_submitted_at):
             return False
-        entries, _repeated = answer_entries(path.read_text())
-    except (OSError, UnicodeDecodeError) as error:
+        entries, _repeated, _unknown_tags = answer_entries(path.read_text(), finding_ids)
+    except UnicodeDecodeError:
+        # The brief then copies the file's bytes unchanged before it writes a new one.
+        return False
+    except OSError as error:
         raise StepFailed(f"could not read the answers file {path}: {error}") from None
-    return set(range(1, finding_count + 1)) <= entries.keys()
+    return set(range(1, len(finding_ids) + 1)) <= entries.keys()
 
 
 def pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(worktree, number, round_review_id, common=None):
@@ -931,6 +946,7 @@ def answers_kept_for_findings(data, finding_ids):
     kept, other = {}, stray
     for _number, finding_id, lines in entries:
         if not answered(lines):
+            other = other or any(line.strip() for line in lines)
             continue
         if finding_id in finding_ids and finding_id not in kept:
             kept[finding_id] = lines
@@ -1004,7 +1020,7 @@ def answers_file_with_one_line_per_finding_write(path, finding_ids, kept_copies_
     return kept
 
 
-def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, finding_count, review_submitted_at,
+def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, finding_ids, review_submitted_at,
                                   merge_lane):
     """The pull request's topic-worktree, made when this clone has none; refuse unless it is clean at frozen_head,
     and say how to finish the round when a stopped fix-round subagent left every answer, with its commit or none."""
@@ -1045,7 +1061,7 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
     head = git([*in_worktree, "rev-parse", "HEAD"]).strip()
     answers = worktree / answers_name
     if head == frozen_head:
-        if answers_file_answers_every_finding_of_round(answers, finding_count, review_submitted_at):
+        if answers_file_answers_every_finding_of_round(answers, finding_ids, review_submitted_at):
             raise Refused(f"Pull request {number}'s topic-worktree {worktree} is at the frozen-head "
                           f"{frozen_head[:12]} with no fix-round commit, and its answers file {answers} answers "
                           "every finding of this round, so a fix-round subagent wrote every answer.\n"
@@ -1055,7 +1071,7 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
                           f"{rerun}\n" + finish)
         return worktree
     if (git([*in_worktree, "rev-list", "--parents", "-n", "1", head]).split()[1:] == [frozen_head]
-            and answers_file_answers_every_finding_of_round(answers, finding_count, review_submitted_at)):
+            and answers_file_answers_every_finding_of_round(answers, finding_ids, review_submitted_at)):
         raise Refused(f"Pull request {number}'s topic-worktree {worktree} holds the unpushed commit {head[:12]} on "
                       f"top of the frozen-head {frozen_head[:12]}, and its answers file {answers} answers every "
                       "finding of this round, so a fix-round subagent wrote every answer and its commit.\n"
@@ -1100,7 +1116,8 @@ def print_brief(number, reviewer_login):
                          f"The round's reviews: {review_link}", "", *conflict_report, "",
                          REPLACE_INSTEAD_OF_ROUND_INSTRUCTION.format(number=number, merge_lane=merge_lane)]))
         return
-    worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, len(findings) + len(nits),
+    finding_ids = [str(finding.get("id")) for finding in findings + nits]
+    worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, finding_ids,
                                              review_submitted_at, merge_lane)
     answers_path = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
     kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
@@ -1117,7 +1134,7 @@ def print_brief(number, reviewer_login):
     for directory in other_reviews_directories:
         answers_kept_copies_oldest_first(directory)
     kept_copies = fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(
-        answers_path, [str(finding.get("id")) for finding in findings + nits], kept_copies_directory)
+        answers_path, finding_ids, kept_copies_directory)
     other_reviews_kept_copies = [kept_answers for directory in other_reviews_directories
                                  for kept_answers in answers_kept_copies_oldest_first(directory)]
     lines = [
@@ -1230,12 +1247,12 @@ def default_answers_path(number):
     return str(Path(top_level) / ANSWERS_FILE_NAME_FORMAT.format(number=number))
 
 
-def read_answers(path, blocking_count, nit_count):
+def read_answers(path, finding_ids, blocking_count, nit_count):
     try:
         text = Path(path).read_text()
-    except OSError as error:
+    except (OSError, UnicodeDecodeError) as error:
         raise StepFailed(f"could not read the answers file {path}: {error}") from None
-    answers, repeated = answer_entries(text)
+    answers, repeated, unknown_tags = answer_entries(text, finding_ids)
     if repeated:
         raise Refused(f"The answers file {path} has two entries for finding {repeated[0]}.\n"
                       "Merge them into one entry.")
@@ -1243,12 +1260,15 @@ def read_answers(path, blocking_count, nit_count):
     expected = set(range(1, finding_count + 1))
     missing = sorted(expected - answers.keys())
     extra = sorted(answers.keys() - expected)
-    if missing or extra:
+    if missing or extra or unknown_tags:
         problems = []
         if missing:
             problems.append(f"no entry for finding {', '.join(map(str, missing))}")
         if extra:
             problems.append(f"an entry for finding {', '.join(map(str, extra))}, which does not exist")
+        if unknown_tags:
+            problems.append(f"an entry tagged (finding {', '.join(unknown_tags)}), which names no finding of this "
+                            "review")
         nits = f" and {nit_count} nit{'' if nit_count == 1 else 's'}" if nit_count else ""  # pragma: no mutate, nit_count is a len() and the f-string runs only when it is nonzero, so `<=` matches only 1 as `==` does
         raise Refused(f"The answers file {path} has {' and '.join(problems)}; the review has "
                       f"{blocking_count} blocking findings{nits}.\n"
@@ -1673,7 +1693,7 @@ def check_round(number, reviewer_login, answers_path, commit_name,
     findings = blocking + nits
     answers_path = answers_path or default_answers_path(number)
     refuse_outside_topic_worktree(number, reviewer_login, branch)
-    answers = read_answers(answers_path, len(blocking), len(nits))
+    answers = read_answers(answers_path, [str(finding.get("id")) for finding in findings], len(blocking), len(nits))
     refuse_answers_written_before_review(answers_path, review_submitted_at, review_link, merge_lane)
     refuse_moved_to_missing_pull_request(answers, answers_path)
     commit = git(["rev-parse", "--verify", f"{commit_name}^{{commit}}"]).strip()

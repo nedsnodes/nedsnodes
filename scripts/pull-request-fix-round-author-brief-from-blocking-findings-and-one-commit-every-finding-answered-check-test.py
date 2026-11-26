@@ -930,8 +930,10 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     answers.write_bytes(b"1. \xff\n")
     os.utime(answers, (submitted_seconds + 60, submitted_seconds + 60))
     code, out, err = run(root, repository, dated_routes)
-    check("stopped round: an answers file that is not text fails the brief with exit 2, naming it",
-          code == 2 and out == "" and f"could not read the answers file {answers}" in err, err + out)
+    check("stopped round: an answers file that is not text answers no finding, so an unpushed commit keeps the "
+          "refusal that names both ways on, and the file is left as it was",
+          code == 1 and "holds commits that the frozen-head" in err and "wrote every answer" not in err
+          and answers.read_bytes() == b"1. \xff\n", err + out)
     answers.unlink()
     answers.mkdir()
     os.utime(answers, (submitted_seconds + 60, submitted_seconds + 60))
@@ -2065,6 +2067,45 @@ def answers_put_back_cases(root, repository, _base, frozen_head):
           code == 1 and "no entry for finding 1;" in check_err and "finding 2" not in check_err,
           check_out + check_err)
 
+    noted = "1. (finding 1) Fixed the lookup.\n2. (finding 3) \n## Notes\n"
+    answers.write_text(noted)
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: --check does not take a note under an entry left empty as that entry's answer",
+          code == 1 and "no entry for finding 2;" in check_err, check_out + check_err)
+    code, out, err = run(root, repository, routes)
+    copies = sorted(kept_directory.iterdir(), key=lambda path: path.stat().st_mtime_ns)
+    check("answers put back: a note under an entry left empty is kept in a copy, and the answer above it is put back",
+          code == 0 and answers.read_text() == "1. (finding 1) Fixed the lookup.\n2. (finding 3) \n"
+          and copies[-1].read_text() == noted, err + out)
+    answers.write_text("1. (finding 3) Added the timeout case.\n2. (finding 1) Fixed the lookup.\n")
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: --check gives each tagged answer to the finding its tag names, whatever its number",
+          code == 0 and "1. hook.py:12: Fixed the lookup." in check_out
+          and "2. test.py: Added the timeout case." in check_out, check_out + check_err)
+    answers.write_text("1. (finding 99) An answer to a finding of another review.\n2. (finding 3) Added the timeout "
+                       "case.\n")
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: --check refuses a tag that names no finding of the review, and the finding left "
+          "without an answer",
+          code == 1 and "no entry for finding 1 and an entry tagged (finding 99), which names no finding of this "
+                        "review;" in check_err, check_out + check_err)
+
+    submitted = "2026-11-11T12:00:00Z"
+    submitted_seconds = datetime.datetime.fromisoformat(submitted.replace("Z", "+00:00")).timestamp()
+    dated_routes = routes_for(frozen_head, [dict(review(commit_id=frozen_head), submitted_at=submitted)])
+    answers.write_bytes(b"1. (finding 1) \xff\n")
+    os.utime(answers, (submitted_seconds + 60, submitted_seconds + 60))
+    code, out, err = run(root, repository, dated_routes)
+    copies = sorted(kept_directory.iterdir(), key=lambda path: path.stat().st_mtime_ns)
+    check("answers put back: at the frozen-head, an answers file that is not text, written after the review, is "
+          "copied unchanged and the brief writes a new one",
+          code == 0 and answers.read_text() == BRIEF_ANSWERS and copies[-1].read_bytes() == b"1. (finding 1) \xff\n"
+          and f"copied it unchanged to {copies[-1]}." in out, err + out)
+    answers.write_bytes(b"1. (finding 1) \xff\n")
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: --check fails on an answers file that is not text with exit 2, naming it",
+          code == 2 and f"could not read the answers file {answers}" in check_err, check_out + check_err)
+
     program = load_program()
     directory = root / "put-back-unit"
     directory.mkdir()
@@ -2084,9 +2125,15 @@ def answers_put_back_cases(root, repository, _base, frozen_head):
     check("answers put back: an answer with no finding tag is kept in a copy, not put back",
           unit_answers.read_text() == "1. (finding 5) \n" and copy.read_text() == "1. Fixed, with no tag.\n",
           str(copy))
-    entries, repeated = program.answer_entries("1. (finding 5) \n1. Fixed below the brief's line.\n2.\n")
+    entries, repeated, unknown_tags = program.answer_entries(
+        "1. (finding 5) \n1. Fixed below the brief's line.\n2.\n", ["5", "6"])
     check("answers put back: the brief's unanswered line beside the agent's answer for the same number is one entry",
-          entries == {1: ["Fixed below the brief's line."]} and repeated == [], repr((entries, repeated)))
+          entries == {1: ["Fixed below the brief's line."]} and repeated == [] and unknown_tags == [],
+          repr((entries, repeated, unknown_tags)))
+    entries, repeated, unknown_tags = program.answer_entries("1. (finding 6) Second.\n2. First.\n", ["5", "6"])
+    check("answers put back: a tagged answer under another finding's number is the answer to the finding its tag "
+          "names, and repeats the untagged answer under that number",
+          entries == {2: ["First."]} and repeated == [2] and unknown_tags == [], repr((entries, repeated, unknown_tags)))
 
 
 def stated_count_position_cases(root, repository, base, frozen_head):
