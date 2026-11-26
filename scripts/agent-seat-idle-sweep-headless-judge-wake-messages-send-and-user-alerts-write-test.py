@@ -233,6 +233,21 @@ KEEP_IT = (f'The text ends with the sentence "{DO_NOT_REPLY}" That sentence is w
            "agent-seat, not to you, and is part of the message: keep it.")
 
 
+def mark_irrelevant(message_id):
+    """The sentence every rule 2 and rule 5 message and every escalation carries, with its id."""
+    return ("If this reminder does not help, for example because the work is done, a task, GHI or "
+            "monitor already tracks it, or you will get a message when it ends, run `python3 "
+            "scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py "
+            f"{message_id}`; the idle sweep then stops this reminder.")
+
+
+def mark_irrelevant_call(message_id, when, tool_id="t-mark"):
+    """The Bash call by which the agent-seat marks a reminder irrelevant."""
+    return assistant(tool=("Bash", {"command": "python3 scripts/agent-seat-idle-sweep-received-"
+                                               f"wake-message-mark-irrelevant-by-message-id.py {message_id}"}),
+                     when=when, tool_id=tool_id)
+
+
 def ends_with_do_not_reply_once(text):
     return text.endswith("\n\n" + DO_NOT_REPLY) and text.count(DO_NOT_REPLY) == 1
 
@@ -402,7 +417,9 @@ calls = machine.claude_calls()
 nudge_text = machine.events("wait_step")[0]["text"]
 expected = ("You've given this 26 minutes, please check; if not sure, hand off. At 2026-11-02 "
             "12:00Z the idle sweep wrote this, which you have not acted on:\n\n"
-            + "\n".join("> " + line for line in nudge_text.split("\n")) + "\n\n" + DO_NOT_REPLY)
+            + "\n".join("> " + line for line in nudge_text.split("\n")) + "\n\n"
+            + mark_irrelevant(machine.events("message_sent")[-1].get("message_id")) + "\n\n"
+            + DO_NOT_REPLY)
 check("idle again 15 minutes after the nudge: the escalation with the minutes since it went idle, "
       "quoting the nudge without its do-not-reply sentence",
       len(calls) == 1 and machine.events("message_sent")[-1]["text"] == expected
@@ -549,7 +566,9 @@ calls = machine.claude_calls()
 check("rule 5: asked again 15 minutes later; the message it wrote starts the wait with its text, "
       "and a sender sends it",
       len(calls) == 2 and "What's going on?" in calls[1]["prompt"]
-      and machine.events("message_sent")[-1]["text"] == "What's going on?\n\n" + DO_NOT_REPLY
+      and machine.events("message_sent")[-1]["text"]
+      == ("What's going on?\n\n" + mark_irrelevant(machine.events("message_sent")[-1]["message_id"])
+          + "\n\n" + DO_NOT_REPLY)
       and machine.events("wait_step")[-1]["step"] == "nudge"
       and machine.events("wait_step")[-1]["text"] == "What's going on?", machine.events())
 machine = Machine()
@@ -3274,7 +3293,7 @@ nudge_text = machine.events("wait_step")[0]["text"]
 machine.script(rechecked(False, False), sent_ok())
 machine.run(16)
 escalation = machine.events("message_sent")[-1]["text"]
-quote = escalation.split("which you have not acted on:\n\n", 1)[-1].rsplit("\n\n", 1)[0]
+quote = escalation.split("which you have not acted on:\n\n", 1)[-1].rsplit("\n\n", 2)[0]
 check("an escalation after a nudge of two lines: each line of the nudge quoted with \"> \", the "
       "do-not-reply sentence once, after the quote and on no quoted line",
       len(nudge_text.split("\n")) == 2 and machine.events("message_sent")[-1]["step"] == "escalate"
@@ -4169,6 +4188,95 @@ machine.script({"sends": [send_to("alpha", is_error=True)], "answer": {"sent": F
 machine.run(0)
 check("rule 3: a message whose send failed logs no reminder", not machine.events("reminder_sent"),
       machine.events())
+
+# --- marking a reminder irrelevant, and the texts naming automatic tracking ----------------------
+RUNNING_WORK_TRACKED_AUTOMATICALLY = (
+    "A background command or subagent you started tells you itself when it ends. If you are "
+    "waiting for a pull request, stop any polling command and record a task with prerequisites "
+    '[{"pr_merged": <number>}], which raises the task when it merges.')
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+promise_sent = machine.events("message_sent")[-1]
+check("rule 2: the message names the pr_merged and issue_closed examples, then the command that "
+      "marks it irrelevant with its own message_id, then the do-not-reply sentence",
+      promise_sent["text"] == (
+          'You promised "I\'ll report when PR 927 merges.". Record it as a task whose prerequisites '
+          'name the event, such as [{"pr_merged": <number>}] or [{"issue_closed": <number>}], which '
+          "raises the task when it happens; or tell the user you take the promise back.\n\n"
+          + mark_irrelevant(promise_sent["message_id"]) + "\n\n" + DO_NOT_REPLY),
+      promise_sent)
+machine.append("alpha", cross_session(promise_sent["text"], at(0.5)),
+               mark_irrelevant_call(promise_sent["message_id"], at(1)),
+               assistant("Marked.", at(1.1)), turn_end(at(1.1)))
+machine.script()
+machine.run(7)
+machine.script(sent_ok())
+machine.run(16)
+check("rule 2: running the command with the message's id ends the wait, which a tool call alone "
+      "does not: no escalation",
+      [(event["why"], event.get("message_ids")) for event in machine.events("wait_ended")]
+      == [("it marked a reminder sent on the wait irrelevant", [promise_sent["message_id"]])]
+      and [event["step"] for event in machine.events("message_sent")] == ["nudge"]
+      and not machine.alerts() and not machine.claude_calls(),
+      (machine.events("wait_ended"), machine.events("message_sent"), machine.alerts()))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", mark_irrelevant_call("0" * 32, at(1)), assistant("Marked.", at(1.1)),
+               turn_end(at(1.1)))
+machine.script()
+machine.run(7)
+machine.script(rechecked(False), sent_ok())
+machine.run(16)
+check("rule 2: marking an id no message on the open wait has ends nothing, and the escalation is sent",
+      waited_on_to_escalation(machine),
+      (machine.events("wait_step"), machine.events("wait_ended")))
+escalation = machine.events("message_sent")[-1]
+check("the escalation names the command with its own message_id, not the nudge's",
+      escalation["step"] == "escalate"
+      and escalation["text"].endswith("\n\n" + mark_irrelevant(escalation["message_id"]) + "\n\n"
+                                       + DO_NOT_REPLY)
+      and escalation["message_id"] != machine.events("message_sent")[0]["message_id"], escalation)
+machine.append("alpha", mark_irrelevant_call(escalation["message_id"], at(17)),
+               assistant("Marked.", at(17.1)), turn_end(at(17.1)))
+machine.script()
+machine.run(32)
+check("marking the escalation's id ends the wait before the step that follows the escalation",
+      [event["why"] for event in machine.events("wait_ended")]
+      == ["it marked a reminder sent on the wait irrelevant"]
+      and "tell_user" not in [event["step"] for event in machine.events("wait_step")],
+      (machine.events("wait_ended"), machine.events("wait_step")))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), *background_bash_launch("b9s9", "python3 scripts/slow.py", at(-30),
+                                                            "tb9", "Run the slow check"),
+                       assistant("Waiting on the check."), turn_end()])
+machine.script(judged(True, 'Your background command "Run the slow check" (b9s9) started 30 '
+                            "minutes ago and has not finished. Is it taking longer than expected?"),
+               sent_ok())
+machine.run(0)
+running_sent = machine.events("message_sent")[-1]
+check("rule 5: a message naming running work gets the automatic-tracking text, then the command "
+      "with its own message_id; the wait opens with the message and the tracking text",
+      running_sent["text"] == (
+          'Your background command "Run the slow check" (b9s9) started 30 minutes ago and has not '
+          "finished. Is it taking longer than expected?\n\n" + RUNNING_WORK_TRACKED_AUTOMATICALLY
+          + "\n\n" + mark_irrelevant(running_sent["message_id"]) + "\n\n" + DO_NOT_REPLY)
+      and machine.events("wait_step")[-1]["text"].endswith(RUNNING_WORK_TRACKED_AUTOMATICALLY),
+      running_sent)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok())
+machine.run(0)
+check("rule 3: the handoff message, which is not a rule 2 or rule 5 message, names no command",
+      "mark-irrelevant" not in machine.events("message_sent")[-1]["text"],
+      machine.events("message_sent"))
 
 import importlib.util
 _spec = importlib.util.spec_from_file_location("idle_sweep_program", PROGRAM)
