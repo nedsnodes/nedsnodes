@@ -71,6 +71,13 @@ agent to set the task in_progress and dispatch a forked subagent for it, in
 place of "Act on task N now", whatever made it ready. A task whose
 prerequisites cannot be used is never ready. An in_progress task with an
 approval is raised as a task without one, since someone is already on it.
+One such raise at most is given per stop, for the ready task most other open
+tasks list in blockedBy, then the lowest task number, and none while the
+payload's background_tasks list shows at least
+SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT subagents and workflows running;
+a payload without the list counts as none running, and its raise then leaves
+out the count. A ready task not raised keeps its record as it was, so a later
+stop raises it.
 
 A PULL REQUEST CLOSED WITHOUT MERGING never meets its `pr_merged`
 condition, so its task would wait in silence. An open task is raised once
@@ -167,7 +174,8 @@ says nothing about it:
 Code gathers what it can for the agent: the open tasks no blockedBy or
 unmet prerequisite holds back (prerequisites are answered by the same gh
 checker, and one gh could not answer holds its task), the count of the
-held ones, and every walk-minutes line marked `<open>`, each list cut at a
+held ones, and every walk-minutes line marked `<open>`, the tasks in the
+order the approval raise names them in, each list cut at a
 limit with a count of the rest. Which listed task is ready, which needs the
 user, and what the walk holds is the agent's judgment. The entry is written
 with the rest of the state, before the prompt is printed. A fault while
@@ -292,12 +300,15 @@ PREREQUISITE_FORMS = (
 
 RAISE_LINE_TEMPLATE = ('[rule due-task-raise-when-prerequisites-met] Act on task {task_id} "{subject}" '
                        "now: {reasons}.")
-# The user set this wording; change it only with his approval. The rule ID is the only addition.
+# The user set this number and the wordings that name it; change them only with his approval.
+SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT = 3
 APPROVAL_RAISE_LINE_TEMPLATE = (
     '[rule due-task-approved-ready-task-forked-subagent-dispatch-reminder] Task {task_id} "{subject}" is ready and '
-    "needs no decision from the user ({approval}). Set it in_progress with TaskUpdate, then dispatch a "
-    'forked subagent for it now, with the Agent tool\'s isolation "worktree", and mark the task '
-    "completed when the subagent reports it done.")
+    "needs no decision from the user ({approval}).{running_sentence} Set it in_progress with TaskUpdate, "
+    'then dispatch a forked subagent for it, with the Agent tool\'s isolation "worktree", and mark the '
+    "task completed when the subagent reports it done.")
+APPROVAL_RAISE_RUNNING_SENTENCE_TEMPLATE = (
+    " {running} of the {limit} subagents and workflows you may run at once are running.")
 DEFER_INSTRUCTION = (
     "If a task above cannot be acted on yet, record what it now waits on with TaskUpdate "
     "instead: a pull request, a GHI or an approval-walk item in a new "
@@ -852,17 +863,54 @@ def raise_line(task: dict, met_citations, done_blockers=None) -> str:
                                       reasons=", and ".join(reasons))
 
 
-def approval_raise_line(task: dict, approval: str) -> str:
+def approval_raise_line(task: dict, approval: str, running: "int | None") -> str:
+    """`running` is None when Claude Code sent no background-work list, and the line then leaves
+    out its count."""
+    running_sentence = ("" if running is None else APPROVAL_RAISE_RUNNING_SENTENCE_TEMPLATE.format(
+        running=running, limit=SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT))
     return APPROVAL_RAISE_LINE_TEMPLATE.format(
         task_id=task["id"], subject=single_line(task.get("subject", "")),
-        approval=single_line(approval))
+        approval=single_line(approval), running_sentence=running_sentence)
+
+
+def running_subagents_and_workflows(payload: dict) -> "int | None":
+    """How many subagents and workflows the Stop payload's background-work list shows running, or
+    None when the payload holds no list."""
+    handoff = _load_module_by_path("handoff_context_threshold_hook", HANDOFF_THRESHOLD_HOOK_FILE)
+    background_tasks = payload.get(handoff.BACKGROUND_TASKS_PAYLOAD_KEY)
+    if not isinstance(background_tasks, list):
+        return None
+    return sum(1 for entry in background_tasks
+               if isinstance(entry, dict)
+               and entry.get("status") == handoff.RUNNING_TASK_STATUS
+               and entry.get("type") in (handoff.SUBAGENT_TASK_TYPE, handoff.WORKFLOW_TASK_TYPE))
+
+
+def tasks_in_start_order(task_ids, tasks: dict) -> list:
+    """The ids, the one most other open tasks list in blockedBy first, then by task number."""
+    blocking_counts = {}
+    for other_id, other in tasks.items():
+        blocked_by = other.get("blockedBy")
+        if other.get("status") not in OPEN_TASK_STATUSES or not isinstance(blocked_by, list):
+            continue
+        for blocker in set(blocked_by):
+            if isinstance(blocker, str) and blocker != other_id:
+                blocking_counts[blocker] = blocking_counts.get(blocker, 0) + 1
+    return sorted(task_ids, key=lambda task_id: (-blocking_counts.get(task_id, 0),
+                                                 len(task_id), task_id))
 
 
 def due_task_lines(tasks: dict, directory: Path, state: dict,
-                   checker: "GitHubConditionChecker") -> "tuple[list, list, list, bool]":
+                   checker: "GitHubConditionChecker",
+                   running: "int | None" = None) -> "tuple[list, list, list, bool]":
     """The raise lines, the lines naming tasks whose pull request closed without merging, the
     lines naming prerequisites the hook cannot use, and whether the state changed apart from
     `checker`'s cache.
+
+    `running` is the count of running subagents and workflows, None when Claude Code sent no
+    list. Of the pending tasks that record an approval and are ready, at most one is raised, in
+    tasks_in_start_order's order, and none while `running` has reached the limit; the others
+    keep their records unchanged, so a later stop raises them.
 
     Mutates `state` to record every raise and every named fault it returns, and to prune entries
     for tasks and conditions that no longer need them.
@@ -872,6 +920,8 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
     closed_lines = []
     problem_lines = []
     state_changed = False
+    # (task id, approval, the record keys its raise would set or remove, None meaning remove)
+    approval_raise_candidates = []
     conditions_still_named = set()
     held_task_ids = {task_id for task_id, task in tasks.items()
                      if task.get("status") in OPEN_TASK_STATUSES
@@ -919,6 +969,8 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
             approval = None
         prerequisite_citations = None
         done_blockers = None
+        record_before_readiness = {key: new_record.get(key)
+                                   for key in (PREREQUISITES_KEY, "blocked_by")}
         if task_id not in held_task_ids:
             blockers = completed_blockers(task, tasks)
             already_raised_for_prerequisites = False
@@ -950,8 +1002,14 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
             if approval_ready and (record.get(APPROVAL_KEY) != approval
                                    or prerequisite_citations is not None
                                    or done_blockers is not None):
-                new_record[APPROVAL_KEY] = approval
-                lines.append(approval_raise_line(task, approval))
+                raise_record = {key: new_record.get(key) for key in record_before_readiness}
+                raise_record[APPROVAL_KEY] = approval
+                approval_raise_candidates.append((task_id, approval, raise_record))
+                for key, value in record_before_readiness.items():
+                    if value is None:
+                        new_record.pop(key, None)
+                    else:
+                        new_record[key] = value
             elif prerequisite_citations is not None or done_blockers is not None:
                 lines.append(raise_line(task, prerequisite_citations, done_blockers))
         # Kept while the list is unchanged, so a stop that does not look at the list, such as one
@@ -973,6 +1031,21 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
             else:
                 del raised[task_id]
             state_changed = True
+
+    if approval_raise_candidates and (running is None
+                                      or running < SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT):
+        candidates_by_id = {candidate[0]: candidate for candidate in approval_raise_candidates}
+        task_id, approval, raise_record = candidates_by_id[
+            tasks_in_start_order(list(candidates_by_id), tasks)[0]]
+        record = dict(raised.get(task_id) or {})
+        for key, value in raise_record.items():
+            if value is None:
+                record.pop(key, None)
+            else:
+                record[key] = value
+        raised[task_id] = record
+        state_changed = True
+        lines.append(approval_raise_line(tasks[task_id], approval, running))
 
     for task_id in list(raised):
         if task_id not in tasks:
@@ -1001,7 +1074,9 @@ NEXT_ACTION_INSTRUCTIONS = (
     "[rule due-task-idle-agent-seat-start-ready-tasks-and-next-approval-walk] No approval-walk is open and none of "
     "your work is running, so do not stop here.",
     "Tell the user in one line that you are building a new approval-walk.",
-    "Start subagents now on every ready task that needs no review or approval from the user.",
+    f"Start subagents on up to {SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT} of the tasks listed "
+    "below that need no review or approval from the user, taking them in the order listed, and "
+    "start the next as one finishes.",
     "Build an approval-walk of 8 to 16 items, more than 16 only for one large thing with many "
     "parts, from your loose-ends, open questions, concerns, suggestions and tasks that need the "
     "user; put first the items that block work, then what makes the user's interaction easier "
@@ -1119,6 +1194,16 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
     return sorted(unheld, key=lambda text: (len(text), text)), held
 
 
+def unheld_tasks_listed_in_start_order(unheld: list, tasks: dict) -> list:
+    """The lines listing the unheld tasks in tasks_in_start_order's order under their header, cut
+    at the listing limit; none when there is none."""
+    return listed_with_limit(
+        NEXT_ACTION_UNHELD_TASKS_HEADER,
+        [f'task {task_id} "{shortened(tasks[task_id].get("subject", ""))}"'
+         for task_id in tasks_in_start_order(unheld, tasks)],
+        NEXT_ACTION_LISTED_TASKS_LIMIT)
+
+
 def listed_with_limit(header: str, entries: list, limit: int) -> list:
     if not entries:
         return []
@@ -1181,10 +1266,8 @@ def next_action_prompt_lines(payload: dict, tasks: dict, directory: Path, state:
     state[NEXT_ACTION_STATE_KEY] = this_prompt
 
     unheld, held = unheld_and_held_tasks(tasks, directory, checker, state["raised"])
-    unheld = [f'task {task_id} "{shortened(tasks[task_id].get("subject", ""))}"' for task_id in unheld]
     lines = list(NEXT_ACTION_INSTRUCTIONS)
-    lines += listed_with_limit(NEXT_ACTION_UNHELD_TASKS_HEADER, unheld,
-                               NEXT_ACTION_LISTED_TASKS_LIMIT)
+    lines += unheld_tasks_listed_in_start_order(unheld, tasks)
     if held:
         lines.append(NEXT_ACTION_HELD_TASKS_LINE.format(count=held))
     lines += listed_with_limit(NEXT_ACTION_OPEN_ITEMS_HEADER, open_outcome_lines(walk_directory),
@@ -1218,7 +1301,7 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
     checker.answer_all_in_one_query(
         github_conditions_the_due_task_pass_asks(tasks, directory, state["raised"]))
     lines, closed_lines, problem_lines, state_changed = due_task_lines(
-        tasks, directory, state, checker)
+        tasks, directory, state, checker, running_subagents_and_workflows(payload))
     next_action_lines = []
     if not lines and not closed_lines:
         try:
