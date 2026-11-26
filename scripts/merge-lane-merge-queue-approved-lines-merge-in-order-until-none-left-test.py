@@ -74,6 +74,13 @@ elif argv[0] == "api" and "/compare/main..." in argv[1]:
         sys.stderr.write("HTTP 404: no common ancestor\n"); sys.exit(1)
     else:
         print(state["merge_bases"][head])
+elif argv[:2] == ["api", "graphql"]:
+    import re
+    numbers = re.findall(r"pullRequest\(number:([0-9]+)\)", argv[-1])
+    print(json.dumps({"data": {"repository": {
+        f"p{n}": {"headRefOid": state["prs"][n]["headRefOid"],
+                  "files": {"nodes": [{"path": path} for path in state["changed_files"][n]]}}
+        for n in numbers if n in state.get("changed_files", {})}}}))
 elif argv[0] == "api":
     number = argv[1].split("/")[-2]
     print(json.dumps([state.get("reviews", {}).get(number, [])]))
@@ -132,7 +139,8 @@ def merge_account_review(head, at):
 class Case:
     def __init__(self, scratch, name, queue_lines, prs, merge_outcomes=None, reviews=None,
                  branches=None, gh_fails=None, gh_garbles=None, gh_queue_appends=None,
-                 high_priority=(), prose_only_heads=None, merge_bases=None):
+                 high_priority=(), prose_only_heads=frozenset(), merge_bases=None,
+                 changed_files=None):
         self.directory = scratch / name
         self.directory.mkdir()
         self.queue = self.directory / "merge-queue.txt"
@@ -145,9 +153,11 @@ class Case:
             "prs": prs, "merge_outcomes": merge_outcomes or {}, "reviews": reviews or {},
             "branches": branches or {}, "gh_fails": gh_fails or [],
             "gh_garbles": gh_garbles or [], "gh_queue_appends": gh_queue_appends or {},
-            "high_priority": list(high_priority),
+            "high_priority": list(high_priority), "changed_files": changed_files or {},
             "merge_bases": {**{head: "0" * 40 for head in prose_only_heads or ()},
                             **(merge_bases or {})}}))
+        # None runs the real prose-only check, which a test points at a repository of its own,
+        # since against this checkout it fetches the stand-in commits from GitHub.
         self.prose_only_heads = prose_only_heads
         bin_directory = self.directory / "bin"
         bin_directory.mkdir()
@@ -192,6 +202,10 @@ class Case:
 
     def queue_text(self):
         return self.queue.read_text()
+
+    def gh_calls(self):
+        calls = Path(f"{self.state}.gh-calls")
+        return [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
 
     def merge_calls(self):
         log = Path(str(self.state) + ".merge-calls")
@@ -497,6 +511,61 @@ def merge_order_cases(scratch):
           and (case.batches / "merge-batch-prose-only-merges-in-a-row.txt").read_text() == "0\n",
           merged_order(case))
 
+    case = Case(scratch, "code-by-changed-files", [approved(10, A), approved(11, B), approved(12, C)],
+                {"10": pr(A), "11": pr(B), "12": pr(C)}, prose_only_heads={C},
+                changed_files={"10": ["scripts/tool.py"], "11": ["docs/page.md", "README.md"],
+                               "12": ["docs/page.md"]})
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    compares = [call for call in case.gh_calls() if "/compare/main..." in " ".join(call)]
+    check("a waiting pull request that GitHub lists as changing a file outside docs/ Markdown is "
+          "code with no compare call, until it is the only one waiting",
+          merged_order(case) == [12, 10, 11]
+          and not any(call[1].endswith(f"...{A}") for call in compares)
+          and [call[1] for call in compares].count(f"repos/nedsnodes/nedsnodes/compare/main...{B}") == 1,
+          f"{merged_order(case)}\n{compares}")
+
+    case = Case(scratch, "changed-files-read-fails", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B)}, prose_only_heads={B},
+                changed_files={"10": ["scripts/tool.py"]}, gh_fails=["api graphql"])
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("when GitHub's list of changed files cannot be read, each waiting pull request is "
+          "classed by its own compare call, and the log says why",
+          merged_order(case) == [11, 10]
+          and "the changed files of the waiting pull requests could not be read, so each is "
+              "classed by its own compare call: gh api graphql -f exited 1: HTTP 502" in output,
+          f"{merged_order(case)}\n{output}")
+
+    case = Case(scratch, "count-written-when-the-merged-notice-fails", [approved(10, A)],
+                {"10": pr(A)}, prose_only_heads={A})
+    case.batches.mkdir()
+    (case.batches / program.MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME).write_text(
+        "a file, not a directory\n")
+    count_file = case.batches / "merge-batch-prose-only-merges-in-a-row.txt"
+    count_file.write_text("2\n")
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("when the MERGED notice cannot be written, the count is still written, and the stop "
+          "names the failed notice", exit_code == 1 and count_file.read_text() == "3\n"
+          and "could not write the notice" in (case.stop_text() or ""),
+          f"{exit_code}\n{count_file.read_text()!r}\n{case.stop_text()}")
+
+    case = Case(scratch, "merged-notice-and-count-both-fail", [approved(10, A)],
+                {"10": pr(A)}, prose_only_heads={A})
+    case.batches.mkdir()
+    (case.batches / program.MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME).write_text(
+        "a file, not a directory\n")
+    count_file = case.batches / "merge-batch-prose-only-merges-in-a-row.txt"
+    count_file.write_text("2\n")
+    count_file.chmod(0o444)
+    try:
+        exit_code, output = case.run("merge-batch-run-in-queue-order")
+    finally:
+        count_file.chmod(0o644)
+    check("when both the MERGED notice and the count cannot be written, the stop names both, "
+          "the stale count included",
+          exit_code == 1 and "could not write the notice" in (case.stop_text() or "")
+          and "Also, the count of prose-only merges in a row, 3, could not be written" in (
+              case.stop_text() or ""), f"{exit_code}\n{case.stop_text()}")
+
     case = Case(scratch, "count-file-unwritable-after-a-merge", [approved(10, A)],
                 {"10": pr(A)}, prose_only_heads={A})
     case.batches.mkdir()
@@ -594,7 +663,7 @@ def merge_order_cases(scratch):
     case = Case(scratch, "prose-only-from-the-queued-commit",
                 [approved(number, commit) for number, commit in lines],
                 {str(number): pr(commit) for number, commit in lines},
-                merge_bases={commit: base for _, commit in lines})
+                merge_bases={commit: base for _, commit in lines}, prose_only_heads=None)
     real_repository = getattr(program, "REPOSITORY_ROOT", None)
     program.REPOSITORY_ROOT = repository
     try:
@@ -626,7 +695,7 @@ def merge_order_cases(scratch):
     case = Case(scratch, "prose-only-fetches-a-missing-commit",
                 [approved(number, commit) for number, commit in lines],
                 {str(number): pr(commit) for number, commit in lines},
-                merge_bases={commit: base for _, commit in lines})
+                merge_bases={commit: base for _, commit in lines}, prose_only_heads=None)
     program.REPOSITORY_ROOT = repository
     try:
         exit_code, output = case.run("merge-batch-run-in-queue-order")
