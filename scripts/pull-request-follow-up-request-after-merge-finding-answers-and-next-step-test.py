@@ -1752,6 +1752,37 @@ def test_print_block():
                "on line 9 of the same file, but worded differently") in err, out + err)
     code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it now (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=25)])
+    check(f"{PRINT_BLOCK} refuses a later review that rewords an earlier finding on its line and posts its old wording "
+          "on another line, rather than print the earlier finding twice and drop the other line",
+          code == 1 and out == "" and "line 3, under Codex finding id aaaaaaaaaaaa of an earlier finding" in err
+          and "but worded differently" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Add a test for the rename (Codex finding "
+                                                            "aaaaaaaaaaaa).", line=9),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(21, 2, "**fix-next** Add a test for the rename (Codex finding "
+                                                            "aaaaaaaaaaaa).", line=9),
+                                  merge_lane_comment(22, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=25)])
+    check(f"{PRINT_BLOCK} refuses a later review's comment worded as an earlier finding on another line when the "
+          "review also restates that finding on its own line, rather than drop the comment",
+          code == 1 and out == "" and "line 25, worded as an earlier finding on line(s) 3 of the same file" in err
+          and "write the block by hand" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=25)])
+    check(f"{PRINT_BLOCK} refuses a later review's second copy of an earlier finding on another line even when no "
+          "other earlier finding shares its Codex finding id",
+          code == 1 and out == "" and "line 25, worded as an earlier finding on line(s) 3 of the same file" in err,
+          out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
                                   merge_lane_comment(11, 1, "**fix-next** Add a test for the rename (Codex finding "
                                                             "aaaaaaaaaaaa).", line=9),
                                   merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
