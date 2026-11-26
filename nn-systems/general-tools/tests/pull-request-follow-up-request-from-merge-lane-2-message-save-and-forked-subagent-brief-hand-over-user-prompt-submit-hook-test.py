@@ -132,6 +132,26 @@ def test_saves_and_hands_over_the_brief():
         shutil.rmtree(root)
 
 
+def test_finding_quoting_a_unicode_line_separator_is_handed_over_whole():
+    root, repository = scratch()
+    try:
+        block = (f"#follow_up_request pull request {NUMBER}\n"
+                 "1. fix-next: a stray path holds U+0085, U+2028 or U+2029; under LC_ALL=C "
+                 "`$'\u2028'` and `$'\u0085'` are not expanded, and bash prints the literal text.\n"
+                 "2. fix-in-maintenance: a second finding.\n"
+                 "3. fix-in-maintenance: a third finding.\n"
+                 "4. fix-in-maintenance: a fourth finding.\n")
+        code, _, context, err = run(message(f"PR {NUMBER} merged.\n" + block + "— merge-lane-2 on ned-box\n"), repository)
+        check("a finding quoting U+2028 and U+0085 is handed over whole, with all 4 findings counted",
+              code == 0 and context is not None and f"sent 4 non-blocking findings to follow up now:\n\n{block}" in context,
+              repr(context) + err)
+        saved = repository / SAVED
+        check("that block is saved word for word",
+              saved.exists() and saved.read_text() == block, repr(saved.read_text()) if saved.exists() else "missing")
+    finally:
+        shutil.rmtree(root)
+
+
 def test_unreadable_block():
     root, repository = scratch()
     try:
@@ -180,7 +200,8 @@ def test_save_failures():
         shutil.rmtree(root)
 
 
-for test in (test_silent_prompts, test_saves_and_hands_over_the_brief, test_unreadable_block, test_save_failures):
+for test in (test_silent_prompts, test_saves_and_hands_over_the_brief,
+             test_finding_quoting_a_unicode_line_separator_is_handed_over_whole, test_unreadable_block, test_save_failures):
     test()
 
 print(f"FAILED: {len(failures)} failed" if failures else "PASSED: 0 failed")

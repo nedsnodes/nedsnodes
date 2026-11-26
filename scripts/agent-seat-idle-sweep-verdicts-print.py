@@ -7,7 +7,10 @@ due-time-passes.md, § The idle sweep). It decides only what code decides, and i
 it sends no message, starts no headless agent-session, writes no alert and keeps no log, so a
 verdict here changes nothing on the machine. The second build-slice,
 scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py, calls
-verdict_for_seat itself, judges the cases marked "judge", sends, and runs on a schedule.
+verdict_for_seat itself, judges the cases marked "judge", sends, and runs on a schedule; before it
+escalates a wait a rule 2 message was sent on, it calls
+transcript_tool_calls_and_assistant_texts_since for what the agent-seat did since the sentences
+that wait's messages named.
 
 What it reads, for each agent-seat that has a handoff-supervisor state file
 (`<handoff directory>/<seat>-supervisor-state.json`):
@@ -22,15 +25,15 @@ What it reads, for each agent-seat that has a handoff-supervisor state file
   has already raised for a pull request closed without merging;
 - GitHub, through `gh`, for the prerequisites of open tasks, only when rule 4 needs the answer.
 
-It prints one JSON object per agent-seat, one per line. Each holds what the later slice needs
-without reading anything again: the session id, the transcript path, the last time a token was
+It prints one JSON object per agent-seat, one per line. Each holds what the later slice needs to
+decide the agent-seat's rule without reading anything again: the session id, the transcript path, the last time a token was
 spent and the file that showed it, what is running and since when, Workflow-tool runs included, each
 background command with the description of the Bash call that started it and, when its command line
 starts with coreutils `timeout <duration>` and runs nothing after the timed command except through a
 pipe, the time that timeout stops it (a subagent that reported and
 stopped while background commands it launched still run gets the time of its report under
 `stopped_at` and a list of those commands under `own_running_background_commands`), the matched sentences with the code's reading of each, the agent-seat's last message, the tool calls a judge of the sentences
-looks through, the rule that applies and its decision.
+looks through, each marked failed when its result carried is_error, and the assistant texts it reads, the rule that applies and its decision.
 
 What it does not handle: it keeps no record of earlier runs, so it cannot tell which turn-ending
 messages it has already checked; by default it checks only the last one, and
@@ -38,12 +41,18 @@ messages it has already checked; by default it checks only the last one, and
 account change, since that needs the account recorded when the limit was first seen; it reports
 the account now logged in; --usage-limit-record-uuid-to-ignore names a limit record rule 1 no
 longer applies to, which the second build-slice decides from its log. It runs on ned-box and reads
-only ned-box's files, so it does not see the Mac's agent-seats.
+only ned-box's files, so it does not see the Mac's agent-seats. It does not tell a sentence that
+assesses an action from one that promises it: a sentence that opens with an announced-action
+phrase and names a time can read as `promise_after_event`, as
+"Going on with item 2 tomorrow sounds risky." does, so rule 2 can send an unbacked-promise nudge
+for it without the judge.
 
 How it fails: when a file it must read cannot be read, or is not UTF-8 or JSON where a whole line
 is expected, or `gh` cannot answer, the agent-seat's line carries the failure under "errors" and
 "rule" is null, every other agent-seat is still reported, and the program exits 1. A task file
 that does not hold a task with an id is such a failure, when rule 4 reads the task list. A
+prerequisite left unasked because the GitHub time budget was spent is not a failure: the line names
+it under "github_conditions_skipped_for_budget", and rule 5 applies instead of rule 4. A
 failure it does not expect, such as a file that changes between two reads of it, stops the program
 with a traceback and exit 1. A transcript's last line that Claude Code is still writing is
 skipped, except when it holds the key of a subagent or background-command launch: that is then a
@@ -89,6 +98,8 @@ interim_recognizer = threshold_hook.interim_recognizer
 TASK_NOTIFICATION_TASK_ID_PATTERN = threshold_hook.TASK_NOTIFICATION_TASK_ID_PATTERN
 transcript_lookup = _load("claude_code_session_transcript_lookup_and_text_search_common",
                           _SCRIPTS / "claude-code-session-transcript-lookup-and-text-search-common.py")
+user_messages = _load("search_user_messages_in_transcripts",
+                      _SCRIPTS / "search-user-messages-in-transcripts.py")
 
 IDLE_AFTER_SECONDS = 5 * 60
 LAUNCHED_SESSION_ID_KEY = "launched_session_id"
@@ -154,7 +165,7 @@ _GERUNDS = (
     "kicking off|firing|queueing|queuing|retrying|amending|squashing|"
     "reopening|resolving|patching|implementing|scanning|comparing|inspecting|"
     "confirming|re-?dispatching|re-?pushing|relaunching|notifying|pinging|"
-    "handing|staging|finishing"
+    "handing|staging|finishing|going on with"
 )
 _FILLER = (r"(?:(?:now|then|first|next|go ahead and|go|quickly|also|immediately|just|"
            r"straight away|right away|actually|instead|again)\s+)*")
@@ -371,11 +382,14 @@ def tool_uses(record):
 class TranscriptFacts:
     def __init__(self):
         self.last_token_spend = None
+        self.last_user_typed = None
         self.last_model_turn_record = None
         self.turn_ended_after_last_model_turn_record = False
         self.turn_ending_messages = []   # (record, time, time of the prompt that began its turn)
         self.task_tool_calls = []        # (time, name, input, task id), only calls whose result succeeded
-        self.tool_calls = []             # (time, name, input), every tool call
+        self.tool_calls = []             # (time, name, input, tool use id), every tool call
+        self.failed_tool_use_ids = set() # each tool use whose result carries is_error, or a task call whose result is not a success text
+        self.assistant_texts = []        # (time, text), every assistant record with text
         self.launch_times = {}           # subagent or background task id -> time
         self.last_task_notification = {} # task id -> (time, whether it is interim)
         self.background_command_calls = BackgroundCommandCalls()
@@ -527,22 +541,29 @@ def read_main_transcript(path):
     awaiting_turn_start = True
     task_tool_calls = []                 # (tool use id, (time, name, input))
     task_id_by_succeeded_tool_use_id = {}
+    # An interrupt notice is a user record the user did not type, and a queued message re-sent
+    # after an interrupt was typed once, when it was queued.
+    turn_reader = user_messages.TurnReader()
     for record in transcript_records(path):
         moment = parse_time(record.get("timestamp"))
         task_id_by_succeeded_tool_use_id.update(succeeded_task_tool_result_task_ids(record))
+        facts.failed_tool_use_ids |= failed_tool_use_ids(record)
         if awaiting_turn_start and record.get("type") == "user":
             turn_started_at = moment
             awaiting_turn_start = False
         if spends_tokens(record) and moment:
             facts.last_token_spend = max(filter(None, (facts.last_token_spend, moment)))
+        turn = turn_reader.turn(record)
+        if moment and turn and turn[0] == "user":
+            facts.last_user_typed = max(filter(None, (facts.last_user_typed, moment)))
         if is_model_turn_record(record):
             facts.last_model_turn_record = record
             facts.turn_ended_after_last_model_turn_record = False
         if record.get("type") == "assistant" and message_text(record).strip():
             newest_text_record = (record, moment, turn_started_at)
+            facts.assistant_texts.append((moment, message_text(record)))
         if ((record.get("type") == "system" and record.get("subtype") == "turn_duration")
-                or (record.get("type") == "user"
-                    and message_text(record).strip().startswith("[Request interrupted by user"))):
+                or user_messages.is_interrupt_notice(record)):
             facts.turn_ended_after_last_model_turn_record = True
             awaiting_turn_start = True
             turn_started_at = None
@@ -550,7 +571,8 @@ def read_main_transcript(path):
                 facts.turn_ending_messages.append(newest_text_record)
                 newest_text_record = None
         for block in tool_uses(record):
-            facts.tool_calls.append((moment, block.get("name"), block.get("input") or {}))
+            facts.tool_calls.append((moment, block.get("name"), block.get("input") or {},
+                                     block.get("id")))
             if block.get("name") in TASK_TOOL_NAMES:
                 task_tool_calls.append(
                     (block.get("id"), (moment, block.get("name"), block.get("input") or {})))
@@ -569,6 +591,8 @@ def read_main_transcript(path):
     facts.task_tool_calls = [(*call, task_id_by_succeeded_tool_use_id[tool_use_id])
                              for tool_use_id, call in task_tool_calls
                              if tool_use_id in task_id_by_succeeded_tool_use_id]
+    facts.failed_tool_use_ids |= {tool_use_id for tool_use_id, _ in task_tool_calls
+                                  if tool_use_id not in task_id_by_succeeded_tool_use_id}
     return facts
 
 
@@ -588,6 +612,26 @@ def succeeded_task_tool_result_task_ids(record):
             if success:
                 task_ids[block.get("tool_use_id")] = success["created"] or success["updated"]
     return task_ids
+
+
+def failed_tool_use_ids(record):
+    content = (record.get("message") or {}).get("content")
+    if record.get("type") != "user" or not isinstance(content, list):
+        return set()
+    return {block.get("tool_use_id") for block in content
+            if isinstance(block, dict) and block.get("type") == "tool_result"
+            and block.get("is_error") is True}
+
+
+def judged_tool_call(moment, name, tool_input, failed):
+    """A tool call as a rule 2 judge is handed it. "failed" is there only when the call's result
+    carried is_error, or the call is a task call whose result is not a success text, since a
+    failed call does not do the action it was for."""
+    call = {"time": iso(moment), "name": name,
+            "input": json.dumps(tool_input, ensure_ascii=False)[:fields.TOOL_CALL_INPUT_CHARACTERS_KEPT]}
+    if failed:
+        call["failed"] = True
+    return call
 
 
 def tool_result_text(block):
@@ -779,33 +823,63 @@ def last_message_of(facts):
     return {"record_uuid": record.get("uuid"), "time": iso(moment), "text": message_text(record)}
 
 
-def tool_calls_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged):
-    """Every tool call from the start of the earliest turn that ended on a judged sentence's
-    message: the judge looks there for the call, the task or the file that backs a sentence."""
+def transcript_tool_calls_and_assistant_texts_since(path, since):
+    """Every tool call, its input cut as the judge's other tool calls are, and every assistant text
+    in the transcript written after since. Raises ReadFailure as transcript_records does."""
+    tool_calls, texts, failed, succeeded_task_calls = [], [], set(), set()
+    for record in transcript_records(path):
+        failed |= failed_tool_use_ids(record)
+        succeeded_task_calls.update(succeeded_task_tool_result_task_ids(record))
+        moment = parse_time(record.get("timestamp"))
+        if moment is None or moment <= since:
+            continue
+        for block in tool_uses(record):
+            tool_calls.append((moment, block.get("name"), block.get("input") or {}, block.get("id")))
+        if record.get("type") == "assistant" and message_text(record).strip():
+            texts.append({"time": iso(moment), "text": message_text(record)})
+    return {"tool_calls": [judged_tool_call(moment, name, tool_input, tool_use_id in failed or (
+                               name in TASK_TOOL_NAMES and tool_use_id not in succeeded_task_calls))
+                           for moment, name, tool_input, tool_use_id in tool_calls],
+            "assistant_texts": texts}
+
+
+def tool_calls_and_assistant_texts_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged):
+    """Every tool call and every assistant text from the start of the earliest turn that ended on
+    a judged sentence's message: the judge looks there for the call, the task, the file or the
+    text that backs a sentence. Returns (tool calls, text messages)."""
     uuids = {item["record_uuid"] for item in judged}
     starts = [turn_started_at or moment for record, moment, turn_started_at
               in facts.turn_ending_messages if record.get("uuid") in uuids and (turn_started_at or moment)]
     if not starts:
-        return []
+        return [], []
     earliest = min(starts)
-    return [{"time": iso(moment), "name": name,
-             "input": json.dumps(tool_input, ensure_ascii=False)[:fields.TOOL_CALL_INPUT_CHARACTERS_KEPT]}
-            for moment, name, tool_input in facts.tool_calls if moment and moment >= earliest]
+    return ([judged_tool_call(moment, name, tool_input, tool_use_id in facts.failed_tool_use_ids)
+             for moment, name, tool_input, tool_use_id in facts.tool_calls
+             if moment and moment >= earliest],
+            [{"time": iso(moment), "text": text}
+             for moment, text in facts.assistant_texts if moment and moment >= earliest])
 
 
 def rules_three_to_five(verdict, put_off_at, checker, task_directory,
                         due_task_raise_state_directory):
     running = any(verdict["running"].values())
-    if verdict["handoff_deferred_marker"] and not running:
-        return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
-                fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
-    if not running and not verdict["handoff_deferred_marker"]:
-        # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
+    if not running:
+        # The checker is shared by every agent-seat, so only the skips appended here are this one's.
         skipped_before = len(checker.conditions_skipped_for_budget)
-        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
-            task_directory, checker, due_task_raise_state_directory)
-        if (not verdict["open_tasks_nothing_holds"]
-                and len(checker.conditions_skipped_for_budget) == skipped_before):
+        try:
+            verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
+                task_directory, checker, due_task_raise_state_directory)
+        finally:
+            # A gh failure raises after the scan, so the skips it made are named even then.
+            skipped = dict.fromkeys(checker.conditions_skipped_for_budget[skipped_before:])
+            if skipped:
+                verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET] = [
+                    {"kind": kind, "number": number} for kind, number in skipped]
+        if verdict["handoff_deferred_marker"]:
+            return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
+                    fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
+        # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
+        if not skipped and not verdict["open_tasks_nothing_holds"]:
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
     return {fields.RULE: 5, fields.DECISION: fields.JUDGE}
 
@@ -852,11 +926,16 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
         verdict["last_activity"] = {"time": iso(last_spend),
                                     "source": str(source) if last_spend else None}
         verdict[fields.LAST_TOOL_CALL_AT] = iso(max(
-            (moment for moment, _, _ in facts.tool_calls if moment), default=None))
+            (moment for moment, _, _, _ in facts.tool_calls if moment), default=None))
+        verdict[fields.LAST_USER_TYPED_AT] = iso(facts.last_user_typed)
         verdict[fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY] = [
             {"time": iso(moment), "name": name, "task": task_id}
             for moment, name, tool_input, task_id in facts.task_tool_calls
             if moment and sets_prerequisites_or_blocked_by(tool_input)]
+        verdict[fields.IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS] = [
+            {"time": iso(moment), "blocked_tasks": [str(task) for task in tool_input["addBlocks"]]}
+            for moment, _, tool_input, _ in facts.task_tool_calls
+            if moment and tool_input.get("addBlocks")]
 
         last = facts.last_model_turn_record or {}
         limit = is_usage_limit(last)
@@ -913,15 +992,17 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
         verdict[fields.LAST_TURN_ENDING_MESSAGE] = last_message_of(facts)
         task_directory = paths.tasks_root / f"nedsnodes-{seat}-tasks"
         open_waiting_tasks = open_tasks_with_prerequisites_or_blocked_by(task_directory)
+        verdict[fields.OPEN_TASKS_WITH_PREREQUISITES_OR_BLOCKED_BY] = open_waiting_tasks
         verdict["sentences"] = matched_sentences(facts, since, open_waiting_tasks)
         sentences_by_code_reading = fields.verdict_sentences_grouped_by_code_reading(
             verdict["sentences"])
         judged = sentences_by_code_reading.get(fields.JUDGE)
         unbacked = sentences_by_code_reading.get(fields.UNBACKED)
         if judged:
-            verdict[fields.TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE] = (
-                tool_calls_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged))
-            verdict[fields.OPEN_TASKS_WITH_PREREQUISITES_OR_BLOCKED_BY] = open_waiting_tasks
+            (verdict[fields.TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE],
+             verdict[fields.ASSISTANT_TEXT_MESSAGES_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE]) = (
+                tool_calls_and_assistant_texts_since_start_of_earliest_turn_with_sentence_to_judge(
+                    facts, judged))
             # Only the judge can find every sentence backed, and then rules 3 to 5 decide; a
             # sentence code already found unbacked means that can never happen. Rule 2 is set
             # after those reads, so one that fails leaves the rule null.

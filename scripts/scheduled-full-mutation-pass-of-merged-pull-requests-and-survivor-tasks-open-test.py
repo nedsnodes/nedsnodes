@@ -153,6 +153,10 @@ class Fixture:
         self.program.write_text(FAKE_MUTATION_TESTING_PROGRAM)
         self.plan_file = self.root / "plan.json"
         self.plan_file.write_text("{}")
+        # The real table no longer schedules this program; a case's own flag overrides this one.
+        self.schedule_file = self.root / "default-scheduled-jobs.json"
+        self.schedule_file.write_text(json.dumps({"jobs": [
+            {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * * *"}}}]}))
 
     def commit(self, path, text, author="tester"):
         (self.work / path).parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +179,8 @@ class Fixture:
                 "--task-lists-directory", str(self.tasks),
                 "--agent-seats-directory", str(self.agents),
                 "--cosmic-ray-venv", str(self.venv),
-                "--mutation-testing-program", str(self.program)]
+                "--mutation-testing-program", str(self.program),
+                "--scheduled-jobs-on-each-machine-json-file", str(self.schedule_file)]
 
     def run(self, plan=None, *flags, timeout_seconds=None, output=None):
         if plan is not None:
@@ -1260,6 +1265,18 @@ def run_first_pass_and_second_pass_cases():
         check("cron's next start of the job reads the hour and the minute from the schedule",
               due == local(11, 11, 13, 5), (due, local(11, 11, 13, 5)))
 
+    try:
+        job.unix_time_cron_next_starts_this_program_on_ned_box(
+            job.SCHEDULED_JOBS_ON_EACH_MACHINE_JSON_FILE, time.time())
+        message = None
+    except job.StepFailed as error:
+        message = str(error)
+    check("the default scheduled-jobs table gives the job no schedule, and the step failure says "
+          "how to run the second pass by hand without adding the job back",
+          message is not None and "do not add it back" in message
+          and "--scheduled-jobs-on-each-machine-json-file <that file>" in message
+          and "Give the job" not in message, message)
+
     line = job.run_record_line_counting_mutants_not_run_and_naming_oldest_merge_with_one({NOT_RUN_KEY: {
         "b" * 40: {"merged_at_unix_seconds": 86400, "mutants_not_run_count": 3},
         "a" * 40: {"merged_at_unix_seconds": 2 * 86400, "mutants_not_run_count": 4}}}, 3.5 * 86400)
@@ -1551,7 +1568,7 @@ def run_cases():
         fixture.set_last(start)
         merge = fixture.commit("scripts/thing.py", "def double(x):\n    return x + x\n",
                                author="alpha")
-        (alpha_list / (job.TASK_HIGH_WATER_MARK_FILE_NAME + ".partial")).mkdir()
+        (alpha_list / job.TASK_HIGH_WATER_MARK_FILE_NAME).mkdir()
         plan = {merge: {"json": verdict(survived=[survivor()])}}
         completed = fixture.run(plan)
         check("a .highwatermark that cannot be written after the task is linked stops the run, "
@@ -1562,7 +1579,7 @@ def run_cases():
               and fixture.state_json()["last_tested_main_commit"] == start,
               (completed.returncode, task_files(alpha_list), fixture.state_json(),
                completed.stderr))
-        (alpha_list / (job.TASK_HIGH_WATER_MARK_FILE_NAME + ".partial")).rmdir()
+        (alpha_list / job.TASK_HIGH_WATER_MARK_FILE_NAME).rmdir()
         completed = fixture.run(plan)
         key = job.mutant_key(survivor())
         check("the next run finds that task by the mutant's diff file, opens no second one, "

@@ -128,8 +128,14 @@ at the checkout's root (seen once, in the scratch repository, not in the
 checkout); git ignores empty directories, and nothing reads them.
 
 CODEX GETS NO GITHUB TOKEN FROM ITS CALLER. This program removes GH_TOKEN
-and GITHUB_TOKEN, which an agent-seat's supervisor sets to the agent-seat's
-own GitHub token, from the environment it starts codex with.
+and GITHUB_TOKEN from the environment it starts codex with; an agent-seat's
+supervisor sets GH_TOKEN to the agent-seat's own GitHub token. On ned-box,
+with both gone and the gh login file denied, the reviewer reaches GitHub as an
+anonymous visitor: it can read public pages, within GitHub's limits on
+unauthenticated requests, and cannot read a private repository. How gh behaves
+inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py. This program has no fallback for
+either machine.
 
 WHY THE CODEX MEMORY STORE IS OFF FOR REVIEW CELLS: written once, in
 scripts/code-review-codex-cell.py's docstring, under that heading.
@@ -212,15 +218,13 @@ def invocation_builder(effort: str, report_staging_directory: pathlib.Path = Non
 
 # The tracing logger may prefix a timestamp; the URL suffix varies.
 # Unrecognized quota failures remain exit-N until a captured CLI message defines a signature.
-def recognised_failure_texts_for_model(model: str) -> list:
-    del model
-    return [
-        common.RecognisedFailureText(
-            "logged-out",
-            "ERROR codex_api::endpoint::responses_websocket: failed to connect to "
-            "websocket: HTTP error: 401 Unauthorized",
-            common.DETAIL_IS_WHOLE_LINE),
-    ]
+RECOGNISED_FAILURE_TEXTS = (
+    common.RecognisedFailureText(
+        "logged-out",
+        "ERROR codex_api::endpoint::responses_websocket: failed to connect to "
+        "websocket: HTTP error: 401 Unauthorized",
+        common.DETAIL_IS_WHOLE_LINE),
+)
 
 
 def main() -> int:
@@ -230,7 +234,7 @@ def main() -> int:
         tier_to_model_chain=TIER_TO_CODEX_MODEL_CHAIN,
         tier_to_effort=TIER_TO_REASONING_EFFORT,
         invocation_builder=invocation_builder,
-        recognised_failure_texts_for_model=recognised_failure_texts_for_model,
+        recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
         stage_report_outside_checkout=True,
         child_environment={
             name: value for name, value in os.environ.items()
