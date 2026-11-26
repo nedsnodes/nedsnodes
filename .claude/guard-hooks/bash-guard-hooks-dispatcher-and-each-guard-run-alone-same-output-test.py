@@ -9,7 +9,8 @@ same both ways. A guard missing from the dispatcher's results, or one more, fail
 Both ways run in the same sandbox, so a command's guards act on nothing real: git, gh, tmux, ssh, codex
 and claude on PATH are fakes that print nothing and exit 1, the payload's working directory is an empty
 directory of this test's own, and each run of the guards gets a temporary directory of its own, which is
-where the emergency-stop hook keeps its once-per-agent-session record. The guards' probes therefore
+where the emergency-stop hook keeps its once-per-agent-session record; that hook reads an emergency-stop
+folder of this test's own, which holds a stop in force. The guards' probes therefore
 all fail the same way both ways; what differs from one command to the next is how each guard reads the
 command text.
 
@@ -112,10 +113,18 @@ class Sandbox:
             fake.chmod(0o755)
         self.working_directory = self.root / "working-directory"
         self.working_directory.mkdir()
+        # An emergency-stop folder of this test's own, holding a stop in force, so the emergency-stop hook
+        # speaks on every command: the log-store's, read through a mount, answers within the hook's deadline
+        # on one reading and not the next on a loaded machine.
+        emergency_stop_folder = self.root / "emergency-stop"
+        emergency_stop_folder.mkdir()
+        (emergency_stop_folder / "2026-01-01T00-00-00Z.md").write_text(
+            "A stop this test put in force, in its own folder.\n")
         self.environment = {key: value for key, value in os.environ.items()
                             if not key.startswith(("GIT_", "TMUX", "CLAUDE_"))}
         self.environment.update(PATH=f"{fakes}{os.pathsep}{os.environ.get('PATH', '')}",
-                                CLAUDE_PROJECT_DIR=str(REPOSITORY_ROOT))
+                                CLAUDE_PROJECT_DIR=str(REPOSITORY_ROOT),
+                                NEDSNODES_EMERGENCY_STOP_FOLDER=str(emergency_stop_folder))
 
     def run_environment(self):
         """An environment whose temporary directory is new, so no run sees a record another run wrote."""
