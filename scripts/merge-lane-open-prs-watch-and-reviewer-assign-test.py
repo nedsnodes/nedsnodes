@@ -2287,7 +2287,7 @@ def run_poll_once_cases(scratch_root, token_file):
 
     machine, first, description = append_stopping_inside_second_line(
         "append-stops-inside-the-second-line-and-cannot-cut", truncate_fails)
-    machine.complete_tasks()
+    # The first run's append-failure task stays open, as it does until merge-lane-2 reads it.
     before = machine.events_path.read_bytes()
     real_truncate = watcher_module.os.truncate
     watcher_module.os.truncate = truncate_fails
@@ -2296,14 +2296,16 @@ def run_poll_once_cases(scratch_root, token_file):
     finally:
         watcher_module.os.truncate = real_truncate
     after = machine.events_path.read_bytes()
-    description = machine.tasks_read()[-1]["description"] if machine.tasks_read() else ""
+    tasks = machine.tasks_read()
+    cut_tasks = [task for task in tasks if "cut back" in task["subject"]]
+    cut_description = cut_tasks[0]["description"] if cut_tasks else ""
     whole_end = before.rfind(b"\n") + 1
-    check("when the next run cannot cut the cut line back, it appends nothing, exits 1, and its "
-          "failure task says to cut the file to its last whole line",
-          first == 1 and second == 1 and after == before
-          and f"cut the file to {whole_end} bytes" in description,
-          f"{(first, second)} {before[-80:]!r} {after[-80:]!r} {description!r} {machine.errors}")
-    machine.complete_tasks()
+    check("when the next run cannot cut the cut line back, it appends nothing, exits 1, and opens "
+          "a task of its own beside the open append-failure task, saying polls record nothing "
+          "until the cut works",
+          first == 1 and second == 1 and after == before and len(tasks) == 2
+          and len(cut_tasks) == 1 and "recorded nothing" in cut_description,
+          f"{(first, second)} {before[-80:]!r} {after[-80:]!r} {tasks!r} {machine.errors}")
     third = machine.run()
     lines = machine.event_lines()
     check("once the cut works again, the next run cuts the cut line back and records the put-back "
@@ -2311,6 +2313,11 @@ def run_poll_once_cases(scratch_root, token_file):
           third == 0 and [line.split()[2] for line in lines if " REVIEW-ASSIGNED " in line] == ["#1", "#2"]
           and all(len(re.findall(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", line)) == 1 for line in lines),
           f"{third} {lines} {machine.errors}")
+    check("the cut-failure task, still open after a later run recorded lines, names no byte offset "
+          "and no cut to make, so following it deletes none of those lines",
+          str(whole_end) not in cut_description and "bytes" not in cut_description
+          and "cut the file" not in cut_description and "by hand" in cut_description,
+          cut_description)
 
     machine = machine_for("append-fails-and-cannot-be-read-back")
     machine.assignments.write_text("", encoding="utf-8")

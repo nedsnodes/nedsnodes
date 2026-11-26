@@ -807,6 +807,8 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
                             f"REVIEW-ASSIGNED line for them was recorded: "
                             + "; ".join(put_back)
                             + ". Send each to its merge-lane agent-seat yourself") from error
+                if isinstance(error, EventFileCutBackFailed):
+                    raise
                 raise OSError(message) from error
         return assigned_lines
 
@@ -1025,10 +1027,14 @@ class EventLinesAppendFailed(OSError):
         self.read_back = read_back
 
 
+class EventFileCutBackFailed(OSError):
+    """The event file ends inside a line, and the bytes after its last newline could not be cut."""
+
+
 def event_file_cut_back_to_last_whole_line(path):
     """Cut the bytes after the event file's last newline, which an append that stopped inside a
-    line leaves, so that the next line does not glue onto them. Raises OSError when they cannot
-    be cut."""
+    line leaves, so that the next line does not glue onto them. Raises EventFileCutBackFailed when
+    they cannot be cut."""
     try:
         with path.open("rb") as events:
             end = events.seek(0, os.SEEK_END)
@@ -1051,10 +1057,12 @@ def event_file_cut_back_to_last_whole_line(path):
     try:
         os.truncate(path, end)
     except OSError as error:
-        raise OSError(
-            f"the event file {path} ends inside a line after byte {end}, which could not be cut "
-            f"back ({error}), so this poll records nothing: cut the file to {end} bytes, its last "
-            f"whole line, and the next poll records again") from error
+        raise EventFileCutBackFailed(
+            f"the event file {path} ends inside a line, which a failed append left, and the poll "
+            f"could not cut that line back ({error}), so this poll recorded nothing. Each later "
+            f"poll cuts the line back itself before it records, so polls record again once the "
+            f"cut works. Fix what the error names; do not edit the event file by hand. When a "
+            f"later poll has recorded events, mark this task completed") from error
 
 
 def event_lines_append(path, lines, now):
@@ -1248,6 +1256,10 @@ def poll_once(arguments, assignments_file, options_in_use):
             events_task_opened_when_due(state, state_path, events_path, task_list_directory, now)
         except PollStateUnusable as error:
             return failure_reported(task_list_directory, "its state cannot be used", str(error))
+        except EventFileCutBackFailed as error:
+            # Its own subject, so an open append-failure task does not swallow it.
+            return failure_reported(task_list_directory, "its polls record nothing until the event "
+                                    "file's last line is cut back", str(error))
         except OSError as error:
             return failure_reported(task_list_directory, "it could not record or deliver events",
                                     f"{error}. The state file still holds the last run that "
