@@ -792,7 +792,7 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
     for suite, verdict in sorted(verdicts.items()):
         if not verdict["ran_to_the_end"]:
             print(f"STOP: merged, but {suite} did not run to the end: it was killed, passed its "
-                  f"time limit, or stopped after a case line with no verdict, so its later cases "
+                  f"time limit, crashed, as its missing END line shows, or could not run, so its later cases "
                   f"have none.\n{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
             kept["complete"] = False
 
