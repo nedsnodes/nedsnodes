@@ -27,6 +27,7 @@ import argparse
 import glob
 import gzip
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -44,9 +45,26 @@ class ListWriteFailure(Exception):
     """A step failed; its text says what, and the old list is left in place."""
 
 
+class SnapshotRootMissing(ListWriteFailure):
+    """The snapshot root is absent, which is what an unmounted backup drive looks like."""
+
+
+JOB_NAME = "timeshift-newest-snapshot-file-name-list-write"
+SCHEDULED_JOBS_TABLE = Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools" / "scheduled-jobs-on-each-machine.json"
+
+
+def job_owner():
+    """Return the agent-seat the scheduled-jobs table names as this job's owner, or the table's path when unreadable."""
+    try:
+        table = json.loads(SCHEDULED_JOBS_TABLE.read_text())
+        return next(job["owner"] for job in table["jobs"] if job["name"] == JOB_NAME)
+    except (OSError, ValueError, KeyError, StopIteration, TypeError):
+        return "the owner of job %s in %s" % (JOB_NAME, SCHEDULED_JOBS_TABLE)
+
+
 def newest_snapshot(snapshot_root):
     if not os.path.isdir(snapshot_root):
-        raise ListWriteFailure("%s does not exist — is the backup drive mounted?" % snapshot_root)
+        raise SnapshotRootMissing("%s does not exist — is the backup drive mounted?" % snapshot_root)
     names = sorted(name for name in os.listdir(snapshot_root) if os.path.isdir(os.path.join(snapshot_root, name)))
     if not names:
         raise ListWriteFailure("%s holds no snapshot" % snapshot_root)
@@ -108,11 +126,13 @@ def main(argv=None):
         print("Until this program succeeds, a bare-name search of Timeshift by %s reports Timeshift as not searched, "
               "because no list of the newest snapshot is in %s." % (finder.PROGRAM_PATH, args.list_directory),
               file=sys.stderr)
-        print("If the backup drive is not mounted, mount it, then run this program again on ned-box: "
-              "python3 %s" % finder.TIMESHIFT_FILE_NAME_LIST_WRITE_PROGRAM_PATH, file=sys.stderr)
-        print("Otherwise run it again once; if it fails the same way, send the failure line above to the "
-              "agent-seat that owns the job timeshift-newest-snapshot-file-name-list-write in "
-              "nn-systems/general-tools/scheduled-jobs-on-each-machine.json.", file=sys.stderr)
+        if isinstance(failure, SnapshotRootMissing):
+            print("Tell the user the backup drive is not mounted on ned-box; once it is, the next hourly run writes "
+                  "the list, or run now on ned-box: python3 %s" % finder.TIMESHIFT_FILE_NAME_LIST_WRITE_PROGRAM_PATH,
+                  file=sys.stderr)
+        else:
+            print("Send the FAILED line above to the agent-seat %s, which owns this job; running it again will not "
+                  "fix it." % job_owner(), file=sys.stderr)
         return 1
     return 0
 

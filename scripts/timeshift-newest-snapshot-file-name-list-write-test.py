@@ -10,6 +10,7 @@ PATH, since a real one cannot be made to fail reliably for every user.
 """
 
 import gzip
+import importlib.util
 import os
 import subprocess
 import sys
@@ -89,7 +90,7 @@ with tempfile.TemporaryDirectory() as tmp:
     result = run(root, lists, path_prefix=str(fake_bin))
     check("a find that fails exits 1, names the snapshot and find's error, and says what to do",
           result.returncode == 1 and "find over snapshot 2026-08-16_09-00-00 failed (exit 1) — find: injected failure"
-          in result.stderr and "run it again once" in result.stderr, "%s %r" % (result.returncode, result.stderr))
+          in result.stderr and "Send the FAILED line above to the agent-seat pr-review-maintenance-findings-batch-fix-agent" in result.stderr, "%s %r" % (result.returncode, result.stderr))
     check("a failed find keeps the previous list and leaves no partial file",
           sorted(os.listdir(lists)) == ["2026-08-15_09-00-00.paths.gz"], str(sorted(os.listdir(lists))))
 
@@ -103,13 +104,21 @@ with tempfile.TemporaryDirectory() as tmp:
     result = run(Path(tmp, "no-such-root"), lists)
     check("a missing snapshot root exits 1 and asks whether the backup drive is mounted",
           result.returncode == 1 and "is the backup drive mounted?" in result.stderr
-          and "mount it, then run this program again on ned-box" in result.stderr,
+          and "Tell the user the backup drive is not mounted on ned-box" in result.stderr,
           "%s %r" % (result.returncode, result.stderr))
 
     Path(tmp, "empty").mkdir()
     result = run(Path(tmp, "empty"), lists)
     check("a snapshot root with no snapshot exits 1", result.returncode == 1 and "holds no snapshot" in result.stderr,
           "%s %r" % (result.returncode, result.stderr))
+
+    spec = importlib.util.spec_from_file_location("timeshift_list_writer", PROGRAM)
+    writer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(writer)
+    writer.SCHEDULED_JOBS_TABLE = Path(tmp, "no-such-table.json")
+    check("an unreadable scheduled-jobs table makes the failure message name the job and the table instead of an owner",
+          writer.job_owner() == "the owner of job %s in %s" % (writer.JOB_NAME, writer.SCHEDULED_JOBS_TABLE),
+          writer.job_owner())
 
 if failures:
     print("\n%d case(s) failed: %s" % (len(failures), "; ".join(failures)))
