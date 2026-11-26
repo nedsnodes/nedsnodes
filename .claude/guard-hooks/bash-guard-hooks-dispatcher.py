@@ -89,6 +89,10 @@ KILLED_BY_SIGNAL_FAILURE = "it was killed by signal {signal}{error_output}"
 OUTPUT_NOT_COMBINED_FAILURE = ("it printed output that is not PreToolUse hook JSON this dispatcher combines "
                                "({problem}): {output}")
 ERROR_OUTPUT_ENDING = ", and its error output ends: {text}"
+GUARD_LIST_FIX_LINE = (
+    "make the file hold {\"guards\": [{\"path\": <guard file, relative to the repository root>, "
+    "\"timeout_seconds\": <seconds, a number above 0>}, ...]}, one entry per guard, as on main, "
+    "where git show origin/main:.claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json prints it")
 
 
 class BashGuardHooksDispatcherGuardListUnreadable(Exception):
@@ -103,9 +107,13 @@ def bash_guard_hooks_dispatcher_guard_list_read(list_path=BASH_GUARD_HOOKS_DISPA
     try:
         entries = json.loads(Path(list_path).read_text(encoding="utf-8"))["guards"]
     except (OSError, ValueError, KeyError, TypeError) as error:
-        raise BashGuardHooksDispatcherGuardListUnreadable(f"the guard list {list_path} cannot be read: {error!r}") from error
+        raise BashGuardHooksDispatcherGuardListUnreadable(
+            f"the Bash guard hooks dispatcher's guard list {list_path}, which names the guard files it runs, cannot "
+            f"be read ({error!r}), so no Bash guard checked this call; " + GUARD_LIST_FIX_LINE) from error
     if not isinstance(entries, list) or not entries:
-        raise BashGuardHooksDispatcherGuardListUnreadable(f"the guard list {list_path} holds no list of guards under \"guards\"")
+        raise BashGuardHooksDispatcherGuardListUnreadable(
+            f"the Bash guard hooks dispatcher's guard list {list_path} holds no list of guards under \"guards\", "
+            "so no Bash guard checked this call; " + GUARD_LIST_FIX_LINE)
     guards = []
     for entry in entries:
         path = entry.get("path") if isinstance(entry, dict) else None
@@ -113,8 +121,8 @@ def bash_guard_hooks_dispatcher_guard_list_read(list_path=BASH_GUARD_HOOKS_DISPA
         if not isinstance(path, str) or not path or isinstance(timeout, bool) \
                 or not isinstance(timeout, (int, float)) or timeout <= 0:
             raise BashGuardHooksDispatcherGuardListUnreadable(
-                f"the guard list {list_path} holds {entry!r}, which is not "
-                "{\"path\": <guard file>, \"timeout_seconds\": <number above 0>}")
+                f"the Bash guard hooks dispatcher's guard list {list_path} holds the entry {entry!r}, so no Bash "
+                "guard checked this call; " + GUARD_LIST_FIX_LINE)
         guards.append((path, timeout))
     return guards
 
