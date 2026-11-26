@@ -17,9 +17,10 @@ claim sets the file's modification time to the claim time, because a rename keep
 what the 30-minute limit reads. A returned alert keeps its agent-seat, because files are moved, never rewritten.
 
 Failures: a file another agent-session moved first is skipped, never an error. A pending file that is not a JSON
-object, or that cannot be read, such as a directory, is moved into claimed/ and its ValueError or OSError raised,
-so the next prompt claims the alerts after it; a claimed file that is not a JSON object raises ValueError, and any
-other OSError is raised; the caller reports each.
+object, or that cannot be read, such as a directory, is moved into ~/.local/state/nedsnodes/user-alerts/unreadable/,
+where nothing returns it to pending/, and its ValueError or OSError raised, naming the full path it went to, so the
+next prompt claims the alerts after it; a claimed file that is not a JSON object raises ValueError, and any other
+OSError is raised; the caller reports each.
 """
 import importlib.util
 import json
@@ -104,6 +105,9 @@ def user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(agent_
     oldest first. An agent_seat of None, an agent-session whose agent-seat is unknown, claims nothing."""
     directory = user_alerts_directory()
     pending, claimed = directory / "pending", directory / "claimed"
+    # ~/.local/state/nedsnodes/user-alerts/unreadable/, not claimed/, whose entries go back to pending/ after the
+    # time limit and would block the claim again.
+    unreadable = directory / "unreadable"
     if agent_seat is None or not pending.is_dir():
         return []
     claim_time = (now or datetime.now(timezone.utc)).timestamp()
@@ -112,23 +116,29 @@ def user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(agent_
         claimed.mkdir(parents=True, exist_ok=True)
         target = claimed / path.name
         try:
+            alert = user_alert_read_from_json_file(path)
+        except FileNotFoundError:
+            # Another agent-session claimed it first.
+            continue
+        except (ValueError, OSError) as error:
+            unreadable.mkdir(parents=True, exist_ok=True)
             try:
-                alert = user_alert_read_from_json_file(path)
+                os.rename(path, unreadable / path.name)
             except FileNotFoundError:
-                raise
-            except (ValueError, OSError):
-                # Moved out of pending/ before the error is raised, so the next prompt claims the alerts after it.
-                os.rename(path, target)
-                os.utime(target, (claim_time, claim_time))
-                raise
-            if not user_alert_addressed_to_agent_seat(alert, agent_seat):
                 continue
+            moved = unreadable / path.name
+            if isinstance(error, OSError):
+                raise type(error)(error.errno, error.strerror, f"{path}, now moved to {moved}") from error
+            raise ValueError(f"{error}; moved to {moved}") from error
+        if not user_alert_addressed_to_agent_seat(alert, agent_seat):
+            continue
+        try:
             os.rename(path, target)
             os.utime(target, (claim_time, claim_time))
-            alerts.append(alert)
         except FileNotFoundError:
             # Another agent-session claimed it first, or returned it to pending/ in the moment after the rename.
             continue
+        alerts.append(alert)
     return alerts
 
 
