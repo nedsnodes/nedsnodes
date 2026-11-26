@@ -99,7 +99,7 @@ NO_WALK_MEANINGS = {
     "AO": "AO means approve as obvious: the user agrees with your last recommendation or proposal, and finds it obvious.",
     "Aa": "Aa means approve after an advisor check: the user agrees with your last recommendation or proposal, "
           "once the advisor has checked it.",
-    "D": "D means disapprove: the user disagrees with your last recommendation or proposal. Do not act on it.",
+    "N": "N means do nothing: the user turns down your last recommendation or proposal. Do not act on it.",
     "Z": "Z means defer: postpone your last question or proposal and record it as a task.",
     "defer": "Z means defer: postpone your last question or proposal and record it as a task.",
     "later": "Z means defer: postpone your last question or proposal and record it as a task.",
@@ -110,8 +110,8 @@ NO_WALK_MEANINGS = {
     "approved": "Approved means approve: the user agrees with your last recommendation or proposal.",
     "approve": "Approve means approve: the user agrees with your last recommendation or proposal.",
     "approve as obvious": "AO means approve as obvious: the user agrees with your last recommendation",
-    "disapproved": "Disapproved means disapprove: the user disagrees with your last recommendation or proposal.",
-    "disapprove": "Disapprove means disapprove: the user disagrees with your last recommendation or proposal.",
+    "disapproved": "Disapproved means do nothing: the user turns down your last recommendation or proposal.",
+    "disapprove": "Disapprove means do nothing: the user turns down your last recommendation or proposal.",
     "repeat": "Repeat asks to see your last question or proposal again: show it in full",
 }
 
@@ -272,7 +272,7 @@ def test_a_hyphen_between_the_letters_of_ao_o2_and_o3_is_read_as_that_letter():
     lines = Case(next_to_present="items 5 and 6 of 9").lines("5 a-o, 6 d")
     check("'5 a-o, 6 d' gives item 5 AO",
           lines is not None
-          and lines[1] == "The answer gives each item it names its own letter: item 5 of 9: AO, item 6 of 9: D.",
+          and lines[1] == "The answer gives each item it names its own letter: item 5 of 9: AO, item 6 of 9: N.",
           f"lines {lines!r}")
     for prompt in ("all a-o", "a-o to all"):
         lines = Case(next_to_present="items 5 and 6 of 9").lines(prompt)
@@ -304,7 +304,7 @@ def is_only_the_own_words_message(result):
 def test_retired_letters_o_and_other_prompts_print_nothing_with_no_walk_and_only_the_settled_line_on_one():
     case = Case(next_to_present="item 3 of 9")
     no_walk = Case()
-    for prompt in ("y", "n", "N", "next", "c", "l", "L.", "1 l", "l, later", "Y.", "all o", "1 o2", "o4", "oo", "all y", "1 y 2 n", "5 n, 6 y", "y but quickly",
+    for prompt in ("y", "next", "g", "G", "go on", "l", "L.", "1 l", "l, later", "Y.", "all o", "1 o2", "o4", "oo", "all y", "1 y 2 n", "5 n, 6 y", "y but quickly",
                    "yes", "a a", "aaa", "A..", "X", "", ".", "a lot of things to do", "I think a",
                    "4", "1a2d", "1 c", "1 ab", "explain", "repeater", "deferred", "aol"):
         result = no_walk.run(prompt)
@@ -390,17 +390,20 @@ def test_aa_in_any_mix_of_capitals_runs_the_check_step_with_after_advisor():
 
 def test_d_does_the_alternative_after_the_check_step():
     case = Case(next_to_present="item 4 of 9")
-    for prompt in ("d", "disapproved", "Disapprove"):
+    for prompt in ("n", "do nothing", "d", "disapproved", "Disapprove"):
         lines = case.lines(prompt)
         word = prompt[:1].upper() + prompt[1:].lower()
-        check(f"{prompt!r} disapproves and does the alternative after check --disapproved and close",
+        check(f"{prompt!r} does the do-nothing line after check --do-nothing and close",
               lines is not None
-              and lines[1] == (f"{word} means disapprove: the user disagrees with the recommendation of item 4 of 9 "
-                               "(leave the filter out).")
-              and lines[2] == ("If the item gives no single alternative, ask the user what he wants done instead, "
-                               "and act on nothing yet.")
-              and lines[3] == (f"Otherwise do the item's alternative; whether or not it makes a change, first run "
-                               f"`{CHECK} --disapproved`, {CLOSE_END}"), f"lines {lines!r}")
+              and lines[1].startswith(f"{word} means do nothing: the user turns down the recommendation of item 4 of 9 "
+                                      "(leave the filter out) and takes its do-nothing line")
+              and lines[2] == "If the item has neither line, ask the user what he wants done, and act on nothing yet."
+              and lines[3].endswith(f"`{CHECK} --do-nothing`, {CLOSE_END}"), f"lines {lines!r}")
+    lines = case.lines("c")
+    check("'c' approves the creative alternative after check --creative-alternative and close",
+          lines is not None and lines[1].startswith("C means the user approves the creative alternative of item 4 of 9")
+          and lines[3].endswith(f"`{CHECK} --creative-alternative`, then the close command it prints, and do what "
+                                "close prints; write nothing in the minutes by hand."), f"lines {lines!r}")
 
 
 def test_o_asks_for_option_2_and_option_3_paragraphs():
@@ -437,7 +440,8 @@ def test_o_with_a_condition_or_more_text():
               and any(line.startswith("O asks for other options") for line in lines), f"lines {lines!r}")
 
 
-MORE_RESPONSES = "AO approve as obvious · Aa approve after an advisor check · Z defer · E explain · O other options"
+MORE_RESPONSES = ("AO approve as obvious · Aa approve after an advisor check · C creative alternative, when the item has "
+                  "one · Z defer · E explain · O other options")
 
 
 def test_m_shows_the_responses_the_closing_line_leaves_out_and_records_nothing():
@@ -451,9 +455,10 @@ def test_m_shows_the_responses_the_closing_line_leaves_out_and_records_nothing()
               and lines[2].endswith(": " + MORE_RESPONSES)
               and not any(" check" in line and "--" in line for line in lines[:3]), f"lines {lines!r}")
     lines = Case().lines("m")
-    check("M with no approval-walk shows every response but M, A and D included, since no closing line shows them",
+    check("M with no approval-walk shows every response but M, A and N included, since no closing line shows them",
           lines is not None and lines[-1].endswith(": A approve · AO approve as obvious · Aa approve after an advisor "
-                                                   "check · D disapprove · Z defer · E explain · O other options"),
+                                                   "check · N do nothing · C creative alternative, when the item has "
+                                                   "one · Z defer · E explain · O other options"),
           f"lines {lines!r}")
     for prompt in ("m", "more responses"):
         result = case.run(prompt)
@@ -468,8 +473,9 @@ def test_m_shows_the_responses_the_closing_line_leaves_out_and_records_nothing()
               f"lines {lines!r}")
     check("every response is on the closing line or in M's list, once",
           sorted((LETTERS_AFTER_LINK + " · " + MORE_RESPONSES).split(" · "))
-          == sorted(["A approve", "AO approve as obvious", "Aa approve after an advisor check", "D disapprove",
-                     "Z defer", "E explain", "O other options", "M more responses"]))
+          == sorted(["A approve", "AO approve as obvious", "Aa approve after an advisor check", "N do nothing",
+                     "C creative alternative, when the item has one", "Z defer", "E explain", "O other options",
+                     "M more responses"]))
 
 
 def test_o2_and_o3_approve_an_option_through_the_check_step():
@@ -609,7 +615,7 @@ def test_no_open_walk():
 
 def test_an_item_without_a_recommendation_line_is_reported_for_a_ao_and_d():
     case = Case(next_to_present="item 3 of 9")
-    for letter in ("A", "AO", "Aa", "D"):
+    for letter in ("A", "AO", "Aa", "N"):
         lines = case.lines(letter.lower())
         check(f"{letter} on an item with no recommendation says so and how to go on",
               lines is not None and unknown_line("item 3 of 9", NO_RECOMMENDATION, letter) in lines
@@ -715,7 +721,7 @@ def test_r_on_an_open_walk_goes_to_the_agent_and_does_not_block():
 
 PAGE_1 = "https://claude.ai/artifact/PageOfItem4Old"
 PAGE_2 = "https://claude.ai/artifact/PageOfItem4New"
-LETTERS_AFTER_LINK = "A approve · D disapprove · M more responses"
+LETTERS_AFTER_LINK = "A approve · N do nothing · M more responses"
 
 
 def page_line(answer, item, closing_line):
@@ -940,7 +946,7 @@ def test_numbered_answers():
     check("a numbered answer names each letter's check flag, records one item at a time through close, sets "
           "the `#next_to_present` line to each item before its check, and stops at a refusal",
           all(flag in text for flag in ("AO does the same and marks the approval as obvious, with the flag --obvious",
-                                        "alternative, with the flag --disapproved",
+                                        "do-nothing line, with the flag --do-nothing",
                                         "Z defers the item, with the flag --deferred"))
           and ("Record the answers one item at a time, in the order given: for each, run the check step with that "
                "answer's flag, then close, and do what close prints, before the next.") in text
@@ -948,8 +954,8 @@ def test_numbered_answers():
           and ("If check or close refuses or fails, stop there and record none of the remaining answers: tell the "
                "user which answers were recorded and what was printed, and ask him how to go on.") in text
           and "makes a change waits for the check step" not in text, f"lines {lines!r}")
-    for prompt, letters in (("5 d, 6 ao", ("D", "AO")), ("5d 6ao", ("D", "AO")), ("5 - a 6 - z", ("A", "Z")),
-                            ("Item 5 AO; item 6 D", ("AO", "D"))):
+    for prompt, letters in (("5 d, 6 ao", ("N", "AO")), ("5d 6ao", ("N", "AO")), ("5 - a 6 - z", ("A", "Z")),
+                            ("Item 5 AO; item 6 D", ("AO", "N"))):
         lines = case.lines(prompt)
         check(f"{prompt!r} names both items, each with its letter",
               lines is not None
@@ -1016,7 +1022,7 @@ def test_repeat_and_an_item_number_is_read_as_that_number_and_r():
 def test_an_answer_word_and_an_item_number_is_read_as_that_numbered_answer():
     case = Case(next_to_present="items 5 and 6 of 9")
     for prompt, letter in (("approve 5", "A"), ("Approved item 5.", "A"), ("approve as obvious 5", "AO"),
-                           ("disapprove 5", "D"), ("defer 5", "Z"), ("later 5", "Z")):
+                           ("disapprove 5", "N"), ("defer 5", "Z"), ("later 5", "Z")):
         lines = case.lines(prompt)
         check(f"{prompt!r} answers item 5 with {letter}, not the waiting items with a rider",
               lines is not None
@@ -1169,9 +1175,9 @@ A plain item. Recommendation: keep it.
 def parts_different_letters_lines(flags):
     return [
         "Each part's letter does for that part what it does for a whole item: A approves the part's recommendation, "
-        "so do what it says; AO does the same and marks the approval as obvious; D disapproves it, so do the "
-        "part's alternative.",
-        "If a part answered D gives no single alternative, ask the user what he wants done instead, and act on "
+        "so do what it says; AO does the same and marks the approval as obvious; N turns it down, so do the "
+        "part's do-nothing line.",
+        "If a part answered N gives no do-nothing line, ask the user what he wants done instead, and act on "
         "nothing yet.",
         f"Otherwise, whether or not the parts make a change, first run `{CHECK} {flags}`, which records each part's "
         "answer, then the close command it prints, and do what close prints; write nothing in the minutes by hand."]
@@ -1180,11 +1186,11 @@ def parts_different_letters_lines(flags):
 def parts_deferred_beside_answered_lines(item="item 4 of 9"):
     return [
         "The check step cannot record this answer: `walk-me-through-answer-added-texts-cold-read-fast-read-check-and-"
-        "close.py check --part-answer` takes A, AO or D for a part, because the walk-me-through skill does not say where an "
+        "close.py check --part-answer` takes A, AO or N for a part, because the walk-me-through skill does not say where an "
         "item goes in the walk when one of its parts is deferred and the others are answered.",
         "Record nothing and act on none of the parts.",
         "Tell the user that the walk-me-through check program cannot record a deferred part beside answered ones, "
-        f"and ask him to answer every part of {item} with A, AO or D, to answer Z to the whole item, or to say how "
+        f"and ask him to answer every part of {item} with A, AO or N, to answer Z to the whole item, or to say how "
         "else to go on."]
 
 
@@ -1205,7 +1211,7 @@ def parts_read_line(pairs, item="item 4 of 9", last="3"):
 def test_a_numbered_answer_within_the_waiting_items_parts_answers_the_parts():
     case = Case(next_to_present="item 4 of 9", document=PARTS_DOCUMENT)
     for prompt, pairs, flags in (
-            ("1 a 2 d 3 a", "part 1: A, part 2: D, part 3: A", "--part-answer 1=A --part-answer 2=D --part-answer 3=A"),
+            ("1 a 2 d 3 a", "part 1: A, part 2: N, part 3: A", "--part-answer 1=A --part-answer 2=N --part-answer 3=A"),
             ("3 a, 1 ao, 2 a", "part 3: A, part 1: AO, part 2: A", "--part-answer 1=AO --part-answer 2=A --part-answer 3=A")):
         lines = case.lines(prompt)
         check(f"{prompt!r} on an item with parts 1 to 3 names each part's letter and gives the check command "
@@ -1216,10 +1222,10 @@ def test_a_numbered_answer_within_the_waiting_items_parts_answers_the_parts():
     lines = case.lines("1 a 2 d")
     check("'1 a 2 d' on an item with parts 1 to 3 leaves part 3 unanswered, so nothing is recorded, though the "
           "letters differ",
-          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: D")]
+          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: N")]
           + parts_unanswered_lines("part 3"), f"lines {lines!r}")
     for prompt, pairs in (("1 a 2 z 3 a", "part 1: A, part 2: Z, part 3: A"),
-                          ("1 z 2 z 3 d", "part 1: Z, part 2: Z, part 3: D")):
+                          ("1 z 2 z 3 d", "part 1: Z, part 2: Z, part 3: N")):
         lines = case.lines(prompt)
         check(f"{prompt!r} defers a part beside answered ones, which check cannot record, so nothing is recorded",
               lines is not None and lines[1:] == [parts_read_line(pairs)] + parts_deferred_beside_answered_lines(),
@@ -1227,9 +1233,9 @@ def test_a_numbered_answer_within_the_waiting_items_parts_answers_the_parts():
     lines = case.lines("1 a 2 d 3 a 2 r")
     check("R on a part beside different letters for every part shows the item again and still gives the command",
           lines is not None and lines[1:] == [
-              parts_read_line("part 1: A, part 2: D, part 3: A, part 2: R"),
+              parts_read_line("part 1: A, part 2: N, part 3: A, part 2: R"),
               *numbered_r_lines("2", "item 4 of 9", "three wording fixes in one file")]
-          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=D --part-answer 3=A"),
+          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=N --part-answer 3=A"),
           f"lines {lines!r}")
     lines = case.lines("1 a 2 a")
     check("'1 a 2 a' leaves part 3 unanswered, so the item stays open and nothing is recorded",
@@ -1242,7 +1248,7 @@ def test_a_numbered_answer_within_the_waiting_items_parts_answers_the_parts():
               "own, so a reply that names only the parts still missing would leave the others unanswered."],
           f"lines {lines!r}")
     for prompt, letter, flag in (("1 a 2 a 3 a", "A", " check`"), ("approve 1, 2 and 3", "A", " check`"),
-                                 ("1 d 2 d 3 d", "D", " check --disapproved`")):
+                                 ("1 d 2 d 3 d", "N", " check --do-nothing`")):
         lines = case.lines(prompt)
         check(f"{prompt!r} gives every part {letter}, so it is {letter} to the whole item, with that letter's "
               "check command",
@@ -1274,8 +1280,8 @@ def test_a_numbered_answer_within_the_waiting_items_parts_answers_the_parts():
           f"lines {lines!r}")
     lines = Case(next_to_present="item 7 of 9", document=PARTS_DOCUMENT).lines("1 a 2 d")
     check("a `Part 2.` line after a hard break, with nothing after its period, is read as a part",
-          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: D", "item 7 of 9", "2")]
-          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=D"), f"lines {lines!r}")
+          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: N", "item 7 of 9", "2")]
+          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=N"), f"lines {lines!r}")
 
 
 def test_numbers_are_item_numbers_when_the_waiting_item_has_no_parts_or_a_number_falls_outside_them():
@@ -1304,7 +1310,7 @@ def test_numbers_are_item_numbers_when_the_waiting_item_has_no_parts_or_a_number
               and lines[1] == "The answer gives each item it names its own letter: item 2 of 9: A.", f"lines {lines!r}")
     lines = case.lines("1 a 2 d")
     check("'1 a 2 d' while item 2, with parts 1 to 3, waits still answers its parts",
-          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: D", "item 2 of 9")]
+          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: N", "item 2 of 9")]
           + parts_unanswered_lines("part 3", "item 2 of 9"), f"lines {lines!r}")
     lines = Case(next_to_present="item 4 of 9", document=PARTS_DOCUMENT).lines("item 1 a item 2 d")
     check("an answer that says `item` names items, not parts",
@@ -1347,8 +1353,8 @@ def test_a_part_n_line_inside_a_multiline_code_span_is_not_a_part():
     case = Case(next_to_present="item 4 of 9", document=document)
     lines = case.lines("1 a 2 d")
     check("`Part 1.` and `Part 2.` lines outside a code span are parts 1 and 2",
-          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: D", last="2")]
-          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=D"), f"lines {lines!r}")
+          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: N", last="2")]
+          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=N"), f"lines {lines!r}")
     lines = case.lines("1 a 2 d 3 a")
     check("a `Part 3.` line inside a multiline code span is no part, so '1 a 2 d 3 a' is read as item numbers",
           lines is not None and lines[1].startswith("The answer gives a letter to item 1 of 9"), f"lines {lines!r}")
@@ -1359,8 +1365,8 @@ def test_parts_in_a_paragraph_that_runs_up_to_the_next_items_heading_are_read():
                 "## Item 5 of 9: next\n\nRecommendation: do five.\n")
     lines = Case(next_to_present="item 4 of 9", document=document).lines("1 a 2 d")
     check("a parts paragraph with no blank line before the next item's heading still gives the item its parts",
-          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: D", last="2")]
-          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=D"), f"lines {lines!r}")
+          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: N", last="2")]
+          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=N"), f"lines {lines!r}")
 
 
 def test_parts_in_an_items_opening_paragraph_under_a_shared_heading_are_that_items_alone():
@@ -1369,8 +1375,8 @@ def test_parts_in_an_items_opening_paragraph_under_a_shared_heading_are_that_ite
                                        "Recommendation: drop it.\n")
     lines = Case(next_to_present="item 6 of 9", document=document).lines("1 a 2 d")
     check("`Part N.` lines in item 6's opening paragraph are item 6's parts",
-          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: D", "item 6 of 9", "2")]
-          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=D"), f"lines {lines!r}")
+          lines is not None and lines[1:] == [parts_read_line("part 1: A, part 2: N", "item 6 of 9", "2")]
+          + parts_different_letters_lines("--part-answer 1=A --part-answer 2=N"), f"lines {lines!r}")
     lines = Case(next_to_present="item 5 of 9", document=document).lines("1 a 2 d")
     check("`Part N.` lines in item 6's opening paragraph are not parts of item 5, which comes before it",
           lines is not None and lines[1].startswith("The answer gives a letter to item 1 of 9"), f"lines {lines!r}")
@@ -1582,7 +1588,7 @@ def test_condition_and_rider():
     for prompt, rest, meaning in (
             ("A but will need careful instructional wording.", "but will need careful instructional wording.",
              "A means approve"),
-            ("d and r", "and r", "D means disapprove"), ("ao, keep the old name", "keep the old name", "AO means"),
+            ("d and r", "and r", "D means do nothing"), ("ao, keep the old name", "keep the old name", "AO means"),
             ("aa, keep the old name", "keep the old name", "Aa means approve after an advisor check"),
             ("z - later", "later", "Z means defer"), ("approved next", "next", "Approved means approve"),
             ("approve as obvious, thanks", "thanks", "AO means")):
@@ -1693,7 +1699,7 @@ def test_unreadable_minutes_still_expand_and_say_so():
                                   "is open, because reading the approval-walk state failed: UnicodeDecodeError")
           and lines[1].startswith("Find out yourself: the last `#next_to_present` line in each of the checkout's")
           and "If an approval-walk is open:" in lines and "If no approval-walk is open:" in lines
-          and any(line.startswith("D means disapprove: the user disagrees with your last") for line in lines),
+          and any(line.startswith("D means do nothing: the user turns down your last") for line in lines),
           f"lines {lines!r}")
 
 
@@ -1819,7 +1825,7 @@ def test_an_answer_counts_when_the_last_message_showing_the_item_holds_its_text_
     for prompt in ("a", "AO", "Aa", "d", "a, and file a task", "a if the tests pass", "4 a", "all a"):
         lines = case.lines(prompt, case.transcript(message))
         check(f"{prompt!r} counts when the item's text was shown with other markup and line breaks", counted(lines)
-              or (prompt == "d" and lines is not None and lines[1].startswith("D means disapprove")),
+              or (prompt == "d" and lines is not None and lines[1].startswith("D means do nothing")),
               f"lines {lines!r}")
     lines = case.lines("a", case.transcript(SHOWN_ITEM))
     check("an answer counts when the message shows the tag lines too", counted(lines), f"lines {lines!r}")
@@ -1925,7 +1931,7 @@ OLDER_FORM_DOCUMENT = """# A walk
 
 A filter would hide old rows.
 
-[No decision here; type N or next to continue.](https://claude.ai/artifact/x)
+[No decision here; type G or go on to continue.](https://claude.ai/artifact/x)
 
 ### The choice
 
@@ -1944,7 +1950,7 @@ def test_an_older_form_item_counts_once_the_text_handed_back_is_shown():
           lines is not None and "BEGIN" in lines and "END" in lines, f"lines {lines!r}")
     handed_back = "\n".join(lines[lines.index("BEGIN") + 1:lines.index("END")])
     check("the handed-back text keeps the sub-step's no-decision line",
-          "No decision here; type N or next to continue." in handed_back, handed_back)
+          "No decision here; type G or go on to continue." in handed_back, handed_back)
     lines = case.lines("a", case.transcript(f"{handed_back}\n\n{ITEM_4_CLOSING_LINE}"))
     check("an answer to an older-form item counts once the agent has shown the text the hook handed back",
           counted(lines), f"lines {lines!r}")
@@ -2817,7 +2823,7 @@ NO_DECISION_SUB_STEP_DOCUMENT = """# A walk
 
 A filter hides old rows.
 
-[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)
+[No decision here; type G or go on to continue.](https://claude.ai/artifact/p41)
 
 ### Item 4.2 of 9: The choice
 
@@ -2827,7 +2833,7 @@ Recommendation: leave the filter out.
 
 Recommendation: do the next thing.
 """
-NO_DECISION_LINE = "[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)"
+NO_DECISION_LINE = "[No decision here; type G or go on to continue.](https://claude.ai/artifact/p41)"
 NO_DECISION_PAGES = ("#item_page item 4.1 of 9 https://claude.ai/artifact/p41\n"
                      "#item_page item 4.2 of 9 https://claude.ai/artifact/p42\n")
 
@@ -2849,8 +2855,8 @@ def test_an_answer_to_a_no_decision_sub_step_records_nothing():
     text = "\n".join(case.lines("r", case.transcript("Here.")) or [])
     check("R on a no-decision sub-step repeats the no-decision line", NO_DECISION_LINE in text
           and "A approve" not in text, text)
-    lines = context_lines(case.run("n", transcript_path=case.transcript("Here.")))
-    check("N is left to the agent as a navigation word: it gets only what a reply in the user's own words gets",
+    lines = context_lines(case.run("g", transcript_path=case.transcript("Here.")))
+    check("G is left to the agent as a navigation word: it gets only what a reply in the user's own words gets",
           len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING) and lines[1] == SETTLED_LINE, lines)
 
 

@@ -98,11 +98,12 @@ NEXT_STEPS_LINES = (
     "close step refuses to move the walk on until each has its category line.",
     "At the end of each item added to the walk-document, write a line `#case_against <rating>: <the strongest case against your "
     "recommendation>`, the rating one of weak, medium, strong or very strong, or the line `#case_against none.` "
-    "when there is no case against; then a line `The alternative: <what you will do if the user disapproves>`; then a line "
-    "`Recommendation: "
-    "<what you will do on ned-box, or what the user does and where>`, as the walk-me-through skill's section "
-    "\"Each item\" says; until the `Recommendation:` line is there, the short-answer hook finds no recommendation "
-    "for the item.",
+    "when there is no case against; then run `python3 "
+    "nn-systems/skills/walk-me-through/walk-me-through-approval-walk-item-option-lines-write.py <the walk-document> "
+    "--item-title '<the heading of the item, without ##>' --do-nothing '<what N leaves as it is>' --recommendation "
+    "'<what you will do on ned-box, or what the user does and where>'`, which writes the item's option lines, as the "
+    "walk-me-through skill's section \"Each item\" says; until it has written them, the short-answer hook finds no "
+    "recommendation for the item.",
     "Present each added item when its turn comes, as for any item; the walk check program numbers it then.",
 )
 

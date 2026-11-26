@@ -107,7 +107,7 @@ a code span and links to the item's page, or, for an item whose publish
 failed, has no link.
 
 A WAITING SUB-STEP, an item with a dotted number such as `Item 4.1 of 9`, also
-passes when the reply holds a line that is `[No decision here; type N or next
+passes when the reply holds a line that is `[No decision here; type G or go on
 to continue.](<page link>)`, the line a sub-step that asks for no decision
 ends with, and its link is the sub-step's page; or, for a sub-step whose
 publish failed, that line without its link, as WALK_FINDER_FILE reads it.
@@ -222,7 +222,7 @@ IN_CODE_SPAN_PROBLEM = (
     "click its link")
 NO_DECISION_LINE_MISSING_PROBLEM = (
     "`Item {number} of {total}` asks for no decision, so its closing line is the no-decision line below, which "
-    "offers only N or next, and no line offering A, D or M")
+    "offers only G or go on, and no line offering A, D or M")
 NO_LINK_PROBLEM = (
     "the closing line for `Item {number} of {total}` has no link, but the walk-minutes record its page as {page}")
 REPLY_LACKS_CLOSING_LINE_INSTRUCTIONS = (
@@ -245,11 +245,11 @@ REPLY_LACKS_CLOSING_LINE_INSTRUCTIONS = (
 NO_DECISION_INSTRUCTIONS = (
     "If the waiting item is a sub-step that asks for no decision, you may end your reply instead with the line "
     "below, where <page link> is the link that ends the sub-step's line in {minutes} of the form {page_line}. "
-    + NOT_IN_BACKTICKS + "\n[No decision here; type N or next to continue.](<page link>)",
+    + NOT_IN_BACKTICKS + "\n[No decision here; type G or go on to continue.](<page link>)",
     "If {minutes} has no such line, add it at the end of {minutes} first, with the link of the page "
     "you published for the sub-step with the Artifact tool.",
     "If the newest such line for the sub-step records that its publish failed, end your reply instead with this "
-    "line, without a link, as plain text with no backticks around it:\nNo decision here; type N or next to continue.")
+    "line, without a link, as plain text with no backticks around it:\nNo decision here; type G or go on to continue.")
 OLD_MARKER_INSTRUCTIONS = (
     "Add this line at the end of {minutes}, below every earlier marker line, and leave "
     "the old lines as they are: {new_line}",

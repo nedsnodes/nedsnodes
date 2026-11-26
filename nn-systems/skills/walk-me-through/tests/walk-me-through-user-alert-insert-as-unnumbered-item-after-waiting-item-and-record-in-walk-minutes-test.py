@@ -126,9 +126,9 @@ def run_one_alert_cases(root):
           minutes.startswith(minutes_before) and "#user_alert alert-a\n" in minutes
           and "added 1 unnumbered item(s) after the whole of item 4," in minutes
           and minutes.count("#next_to_present") == 1, minutes)
-    check("the output says what was added and tells the agent to write the case against and recommendation",
+    check("the output says what was added and tells the agent to write the case against and run the option-lines writer",
           "Added the unnumbered item `## merge-lane-2 is down, and recovery refuses it`" in result.stdout
-          and "Recommendation:" in result.stdout and "`#case_against <rating>:" in result.stdout
+          and "walk-me-through-approval-walk-item-option-lines-write.py" in result.stdout and "`#case_against <rating>:" in result.stdout
           and "`#case_against none.`" in result.stdout, result.stdout)
     check("an alert title that reads as no item heading keeps its words, with no prefix",
           "User alert: " not in document, document)

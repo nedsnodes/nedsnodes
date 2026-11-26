@@ -135,7 +135,7 @@ count in emphasis or a code span, or one that names no item, such as a range
 that runs backwards, makes no closing line.
 approval_walk_sub_step_no_decision_closing_line_page_link_or_none reads the
 line a sub-step that asks for no decision ends with, `[No decision here; type
-N or next to continue.](<page link>)`, alone on its line, or, for a sub-step
+G or go on to continue.](<page link>)`, alone on its line, or, for a sub-step
 whose publish failed, the same line without its link.
 approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line
 says which waiting sub-steps ask for no decision: those whose text as shown
@@ -147,21 +147,41 @@ Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 """
 import importlib.util
+import hashlib
 import os
 import re
 from pathlib import Path
 
 HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
-RECOMMENDATION = re.compile(r"Recommendation:(.*)$", re.I | re.M)
+# The three option lines that end a walk item, as walk-me-through-approval-walk-item-option-lines-write.py writes
+# them: the do-nothing line, the creative-alternative line when the item has one, then the recommendation.
+APPROVAL_WALK_ITEM_RECOMMENDATION_HASHTAG = "#approval_walk_item_recommendation#"
+APPROVAL_WALK_ITEM_DO_NOTHING_HASHTAG = "#approval_walk_item_do_nothing#"
+APPROVAL_WALK_ITEM_CREATIVE_ALTERNATIVE_HASHTAG = "#approval_walk_item_creative_alternative#"
+# The HTML comment the writer puts after the lines it writes, holding the SHA-256 of those lines joined by newlines,
+# so the walk check program can refuse option lines an agent typed or changed by hand.
+APPROVAL_WALK_ITEM_OPTION_LINES_WRITTEN_STAMP = "#approval_walk_item_option_lines_written#"
+APPROVAL_WALK_ITEM_OPTION_LINES_WRITTEN_STAMP_LINE_PATTERN = re.compile(
+    r"^<!-- " + re.escape(APPROVAL_WALK_ITEM_OPTION_LINES_WRITTEN_STAMP) + r" sha256=([0-9a-f]{64}) -->$")
+APPROVAL_WALK_ITEM_OPTION_HASHTAGS = (APPROVAL_WALK_ITEM_DO_NOTHING_HASHTAG,
+                                      APPROVAL_WALK_ITEM_CREATIVE_ALTERNATIVE_HASHTAG,
+                                      APPROVAL_WALK_ITEM_RECOMMENDATION_HASHTAG)
+# A walk-document written before the writer existed opens these lines with the plain labels below, an old
+# `The alternative:` line counting as the do-nothing line; both forms are read until item 32's one-time conversion
+# rewrites those walk-documents.
+RECOMMENDATION = re.compile(r"(?:Recommendation:|" + re.escape(APPROVAL_WALK_ITEM_RECOMMENDATION_HASHTAG) + r")(.*)$",
+                            re.I | re.M)
+APPROVAL_WALK_ITEM_OPTION_LINE_PATTERN = re.compile(
+    r"^\s*(?:" + "|".join(re.escape(tag) for tag in APPROVAL_WALK_ITEM_OPTION_HASHTAGS) + r")")
 # One list or quotation mark that can open a Markdown source line, with the spacing after it, as regular-expression
 # text to repeat after `^\s*`.
 MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT = r"(?:(?:[-*+]|\d+[.)]|>)\s+)"
-# Recognises `#new` and `#new_if_d` mark lines, the walk-document lines holding a text an answer adds: after any list
-# or quotation marks, the mark `#new` or `#new_if_d`, spelled exactly, then the text. The walk check program and the
+# Recognises `#new`, `#new_if_d` and `#new_if_c` mark lines, the walk-document lines holding a text an answer adds:
+# after any list or quotation marks, the mark `#new`, `#new_if_d` or `#new_if_c`, spelled exactly, then the text. The walk check program and the
 # short-answer hook both read marks with this one pattern, so that a line one of them takes for a mark the other
 # cannot skip.
 APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN = re.compile(
-    rf"^\s*{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*(#new(?:_if_d)?)\b[:\s]*(.*)$")
+    rf"^\s*{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*(#new(?:_if_[dc])?)\b[:\s]*(.*)$")
 
 REPOSITORY_TOP = Path(__file__).resolve().parents[3]
 SUITE_RUNNER_FILE = REPOSITORY_TOP / "scripts" / "run-all-test-suites.py"
@@ -199,7 +219,7 @@ ITEM_LABEL = re.compile(
     rf"^(?:(?P<bold>\*\*|__)item\s+(?P<bold_number>{WHOLE_NUMBER})(?:\s+of\s+(?P<total>\d+))?"
     rf"(?=\s*[:.,]|(?P=bold)\s*(?:[:.,\-–—]|$))"
     rf"|item\s+(?P<plain_number>{WHOLE_NUMBER})[:.](?=\s|$))", re.I)
-APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = "No decision here; type N or next to continue."
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = "No decision here; type G or go on to continue."
 SUB_STEP_NO_DECISION_CLOSING_LINE = re.compile(
     rf"^\s*(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\((\S+)\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
 CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*)?", re.S)
@@ -289,6 +309,35 @@ def approval_walk_item_last_recommendation_text_from_item_lines(lines):
     found = [match[1].strip(" *_") for match in RECOMMENDATION.finditer("\n".join(lines))]
     found = [text[:-1].rstrip(" *_") if text.endswith(".") else text for text in found]
     return found[-1] if found and found[-1] else None
+
+
+def approval_walk_item_option_lines_stamp_hash(block_lines):
+    """The SHA-256, as hex, that the writer's stamp holds for the lines from the first option line up to the
+    stamp, joined by newlines."""
+    return hashlib.sha256("\n".join(block_lines).encode("utf-8")).hexdigest()
+
+
+def approval_walk_item_option_lines_problem(raw_lines):
+    """None when an item's raw lines hold no line opening with one of APPROVAL_WALK_ITEM_OPTION_HASHTAGS, or when
+    all such lines lie in one block that ends just before a writer's stamp whose hash matches the block; else a
+    clause saying what is wrong, as in `its option lines have no stamp from the option-lines writer`. Old
+    `Recommendation:` and `The alternative:` lines are not option lines here, so a walk-document written before
+    the writer passes."""
+    option_numbers = [number for number, line in enumerate(raw_lines)
+                      if APPROVAL_WALK_ITEM_OPTION_LINE_PATTERN.match(line)]
+    if not option_numbers:
+        return None
+    stamps = [number for number, line in enumerate(raw_lines)
+              if APPROVAL_WALK_ITEM_OPTION_LINES_WRITTEN_STAMP_LINE_PATTERN.match(line.strip())]
+    if not stamps:
+        return "its option lines have no stamp from the option-lines writer"
+    stamp = stamps[-1]
+    if option_numbers[-1] > stamp:
+        return "an option line comes after the option-lines writer's stamp"
+    found = APPROVAL_WALK_ITEM_OPTION_LINES_WRITTEN_STAMP_LINE_PATTERN.match(raw_lines[stamp].strip())[1]
+    if found != approval_walk_item_option_lines_stamp_hash(raw_lines[option_numbers[0]:stamp]):
+        return "its option lines were typed or changed by hand, not written by the option-lines writer"
+    return None
 
 
 def without_html_comments(lines):
