@@ -616,6 +616,9 @@ def case_hook_shows_names_past_the_cap_later(root):
     check("the first reminder shows 30 names: the new file path, then 29 of the 35 backquoted names, and not the branch",
           len(shown_first) == 29 and "(branch)" not in first and "many.md (file-path)" in first,
           str(len(shown_first)))
+    _, unchanged = run_hook(clone, state_root, {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+    check("a shell command that changed nothing is silent even while names past the cap wait", unchanged == "",
+          unchanged)
     _, second = run_hook(clone, state_root, {"tool_name": "Edit", "tool_input": {"file_path": "many.md"}})
     shown_second = set(re.findall(r"capped-name-\d\d", second))
     check("the next reminder shows the names past the cap",
