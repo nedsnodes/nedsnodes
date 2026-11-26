@@ -95,9 +95,9 @@ MINIMUM_DIALOG_WORDS = 1000
 
 # Openings of records Claude Code writes as context around a delivery rather than as one. Not <bash-input>, a
 # command the user typed, nor a slash command's or task notification's record, each of which delivers a queued text.
+# A skill's base directory and the local-command caveat come only in isMeta records, which both readers drop, so a
+# prompt the user pastes that opens with either is his.
 CONTEXT_RECORD_TEXT_OPENINGS = (
-    "Base directory for this skill:",
-    "<local-command-caveat>",
     "<local-command-stdout>",
     "<local-command-stderr>",
     "<bash-stdout>",
@@ -375,24 +375,38 @@ def dialog_turn_from_record(record):
 
 def typed_slash_command(text: str, record):
     """Return a human-typed command with its arguments, or None for other records."""
+    command_name = typed_slash_command_name(text, record)
+    if command_name is None:
+        return None
+    words = re.search(r"<command-args>(.*?)</command-args>", text, re.S)
+    if not words or not words.group(1).strip():
+        return None
+    return f"{command_name} {words.group(1).strip()}"
+
+
+def typed_slash_command_name(text: str, record):
+    """Return the name, with its slash, of a human-typed command's record, or None for other records."""
     # Built-in and older skill-command records omit origin; their tag-wrapped words are still user input.
     if not text.startswith(("<command-message>", "<command-name>")):
         return None
     origin = record.get("origin")
     if isinstance(origin, dict) and origin.get("kind") != "human":
         return None
-    words = re.search(r"<command-args>(.*?)</command-args>", text, re.S)
-    if not words or not words.group(1).strip():
-        return None
     name = re.search(r"<command-name>(.*?)</command-name>", text, re.S)
     if name and name.group(1).strip():
-        command_name = name.group(1).strip()
-    else:
-        message = re.search(r"<command-message>(.*?)</command-message>", text, re.S)
-        if not message or not message.group(1).strip():
-            return None
-        command_name = "/" + message.group(1).strip().lstrip("/")
-    return f"{command_name} {words.group(1).strip()}"
+        return name.group(1).strip()
+    message = re.search(r"<command-message>(.*?)</command-message>", text, re.S)
+    if not message or not message.group(1).strip():
+        return None
+    return "/" + message.group(1).strip().lstrip("/")
+
+
+def typed_slash_command_without_arguments(text: str, record):
+    """Return the name of a human-typed command given no arguments, which is how such a command is queued, or None."""
+    words = re.search(r"<command-args>(.*?)</command-args>", text, re.S)
+    if words and words.group(1).strip():
+        return None
+    return typed_slash_command_name(text, record)
 
 
 CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION = (
@@ -413,6 +427,9 @@ def texts_shown_to_agent(record) -> list:
     """Return each form in which a record shows the agent queued text: a prompt, its typed slash command or shell command, or an absorbed attachment."""
     if not isinstance(record, dict) or record.get("isSidechain"):
         return []
+    # Context Claude Code adds, such as a skill's body, delivers nothing; the dialog reader drops it too.
+    if record.get("type") == "user" and record.get("isMeta"):
+        return []
     if record.get("type") == "attachment":
         attachment = record.get("attachment")
         if isinstance(attachment, dict) and attachment.get("type") == "queued_command":
@@ -425,7 +442,8 @@ def texts_shown_to_agent(record) -> list:
     if isinstance(content, str):
         text = content.strip()
         shell_command = re.fullmatch(r"<bash-input>(.*)</bash-input>", text, re.S)
-        return [text, typed_slash_command(text, record) or "", shell_command.group(1).strip() if shell_command else ""]
+        return [text, typed_slash_command(text, record) or typed_slash_command_without_arguments(text, record) or "",
+                shell_command.group(1).strip() if shell_command else ""]
     return [joined_text_blocks(content).strip()]
 
 
@@ -505,22 +523,28 @@ def oldest_position_from_sender_of_first_delivery_record(events: list, operation
     that delivers a message, and return the oldest pending position from its sender; with no such record, the oldest position.
 
     Claude Code delivers some messages in another form than it queued them, such as a peer message without its hop-chain
-    attribute or a slash command without arguments, but never from another sender, so a stale message from another sender
-    is not taken in their place. A record of context Claude Code adds, such as a skill's base directory, delivers nothing,
-    and a record showing a message enqueued after this dequeue delivers that later message, so neither is claimed.
+    attribute, but never from another sender, so a stale message from another sender is not taken in their place. A record
+    of context Claude Code adds, such as a command's output, delivers nothing, and a record showing a message enqueued after
+    this dequeue and dequeued after that enqueue may deliver that later message, so neither is claimed. A later enqueue no
+    later dequeue follows cannot have been delivered yet, so a record matching only it delivers this dequeue's message.
     """
-    enqueued_later = []
+    enqueued_later_then_dequeued = []
+    enqueued_later_not_yet_dequeued = []
     for index in range(operation_index + 1, len(events)):
         event = events[index]
         if event is None:
             break
         if isinstance(event, dict):
             if event["operation"] == "enqueue" and isinstance(event["content"], str):
-                enqueued_later.append(event["content"].strip())
+                enqueued_later_not_yet_dequeued.append(event["content"].strip())
+            elif event["operation"] == "dequeue":
+                enqueued_later_then_dequeued += enqueued_later_not_yet_dequeued
+                enqueued_later_not_yet_dequeued = []
             continue
         if type(event) is not list or index in claimed:
             continue
-        if event[0].startswith(CONTEXT_RECORD_TEXT_OPENINGS) or first_pending_position_shown(enqueued_later, event) is not None:
+        if (event[0].startswith(CONTEXT_RECORD_TEXT_OPENINGS)
+                or first_pending_position_shown(enqueued_later_then_dequeued, event) is not None):
             continue
         claimed.add(index)
         sender = queued_text_sender_kind(event[0])
