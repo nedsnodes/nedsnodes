@@ -1244,16 +1244,16 @@ def test_the_waiting_item_read_step_does_not_refuse_a_status_claim_in_an_item_se
           described(result))
 
 
-def test_the_waiting_item_read_step_still_stops_an_item_rated_none_when_an_earlier_item_has_the_unclosed_settling():
+def test_the_waiting_item_read_step_offers_no_settling_while_an_earlier_items_settling_has_no_close():
     case = Case(document=marks_document("cold-read-research is offline.\n#not_asked_touches\n")
                 .replace("#case_against weak: the page grows.", "#case_against none."))
     with case.minutes.open("a") as minutes:
         minutes.write("item 2 of 9: settled without asking the user, not asked, case against none #case_against_none "
                       "(2026-11-22 00:00Z), which makes its change. Fast reads:\n")
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("an unclosed settling of item 2 does not count as the settling of waiting item 3, also rated none",
-          result.returncode == 0 and "item 3 of 9 is not to be shown to the user" in result.stdout
-          and "check --not-asked none" in result.stdout, described(result))
+    check("while item 2's settling has no close, the read step offers waiting item 3, also rated none, no settling",
+          "item 3 of 9 is not to be shown to the user" not in result.stdout
+          and "check --not-asked none" not in result.stdout, described(result))
 
 
 def test_the_waiting_item_read_step_names_and_reads_the_first_undecided_numbered_sub_step_of_the_item_named():
@@ -5268,7 +5268,7 @@ def test_check_refuses_a_second_settling_of_an_item_whose_settling_has_no_close_
         result = case.run("check", *second)
         check(f"after an unclosed check --already-decided ... D, check {second[0]} is refused, writing nothing",
               settled.returncode == 0 and result.returncode == 1
-              and f"was not settled again with `{second[0]}`" in result.stderr
+              and f"was not settled with `{second[0]}`" in result.stderr
               and case.minutes.read_text() == before, described(settled) + described(result))
     case = Case(next_to_present="item 3 of 9")
     case.run("check", "--already-decided", "walk x's minutes, item 3 (2026-10-20)", "D")
@@ -5287,13 +5287,55 @@ def test_a_repeated_already_decided_is_refused_writing_nothing():
           and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
 
 
-def test_a_moved_on_reason_naming_a_ruling_is_not_taken_for_an_already_decided_answer():
-    case = Case(next_to_present="item 3 of 9")
-    moved = case.run("check", "--moved-on", "the question went to walk y, already decided by walk z")
-    result = case.run("check", "--already-decided", "walk x, item 3")
-    check("an unclosed --moved-on whose reason holds \", already decided by \" is not taken for a settling, so a "
-          "later --already-decided is not refused as a second settling",
-          moved.returncode == 0 and "was not settled again" not in result.stderr, described(moved) + described(result))
+SECOND_SETTLINGS = (("--not-asked", "none"), ("--already-decided", "walk y, item 3"),
+                    ("--now-over-later-already-decided",))
+
+
+def test_a_settling_left_unclosed_is_not_settled_again_after_a_replan_changes_the_count():
+    for second in SECOND_SETTLINGS:
+        case = Case(next_to_present="item 3 of 9")
+        settled = case.run("check", "--already-decided", "walk x's minutes, item 3 (2026-10-20)", "D")
+        case.minutes.write_text(case.minutes.read_text() + "#next_to_present item 3 of 10\n")
+        before = case.minutes.read_text()
+        result = case.run("check", *second)
+        check(f"after an unclosed check --already-decided ... D and a re-plan that makes item 3 of 9 item 3 of 10, "
+              f"check {second[0]} is refused, writing nothing",
+              settled.returncode == 0 and result.returncode == 1 and "to item 3 of 9, has no close" in result.stderr
+              and case.minutes.read_text() == before, described(settled) + described(result))
+    closed = case.run("close")
+    check("close then records the cited disapproval as rejected",
+          closed.returncode == 0 and "\nitem 3 of 9: already decided by `walk x's minutes, item 3 (2026-10-20)`; the "
+                                     "walk does not come back to it. <rejected>\n" in case.minutes.read_text(),
+          described(closed) + case.minutes.read_text())
+
+
+def test_an_unclosed_answer_to_another_item_refuses_every_settling_and_names_close():
+    for second in SECOND_SETTLINGS:
+        case = Case(next_to_present="item 3 of 9")
+        settled = case.run("check", "--already-decided", "walk x's minutes, item 3 (2026-10-20)", "D")
+        case.minutes.write_text(case.minutes.read_text() + "#next_to_present item 4 of 9\n")
+        before = case.minutes.read_text()
+        result = case.run("check", *second)
+        check(f"while item 3 of 9's answer has no close and item 4 of 9 waits, check {second[0]} is refused, naming "
+              "close and writing nothing",
+              settled.returncode == 0 and result.returncode == 1 and "to item 3 of 9, has no close" in result.stderr
+              and f"run `{shlex.join(['python3', str(PROGRAM), 'close', '--cwd', str(case.checkout.resolve())])}`" in result.stderr and case.minutes.read_text() == before,
+              described(settled) + described(result))
+
+
+def test_an_unclosed_answer_of_the_users_own_refuses_every_settling():
+    for first, second in ((dict(reply="d"), ("--not-asked", "none")),
+                          (dict(reply="a"), ("--already-decided", "walk y, item 3")),
+                          (dict(), ("--moved-on", "the question went to walk y, already decided by walk z"))):
+        case = Case(next_to_present="item 3 of 9")
+        answered = (case.run("check", reply=first["reply"]) if first
+                    else case.run("check", "--moved-on", "the question went to walk y, already decided by walk z"))
+        before = case.minutes.read_text()
+        result = case.run("check", *second) if first else case.run("check", "--already-decided", "walk x, item 3")
+        check(f"after an unclosed {'answer ' + first['reply'] if first else '--moved-on'} to item 3 of 9, a settling "
+              "is refused, writing nothing",
+              answered.returncode == 0 and result.returncode == 1 and "to item 3 of 9, has no close" in result.stderr
+              and case.minutes.read_text() == before, described(answered) + described(result))
 
 
 def test_the_read_step_offers_no_settling_for_an_item_whose_settling_has_no_close():
@@ -6619,9 +6661,20 @@ def test_a_read_ahead_the_read_step_has_not_used_is_no_items_latest_read():
     program.write_json(reads / "a-outcome.json", {"status": program.READ_DONE, "item": "item 3 of 4", "finished": 1})
     program.write_json(reads / "b-outcome.json", {"status": program.READ_DONE, "item": "item 3 of 4", "finished": 2,
                                                   program.NUMBER_PREDICTED: True})
-    latest = program.latest_read(reads, "item 3 of 4")
+    latest = program.latest_read(program.load_walk_finder(), reads, ["3"])
     check("the latest read of an item leaves out a read ahead that no read step has used for it",
           latest is not None and latest[0] == "a", repr(latest))
+
+
+def test_an_items_latest_read_is_found_by_its_number_after_a_replan_changes_the_count():
+    program = load_program()
+    reads = SUITE_ROOT / "latest-read-replanned"
+    reads.mkdir(parents=True, exist_ok=True)
+    program.write_json(reads / "a-outcome.json", {"status": program.READ_DONE, "item": "item 3 of 4", "finished": 1})
+    program.write_json(reads / "b-outcome.json", {"status": program.READ_DONE, "item": "item 4 of 5", "finished": 2})
+    latest = program.latest_read(program.load_walk_finder(), reads, ["3"])
+    check("a read recorded for item 3 of 4 is item 3's latest read once a re-plan makes it item 3 of 5, and item 4's "
+          "is not", latest is not None and latest[0] == "a", repr(latest))
 
 
 def test_a_newer_failed_read_is_no_items_latest_read():
@@ -6631,7 +6684,7 @@ def test_a_newer_failed_read_is_no_items_latest_read():
     program.write_json(reads / "a-outcome.json", {"status": program.READ_DONE, "item": "item 3 of 4", "finished": 1})
     program.write_json(reads / "b-outcome.json", {"status": program.READ_FAILED, "item": "item 3 of 4", "finished": 2,
                                                   "failed": "the fast read exited 1"})
-    latest = program.latest_read(reads, "item 3 of 4")
+    latest = program.latest_read(program.load_walk_finder(), reads, ["3"])
     check("the latest read of an item leaves out a newer read that failed",
           latest is not None and latest[0] == "a", repr(latest))
 

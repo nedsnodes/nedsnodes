@@ -41,13 +41,13 @@ and is recorded as disapproved; any other value after USER_RULING is refused,
 writing nothing, and so is --already-decided given twice; --now-over-later-already-decided, the
 same with the now-over-later ruling as its citation; and --moved-on for an item the walk
 leaves with no decision, REASON saying why, which changes nothing. While the
-waiting item's last answer in the walk-minutes is a --not-asked or
---already-decided one with no close after it, as when the advisor objected and
-the item is shown after all, check refuses, writing nothing, a second
---not-asked, --already-decided or --now-over-later-already-decided for it, and
-the read step offers neither a no-answer row nor the now-over-later settling,
-since a second settling would record the item twice and could reverse the
-first; the user's own answer is still taken. When the
+walk-minutes' last answer, for any item and of any kind, has no close after it,
+as when the advisor objected to a settling and the item is shown after all,
+check refuses, writing nothing, every --not-asked, --already-decided and
+--now-over-later-already-decided, and the read step offers neither a no-answer
+row nor the now-over-later settling, since a settling then could record an item
+twice and reverse what that answer recorded; the user's own answer is still
+taken. When the
 walk-minutes hold an `#item_page` line for the item, a link or a failed
 publish, the user was shown it, so --moved-on writes its answer line opening
 `shown to the user,` in place of `settled without asking the user,`, and CLOSE
@@ -1562,11 +1562,11 @@ ALREADY_DECIDED_REPEATED = ("--already-decided was given more than once; give it
                             "decides the item and the answer that ruling gives")
 SETTLING_FLAGS = ("--not-asked", NOW_OVER_LATER_FLAG, "--already-decided")
 SECOND_SETTLING_REFUSED = (
-    "nothing written: {item} was not settled again with `{flag}`, because the last answer in {minutes} already "
-    "settles it without asking the user and no close follows that answer, so a second settling would record it "
-    "twice, and the later one could reverse what the first recorded.\n"
-    "If the item was not shown to the user, run `{close}` and do what it prints.\n"
-    "If it was shown, record his own answer with one of these, as `--help` lists them:\n{commands}")
+    "nothing written: {item} was not settled with `{flag}`, because the last answer in {minutes}, to {pending}, has "
+    "no close after it, so a settling now could record an item twice, and could reverse what that answer recorded.\n"
+    "If that answer settled {pending} without asking the user and {pending} was then shown to him, record his own "
+    "answer with one of these, as `--help` lists them:\n{commands}\n"
+    "Otherwise run `{close}` and do what it prints.")
 NOW_OVER_LATER_PARTS = "- a `Part N.` paragraph, each part answered on its own, on line {lines}"
 NOW_OVER_LATER_OPTIONS = "- a line opening `Option N`, another option he can pick, on line {lines}"
 NOW_OVER_LATER_NEW_IF_D = "- a `#new_if_d` text, what his disapproval would do instead, on line {lines}"
@@ -2705,8 +2705,10 @@ def check(arguments):
         raise Failure(NAVIGATION_WORD_REFUSED.format(words=words, item=item,
                                                      answered=answered_word(arguments, walk_finder),
                                                      command=moved_on_no_decision_command))
-    if not_shown_flag in SETTLING_FLAGS and settling_left_unclosed(walk_finder, minutes, parser, item):
+    pending = unclosed_last_answer(walk_finder, minutes, parser) if not_shown_flag in SETTLING_FLAGS else None
+    if pending:
         raise Failure(SECOND_SETTLING_REFUSED.format(item=item, flag=not_shown_flag, minutes=minutes,
+                                                     pending=pending["item"],
                                                      close=step_command_with_cwd(top, "close"),
                                                      commands=answer_check_commands(top)))
     if arguments.now_over_later_already_decided:
@@ -3017,13 +3019,14 @@ def waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, par
         for unit in walk_finder.item_unit_spans(text, parser) if set(unit[0]) & set(numbers)]
 
 
-def latest_read(reads, item):
-    """Return (key, outcome) of the latest read of the item that wrote its report, or None; a read ahead that no read
-    step has used is no item's read."""
+def latest_read(walk_finder, reads, numbers):
+    """Return (key, outcome) of the latest read of the item numbered numbers that wrote its report, or None; a read
+    ahead that no read step has used is no item's read. Matched by number, since a re-plan changes M in the label."""
     done = []
     for path in reads.glob("*-outcome.json") if reads.is_dir() else []:
         outcome = json.loads(path.read_text(encoding="utf-8"))
-        if outcome["item"] == item and outcome["status"] == READ_DONE and not outcome.get(NUMBER_PREDICTED):
+        if (walk_finder.parse_items(outcome["item"])[0] == numbers and outcome["status"] == READ_DONE
+                and not outcome.get(NUMBER_PREDICTED)):
             done.append((outcome["finished"], path.name[:-len("-outcome.json")], outcome))
     return max(done)[1:] if done else None
 
@@ -3514,16 +3517,7 @@ def rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, t
     if TOUCHES in evidence(lines) and not_asked_problems(NOT_ASKED_RATED_NONE, NOT_ASKED_RATED_NONE, lines, marks,
                                                          top, named):
         return None
-    return None if settling_left_unclosed(walk_finder, minutes, parser, named) else document
-
-
-def settling_left_unclosed(walk_finder, minutes, parser, named):
-    """True when the walk-minutes' last answer settles the named item without asking the user and no close follows
-    it, as when the advisor objected: the item is then shown, and rerunning the settling would record it twice."""
-    match = unclosed_last_answer(walk_finder, minutes, parser)
-    settled = {f"not asked, {not_asked_label(kind)}" for kind in NOT_ASKED_KINDS + NOT_ASKED_NO_KIND_VALUES}
-    return bool(match and match["item"].lower() == named.lower()
-                and (match["answered"] in settled or answer_is_already_decided(match["answered"])))
+    return None if unclosed_last_answer(walk_finder, minutes, parser) else document
 
 
 def answer_is_already_decided(answered):
@@ -3545,7 +3539,7 @@ NO_ANSWER_ROW_NOT_CHECKED = ("- {label}: its evidence could not be checked, so i
 
 def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numbers, total, parser, named, item):
     """The no-answer table's rows the waiting item could settle by, as the docstring's read-step paragraph says."""
-    if numbers[1:] or settling_left_unclosed(walk_finder, minutes, parser, named):
+    if numbers[1:] or unclosed_last_answer(walk_finder, minutes, parser):
         return []
     document, lines, marks, _, _ = item_lines(walk_finder, minutes, value, numbers, total, parser)
     ratings = [CASE_AGAINST_RATING.match(match[1]) for match in map(CASE_AGAINST_LINE.match, lines) if match]
@@ -3587,14 +3581,24 @@ def no_answer_table_row_text_or_none_from_evidence_check_problems(case, problems
     return None
 
 
-def unclosed_last_answer(walk_finder, minutes, parser):
-    """Return the ANSWER_LINE match of the walk-minutes' last answer line when no close line follows it, else None."""
+def last_answer_line(walk_finder, minutes, parser):
+    """Return (match, the lines after it, closed) for the walk-minutes' last answer line, or None when there is none.
+    closed compares the answer line's label with itself: every line close writes for an answer opens with that
+    label, so a re-plan that changes M cannot make the two differ."""
     lines = walk_finder.prose_lines(minutes.read_text(encoding="utf-8"), parser)
     for index in range(len(lines) - 1, -1, -1):
         match = ANSWER_LINE.match(lines[index])
         if match:
-            return None if any(line.startswith(match["item"] + ": ") for line in lines[index + 1:]) else match
+            after = lines[index + 1:]
+            return match, after, any(line.startswith(match["item"] + ": ") for line in after)
     return None
+
+
+def unclosed_last_answer(walk_finder, minutes, parser):
+    """Return the ANSWER_LINE match of the walk-minutes' last answer line when no close line follows it, else None:
+    while it returns one, nothing may settle any item."""
+    found = last_answer_line(walk_finder, minutes, parser)
+    return found[0] if found and not found[2] else None
 
 
 def item_read_findings_without_outcomes_lines(item, report, outcome_file, fast_read_program, command,
@@ -3905,7 +3909,7 @@ def waiting_item_read(arguments, sub_step_of=None):
                                     read_command=command_reading_again)
                         for line in [*RATED_NONE_NOT_SHOWN_LINES, *no_answer_rows]))
         return 0
-    now_over_later_clause = ("." if settling_left_unclosed(walk_finder, minutes, parser, named)
+    now_over_later_clause = ("." if unclosed_last_answer(walk_finder, minutes, parser)
                              else PRESENT_UNLESS_NOW_OVER_LATER_CLAUSE.format(
                                  now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG)))
     key = text_key(text)
@@ -3921,7 +3925,8 @@ def waiting_item_read(arguments, sub_step_of=None):
         if ahead:
             why = (ITEM_READ_RUN_AHEAD_FAILED.format(line=outcome["failed"]) if outcome
                    else ITEM_READ_RUN_AHEAD_ENDED.format(log=reads / f"{key}.log"))
-        latest = latest_read(reads, item) if arguments.after_fixes_reread_only_when_facts_change else None
+        latest = (latest_read(walk_finder, reads, numbers) if arguments.after_fixes_reread_only_when_facts_change
+                  else None)
         if latest is not None:
             last_text = (reads / f"{latest[0]}.md").read_text(encoding="utf-8").rstrip("\n")
             facts = approval_walk_item_before_and_after_fixes_compare_for_changed_fact_words_needing_another_cold_read_fast_read(last_text, text, top)
@@ -3977,21 +3982,20 @@ def items_shown_to_user(walk_finder, minutes, numbers, parser):
 def last_answer(walk_finder, minutes, parser, top):
     """Return (item, answered, status lines, how the line opens after the item, as in `shown to the user,`) of the
     walk-minutes' last answer line, or raise Failure when there is none or a close already recorded it."""
-    lines = walk_finder.prose_lines(minutes.read_text(encoding="utf-8"), parser)
-    for index in range(len(lines) - 1, -1, -1):
-        match = ANSWER_LINE.match(lines[index])
-        if match:
-            statuses = []
-            for line in lines[index + 1:]:
-                if not line.startswith(STATUS_LINE_PREFIX):
-                    break
-                statuses.append(line[len(STATUS_LINE_PREFIX):])
-            # Every line close writes for an answer opens with its item; without this, a close after a
-            # check that failed reads the earlier, already closed answer as one held for a new item.
-            if any(line.startswith(match["item"] + ": ") for line in lines[index + 1:]):
-                raise Failure(CLOSE_ALREADY_RECORDED.format(minutes=minutes, item=match["item"],
-                                                            command=check_command_with_cwd(top)))
-            return match["item"], match["answered"], statuses, match["settled"]
+    found = last_answer_line(walk_finder, minutes, parser)
+    if found:
+        match, after, closed = found
+        # Without this, a close after a check that failed reads the earlier, already closed answer as one held for
+        # a new item.
+        if closed:
+            raise Failure(CLOSE_ALREADY_RECORDED.format(minutes=minutes, item=match["item"],
+                                                        command=check_command_with_cwd(top)))
+        statuses = []
+        for line in after:
+            if not line.startswith(STATUS_LINE_PREFIX):
+                break
+            statuses.append(line[len(STATUS_LINE_PREFIX):])
+        return match["item"], match["answered"], statuses, match["settled"]
     raise Failure(f"{minutes} has no line recording the user's answer; run "
                   f"`{check_command_with_cwd(top)}` first, with the flag for the user's answer as "
                   f"`--help` lists it.")
