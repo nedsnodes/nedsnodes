@@ -12,6 +12,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -46,9 +47,16 @@ for failing in state.get("gh_fails", []):
         sys.stderr.write("HTTP 502: bad gateway\n"); sys.exit(1)
 if argv[:2] == ["pr", "view"]:
     print(json.dumps(state["prs"][argv[2]]))
+elif argv[:2] == ["pr", "list"] and "--label" in argv:
+    print(json.dumps([{"number": n} for n in state.get("high_priority", [])]))
 elif argv[:2] == ["pr", "list"]:
     branch = argv[argv.index("--head") + 1]
     print(json.dumps([{"number": n} for n in state.get("branches", {}).get(branch, [])]))
+elif argv[0] == "api" and "/compare/main..." in argv[1]:
+    head = argv[1].split("...")[-1]
+    if head not in state.get("merge_bases", {}):
+        sys.stderr.write("HTTP 404: no common ancestor\n"); sys.exit(1)
+    print(state["merge_bases"][head])
 elif argv[0] == "api":
     number = argv[1].split("/")[-2]
     print(json.dumps([state.get("reviews", {}).get(number, [])]))
@@ -105,7 +113,8 @@ def merge_account_review(head, at):
 
 class Case:
     def __init__(self, scratch, name, queue_lines, prs, merge_outcomes=None, reviews=None,
-                 branches=None, gh_fails=None, gh_garbles=None):
+                 branches=None, gh_fails=None, gh_garbles=None, high_priority=(),
+                 prose_only_heads=None, merge_bases=None):
         self.directory = scratch / name
         self.directory.mkdir()
         self.queue = self.directory / "merge-queue.txt"
@@ -117,7 +126,10 @@ class Case:
         self.state.write_text(json.dumps({
             "prs": prs, "merge_outcomes": merge_outcomes or {}, "reviews": reviews or {},
             "branches": branches or {}, "gh_fails": gh_fails or [],
-            "gh_garbles": gh_garbles or []}))
+            "gh_garbles": gh_garbles or [], "high_priority": list(high_priority),
+            "merge_bases": {**{head: "0" * 40 for head in prose_only_heads or ()},
+                            **(merge_bases or {})}}))
+        self.prose_only_heads = prose_only_heads
         bin_directory = self.directory / "bin"
         bin_directory.mkdir()
         self.gh = bin_directory / "gh"
@@ -140,12 +152,22 @@ class Case:
         saved = dict(os.environ)
         os.environ.update(self.environment, **(extra_environment or {}))
         output = io.StringIO()
+        runner = program.MergeQueuePullRequestMergeBatchRunner
+        real_check = getattr(runner, "changes_only_docs_prose", None)
+        if self.prose_only_heads is not None:
+            runner.changes_only_docs_prose = (
+                lambda queue, merge_base, head: head in self.prose_only_heads)
         try:
             with contextlib.redirect_stdout(output):
                 exit_code = program.main(self.argv(*subcommand))
         finally:
             os.environ.clear()
             os.environ.update(saved)
+            if self.prose_only_heads is not None:
+                if real_check is None:
+                    del runner.changes_only_docs_prose
+                else:
+                    runner.changes_only_docs_prose = real_check
         return exit_code, output.getvalue()
 
     def queue_text(self):
@@ -337,6 +359,118 @@ def merging_cases(scratch):
           "0 and leaves the new line to it",
           exit_code == 0 and [call[0] for call in case.merge_calls()] == ["10"]
           and "DONE" not in output, f"{flock_calls}\n{output}")
+
+
+def head(number):
+    return f"{number:x}".rjust(40, "0")
+
+
+def merged_order(case):
+    return [int(call[0]) for call in case.merge_calls()]
+
+
+def merge_order_cases(scratch):
+    case = Case(scratch, "high-priority-first", [approved(10, A), approved(11, B), approved(12, C)],
+                {"10": pr(A), "11": pr(B), "12": pr(C)}, high_priority=[12, 11],
+                prose_only_heads={A})
+    case.run("merge-batch-run-in-queue-order")
+    check("pull requests labeled high-priority merge first, oldest first, even before a "
+          "prose-only one", merged_order(case) == [11, 12, 10], merged_order(case))
+
+    case = Case(scratch, "prose-only-before-code", [approved(10, A), approved(11, B), approved(12, C)],
+                {"10": pr(A), "11": pr(B), "12": pr(C)}, prose_only_heads={B, C})
+    case.run("merge-batch-run-in-queue-order")
+    check("the oldest prose-only line merges before any code line",
+          merged_order(case) == [11, 12, 10], merged_order(case))
+
+    numbers = [10, 11, 12, 13, 14, 15]
+    case = Case(scratch, "code-after-three-prose-only", [approved(n, head(n)) for n in numbers],
+                {str(n): pr(head(n)) for n in numbers},
+                prose_only_heads={head(n) for n in (10, 11, 12, 13)})
+    case.run("merge-batch-run-in-queue-order")
+    check("after three prose-only merges in a row the oldest code line merges, then prose-only "
+          "again", merged_order(case) == [10, 11, 12, 14, 13, 15], merged_order(case))
+
+    numbers = [10, 11, 12, 13, 14]
+    case = Case(scratch, "count-carries-to-the-next-batch",
+                [approved(n, head(n)) for n in (10, 11, 12)],
+                {str(n): pr(head(n)) for n in numbers},
+                prose_only_heads={head(n) for n in (10, 11, 12, 13)})
+    case.run("merge-batch-run-in-queue-order")
+    with open(case.queue, "a") as queue:
+        queue.write(approved(13, head(13)) + "\n" + approved(14, head(14)) + "\n")
+    case.run("merge-batch-run-in-queue-order")
+    check("the count of prose-only merges in a row carries from one merge batch to the next",
+          merged_order(case) == [10, 11, 12, 14, 13], merged_order(case))
+
+    case = Case(scratch, "count-file-malformed", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B)}, prose_only_heads={B})
+    case.batches.mkdir()
+    (case.batches / "merge-batch-prose-only-merges-in-a-row.txt").write_text("three\n")
+    case.run("merge-batch-run-in-queue-order")
+    check("a count file that holds no whole number stops the merge batch, naming the file",
+          case.merge_calls() == [] and "not a whole number" in (case.stop_text() or "")
+          and "merge-batch-prose-only-merges-in-a-row.txt" in case.stop_text(),
+          f"{case.merge_calls()}\n{case.stop_text()}")
+
+    case = Case(scratch, "label-read-fails", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B)}, gh_fails=["pr list --repo nedsnodes/nedsnodes --label"])
+    case.run("merge-batch-run-in-queue-order")
+    check("a failed read of the high-priority label stops the merge batch, quoting gh's error",
+          case.merge_calls() == [] and "gh pr list --repo exited 1: HTTP 502" in (
+              case.stop_text() or ""), f"{case.merge_calls()}\n{case.stop_text()}")
+
+    case = Case(scratch, "prose-only-unreadable", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B)}, prose_only_heads={B},
+                gh_fails=[f"api repos/nedsnodes/nedsnodes/compare/main...{B}"])
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("a pull request whose files cannot be read counts as code, and the log says why",
+          merged_order(case) == [10, 11]
+          and f"pull request 11: whether {B} is prose-only could not be read, so it counts as "
+              f"code: gh api repos/nedsnodes/nedsnodes/compare/main...{B} --jq exited 1: HTTP 502" in output,
+          f"{merged_order(case)}\n{output}")
+
+    repository = scratch / "prose-only-check-repository"
+    repository.mkdir()
+
+    def git(*arguments):
+        return subprocess.run(["git", "-C", str(repository), *arguments], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def commit_from(base, path, text):
+        git("checkout", "-q", "--detach", base)
+        (repository / path).parent.mkdir(parents=True, exist_ok=True)
+        (repository / path).write_text(text)
+        git("add", "-A")
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", path)
+        return git("rev-parse", "HEAD")
+    git("init", "-q")
+    page = "# Page\n\nProse.\n\n```\ncode\n```\n"
+    (repository / "docs").mkdir()
+    (repository / "docs" / "page.md").write_text(page)
+    (repository / "README.md").write_text("Prose.\n")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+    base = git("rev-parse", "HEAD")
+    fenced = commit_from(base, "docs/page.md", page.replace("code", "other code"))
+    outside_docs = commit_from(base, "README.md", "Other prose.\n")
+    not_markdown = commit_from(base, "docs/tool.txt", "text\n")
+    prose = commit_from(base, "docs/page.md", page.replace("Prose.", "Other prose."))
+    lines = [(10, fenced), (11, outside_docs), (12, not_markdown), (13, prose)]
+    case = Case(scratch, "prose-only-from-the-queued-commit",
+                [approved(number, commit) for number, commit in lines],
+                {str(number): pr(commit) for number, commit in lines},
+                merge_bases={commit: base for _, commit in lines})
+    real_repository = getattr(program, "PROSE_ONLY_CHECK_REPOSITORY", None)
+    program.PROSE_ONLY_CHECK_REPOSITORY = repository
+    try:
+        case.run("merge-batch-run-in-queue-order")
+    finally:
+        program.PROSE_ONLY_CHECK_REPOSITORY = real_repository
+    check("prose-only is read from the queued commit: only Markdown under docs/ changed outside "
+          "fenced code is prose-only, and a fenced-code change, Markdown outside docs/ and any "
+          "other file under docs/ are code", merged_order(case) == [13, 10, 11, 12],
+          merged_order(case))
 
 
 def stopping_cases(scratch):
@@ -579,6 +713,7 @@ def main():
     scratch = Path(tempfile.mkdtemp(prefix="merge-queue-test-")).resolve()
     try:
         merging_cases(scratch)
+        merge_order_cases(scratch)
         stopping_cases(scratch)
         next_merge_decision_cases(scratch)
         starting_cases(scratch)

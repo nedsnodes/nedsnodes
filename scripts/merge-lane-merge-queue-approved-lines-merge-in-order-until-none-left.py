@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge the merge queue's approved lines in order, one merge at a time, until none is left.
+"""Merge the merge queue's approved lines in merge order, one merge at a time, until none is left.
 
 Usage:
   scripts/merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py merge-batch-start [--quiet]
@@ -24,8 +24,21 @@ The merge queue file is read as merge-lane-2's lanes write it: the last line for
 request decides its state. "<pr> <nn-head-commit> <review commissioned at> <author> (...)"
 makes it waiting; the same line opening with "HOLD-<reason> " holds it for its lane;
 "MERGED <pr> ..." and "DROPPED-<reason> <pr> ..." mean done; "HELD <pr> ..." means it waits
-for a new approved line. "NOTE" lines, "#" lines and empty lines are skipped. Waiting pull
-requests merge in the order of their last lines.
+for a new approved line. "NOTE" lines, "#" lines and empty lines are skipped. A waiting pull
+request's age is the place of its last line: the earlier, the older.
+
+Waiting pull requests merge in this order, chosen again before each merge:
+  1. those labeled high-priority on GitHub, oldest first;
+  2. the oldest prose-only one, before any code one;
+  3. after three prose-only merges in a row, the oldest code one; then prose-only again.
+When no line of the kind a rule wants is waiting, the oldest other line goes. A pull request
+is prose-only when every file it changes, from its merge base with main to its queued
+nn-head-commit, which is the commit about to be merged, is Markdown under docs/ that
+scripts/pull-request-review-plan.py classes as prose, so no line it changes is inside a
+fenced code block; any other pull request is code, and so is one whose files could not be
+read, which the log says. The count of prose-only merges in a row is kept in
+merge-batch-prose-only-merges-in-a-row.txt, so it carries from one merge batch to the next;
+every merge this program makes counts by its kind, and a code merge sets the count to 0.
 
 merge-batch-run-in-queue-order takes merge-batch.lock without waiting, and exits 0 when
 another process holds it. It makes passes over the queue file until a pass neither merges
@@ -89,6 +102,10 @@ _merge_spec = importlib.util.spec_from_file_location(
     SCRIPTS / "merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py")
 merge_program = importlib.util.module_from_spec(_merge_spec)
 _merge_spec.loader.exec_module(merge_program)
+_review_plan_spec = importlib.util.spec_from_file_location(
+    "pull_request_review_plan", SCRIPTS / "pull-request-review-plan.py")
+review_plan = importlib.util.module_from_spec(_review_plan_spec)
+_review_plan_spec.loader.exec_module(review_plan)
 
 REPOSITORY = "nedsnodes/nedsnodes"
 MERGE_ACCOUNT = "ned-review-merge"
@@ -100,6 +117,11 @@ MERGE_PROGRAM = SCRIPTS / "merge-lane-pull-request-merge-through-merge-gate-with
 FOLLOW_UP_PROGRAM = SCRIPTS / "pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py"
 MERGE_BATCH_LOCK_FILE_NAME = "merge-batch.lock"
 MERGE_BATCH_LOG_FILE_NAME = "merge-batch.log"
+PROSE_ONLY_MERGES_IN_A_ROW_FILE_NAME = "merge-batch-prose-only-merges-in-a-row.txt"
+PROSE_ONLY_MERGES_IN_A_ROW_BEFORE_A_CODE_MERGE = 3
+HIGH_PRIORITY_LABEL = "high-priority"
+# The checkout whose git objects the prose-only check reads, fetching any commit missing.
+PROSE_ONLY_CHECK_REPOSITORY = SCRIPTS.parent
 MERGE_IN_PROGRESS_FILE_NAME = "merge-batch-merge-in-progress.txt"
 MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME = "merge-batch-outcome-notices-for-merge-lane-2"
 NEXT_MERGE_STARTS, NEXT_MERGE_WAITS, NEXT_MERGE_STOPS = "STARTS", "WAITS", "STOPS"
@@ -160,7 +182,9 @@ class MergeQueuePullRequestMergeBatchRunner:
                           / merge_program.MERGE_QUEUE_STOP_FILE_NAME)
         self.in_progress_file = self.directory / MERGE_IN_PROGRESS_FILE_NAME
         self.notices = self.directory / MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME
+        self.prose_only_merges_in_a_row_file = self.directory / PROSE_ONLY_MERGES_IN_A_ROW_FILE_NAME
         self.merged_cleanly = None
+        self.prose_only_by_merge_base_and_head = {}
 
     # The merge queue file
 
@@ -227,6 +251,84 @@ class MergeQueuePullRequestMergeBatchRunner:
     def open_pull_requests_with_branch(self, branch):
         return self.gh_json("pr", "list", "--repo", REPOSITORY, "--head", branch,
                             "--state", "open", "--json", "number")
+
+    def high_priority_pull_requests(self):
+        # Read before every choice, since a pull request can be labeled during a merge batch.
+        return {entry["number"] for entry in self.gh_json(
+            "pr", "list", "--repo", REPOSITORY, "--label", HIGH_PRIORITY_LABEL, "--state", "open",
+            "--limit", "1000", "--json", "number")}
+
+    # Merge order
+
+    def prose_only(self, line):
+        number, head = int(line["pr"]), line["head"]
+        try:
+            merge_base = self.gh("api", f"repos/{REPOSITORY}/compare/main...{head}",
+                                 "--jq", ".merge_base_commit.sha").strip()
+            if not re.fullmatch(r"[0-9a-f]{40}", merge_base):
+                raise Stop(f"GitHub gave {merge_base[:200]!r} as its merge base with main")
+            key = (merge_base, head)
+            if key not in self.prose_only_by_merge_base_and_head:
+                self.prose_only_by_merge_base_and_head[key] = self.changes_only_docs_prose(
+                    merge_base, head)
+            return self.prose_only_by_merge_base_and_head[key]
+        except (Stop, review_plan.ReviewPlanRefusal, ValueError) as error:
+            self.log(f"pull request {number}: whether {head} is prose-only could not be read, so "
+                     f"it counts as code: {error}")
+            return False
+
+    def changes_only_docs_prose(self, merge_base, head):
+        repository = PROSE_ONLY_CHECK_REPOSITORY
+        missing = [commit for commit in (merge_base, head) if review_plan.run_git_in_repository(
+            repository, "cat-file", "-e", f"{commit}^{{commit}}").returncode]
+        if missing:
+            # By commit and without FETCH_HEAD, as the merge program fetches, since a fetch
+            # that updates origin/main can collide with another checkout's fetch.
+            fetch = review_plan.run_git_in_repository(
+                repository, "fetch", "--quiet", "--no-write-fetch-head", "origin", *missing)
+            if fetch.returncode:
+                raise Stop(f"git fetch of {' '.join(missing)} in {repository} exited "
+                           f"{fetch.returncode}: {fetch.stderr.strip()}")
+        return all(entry["path"].startswith("docs/") and entry["path"].endswith(".md")
+                   and entry["class"] == "prose"
+                   for entry in review_plan.changed_files_with_classes_and_tiers(
+                       repository, merge_base, head))
+
+    def prose_only_merges_in_a_row(self):
+        try:
+            text = self.prose_only_merges_in_a_row_file.read_text().strip()
+        except FileNotFoundError:
+            return 0
+        if not text.isdigit():
+            raise Stop(f"{self.prose_only_merges_in_a_row_file}, which counts the prose-only merges "
+                       f"in a row, holds {text[:200]!r}, not a whole number, so the next pull "
+                       f"request cannot be chosen. Write into it the number of prose-only merges "
+                       f"since the last code merge, or remove it to count from 0, before you "
+                       f"resume")
+        return int(text)
+
+    def next_in_merge_order(self, waiting):
+        """Return the line to merge next from the waiting lines, given oldest first."""
+        high_priority = self.high_priority_pull_requests()
+        for line in waiting:
+            if int(line["pr"]) in high_priority:
+                self.log(f"next: pull request {line['pr']}, the oldest labeled {HIGH_PRIORITY_LABEL}")
+                return line
+        in_a_row = self.prose_only_merges_in_a_row()
+        wants_prose_only = in_a_row < PROSE_ONLY_MERGES_IN_A_ROW_BEFORE_A_CODE_MERGE
+        wanted = "prose-only" if wants_prose_only else "code"
+        line = next((line for line in waiting if self.prose_only(line) == wants_prose_only), None)
+        if line is None:
+            self.log(f"next: pull request {waiting[0]['pr']}, the oldest, since after {in_a_row} "
+                     f"prose-only merges in a row a {wanted} one goes next and none waits")
+            return waiting[0]
+        self.log(f"next: pull request {line['pr']}, the oldest {wanted} one, after {in_a_row} "
+                 f"prose-only merges in a row")
+        return line
+
+    def prose_only_merge_counted(self, line):
+        in_a_row = self.prose_only_merges_in_a_row() + 1 if self.prose_only(line) else 0
+        self.prose_only_merges_in_a_row_file.write_text(f"{in_a_row}\n")
 
     # Files for merge-lane-2
 
@@ -325,7 +427,7 @@ class MergeQueuePullRequestMergeBatchRunner:
                 waiting = first
             if not waiting:
                 return appended
-            line = waiting[0]
+            line = waiting[0] if len(waiting) == 1 else self.next_in_merge_order(waiting)
             tried.add(int(line["pr"]))
             self.merged_cleanly = None
             appended |= self.one_pull_request(line)
@@ -417,6 +519,7 @@ class MergeQueuePullRequestMergeBatchRunner:
         on_github = merged_state.get("state") == "MERGED"
         if on_github:
             self.append(f"MERGED {number} {merge_commit}")
+            self.prose_only_merge_counted({"pr": number, "head": head})
         if exit_code == 0 and on_github:
             self.merged_cleanly = number
             self.in_progress_file.unlink(missing_ok=True)
