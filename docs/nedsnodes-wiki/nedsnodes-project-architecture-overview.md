@@ -19,7 +19,7 @@ Each nn-system has its own directory under `nn-systems/`, or files still to move
 
 A critical component is a part the project does not own and whose failure stops work that has no other way to go on.
 
-- **ned-box, its disk included.** Most agent-seats run there, merge-lane-2 reviews and merges every pull request there, and the log-store is kept there.
+- **ned-box, its disk included.** Most agent-seats run there, merge-lane-2 merges every pull request there, merge-lane-1, merge-lane-2 and merge-lane-3 manage their reviews there, and the log-store is kept there.
 - **The user's Mac, its disk included.** The user reads and answers from it, and its own agent-seats run there.
 - **The network between the Mac and ned-box.** The Mac reaches ned-box, and the log-store through the `/Volumes/nedhome` mount, only over it.
 - **git.** Every change reaches main as a commit on an nn-topic-branch.

@@ -1113,14 +1113,15 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     reaches GitHub; otherwise None. A ruling question
     does not stop the write.
 
-    Not handled: a too-similar verdict naming the edited issue, while it is
-    open, and a number that is not a GHI, such as a pull request's. The ask's
-    closed-GHI check passes a number its mirror does not hold, the edited
-    issue is dropped here, and the refusal sends the author to that number;
-    the author's reconsider path in RECONSIDER_LINE passes the write. When
-    the edited issue is closed in the mirror, the ask rechecks the verdict
-    before it reaches here, and a failed or repeated recheck skips the
-    adjudication instead."""
+    Not handled: a too-similar verdict naming a number the ask's mirror does
+    not hold as a closed GHI, such as the edited issue while the mirror shows
+    it open, even after GitHub has closed it, or a pull request's number that
+    a recheck kept. The ask's closed-GHI check passes such a number, the
+    edited issue is dropped here, and the refusal sends the author to that
+    number; the author's reconsider path in RECONSIDER_LINE passes the write.
+    A number the mirror holds as a closed GHI makes the ask recheck the
+    verdict before it reaches here, and a failed or repeated recheck skips
+    the adjudication instead."""
     marker = repository_root / RECONSIDERED_MARKER_NAME
     if marker.is_file():
         marker.unlink()
@@ -1229,7 +1230,7 @@ def ghi_guide_agent_log_store():
     directory on this machine; the store's directory)."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return None, override
+        return None, os.path.abspath(override)
     if socket.gethostname().split(".")[0] == GHI_GUIDE_AGENT_LOG_STORE_HOSTNAME:
         return None, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
     return GHI_GUIDE_AGENT_LOG_STORE_HOST, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
@@ -1240,7 +1241,7 @@ def ghi_guide_agent_log_store_citation(name: str) -> str:
     as the local path when a test points the store at a directory."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return str(Path(override) / name)
+        return os.path.join(os.path.abspath(override), name)
     return f"{GHI_GUIDE_AGENT_LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}"
 
 

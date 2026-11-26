@@ -347,9 +347,11 @@ def gh(arguments, timeout_seconds=None):
     return completed.stdout
 
 
-def state_directory(directory="."):
-    """PULL_REQUEST_FOLLOW_UP_REQUESTS_DIRECTORY_NAME in the git common directory, which the checkout and its worktrees share."""
-    common = git(directory, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
+def state_directory(directory=".", environment=None):
+    """PULL_REQUEST_FOLLOW_UP_REQUESTS_DIRECTORY_NAME in the git common directory, which the checkout and its worktrees share.
+    git runs in `environment`, by default this process's."""
+    common = git(directory, ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                 environment=environment).strip()
     return Path(common) / PULL_REQUEST_FOLLOW_UP_REQUESTS_DIRECTORY_NAME
 
 

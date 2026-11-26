@@ -419,20 +419,25 @@ with tempfile.TemporaryDirectory() as scratch:
     code, calls, printed, errors = run(argv=[outcome])
     check("--print-outcome outside a reference-checkout says nothing was run and names both "
           "reference-checkouts",
-          code == 0 and calls == [] and "is not a reference-checkout, so nothing was run; run "
-          f"this in {elsewhere} on ned-box or " in printed, (code, calls, printed))
+          code == 0 and calls == [] and printed.endswith(
+              "is not a reference-checkout, so nothing was run; run this in "
+              f"{elsewhere} on ned-box or {after_merge.REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME[after_merge.MAC]} "
+              "on the Mac.\n"), (code, calls, printed))
     reset()
 
     outside = scratch / "not-a-repository"
     outside.mkdir()
     reset()
-    def run_outside(argv):
+    def run_outside(argv, directory=outside, extra_environment=None):
         printed, errors = io.StringIO(), io.StringIO()
         before = os.getcwd()
-        os.chdir(outside)
+        os.chdir(directory)
         try:
+            if directory != outside:
+                os.rmdir(directory)
             with redirect_stdout(printed), redirect_stderr(errors):
-                code = after_merge.main({**os.environ, **seams}, argv=argv)
+                code = after_merge.main({**os.environ, **seams, **(extra_environment or {})},
+                                        argv=argv)
         finally:
             os.chdir(before)
         return code, printed.getvalue(), errors.getvalue()
@@ -445,9 +450,24 @@ with tempfile.TemporaryDirectory() as scratch:
     check("--print-outcome outside any git checkout says nothing was run and names both "
           "reference-checkouts",
           code == 0 and not installer_log.exists() and errors == ""
-          and printed.startswith(f"{os.path.realpath(outside)} is not in a Git checkout, so "
-                                 "nothing was run; run this in ")
-          and " on ned-box or " in printed, (code, printed, errors))
+          and printed == "The current directory is not in a Git checkout, so nothing was run; "
+                         f"run this in {after_merge.REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME[after_merge.NED_BOX]} "
+                         f"on ned-box or {after_merge.REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME[after_merge.MAC]} "
+                         "on the Mac.\n", (code, printed, errors))
+    stale_git_directory = scratch / "stale-git-directory"
+    code, printed, errors = run_outside(
+        [outcome], extra_environment={"GIT_DIR": str(stale_git_directory)})
+    check("--print-outcome with a stale GIT_DIR prints git's error, not the rerun advice",
+          code == 0 and not installer_log.exists() and errors == ""
+          and printed.startswith("git rev-parse --show-toplevel exited ")
+          and str(stale_git_directory) in printed and "run this in" not in printed,
+          (code, printed, errors))
+    removed = scratch / "removed-directory"
+    removed.mkdir()
+    code, printed, errors = run_outside([], directory=removed)
+    check("a hook run from a removed directory does nothing, prints nothing and exits 0",
+          code == 0 and not installer_log.exists() and printed == errors == "",
+          (code, printed, errors))
 
     reset()
     helped = subprocess.run(["python3", str(PROGRAM_PATH), "--help"], cwd=repository,

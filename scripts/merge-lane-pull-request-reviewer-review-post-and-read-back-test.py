@@ -127,11 +127,15 @@ def running(pid):
 
 
 def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", "7", "--head-commit", HEAD),
-                interrupt=None, merge_token=MERGE_TOKEN, codex_runs=None, review_plan=None, **fake_gh_environment):
+                interrupt=None, merge_token=MERGE_TOKEN, codex_runs=None, review_plan=None, findings_record_match=None,
+                **fake_gh_environment):
     """Run the program; with interrupt, a signal, send it once the stand-in gh is hanging. For merge-lane-2's
     review, codex_runs lists the (head, exit code, report text or None) Codex run records it finds, by
     default one clean run on HEAD, and review_plan is the (exit code, stdout, stderr) of a stand-in review
-    plan program, which by default fails, so that a case that should not read the plan shows it."""
+    plan program, which by default fails, so that a case that should not read the plan shows it;
+    findings_record_match maps the subcommands match and add of a stand-in findings record program to the
+    (exit code, stdout, stderr) each gives, and each one not given fails; run.match_calls lists the
+    (arguments, standard input as JSON) of each of its runs."""
     case = Path(tempfile.mkdtemp(dir=scratch))
     home, state, fake_gh_directory = case / "home", case / "state", case / "fake-gh"
     for directory in (home, state, fake_gh_directory):
@@ -152,8 +156,18 @@ def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", 
         plan_exit, plan_stdout, plan_stderr = review_plan or (9, "", "the stand-in plan was not expected to run")
         plan_program.write_text(f"import sys\nsys.stdout.write({plan_stdout!r})\nsys.stderr.write({plan_stderr!r})\n"
                                 f"sys.exit({plan_exit})\n")
+        match_program = case / "stand-in-findings-record-match.py"
+        replies = {"match": (9, "", "the stand-in findings record program's match was not expected to run"),
+                   "add": (9, "", "the stand-in findings record program's add was not expected to run"),
+                   **(findings_record_match or {})}
+        match_program.write_text(
+            f"import json, sys\nwith open({str(case / 'match-calls.jsonl')!r}, 'a') as log:\n"
+            f"    log.write(json.dumps([sys.argv[1:], json.loads(sys.stdin.read())]) + '\\n')\n"
+            f"code, out, err = {replies!r}[sys.argv[1]]\n"
+            f"sys.stdout.write(out)\nsys.stderr.write(err)\nsys.exit(code)\n")
         arguments = (*arguments, "--merge-lane-worktrees-and-outputs-directory", str(case / "helpers"),
-                     "--pull-request-review-plan-program", str(plan_program))
+                     "--pull-request-review-plan-program", str(plan_program),
+                     "--findings-record-codex-finding-match-program", str(match_program))
         for index, (run_head, exit_code, report) in enumerate(
                 CLEAN_CODEX_RUN if codex_runs is None else codex_runs):
             outputs = case / "helpers" / "cx" / f"pr7-base{index}"
@@ -188,6 +202,9 @@ def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", 
     posted_file = state / "posted.json"
     posted = json.loads(posted_file.read_text()) if posted_file.exists() else None
     run = Run(completed, calls, posted)
+    match_calls_file = case / "match-calls.jsonl"
+    run.match_calls = ([json.loads(line) for line in match_calls_file.read_text().splitlines()]
+                       if match_calls_file.exists() else [])
     time.sleep(0.2 if interrupt is not None else 0)
     run.gh_left_running = hanging.exists() and running(int(hanging.read_text()))
     return run
@@ -273,8 +290,10 @@ def codex_finding_id(priority, text):
     return hashlib.sha256(f"{priority}\0{text}".encode("utf-8")).hexdigest()[:12]
 
 
-FACT_LINES = ("- `Main has it:` `no`\n- `This pull request makes it happen:` `yes`\n"
-              "- `Reports success on failure:` `no`\n- `Shown by:` `judged from the code only`")
+FACT_LINES = ("- `#defect_already_on_main` `no`\n- `#pull_request_triggers_the_defect` `yes`\n"
+              "- `#false_report_of_success_on_failure` `no`\n- `#defect_evidence` `judged from the code only`")
+OLDER_LABEL_FACT_LINES = ("- `Main has it:` `no`\n- `This pull request makes it happen:` `yes`\n"
+                          "- `Reports success on failure:` `no`\n- `Shown by:` `judged from the code only`")
 
 
 def finding_fact_line_count_cases(scratch):
@@ -286,17 +305,40 @@ def finding_fact_line_count_cases(scratch):
     check("the success line counts the Claude reviewer's comments that lack a fact line, reading labels "
           "with or without list and code marks, and names each with the labels it lacks",
           result.code == 0 and "; 1 of 2 finding(s) lack an answered fact line: "
-          "scripts/thing.py:3 lacks 'Shown by:'" in result.stdout, result.detail)
+          "scripts/thing.py:3 lacks '#defect_evidence'" in result.stdout, result.detail)
     bare = {"path": "scripts/thing.py", "line": 4,
-            "body": FACT_LINES.replace("- `Shown by:` `judged from the code only`", "- `Shown by:`")}
+            "body": OLDER_LABEL_FACT_LINES.replace("- `Shown by:` `judged from the code only`", "- `Shown by:`")}
     other_marks = {"path": "scripts/thing.py", "line": 5, "body": (
         "A finding.\n+ **Main has it**: no\n1. This pull request makes it happen: yes\n"
         "2) `Reports success on failure`: no\n+ __Shown by:__ judged from the code only")}
     result = run_program(scratch, review("APPROVE", comments=[bare, other_marks]))
-    check("a fact line whose label carries no answer counts as lacking, and a + or numbered list mark or a "
-          "colon outside the label's marks still counts as a fact line",
+    check("an older label with no answer counts as lacking, and a + or numbered list mark or a colon outside "
+          "an older label's marks still counts as a fact line",
           result.code == 0 and "; 1 of 2 finding(s) lack an answered fact line: "
-          "scripts/thing.py:4 lacks 'Shown by:'" in result.stdout, result.detail)
+          "scripts/thing.py:4 lacks '#defect_evidence'" in result.stdout, result.detail)
+    bare_hashtag = {"path": "scripts/thing.py", "line": 4, "body": FACT_LINES.replace(
+        "- `#defect_evidence` `judged from the code only`", "- `#defect_evidence`")}
+    unmarked = {"path": "scripts/thing.py", "line": 5, "body": (
+        "A finding.\n#defect_already_on_main no\n#pull_request_triggers_the_defect yes\n"
+        "#false_report_of_success_on_failure no\n#defect_evidence_shown judged from the code only")}
+    result = run_program(scratch, review("APPROVE", comments=[bare_hashtag, unmarked]))
+    check("a hashtag line with no answer counts as lacking, a hashtag needs no list or code marks, and a "
+          "longer hashtag that starts with one of the four is not that hashtag's line",
+          result.code == 0 and "; 2 of 2 finding(s) lack an answered fact line: "
+          "scripts/thing.py:4 lacks '#defect_evidence' | scripts/thing.py:5 lacks '#defect_evidence'"
+          in result.stdout, result.detail)
+    older = {"path": "scripts/thing.py", "line": 6, "body": f"A finding.\n\n{OLDER_LABEL_FACT_LINES}"}
+    older_short = {"path": "scripts/thing.py", "line": 7, "body": OLDER_LABEL_FACT_LINES.replace(
+        "- `Main has it:` `no`\n", "")}
+    mixed = {"path": "scripts/thing.py", "line": 8, "body": (
+        "A finding.\nMain has it: no\n#pull_request_triggers_the_defect yes\n"
+        "Reports success on failure: no\n#defect_evidence reproduction")}
+    result = run_program(scratch, review("APPROVE", comments=[older, older_short, mixed]))
+    check("a line starting with the older label a hashtag replaced counts as that hashtag's line, also beside "
+          "hashtag lines in one finding, and a finding missing one older label is named with that label's hashtag",
+          result.code == 0 and "; 1 of 3 finding(s) lack an answered fact line: "
+          "scripts/thing.py:7 lacks '#defect_already_on_main'" in result.stdout
+          and "scripts/thing.py:8" not in result.stdout, result.detail)
     result = run_program(scratch, review("APPROVE", comments=[whole]))
     check("a review whose findings all have their fact lines names none",
           result.code == 0 and "; 0 of 1 finding(s) lack an answered fact line" in result.stdout
@@ -317,8 +359,8 @@ def finding_fact_line_count_cases(scratch):
     check("merge-lane-2's verdict review counts the Codex findings that lack a fact line, each finding's text "
           "running to the next heading, and not merge-lane-2's own comments",
           result.code == 0 and "; 1 of 2 Codex finding(s) lack an answered fact line: "
-          f"{codex_finding_id('P3', second)} lacks 'Main has it:', 'This pull request makes it happen:', "
-          "'Reports success on failure:'" in result.stdout, result.detail)
+          f"{codex_finding_id('P3', second)} lacks '#defect_already_on_main', '#pull_request_triggers_the_defect', "
+          "'#false_report_of_success_on_failure'" in result.stdout, result.detail)
     report = (f"<!-- provenance -->\n\n- [Codex priority P2 (P0 highest)] {first}\n  Body.\n{indented}\n\n"
               f"- [Codex priority P2 (P0 highest)] {first}\n  The same heading, without lines.\n")
     result = run_program(scratch, json.dumps({"verdict": "APPROVE", "body": "The review body.", "comments": [
@@ -337,7 +379,133 @@ def finding_fact_line_count_cases(scratch):
     check("two Codex runs on one commit that report the same finding are both counted, the later run not "
           "replacing the earlier run's entry",
           result.code == 0 and "; 1 of 2 Codex finding(s) lack an answered fact line: "
-          f"{codex_finding_id('P2', first)} lacks 'Main has it:'" in result.stdout, result.detail)
+          f"{codex_finding_id('P2', first)} lacks '#defect_already_on_main'" in result.stdout, result.detail)
+
+
+def findings_record_cases(scratch):
+    on_main, on_pull_request = "Delete only captures — scripts/thing.py:2-2", "New bug — scripts/thing.py:3-3"
+    main_lines = FACT_LINES.replace("`#defect_already_on_main` `no`", "`#defect_already_on_main` `yes`").replace(
+        "`#pull_request_triggers_the_defect` `yes`", "`#pull_request_triggers_the_defect` `no`")
+    indent = "\n".join("  " + line for line in main_lines.splitlines())
+    report = (f"<!-- provenance -->\n\n- [Codex priority P1 (P0 highest)] {on_main}\n  Body.\n{indent}\n\n"
+              f"- [Codex priority P2 (P0 highest)] {on_pull_request}\n  Body.\n"
+              + "\n".join("  " + line for line in FACT_LINES.splitlines()) + "\n")
+    main_id, pull_request_id = codex_finding_id("P1", on_main), codex_finding_id("P2", on_pull_request)
+    row = {"record_id": 17, "state": "decided-not-worth-fixing", "grade": "fix-in-maintenance",
+           "decision": "the captures directory holds only captures"}
+    pull_request_grade = {"finding": pull_request_id, "grade": "does-not-hold", "reason": "Unreachable."}
+    main_grade = {"finding": main_id, "grade": "file-for-later"}
+    main_comment = finding(2, "file-for-later", f"Delete only captures (Codex finding {main_id})")
+
+    def file(grades, comments=()):
+        return json.dumps({"verdict": "APPROVE", "body": "The review body.", "comments": list(comments),
+                           "merge_lane_codex_review_finding_grades": grades})
+
+    def posting(review_file, **replies):
+        return run_program(scratch, review_file, arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, report),),
+                           findings_record_match=replies)
+
+    same = (0, json.dumps({main_id: {"answer": "SAME", "record": row, "possible_regression": False}}), "")
+    result = posting(file([pull_request_grade]), match=same)
+    sent = result.match_calls[0] if result.match_calls else None
+    check("only a Codex finding that says main has it goes to the findings record program's match, with its "
+          "text and no grade", sent is not None
+          and sent[0] == ["match", "--pull-request", "7", "--head-commit", HEAD]
+          and [entry["finding_id"] for entry in sent[1]] == [main_id]
+          and sent[1][0]["heading"] == on_main and sent[1][0]["text"].startswith("- [Codex priority P1")
+          and "grade" not in sent[1][0], result.detail)
+    check("a Codex finding the findings record already holds needs no grade and is not added, and the posted body "
+          "quotes its row's state, grade and decision",
+          result.code == 0 and len(result.match_calls) == 1 and f"- {main_id}: the same defect as findings record "
+          "row 17, state decided-not-worth-fixing, grade fix-in-maintenance, decision: the captures directory "
+          "holds only captures" in (result.posted or {}).get("body", "")
+          and "; findings record: 1 already held, 0 added" in result.stdout, result.detail)
+
+    both_lines = FACT_LINES.replace("`#defect_already_on_main` `no`", "`#defect_already_on_main` `yes`")
+    both_report = (f"<!-- provenance -->\n\n- [Codex priority P1 (P0 highest)] {on_main}\n  Body.\n"
+                   + "\n".join("  " + line for line in both_lines.splitlines()) + "\n")
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, both_report),),
+                         findings_record_match={"match": same})
+    check("a Codex finding the findings record already holds that also says this pull request makes it happen "
+          "still needs a grade, so nothing is posted without one",
+          result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr
+          and [call[0][0] for call in result.match_calls] == ["match"], result.detail)
+    result = run_program(scratch, file([main_grade], [main_comment]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, both_report),), findings_record_match={"match": same})
+    check("graded, such a finding posts with its own grade and is not added again",
+          result.code == 0 and f"- {main_id} (P1): file-for-later" in (result.posted or {}).get("body", "")
+          and [call[0][0] for call in result.match_calls] == ["match"], result.detail)
+
+    unchecked_lines = main_lines.replace("`#pull_request_triggers_the_defect` `no`",
+                                         "`#pull_request_triggers_the_defect` `not checked`")
+    unchecked_report = (f"<!-- provenance -->\n\n- [Codex priority P1 (P0 highest)] {on_main}\n  Body.\n"
+                        + "\n".join("  " + line for line in unchecked_lines.splitlines()) + "\n")
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, unchecked_report),), findings_record_match={"match": same})
+    check("a Codex finding the findings record already holds whose entry answers that this pull request makes it "
+          "happen `not checked` still needs a grade, so nothing is posted without one",
+          result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr,
+          result.detail)
+    conflicting_report = report.split("\n\n- [Codex priority P2")[0] + "\n\n" + both_report.split("\n\n", 1)[1]
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, conflicting_report),), findings_record_match={"match": same})
+    check("a Codex finding the findings record already holds whose two entries answer that this pull request makes "
+          "it happen no and yes still needs a grade, so nothing is posted without one",
+          result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr,
+          result.detail)
+
+    fixed = (0, json.dumps({main_id: {"answer": "SAME", "record": {**row, "state": "fixed", "decision": None},
+                                      "possible_regression": True}}), "")
+    result = posting(file([pull_request_grade]), match=fixed)
+    check("a match to a fixed row is reported as a possible regression in the body and the success line",
+          result.code == 0 and "state fixed, grade fix-in-maintenance; a possible regression, since the row is "
+          "fixed" in (result.posted or {}).get("body", "")
+          and f"possible regression: {main_id} matches fixed row 17" in result.stdout, result.detail)
+
+    new = (0, json.dumps({main_id: {"answer": "NEW", "record_id": None}}), "")
+    result = posting(file([main_grade, pull_request_grade], [main_comment]), match=new,
+                     add=(0, json.dumps({main_id: {"record_id": 18, "possible_miss_of": [9]}}), ""))
+    sent = result.match_calls[1] if len(result.match_calls) == 2 else None
+    check("once the grades are accepted, a NEW finding goes to add with its grade, and the success line names "
+          "the row it was added as and the possible miss",
+          result.code == 0 and sent is not None and sent[0][0] == "add"
+          and [(entry["finding_id"], entry["grade"]) for entry in sent[1]] == [(main_id, "file-for-later")]
+          and f"; findings record: 0 already held, 1 added ({main_id} as row 18); possible miss: {main_id} cites "
+          "the same line as row(s) 9, logged for review" in result.stdout, result.detail)
+    result = posting(file([main_grade, pull_request_grade]), match=new)
+    check("a NEW finding whose grade is refused, for lacking its comment, is not added",
+          result.code == 2 and result.posted is None and [call[0][0] for call in result.match_calls] == ["match"],
+          result.detail)
+    result = posting(file([pull_request_grade]), match=new)
+    check("a NEW finding with no grade is refused as before, and not added",
+          result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr
+          and [call[0][0] for call in result.match_calls] == ["match"], result.detail)
+    result = posting(file([{**main_grade, "grade": "does-not-hold", "reason": "Unreachable."}, pull_request_grade]),
+                     match=new, add=(0, json.dumps({main_id: {"record_id": 19, "possible_miss_of": []}}), ""))
+    sent = result.match_calls[1][1][0] if len(result.match_calls) == 2 else {}
+    check("a does-not-hold grade goes to add with its reason",
+          result.code == 0 and sent.get("grade") == "does-not-hold" and sent.get("reason") == "Unreachable.",
+          result.detail)
+
+    for subcommand, replies in (("match", {"match": (1, "", "FAILED: the nn-shared-database service did not answer")}),
+                                ("add", {"match": new, "add": (1, "", "FAILED: the nn-shared-database service did "
+                                                                      "not answer")})):
+        result = posting(file([main_grade, pull_request_grade], [main_comment]), **replies)
+        check(f"a failing {subcommand} stops the post and passes on what it printed",
+              result.code == 2 and result.posted is None and f"{subcommand} exited 1" in result.stderr
+              and "FAILED: the nn-shared-database service did not answer" in result.stderr, result.detail)
+    for name, replies in (
+            ("match answers with text that is not JSON", {"match": (0, "not json", "")}),
+            ("match answers other than SAME or NEW", {"match": (0, json.dumps({main_id: {"answer": "MAYBE"}}), "")}),
+            ("match answers for another finding", {"match": (0, json.dumps({"0123": {"answer": "NEW"}}), "")}),
+            ("match answers SAME without its row",
+             {"match": (0, json.dumps({main_id: {"answer": "SAME", "possible_regression": False}}), "")}),
+            ("add answers without a row id",
+             {"match": new, "add": (0, json.dumps({main_id: {"possible_miss_of": []}}), "")})):
+        result = posting(file([main_grade, pull_request_grade], [main_comment]), **replies)
+        check(f"the post stops when {name}",
+              result.code == 2 and result.posted is None and "printed an answer this program cannot read"
+              in result.stderr, result.detail)
 
 
 def codex_finding_grade_cases(scratch):
@@ -1122,6 +1290,7 @@ def main():
     try:
         merge_lane_cases(scratch)
         codex_finding_grade_cases(scratch)
+        findings_record_cases(scratch)
         finding_fact_line_count_cases(scratch)
         merge_account_comment_review_cases(scratch)
         verdict_review_marks_cases(scratch)

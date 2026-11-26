@@ -38,6 +38,14 @@ Left open on purpose, for the design if the user asks for one:
 - What a running maintenance-job does when load rises during a window: stop, finish, or hand back.
 - Which maintenance-jobs may run in such a window.
 
+## Outcome
+
+Closed as not planned: no maintenance window beyond the overnight one will be designed. The user ruled on 2026-11-24 at 00:59Z, approving item 20 of 45 of approval-walk overall-cleanup-items-handed-over-from-long-approval-walks-2026-11-21, whose walk-minutes are `nedlern@ned-box:/home/nedlern/agents/overall-cleanup/docs/walk/overall-cleanup-items-handed-over-from-long-approval-walks-2026-11-21-minutes.md`:
+
+"I think what you're saying is we found better ways of throttling our work, so there doesn't really need to be a specific maintenance window. Just when there's CPU and memory around, we can start doing maintenance work. I much prefer that than a specific maintenance window. Is that correct? If so, approved."
+
+Not all maintenance work is throttled that way today. `scripts/run-all-test-suites.py` starts a test suite only while CPU use is under 90% and available memory is above 10 GB, and scheduled jobs still start at their cron times.
+
 ## Next action
 
-None until one of these happens: maintenance capacity becomes a problem, because the overnight window is too short for the maintenance-jobs it holds, such as maintenance-jobs left unfinished by morning; the 5-hour usage limit ends; or the user asks for this. Whichever agent sees one happen brings the user the evidence and asks whether to design load-based maintenance windows. When the 5-hour limit has ended, ask him first whether maintenance should simply run around the clock instead, in which case this GHI closes as not planned.
+None.
