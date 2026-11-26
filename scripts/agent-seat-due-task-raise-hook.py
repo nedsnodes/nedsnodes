@@ -1076,7 +1076,8 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
     The closed-without-merging scan asks a `pr_merged` question before `all()` runs and can skip
     it again, so `all()` stopping at an earlier unmet prerequisite saves only its own lookup. The
     scan leaves out a pull request the record shows raised as closed, so when `all()` stops before
-    that prerequisite, no lookup for that pull request happens.
+    that prerequisite, no further lookup for that pull request happens here, though
+    `due_task_lines` may already have asked about it in the same Stop run.
 
     Not handled: a task raised as met stays listed as unheld when what its prerequisites name
     changes afterwards, such as the walk-document of an `approval_walk_item_decided` being
