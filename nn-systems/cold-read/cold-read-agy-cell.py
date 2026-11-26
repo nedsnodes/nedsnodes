@@ -18,7 +18,7 @@ The reviewer writes its findings to --report. This program prints progress
 to stderr and nothing to stdout.
 
 Exit codes: 0 a model produced a report; 1 every model in the cold-read-tier's
-chain failed to produce one, including the case where `agy` never started
+chain, TIER_TO_AGY_MODEL_CHAIN, failed to produce one, including the case where `agy` never started
 because the binary is not on PATH (the common module names that on stderr
 and lets the chain advance, so a 1 always means "no review was produced");
 64 this program refused the invocation and never launched agy, naming its
@@ -26,13 +26,10 @@ own fix -- including when this machine has no sandbox to run agy in. 64 rather t
 EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py, which every
 cold-read-cell shares.
 
-WHAT THIS LEG IS FOR (user-ruled 2026-09-07 at the cold-read-research seat,
-after measurements, superseding the earlier ruling that day for low): the
-cold-read-fast-read runs on Gemini 3.8 Flash at MEDIUM, replacing gpt-5.6-terra
-at low. The measurements: about 100-110 s per document (single runs on a
-658-word skill and a 1,967-word walk draft); on the ghi-write candidate defect
-list, medium found 42% of the rows against 19% at low, and medium and high hit
-the same rows. It is the one cold-read-tier this launcher pins. The `deep` and
+WHAT THIS LEG IS FOR: the cold-read-fast-read, on the models and effort that
+TIER_TO_AGY_MODEL_CHAIN and TIER_TO_REASONING_EFFORT, in this file, give the
+`fast` cold-read-tier; --effort's help below names that effort. It is the one
+cold-read-tier this launcher pins. The `deep` and
 `second-strongest-model` (the agent-binary's second-strongest model)
 cold-read-tiers stay on the Claude and Codex launchers, and this
 launcher refuses them (exit 64 from argparse) rather than running a Gemini
@@ -48,7 +45,7 @@ end of this paragraph says.
 `--print` takes the prompt as its value. `--add-dir` is required, or the
 repository's AGENTS.md does not load. `--dangerously-skip-permissions` is what
 lets the Write of the report happen headless. Antigravity's model ids carry the
-effort as a suffix (gemini-3.8-flash-{low,medium,high}); `--effort` is passed
+effort as a suffix (gemini-4-neon-{low,medium,high,xhigh}); `--effort` is passed
 as well, exactly as the campaign passed it. agy does not always stop at
 `--print-timeout`, so the cell runs agy in a process group of its own and kills
 that group 60 seconds after agy's own deadline; the attempt then fails with
@@ -150,12 +147,12 @@ PROGRAM = "cold-read-agy-cell"
 
 # Antigravity model IDs encode effort as a suffix.
 TIER_TO_AGY_MODEL_CHAIN = {
-    "fast": ("gemini-3.8-flash-medium",),
+    "fast": ("gemini-4-neon-low",),
 }
 
 # Pin effort explicitly so machine defaults cannot change the review.
 TIER_TO_REASONING_EFFORT = {
-    "fast": "medium",
+    "fast": "low",
 }
 
 COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60
@@ -303,7 +300,7 @@ def main() -> int:
     return common.run_cell(
         program=PROGRAM, runtime="agy", description=__doc__,
         model_help="explicit Antigravity model id (effort suffix included, "
-                   "e.g. gemini-3.8-flash-high); overrides the tier mapping",
+                   "e.g. gemini-4-neon-high); overrides the tier mapping",
         tier_to_model_chain=TIER_TO_AGY_MODEL_CHAIN,
         tier_to_effort=TIER_TO_REASONING_EFFORT,
         invocation_builder=invocation_builder,

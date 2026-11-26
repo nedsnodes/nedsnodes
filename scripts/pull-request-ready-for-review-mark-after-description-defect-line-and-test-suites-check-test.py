@@ -76,7 +76,8 @@ class FakeRunner:
     Records each call."""
 
     def __init__(self, view=None, rev_parse=None, status=None, suites=None, ready=None,
-                 branch=None, has_commit=None, ancestor=None, merge_base=None):
+                 branch=None, has_commit=None, ancestor=None, merge_base=None, worktree_add=None,
+                 worktree_remove=None):
         self.behaviours = {
             "view": view or (lambda command: completed(command, 0, view_answer())),
             "rev-parse": rev_parse or (lambda command: completed(command, 0,
@@ -86,10 +87,14 @@ class FakeRunner:
             "ancestor": ancestor or ancestors(),
             "status": status or (lambda command: completed(command, 0, "")),
             "merge-base": merge_base or (lambda command: completed(command, 0, MERGE_BASE + "\n")),
+            "worktree-add": worktree_add or (lambda command: completed(command, 0)),
             "suites": suites or (lambda command: completed(command, 0)),
+            "worktree-remove": worktree_remove or (lambda command: completed(command, 0)),
             "ready": ready or (lambda command: completed(command, 0)),
         }
         self.calls = []
+        self.commands = {}
+        self.options = {}
 
     def __call__(self, command, **options):
         if command[:3] == ["gh", "pr", "view"]:
@@ -104,15 +109,21 @@ class FakeRunner:
             kind = "ancestor"
         elif command == program.UNCOMMITTED_CHANGES_COMMAND:
             kind = "status"
-        elif command == program.MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND:
+        elif command[:3] == ["git", "merge-base", "origin/main"]:
             kind = "merge-base"
-        elif command == program.selective_test_run_command(CHECKOUT, MERGE_BASE):
+        elif command[:3] == ["git", "worktree", "add"]:
+            kind = "worktree-add"
+        elif command[:3] == ["git", "worktree", "remove"]:
+            kind = "worktree-remove"
+        elif command[0] == "python3" and command[1].endswith("/scripts/run-all-test-suites.py"):
             kind = "suites"
         elif command[:3] == ["gh", "pr", "ready"]:
             kind = "ready"
         else:
             raise AssertionError(f"unexpected command {command}")
         self.calls.append(kind)
+        self.commands[kind] = command
+        self.options[kind] = options
         return self.behaviours[kind](command)
 
 
@@ -135,6 +146,12 @@ def answers(stdout):
     return lambda command: completed(command, 0, stdout)
 
 
+def in_turn(*behaviours):
+    """Each call answered by the next behaviour; the last answers every later call."""
+    remaining = list(behaviours)
+    return lambda command: (remaining.pop(0) if len(remaining) > 1 else remaining[0])(command)
+
+
 def exits(status, stderr=""):
     return lambda command: completed(command, status, "", stderr)
 
@@ -150,19 +167,29 @@ def main():
     check("a draft with a defect line, its head checked out and passing suites is marked ready, "
           "the suites running before gh pr ready",
           status == program.EXIT_MARKED_READY
-          and runner.calls == ["view", "rev-parse", "status", "merge-base", "suites", "ready"]
+          and runner.calls == ["view", "rev-parse", "status", "merge-base", "worktree-add", "suites", "worktree-remove", "view", "ready"]
           and f"#77 ({URL}) is marked ready for review." in output
           and "merge-lane-2" not in output + errors,
           (status, runner.calls, output, errors))
-    check("the test suites run with the checkout's own runner, selecting the suites whose recorded "
-          "inputs changed since the checkout's merge base with origin/main, not since origin/main",
-          program.MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND == ["git", "merge-base", "origin/main", "HEAD"]
-          and program.selective_test_run_command(CHECKOUT, MERGE_BASE) == [
-              "python3", CHECKOUT + "/scripts/run-all-test-suites.py",
-              "--only-suites-whose-recorded-inputs-changed-since", MERGE_BASE]
-          and f"running {CHECKOUT}/scripts/run-all-test-suites.py "
-              f"--only-suites-whose-recorded-inputs-changed-since {MERGE_BASE}\n" in output,
-          output)
+    added = runner.commands["worktree-add"]
+    scratch = added[5]
+    check("the test suites run in a detached scratch worktree of the pushed nn-head-commit, with that "
+          "worktree's own runner, selecting the suites whose recorded inputs changed since the "
+          "checked HEAD commit's merge base with origin/main, named by its hash, waiting for the machine's test lock, and the "
+          "scratch worktree is removed after",
+          runner.commands["merge-base"] == ["git", "merge-base", "origin/main", HEAD]
+          and added[:5] == ["git", "worktree", "add", "--quiet", "--detach"] and added[6] == HEAD
+          and not scratch.startswith(CHECKOUT)
+          and runner.options["suites"]["cwd"] == scratch
+          and runner.commands["suites"] == [
+              "python3", scratch + "/scripts/run-all-test-suites.py",
+              "--only-suites-whose-recorded-inputs-changed-since", MERGE_BASE,
+              "--wait-for-lock-seconds", "3600"]
+          and runner.commands["worktree-remove"] == ["git", "worktree", "remove", "--force", scratch]
+          and f"running, in a scratch worktree of {HEAD[:12]}, {scratch}/scripts/run-all-test-suites.py "
+              f"--only-suites-whose-recorded-inputs-changed-since {MERGE_BASE} "
+              "--wait-for-lock-seconds 3600\n" in output,
+          (runner.commands, output))
 
     # Already ready: nothing to do, nothing run.
     runner = FakeRunner(view=answers(view_answer(isDraft=False)))
@@ -237,8 +264,9 @@ def main():
             ("a checkout with an uncommitted change to a tracked file",
              FakeRunner(status=answers(" M scripts/example.py\n")),
              ["view", "rev-parse", "status"],
-             ["this checkout has 1 uncommitted change(s), so the test suites would test files "
-              f"that are not in #77 ({URL})'s pushed commits.",
+             [f"this checkout has 1 uncommitted change(s), which #77 ({URL})'s pushed commits do not "
+              "hold and which may belong in them; marking it ready makes its nn-head-commit a "
+              "frozen-head.",
               "The changes, as git status --porcelain lists them:\n  M scripts/example.py\n",
               "If the changes belong in the pull request: commit them, push with git push origin "
               f"HEAD:{BRANCH}, then run this again; it runs the test suites on the pushed commits"
@@ -305,7 +333,7 @@ def main():
              ["git merge-base origin/main exited with status 1, printing no error.",
               "If git gave any other error, or none: " + RETRY_LINE]),
             ("a failing test suite", FakeRunner(suites=exits(1)),
-             ["view", "rev-parse", "status", "merge-base", "suites"],
+             ["view", "rev-parse", "status", "merge-base", "worktree-add", "suites", "worktree-remove"],
              ["the test suites exited with status 1, so #77",
               "The failing suites are named above.",
               "Fix the cause of each suite's failure and commit the fix; then push, and run "
@@ -315,10 +343,19 @@ def main():
               "then run this again; if it names nothing to do, tell the user, or the agent that "
               "dispatched you, what it printed."]),
             ("a test suite runner that stops before judging every suite",
-             FakeRunner(suites=exits(2)), ["view", "rev-parse", "status", "merge-base", "suites"],
+             FakeRunner(suites=exits(2)), ["view", "rev-parse", "status", "merge-base", "worktree-add", "suites", "worktree-remove"],
              ["scripts/run-all-test-suites.py exited with status 2, before judging every suite, "
               "so #77",
-              "Its error is above.", RETRY_LINE])]:
+              "Its error is above.", RETRY_LINE]),
+            ("a push that moves the pull request's head while the test suites run",
+             FakeRunner(view=in_turn(answers(view_answer()), answers(view_answer(headRefOid=OTHER)))),
+             ["view", "rev-parse", "status", "merge-base", "worktree-add", "suites", "worktree-remove",
+              "view"],
+             [f"#77 ({URL})'s pushed nn-head-commit moved from {HEAD[:12]} to {OTHER[:12]} while the "
+              "test suites ran, so they did not test it,",
+              "Nothing was changed on GitHub.",
+              "Run this command again: it tests the new nn-head-commit, or names what to do first "
+              "when this checkout is not at it."])]:
         status, output, errors = run(runner)
         check(f"{label} is refused before gh pr ready, saying why and what to do",
               status == program.EXIT_MARK_READY_REFUSED_OR_FAILED and runner.calls == expected_calls
@@ -457,6 +494,15 @@ def main():
             ("python3 cannot run the test suites",
              FakeRunner(suites=raises(FileNotFoundError(2, "No such file", "python3"))),
              ["running the test suites failed: python3 could not be run (", RETRY_LINE]),
+            ("git cannot make the scratch worktree",
+             FakeRunner(worktree_add=exits(128, "fatal: could not create directory")),
+             ["making the scratch worktree the test suites run in failed: git worktree add exited "
+              "with status 128: fatal: could not create directory.",
+              "Nothing was changed on GitHub.", RETRY_LINE]),
+            ("the second read of the pull request fails",
+             FakeRunner(view=in_turn(answers(view_answer()), exits(1, "HTTP 502: Bad Gateway"))),
+             ["reading pull request 77 failed: gh pr view exited with status 1: HTTP 502: Bad "
+              "Gateway.", "Nothing was changed on GitHub.", RETRY_LINE]),
             ("gh pr ready fails",
              FakeRunner(ready=exits(1, "HTTP 502: Bad Gateway")),
              [f"marking #77 ({URL}) ready for review failed: gh pr ready exited with status "
@@ -467,6 +513,60 @@ def main():
         check(f"when {label}, the program exits 1 and says what failed and what to do",
               status == program.EXIT_MARK_READY_REFUSED_OR_FAILED
               and all(line in errors for line in expected_lines), (status, errors))
+
+    # A scratch worktree git cannot remove does not change the test result, either way.
+    runner = FakeRunner(worktree_remove=exits(1, "fatal: cannot remove"))
+    status, output, errors = run(runner)
+    check("when the scratch worktree cannot be removed after passing suites, it says so and still "
+          "marks the pull request ready",
+          status == program.EXIT_MARKED_READY and runner.calls[-1] == "ready"
+          and "was not removed: git worktree remove exited with status 1: fatal: cannot remove. "
+              "The test result stands.\n" in output
+          and "If git worktree list still names it: run git worktree prune.\n" in output,
+          (status, runner.calls, output, errors))
+    runner = FakeRunner(suites=exits(1), worktree_remove=exits(1, "fatal: cannot remove"))
+    status, output, errors = run(runner)
+    check("when the scratch worktree cannot be removed after a failing suite, the refusal still "
+          "names the failing suite and gh pr ready is not run",
+          status == program.EXIT_MARK_READY_REFUSED_OR_FAILED and "ready" not in runner.calls
+          and "the test suites exited with status 1" in errors and "was not removed" in output,
+          (status, runner.calls, output, errors))
+
+    # With real git: an edit to the live checkout during the run does not reach the tested tree.
+    with tempfile.TemporaryDirectory() as parent:
+        clone = Path(parent, "clone")
+        seen = Path(parent, "seen-by-test-runner.txt")
+        (clone / "scripts").mkdir(parents=True)
+        (clone / "tracked.txt").write_text("committed\n")
+        (clone / "scripts" / "run-all-test-suites.py").write_text(
+            "from pathlib import Path\n"
+            f"Path({str(seen)!r}).write_text((Path(__file__).resolve().parents[1] / 'tracked.txt')"
+            ".read_text())\n")
+        for setup in (["git", "init", "-q", "-b", "main"], ["git", "add", "."],
+                      ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c",
+                       "commit.gpgsign=false", "commit", "-q", "-m", "base"],
+                      ["git", "update-ref", "refs/remotes/origin/main", "HEAD"]):
+            subprocess.run(setup, cwd=clone, check=True, timeout=60, capture_output=True)
+        real_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=clone, text=True, check=True,
+                                   timeout=60, stdout=subprocess.PIPE).stdout.strip()
+
+        def real_git_with_fake_gh(command, **options):
+            if command[:3] == ["gh", "pr", "view"]:
+                return completed(command, 0, view_answer(headRefOid=real_head))
+            if command[:3] == ["gh", "pr", "ready"]:
+                return completed(command, 0)
+            if command[0] == "python3":
+                (clone / "tracked.txt").write_text("edited during the run\n")
+            options.setdefault("cwd", clone)
+            return subprocess.run(command, **options)
+
+        status, output, errors = run(real_git_with_fake_gh)
+        worktrees = subprocess.run(["git", "worktree", "list"], cwd=clone, text=True, check=True,
+                                   timeout=60, stdout=subprocess.PIPE).stdout.splitlines()
+        check("with real git, the test runner reads the pushed commit's file, not an edit made to "
+              "the checkout during the run, and the scratch worktree is gone after",
+              status == program.EXIT_MARKED_READY and seen.read_text() == "committed\n"
+              and len(worktrees) == 1, (status, output, errors, worktrees))
 
     # The uncommitted-changes command with real git: an untracked file is listed even when the
     # clone's settings hide untracked files from git status.

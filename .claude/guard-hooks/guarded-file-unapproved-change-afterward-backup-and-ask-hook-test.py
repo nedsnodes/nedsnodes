@@ -1400,6 +1400,68 @@ def cases(scratch):
           "seat-brief", all(world.store_file(path, "approved") for path in stocked),
           [world.store_file(path, "approved") for path in stocked])
 
+    # -- another agent-seat's seat-brief and settings.local.json, changed from any directory
+    world = World(Path(scratch) / "other-seat")
+    other = world.agents / "other"
+    (other / ".claude").mkdir(parents=True)
+    other_brief = other / "CLAUDE.local.md"
+    other_settings = other / ".claude" / "settings.local.json"
+    other_brief.write_text("other brief v1\n")
+    other_settings.write_text('{"permissions": {"allow": []}}\n')
+    elsewhere = Path(scratch) / "other-seat" / "elsewhere"
+    elsewhere.mkdir()
+    world.run(cwd=elsewhere)
+    other_brief.write_text("other brief v2\n")
+    other_settings.write_text('{"permissions": {"allow": ["Bash(rm:*)"]}}\n')
+    message = world.run(cwd=world.repo)
+    check("a change to another agent-seat's seat-brief, made from a different checkout, is asked "
+          "about", str(other_brief) in message and "has not approved" in message, message)
+    check("a change to another agent-seat's .claude/settings.local.json, made from a different "
+          "checkout, is asked about", str(other_settings) in message, message)
+    check("and both versions are kept",
+          world.key(other_brief) in world.versions(other_brief)
+          and world.key(other_settings) in world.versions(other_settings),
+          (world.versions(other_brief), world.versions(other_settings)))
+    other_brief.write_text("other brief v1\n")
+    other_settings.write_text('{"permissions": {"allow": []}}\n')
+    approved_brief, approved_settings = world.key(other_brief), world.key(other_settings)
+    other_brief.write_text("other brief v2\n")
+    other_settings.write_text('{"permissions": {"allow": ["Bash(rm:*)"]}}\n')
+    result = world.command("--restore", other_brief, world.key(other_brief),
+                           other_settings, world.key(other_settings))
+    check("--restore puts back another agent-seat's seat-brief and settings.local.json",
+          result.returncode == 0 and world.key(other_brief) == approved_brief
+          and world.key(other_settings) == approved_settings,
+          (result.returncode, result.stdout, result.stderr))
+    check("and a run after the restore asks nothing", world.run(cwd=elsewhere) == "", "")
+
+    world = World(Path(scratch) / "own-seat-brief-once")
+    brief = world.repo / "CLAUDE.local.md"
+    brief.write_text("seat v1\n")
+    world.run()
+    brief.write_text("seat v2\n")
+    message = world.run()
+    check("a change to the seat-brief of the checkout the agent runs in is named once",
+          message.count(f"{brief}, version") == 1, message)
+
+    world = World(Path(scratch) / "agent-seat-files-first-checked")
+    world.run()
+    outside_state = next((world.scratch / "cache").glob("*.json"))
+    state = json.loads(outside_state.read_text())
+    state.pop("agent_seat_files_stocked")
+    outside_state.write_text(json.dumps(state))
+    settings_local = world.repo / ".claude" / "settings.local.json"
+    settings_local.parent.mkdir()
+    settings_local.write_text('{"a": 1}\n')
+    message = world.run(cwd=Path(scratch))
+    check("on a machine that already checked the account-wide files, the agent-seat files present "
+          "when they are first checked are approved without asking",
+          message == "" and world.key(settings_local) in world.store_file(settings_local, "approved"),
+          message)
+    settings_local.write_text('{"a": 2}\n')
+    check("and a later change to one is asked about",
+          str(settings_local) in world.run(cwd=Path(scratch)), "")
+
     # -- the store cannot be written
     world = fresh(scratch, "unwritable")
     claude = world.repo / "CLAUDE.md"

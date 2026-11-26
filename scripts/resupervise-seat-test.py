@@ -322,13 +322,9 @@ def run_missing_launcher_case(workspace: Path):
     # file directly or through a path constant.
     supervisor_home = workspace / "nn-systems" / "handoff"
     supervisor_home.mkdir(parents=True)
-    for supervisor_file in ("handoff-supervisor.py", "session-handoff-field-names-common.py",
-                            "handoff-user-review-of-agent-memory-stores-mark.py",
-                            "uncommitted-work-snapshots.py",
-                            "handoff-reference-checkout-fetch-and-fast-forward-to-origin-main-check-common.py",
-                            "handoff-reference-checkout-back-on-main-after-pushing-leftovers-to-a-branch.py",
-                            "agent-seat-terminal-captures-common.py",
-                            "agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py"):
+    # Every file beside the supervisor is copied, so a new sibling it loads needs no change here.
+    for supervisor_sibling in SUPERVISOR_SCRIPT.parent.glob("*.py"):
+        supervisor_file = supervisor_sibling.name
         (supervisor_home / supervisor_file).write_text(
             SUPERVISOR_SCRIPT.with_name(supervisor_file).read_text(encoding="utf-8"),
             encoding="utf-8")

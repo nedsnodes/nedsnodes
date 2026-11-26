@@ -286,6 +286,9 @@ def run_unit_cases():
               normalized(source) == normalized(source.replace("old", "new")))
     check("normalized AST ignores a printed module constant named as a message",
           normalized('CHECK_MESSAGE = "old"\nprint(CHECK_MESSAGE)\n') == normalized('CHECK_MESSAGE = "new"\nprint(CHECK_MESSAGE)\n'))
+    steering_constant_source = 'MODE = "old"\ndef main(requested_mode):\n    print(MODE)\n    if requested_mode == MODE:\n        return 1\n'
+    check("normalized AST keeps a printed module constant that is also compared",
+          normalized(steering_constant_source) != normalized(steering_constant_source.replace("old", "new")))
     prompt_before = "# Task\n\nRead the whole file, then\nreport each name.\n\n- first step\n- second step\n"
     compare = review_plan_module.prompt_texts_differ_only_in_trailing_whitespace_or_blank_lines
     cosmetic_cases = [

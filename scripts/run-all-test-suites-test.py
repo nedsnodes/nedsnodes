@@ -881,9 +881,9 @@ def commit_files(repo, files, message):
     return git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
-def selective_run(root, since):
+def selective_run(root, *since):
     (root / "ran.txt").unlink(missing_ok=True)
-    return run(root, CHANGED_SINCE, since)
+    return run(root, *[argument for commit in since for argument in (CHANGED_SINCE, commit)])
 
 
 def recording(root, suite):
@@ -961,6 +961,38 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the SELECTED line names the file that differs",
           "SELECTED reads-a-file-test.py: it reads inputs/read-directly.txt, which differs"
           in out, out)
+
+    # Given twice, as the after-merge test run gives it the pull request's head test run's
+    # commit and the newest main commit whose after-merge test run passed.
+    changed = git(repo, "rev-parse", "HEAD").stdout.strip()
+    result = selective_run(root, base, changed)
+    out = lines(result.stdout)
+    check("given two commits, a suite only one comparison selects does not run, and its NOT "
+          "SELECTED line names the comparison that leaves it out",
+          result.returncode == 0 and ran(root) == []
+          and any(line.startswith(f"NOT SELECTED reads-a-file-test.py: the comparison with "
+                                  f"{changed[:12]} leaves it out: none of the ")
+                  and f"files it read differs since {changed[:12]}" in line for line in out)
+          and f"selected by inputs changed since {base[:12]} and since {changed[:12]}"
+          in result.stdout
+          and out[-1].endswith(f"suites not selected, their recorded inputs unchanged since "
+                               f"{base[:12]} or since {changed[:12]}"),
+          (ran(root), result.stdout, result.stderr))
+    commit_files(repo, {"inputs/read-directly.txt": "third\n"}, "change the file again")
+    result = selective_run(root, base, changed)
+    out = lines(result.stdout)
+    check("given two commits, a suite both comparisons select runs, and its SELECTED line "
+          "gives each comparison's reason",
+          ran(root) == ["reads-a-file-test.py"]
+          and f"SELECTED reads-a-file-test.py: the comparison with each commit selects it: "
+              f"{base[:12]}: it reads inputs/read-directly.txt, which differs; {changed[:12]}: "
+              f"it reads inputs/read-directly.txt, which differs" in out,
+          (ran(root), result.stdout, result.stderr))
+    result = selective_run(root, changed, "no-such-commit")
+    check("a second commit git cannot resolve stops the run with exit 2, naming it",
+          result.returncode == 2 and ran(root) == []
+          and "git cannot resolve no-such-commit to a commit" in result.stderr,
+          (result.returncode, result.stdout, result.stderr))
     base = git(repo, "rev-parse", "HEAD").stdout.strip()
 
     commit_files(repo, {"inputs/read-by-a-child.txt": "second\n"}, "change a child's input")
@@ -1009,6 +1041,83 @@ with tempfile.TemporaryDirectory() as scratch:
               ran(root) == sorted(RECORDING_SUITES)
               and f"SELECTED reads-nothing-else-test.py: {changed} differs, and every suite "
                   f"runs under it" in lines(result.stdout), (ran(root), result.stdout))
+
+    # A pull request head test run leaves out the suites that run the real claude CLI and
+    # most no-sandbox suites, so its commit, the second one given, must not leave them out.
+    head_test_run_leaves_out = {"SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI": "reads-nothing-else-test.py",
+                                "SUITES_RUN_WITHOUT_ANY_SANDBOX": "reads-a-file-test.py"}
+    commit_files(repo, {"scripts/run-all-test-suites.py": "# lists naming fixture suites\n" + "".join(
+        f"{name} = {{{head_test_run_leaves_out[name]!r}: 'the fixture names it'}}\n"
+        if name in head_test_run_leaves_out else f"{name} = {{}}\n"
+        for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST)},
+        "name fixture suites in the lists a head test run leaves out")
+    selective_run(root, base)
+    main_passed = git(repo, "rev-parse", "HEAD").stdout.strip()
+    head_tested = commit_files(repo, {".claude/guard-hooks/another-guard.py": "# guard\n"},
+                               "change a guard hook")
+    result = selective_run(root, main_passed, head_tested)
+    out = lines(result.stdout)
+    check("given two commits, a suite that runs the real claude CLI, which a head test run "
+          "leaves out, is judged by the first commit alone, so a change under "
+          ".claude/guard-hooks/ since that commit runs it",
+          "reads-nothing-else-test.py" in ran(root)
+          and any(line.startswith("SELECTED reads-nothing-else-test.py: ") and
+                  "the first commit alone" in line for line in out),
+          (ran(root), result.stdout, result.stderr))
+    check("given two commits, a suite in SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the first "
+          "commit alone too, and a suite in neither list stays left out by the second",
+          any(line.startswith("SELECTED reads-a-file-test.py: ") and "the first commit alone"
+              in line for line in out)
+          and "loads-a-program-by-path-test.py" not in ran(root)
+          and any(line.startswith(f"NOT SELECTED loads-a-program-by-path-test.py: the "
+                                  f"comparison with {head_tested[:12]} leaves it out")
+                  for line in out),
+          (ran(root), result.stdout, result.stderr))
+
+    # A head test run runs main's test runner, so the after-merge test run of a pull request
+    # that changes the runner is the first to run any suite under the changed runner.
+    selective_run(root, head_tested)
+    main_passed = head_tested
+    head_tested = commit_files(repo, {"scripts/run-all-test-suites.py": "# a changed runner\n"
+                                      + runner_copy_lists}, "change the test runner")
+    result = selective_run(root, main_passed, head_tested)
+    out = lines(result.stdout)
+    check("given two commits, when the test runner differs from the first, every suite runs, "
+          "though the second commit already holds the changed runner",
+          ran(root) == sorted(RECORDING_SUITES)
+          and any(line.startswith("SELECTED loads-a-program-by-path-test.py: judged by the "
+                                  f"comparison with the first commit alone, {main_passed[:12]}")
+                  and "scripts/run-all-test-suites.py differs" in line for line in out),
+          (ran(root), result.stdout, result.stderr))
+    base = head_tested
+
+    # When the runner differs from the first commit, the later comparisons are not made, so a
+    # later commit whose comparison would fail, such as one git ls-tree cannot read, stops
+    # nothing.
+    real_suites_selected_since = module.suites_selected_since
+    compared = []
+
+    def suites_selected_since_failing_after_the_first(top, suites, recordings, commit, *rest):
+        compared.append(commit)
+        if len(compared) > 1:
+            raise module.CouldNotRun("injected: git ls-tree of the second commit failed")
+        return [(suite, False, "none of its files differs") for suite in suites]
+
+    module.suites_selected_since = suites_selected_since_failing_after_the_first
+    try:
+        answer = module.suites_selected_since_every_commit(
+            pathlib.Path("/nowhere"), ["a-test.py"], {}, ["first-commit", "second-commit"],
+            [{module.PROGRAM: "M"}, {}], {}, {}, None)
+        refused = None
+    except module.CouldNotRun as refusal:
+        answer, refused = None, str(refusal)
+    finally:
+        module.suites_selected_since = real_suites_selected_since
+    check("given two commits, when the test runner differs from the first, the comparison with "
+          "the second is not made, so its failure does not stop the run, and every suite runs",
+          refused is None and compared == ["first-commit"] and answer is not None
+          and [(suite, selected) for suite, selected, _ in answer] == [("a-test.py", True)],
+          (compared, answer, refused))
 
     result = run(root, CHANGED_SINCE, "no-such-commit")
     check("a commit git cannot resolve is refused, exit 2, before anything runs",
@@ -4953,9 +5062,17 @@ module.write_case_times_suite_resources_and_junit_xml_of_run(junit_directory, [
      "skips": ["SKIP  case s: no Mac"],
      "cases": [dict(case_line("FAIL", "case a: x"), seconds=0.5, ended=0.5, unix_time=0.0)]},
     {"suite": "scripts/b-test.py", "exit": 2, "seconds": 0.0, "log": clean_log, "skips": [],
-     "cases": [], "test sandbox did not start": True}])
+     "cases": [], "test sandbox did not start": True},
+    {"suite": "scripts/c-test.py", "exit": 0, "seconds": 1.0, "log": clean_log, "skips": [],
+     "cases": [dict(case_line("FAIL", "double(3)"), seconds=0.5, ended=0.5, unix_time=0.0),
+               dict(case_line("PASS", "case c"), seconds=0.5, ended=1.0, unix_time=0.0)]}])
 junit_root = xml.etree.ElementTree.parse(junit_directory / "junit.xml").getroot()
 junit_suites = {element.get("name"): element for element in junit_root.iter("testsuite")}
+check("the JUnit XML gives a suite that exits 0 no failure, even for a FAIL case line it printed",
+      junit_suites["scripts/c-test.py"].get("failures") == "0"
+      and not any(case.find("failure") is not None
+                  for case in junit_suites["scripts/c-test.py"].iter("testcase")),
+      xml.etree.ElementTree.tostring(junit_suites["scripts/c-test.py"]))
 check("the JUnit XML names each skipped case, and says whether each suite ran to the end and "
       "was judged",
       [(case.get("name"), case.find("skipped") is not None)

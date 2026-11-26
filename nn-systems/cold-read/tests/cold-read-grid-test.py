@@ -933,6 +933,12 @@ try:
     def lines_opening(result, prefix):
         return [line for line in result.stdout.splitlines() if line.startswith(prefix)]
 
+    def lines_opening_with_their_next_step(result, prefix):
+        """Each line opening prefix, joined to the line after it, which says what to do."""
+        lines = result.stdout.splitlines()
+        return [f"{line}\n{lines[index + 1] if index + 1 < len(lines) else ''}"
+                for index, line in enumerate(lines) if line.startswith(prefix)]
+
     def markers_in(record_directory, prefix):
         """The .md files of the set carrying a marker that opens `prefix`."""
         return [path.name for path in sorted(record_directory.glob("*.md"))
@@ -1196,12 +1202,18 @@ try:
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2",
         "COLD_READ_GRID_TEST_STUB_WRITE_PATHS_BEFORE_SLEEPING": ",".join(
             str(repository / name) for name in (new_file, TARGET_RELATIVE_PATH))})
-    stray_lines = lines_opening(result, "STRAY WRITE:")
+    stray_lines = lines_opening_with_their_next_step(result, "STRAY WRITE:")
     check("each path the stopped cells changed is listed once, and nothing says the check did not run",
           sorted(line.split(" ", 3)[2] for line in stray_lines)
           == sorted([new_file, TARGET_RELATIVE_PATH])
           and lines_opening(result, "WRITE CHECK DID NOT RUN:") == [],
           repr(result.stdout))
+    check("a stopped cell's STRAY WRITE line ends at its finding, and what to do is on the next "
+          "line, where the Monitor tool filter the cold-read skill sets shows it",
+          stray_lines != [] and all(
+              line.split("\n")[0].endswith("cannot tell who changed it.")
+              and "If its content shows a reviewer wrote it" in line.split("\n")[1]
+              for line in stray_lines), repr(stray_lines))
     # The commands name the repository in full, so they hit the same file from any directory.
     resolved_repository = repository.resolve()
     check("a new file gets a delete command naming its absolute path",
@@ -1223,6 +1235,11 @@ try:
         "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
     unchecked_lines = lines_opening(result, "WRITE CHECK DID NOT RUN:")
+    unchecked_lines_with_next_step = lines_opening_with_their_next_step(result, "WRITE CHECK DID NOT RUN:")
+    check("a stopped cell's WRITE CHECK DID NOT RUN line has what to do on the next line",
+          unchecked_lines_with_next_step != [] and all(
+              line.split("\n")[1].startswith("Before you do anything else")
+              for line in unchecked_lines_with_next_step), repr(unchecked_lines_with_next_step))
     check("with no snapshot, every stopped cell says no check ran, why, and that it is not a clean result",
           len(unchecked_lines) == 8 and all(
               "its snapshot of the working tree before the cells launched failed" in line
@@ -1760,6 +1777,47 @@ try:
     def failing_working_tree_state():
         raise grid_module.cell_common.WriteDetectorUnavailable("injected git status failure")
 
+    # Each lifted status line is followed by the line that says what to do, so the agent reads
+    # the instruction when the event happens rather than from the skill before the run.
+    program = sorted(grid_module.CELL_PROGRAM_NAMES)[0]
+    lifted_cases = (
+        (grid_module.cell_common.STRAY_WRITE_PHRASE, "STRAY WRITE:",
+         grid_module.COLD_READ_CELL_STRAY_WRITE_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+        (grid_module.cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE, "WRITE CHECK DID NOT RUN:",
+         grid_module.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+        (grid_module.cell_common.FELL_BACK_PHRASE, "FELL BACK:",
+         grid_module.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+        (grid_module.cell_common.NEAR_MISS_RECOVERY_PHRASE, "RECOVERED:",
+         grid_module.COLD_READ_CELL_NEAR_MISS_REPORT_RECOVERED_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+    )
+    for phrase, marker, instruction in lifted_cases:
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            grid_module.lift_cell_status_lines(
+                scratch / "claude-hunt-deep.md", [f"{program}: {phrase} something\n"])
+        printed_lines = printed.getvalue().splitlines()
+        check(f"the lifted {marker} line is followed by its instruction line",
+              len(printed_lines) == 2 and printed_lines[0].startswith(marker)
+              and printed_lines[1] == instruction, repr(printed_lines))
+    # The grid reads the cell log with str.splitlines, which also splits at U+2028, U+2029 and
+    # U+0085; a git reason holding one, as in a path, must reach the lifted line whole.
+    cell_log = io.StringIO()
+    with contextlib.redirect_stderr(cell_log):
+        grid_module.cell_common.report_stray_writes(program, grid_module.cell_common.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository at '/x/a\u2028b\u2029c\x85d'\nTo add an exception, run:"))
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        grid_module.lift_cell_status_lines(scratch / "claude-hunt-deep.md", cell_log.getvalue().splitlines())
+    printed_lines = printed.getvalue().splitlines()
+    check("a failed snapshot's git reason holding U+2028, U+2029 and U+0085 is lifted whole on one line",
+          len(printed_lines) == 2 and printed_lines[0].startswith("WRITE CHECK DID NOT RUN:")
+          and "'/x/a\\u2028b\\u2029c\\x85d' To add an exception, run:" in printed_lines[0],
+          repr(printed_lines))
+    check("the FELL BACK instruction is the text item 24 of the approval-walk approved",
+          grid_module.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION
+          == "If this report drives a change, name the model that wrote it in cold-read-triage.md.",
+          grid_module.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION)
+
     real_working_tree_state = grid_module.cell_common.working_tree_state
     grid_module.cell_common.working_tree_state = failing_working_tree_state
     try:
@@ -1771,6 +1829,93 @@ try:
           len(lines) == 1 and lines[0].startswith("WRITE CHECK DID NOT RUN: claude-hunt-deep.md — ")
           and "git status failed when it checked (injected git status failure)" in lines[0],
           repr(lines))
+
+    # Git's dubious-ownership message runs over several lines; printed as given, its later
+    # lines would sit where the agent's Monitor shows the instruction.
+    def failing_working_tree_state_with_several_lines():
+        raise grid_module.cell_common.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository\nTo add an exception, run:\n\n"
+            "\tgit config --global --add safe.directory /somewhere")
+
+    grid_module.cell_common.working_tree_state = failing_working_tree_state_with_several_lines
+    try:
+        several_lines_reason_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], set(), None, set())
+    finally:
+        grid_module.cell_common.working_tree_state = real_working_tree_state
+    several_lines_printed = "\n".join(several_lines_reason_lines).splitlines()
+    check("a git error of several lines stays on the WRITE CHECK DID NOT RUN line, "
+          "so the next line is the instruction",
+          len(several_lines_printed) == 2
+          and "dubious ownership in repository To add an exception, run: git config" in several_lines_printed[0]
+          and several_lines_printed[1].startswith("Before you do anything else"),
+          repr(several_lines_printed))
+
+    # Git's -z output keeps a newline in a path; the STRAY WRITE line and its undo command
+    # must each stay one line, and the command must still name that one file.
+    newline_repository = (scratch / "checkout-stopped-cell-writes-a-path-with-a-newline").resolve()
+    newline_repository.mkdir()
+    subprocess.run(["git", "-C", str(newline_repository), "init", "--quiet"], check=True)
+    (newline_repository / "seed.md").write_text("Seed.\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(newline_repository), "add", "seed.md"], check=True)
+    subprocess.run(["git", "-C", str(newline_repository), "-c", "user.name=grid test",
+                    "-c", "user.email=grid-test@example.invalid", "commit", "--quiet", "-m", "seed"],
+                   check=True)
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", newline_repository):
+        newline_baseline = grid_module.cell_common.working_tree_state()
+        (newline_repository / "stray\nwrite's.md").write_text("Stray.\n", encoding="utf-8")
+        newline_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], newline_baseline, None, set())
+    newline_printed = "\n".join(newline_lines).splitlines()
+    newline_commands = re.findall(r"`(rm -r -- [^`]*)`", newline_printed[-1]) if newline_printed else []
+    check("a path holding a newline gives a STRAY WRITE line and an undo line, one line each",
+          len(newline_printed) == 2
+          and newline_printed[0].startswith("STRAY WRITE: $'stray\\x0awrite\\'s.md' changed")
+          and len(newline_commands) == 1, repr(newline_printed))
+    if newline_commands:
+        subprocess.run(["bash", "-c", newline_commands[0]], check=True)
+    check("the one-line undo command deletes the file whose path holds a newline",
+          not (newline_repository / "stray\nwrite's.md").exists()
+          and (newline_repository / "seed.md").exists(), repr(newline_commands))
+
+    # A path that names a checkout may hold two spaces in a row; joining the error's lines
+    # must not collapse them, or the printed safe.directory command names another path.
+    def failing_working_tree_state_with_a_doubled_space():
+        raise grid_module.cell_common.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository at '/x/two  spaces'\n"
+            "\tgit config --global --add safe.directory '/x/two  spaces'")
+
+    grid_module.cell_common.working_tree_state = failing_working_tree_state_with_a_doubled_space
+    try:
+        doubled_space_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], set(), None, set())
+    finally:
+        grid_module.cell_common.working_tree_state = real_working_tree_state
+    check("a doubled space inside one line of a git error is kept",
+          len(doubled_space_lines) == 1
+          and "safe.directory '/x/two  spaces'" in doubled_space_lines[0], repr(doubled_space_lines))
+
+    # str.splitlines also splits at U+2028, U+2029 and U+0085; such a path is escaped like a newline.
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", newline_repository):
+        separator_baseline = grid_module.cell_common.working_tree_state()
+        (newline_repository / "stray write.md").write_text("Stray.\n", encoding="utf-8")
+        separator_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], separator_baseline, None, set())
+    separator_printed = "\n".join(separator_lines).splitlines()
+    separator_commands = re.findall(r"`(rm -r -- [^`]*)`", separator_printed[-1]) if separator_printed else []
+    check("a path holding U+2028 gives a STRAY WRITE line and an undo line, one line each",
+          len(separator_printed) == 2
+          and separator_printed[0].startswith("STRAY WRITE: $'stray\\xe2\\x80\\xa8write.md' changed")
+          and len(separator_commands) == 1, repr(separator_printed))
+    # Under LC_ALL=C, as in bash 3.2, bash leaves $'\u2028' as the literal text, so the command must use bytes.
+    undo_exit = (subprocess.run(["bash", "-c", separator_commands[0]],
+                                env={**os.environ, "LC_ALL": "C"}).returncode
+                 if separator_commands else None)
+    check("the one-line undo command, run with LC_ALL=C, deletes the file whose path holds U+2028",
+          undo_exit == 0, repr(undo_exit))
+    check("...and leaves the other files",
+          not (newline_repository / "stray write.md").exists()
+          and (newline_repository / "seed.md").exists(), repr(separator_commands))
 
     # A stopped cell that moves a file the agent had already edited: restoring or deleting the
     # destination would delete it, and the agent's edits with it. Git pairs the move as a
@@ -2071,6 +2216,17 @@ try:
           and all((quoted_repository / neighbor).read_text(encoding="utf-8") == "The agent's own edit.\n"
                   for neighbor in ("dont", "wont.md", "cant", "shant.md")),
           repr(fallback_commands))
+    # The restore command resets the whole file, so a file that also holds edits that are not a
+    # reviewer's is edited by hand; the Monitor tool shows only the line after the finding.
+    fallback_next_step = grid_module.STOPPED_CELL_WRITE_CHECK_LINE.split("\n")
+    check("the fallback message gives a whole-file undo command only for a path whose every change is "
+          "a reviewer's, says to edit out only the reviewer's writing otherwise, all on the one line "
+          "after the finding",
+          len(fallback_next_step) == 2
+          and "whose every uncommitted change shows a reviewer wrote it" in fallback_next_step[1]
+          and "delete only the reviewer's writing, by editing the file" in fallback_next_step[1]
+          and "throws away every uncommitted change to the file" in fallback_next_step[1],
+          grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
 
     # A conflict with a missing side: both diffs can print only `* Unmerged path`.
     for missing_side_code, written in (("DD", "A reviewer's write.\n"), ("DU", "Incoming.\n")):
