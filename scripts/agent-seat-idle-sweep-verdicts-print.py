@@ -388,7 +388,7 @@ class TranscriptFacts:
         self.turn_ending_messages = []   # (record, time, time of the prompt that began its turn)
         self.task_tool_calls = []        # (time, name, input, task id), only calls whose result succeeded
         self.tool_calls = []             # (time, name, input, tool use id), every tool call
-        self.failed_tool_use_ids = set() # each tool use whose result carries is_error, or a task call whose result is not a success text
+        self.failed_tool_use_ids = set() # each tool use whose result has is_error true, and each task call with no success result, an interrupted one included
         self.assistant_texts = []        # (time, text), every assistant record with text
         self.launch_times = {}           # subagent or background task id -> time
         self.last_task_notification = {} # task id -> (time, whether it is interim)
