@@ -710,7 +710,7 @@ def closing_lines(pages, name, document_text, units, waiting_units, parser, numb
     pages = dict(pages)
     without_page = [number for number in numbers if number not in pages]
     pages.update(dict.fromkeys(without_page, NO_PAGE_LINK))
-    points = answer_hook.heading_points(document_text.split("\n"), units, parser)
+    points = answer_hook.heading_points(document_text.split("\n"), waiting_units, parser)
     no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
         document_text, parser, waiting_units, numbers, units)
     walk = answer_hook.WalkState(name, None, numbers, new_total, {}, None, pages=pages, points=points,
