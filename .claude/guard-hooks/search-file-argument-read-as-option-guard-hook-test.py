@@ -635,12 +635,16 @@ finally:
 # ---------------------------------------------------------------------------
 SETTINGS_PATH = HOOK_SCRIPT.resolve().parents[2] / ".claude" / "settings.json"
 settings = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+_dispatcher_spec = importlib.util.spec_from_file_location(
+    "bash_guard_hooks_dispatcher", HOOK_SCRIPT.resolve().with_name("bash-guard-hooks-dispatcher.py"))
+DISPATCHER = importlib.util.module_from_spec(_dispatcher_spec)
+_dispatcher_spec.loader.exec_module(DISPATCHER)
+# The Bash guard hooks dispatcher stands for each guard in its guard list, with that guard's timeout.
 guard_entries = [
-    hook
-    for matcher_block in settings.get("hooks", {}).get("PreToolUse", [])
-    if matcher_block.get("matcher") == "Bash"
-    for hook in matcher_block.get("hooks", [])
-    if HOOK_SCRIPT.name in hook.get("command", "")
+    {"path": path, "timeout": timeout}
+    for path, timeout in DISPATCHER.bash_pre_tool_use_hook_path_and_timeout_pairs_read_from_settings_with_each_dispatcher_guard_listed_in_its_place(
+        settings, SETTINGS_PATH.parents[1])
+    if Path(path).name == HOOK_SCRIPT.name
 ]
 check("the guard is wired exactly once as a PreToolUse Bash hook",
       len(guard_entries) == 1, str(guard_entries))

@@ -59,6 +59,7 @@ USER_ONLY_NOTICE = "a systemMessage Claude Code shows the user and not the agent
 CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     (".claude/guard-hooks/bash-guard-hooks-dispatcher.py", "GUARD_FAILED_AGENT_NOTICE"): HOOK_FAILED,
     (".claude/guard-hooks/bash-guard-hooks-dispatcher.py", "GUARD_FAILED_USER_NOTICE"): HOOK_FAILED,
+    (".claude/guard-hooks/bash-guard-hooks-dispatcher.py", "GUARD_LIST_FIX_LINE"): LATER_PART,
     # fork A
     (".claude/guard-hooks/claude-code-tmux-kill-server-and-kill-session-missing-server-selection-refusal-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
     (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
