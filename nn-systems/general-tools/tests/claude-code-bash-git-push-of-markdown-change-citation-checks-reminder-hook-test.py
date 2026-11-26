@@ -306,9 +306,14 @@ def main():
               and len(timeouts) == 2, repr(messages))
 
         settings = json.loads((REPOSITORY_ROOT / ".claude" / "settings.json").read_text())
-        registered = [entry.get("timeout") for block in settings["hooks"]["PreToolUse"]
-                      if block.get("matcher") == "Bash" for entry in block["hooks"]
-                      if HOOK_SCRIPT.name in entry["command"]]
+        dispatcher_spec = importlib.util.spec_from_file_location(
+            "bash_guard_hooks_dispatcher",
+            REPOSITORY_ROOT / ".claude" / "guard-hooks" / "bash-guard-hooks-dispatcher.py")
+        dispatcher = importlib.util.module_from_spec(dispatcher_spec)
+        dispatcher_spec.loader.exec_module(dispatcher)
+        registered = [timeout for path, timeout in
+                      dispatcher.bash_pre_tool_use_hook_path_and_timeout_pairs_read_from_settings_with_each_dispatcher_guard_listed_in_its_place(
+                          settings, REPOSITORY_ROOT) if Path(path).name == HOOK_SCRIPT.name]
         check("the registered hook timeout exceeds the git budget, so the hook ends before it is killed",
               len(registered) == 1 and isinstance(registered[0], (int, float))
               and registered[0] > hook.GIT_BUDGET_SECONDS, repr(registered))

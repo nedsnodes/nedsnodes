@@ -26,6 +26,8 @@ RULE_ID_OPENING_PATTERN = re.compile(r"\[rule (" + RULE_ID_WORDS + r")\] ")
 # A `\[rule` is a regular expression that matches an ID, not an ID.
 RULE_ID_LIKE_PATTERN = re.compile(r"(?<!\\)\[rule\b[^\]\n]*\]?")
 CLAUDE_PROJECT_DIRECTORY_PREFIXES = ('"$CLAUDE_PROJECT_DIR"/', "$CLAUDE_PROJECT_DIR/")
+BASH_GUARD_HOOKS_DISPATCHER = ".claude/guard-hooks/bash-guard-hooks-dispatcher.py"
+BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST = ".claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json"
 
 
 def registered_hook_paths(settings_path):
@@ -41,6 +43,12 @@ def registered_hook_paths(settings_path):
                     word = word.strip("\"'")
                     if word.endswith(".py") and word not in paths:
                         paths.append(word)
+    if BASH_GUARD_HOOKS_DISPATCHER in paths:
+        # The dispatcher runs the guards its guard list names, and their messages carry the rule IDs.
+        list_path = Path(settings_path).resolve().parents[1] / BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST
+        for entry in json.loads(list_path.read_text(encoding="utf-8"))["guards"]:
+            if entry["path"] not in paths:
+                paths.append(entry["path"])
     return paths
 
 
