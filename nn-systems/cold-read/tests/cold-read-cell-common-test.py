@@ -804,7 +804,7 @@ with tempfile.TemporaryDirectory() as scratch:
     check("an Opus failure fails the `deep`-tier cell",
           result.returncode == 1, f"exit {result.returncode}; stderr={result.stderr!r}")
     check("no other model is tried in Opus's place",
-          not report.exists() and "claude-fable-5-1" not in result.stderr
+          not report.exists() and "claude-fable-5-2" not in result.stderr
           and "fell back to" not in result.stderr,
           f"stderr={result.stderr!r}")
     check("the failure names the one attempt",
@@ -1058,7 +1058,7 @@ with tempfile.TemporaryDirectory() as scratch:
     report = repository / "cold-read-records" / "run-cause-a" / "claude-defect-hunt-second-strongest-model.md"
     result = run_claude_cell(
         repository, stubs,
-        {"claude-fable-5-1": {"exit": 1, "stdout": FABLE_LIMIT_LINE + "\n"}},
+        {"claude-fable-5-2": {"exit": 1, "stdout": FABLE_LIMIT_LINE + "\n"}},
         report, "--tier", "second-strongest-model",
     )
     check("a Claude cell that hit the Fable limit prints cause: exit-1 with the line as detail",
