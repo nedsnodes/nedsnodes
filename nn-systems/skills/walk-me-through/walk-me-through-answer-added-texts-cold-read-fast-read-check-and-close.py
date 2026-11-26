@@ -457,9 +457,9 @@ prints no such command.
 
 USER'S EARLIER WORDS. For an item that is to be shown, the step then runs
 walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py
-once for each heading that names a waiting item, with its title, in the
-closing line's form too when that differs, as when the title holds a link,
-and the numbers of the waiting items it names; a lone waiting item's search
+once, giving it the title of each heading that names a waiting item, in
+the closing line's form too when that differs, as when the title holds a
+link, each with the numbers of the waiting items its heading names; a lone waiting item's search
 also gives the title of each earlier text of it read, which the next
 paragraph finds, and a Withdrawn heading carries no title. It prints what that program prints right after its first line, which
 names the read's report: each message the user typed
@@ -3001,8 +3001,8 @@ def item_title(walk_finder, line, with_text_after_title=False):
     label = rf"(?:[\s,:;.\-\u2013\u2014]*{revised}[ :,.;\-\u2013\u2014]*)?"
     closer = re.escape(opener)
     # The bare word may end at the closing emphasis only straight after the count, as the finder's REVISED reads it.
-    word = (rf"{walk_finder.APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX}"
-            rf"(?P<after_word>{closer}){separators}|") if opener else ""
+    word = (walk_finder.APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX.format(closer=closer)
+            + rf"(?P<after_word>{closer}){separators}|") if opener else ""
     opening = re.match(rf"{word}{separators}(?:(?P<before>{closer}){separators}{label}|{label}(?P<after>{closer})"
                        rf"{separators}|{label})", line[count.end():], re.I)
     title = line[count.end() + opening.end():]
@@ -3017,19 +3017,25 @@ def item_title(walk_finder, line, with_text_after_title=False):
 
 
 def emphasis_closer(walk_finder, text, opener):
-    """The position in text of the delimiter that closes the emphasis opener opened before it, or None: never one
-    inside a code span, or with a space before it, as in `x ** 2`; and, for `_` emphasis, never one with a letter or
-    digit after it, as in `foo__bar`, which CommonMark reads as literal text."""
+    """The position in text of the delimiter run that closes the emphasis opener opened before it, or None, as
+    markdown-it's delimiter scan reads each run, so `x ** 2` and `foo__bar` close nothing and `foo___` closes at its
+    run's start; never a run inside a code span, which the scan does not see."""
+    from markdown_it.rules_inline import StateInline
     code = [span.span() for span in walk_finder.CODE_SPAN.finditer(text)]
-    for found in re.finditer(re.escape(opener), text):
+    state = StateInline(text, inline_delimiter_scan_parser(walk_finder), {}, [])
+    for found in re.finditer(rf"{re.escape(opener[0])}+", text):
         at = found.start()
-        if at == 0 or text[at - 1].isspace() or any(start <= at < end for start, end in code):
+        if any(start <= at < end for start, end in code):
             continue
-        following = text[found.end():found.end() + 1]
-        if opener[0] == "_" and (following.isalnum() or following == "_"):
-            continue
-        return at
+        scanned = state.scanDelims(at, opener[0] == "*")
+        if scanned.can_close and scanned.length >= len(opener):
+            return at
     return None
+
+
+@functools.cache
+def inline_delimiter_scan_parser(walk_finder):
+    return walk_finder.markdown_parser()
 
 
 def markdown_with_link_syntax_dropped(markdown, parser, hook):
@@ -3660,21 +3666,21 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
     lines = []
     # One search for every group, each title with its own numbers, so an agent-session or walk-minutes line naming
     # titles of two groups is printed once; in the `=` form, so that a title opening with `-` is not read as an option.
-    for words in [[f"--title-of-items={','.join(group_numbers)}:{title}"
-                   for group_titles, group_numbers in groups for title in group_titles]]:
-        result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
-                                stdin=subprocess.DEVNULL)
-        try:
-            exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
-        # Whatever a search that cannot load raises, it is a failed search, reported as the others are.
-        except Exception as error:
-            raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-                item=item, exit=result.returncode, command=command,
-                said="\n".join(filter(None, [result.stderr.strip(), f"FAILED: loading the title search here raised {error!r}."]))))
-        if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
-            raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-                item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
-        lines += result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
+    words = [f"--title-of-items={','.join(group_numbers)}:{title}"
+             for group_titles, group_numbers in groups for title in group_titles]
+    result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL)
+    try:
+        exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
+    # Whatever a search that cannot load raises, it is a failed search, reported as the others are.
+    except Exception as error:
+        raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
+            item=item, exit=result.returncode, command=command,
+            said="\n".join(filter(None, [result.stderr.strip(), f"FAILED: loading the title search here raised {error!r}."]))))
+    if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
+        raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
+            item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
+    lines += result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
     if not session_id:
         return lines, lambda: [TITLE_SEARCH_CACHE_NOT_SAVED.format(
             path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,

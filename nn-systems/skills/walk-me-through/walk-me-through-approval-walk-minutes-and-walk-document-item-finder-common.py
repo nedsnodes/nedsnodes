@@ -207,11 +207,24 @@ CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*
 # title opening with the word, as in `: revised the first`, keeps it. Every reader of the label reads it through
 # these two pieces.
 APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX = r"(?:\(revised\)|revised(?=\s*(?:[:,.;\-\u2013\u2014]|$)))"
-# Right after the count, the word may also end where the emphasis around the count closes, as in
-# `__Item 3 of 9 revised__: the first`, where `_` is a word character and `\b` finds no end.
-APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX = r"\s+revised(?=[*_])"
+# Right after the count, the word may also end where the emphasis opened before the count closes, as in
+# `__Item 3 of 9 revised__: the first`, where `_` is a word character and `\b` finds no end; `{closer}` is that
+# emphasis's delimiter, so `## Item 3 of 10 revised_estimates`, with no emphasis opened, has no label.
+APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX = r"\s+revised(?={closer})"
 # Only right after the count, so a title that uses the word drops nothing.
-REVISED = re.compile(rf"^(?:[*_\s(,:;.\-\u2013\u2014]*{APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX}|{APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX})", re.I)
+REVISED = re.compile(rf"^[*_\s(,:;.\-\u2013\u2014]*{APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX}", re.I)
+
+
+def approval_walk_item_heading_says_revised_right_after_its_item_count(content, count_end):
+    """Whether the heading or opening content carries the `revised` label straight after its count, which ends at
+    count_end: REVISED, or the bare word ending where the emphasis opened before the count closes."""
+    after = content[count_end:]
+    if REVISED.match(after):
+        return True
+    opener = re.match(r"\s*([*_]*)", content)[1]
+    return bool(opener) and bool(re.match(
+        APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX.format(closer=re.escape(opener)),
+        after, re.I))
 WITHDRAWN_HEADING = re.compile(r"^[*_\s(]*withdrawn\b", re.I)
 APPROVAL_WALK_ITEM_TAG_LINE = re.compile(r"^\s*#approval_walk_item_", re.I)
 RUNNING_COUNT_TOTAL = re.compile(rf"\b(items?\s+{NUMBER_LIST})\s+of\s+\d+\b", re.I)
@@ -746,7 +759,7 @@ def item_unit_starts(tokens, lines):
             continue
         else:
             group = None
-        revised = bool(REVISED.match(content[match.end():]))
+        revised = approval_walk_item_heading_says_revised_right_after_its_item_count(content, match.end())
         starts.append((index, numbers, match[2], problem, revised, token.map[0]))
     return starts
 
