@@ -6110,19 +6110,18 @@ def test_read_step_offers_a_removal_that_lacks_only_its_touches_line_while_the_r
     result = case.run(WAITING_ITEM_READ)
     kind_3 = [row for row in no_answer_rows_printed(result) if row.startswith("- kind 3:")]
     check("a removal with an unused line and no touches line is offered kind 3 as lacking only the touches line",
-          len(kind_3) == 1 and "Only evidence is missing" in kind_3[0] and "#not_asked_touches" in kind_3[0]
+          result.returncode == 0 and len(kind_3) == 1 and "Only evidence is missing" in kind_3[0] and "#not_asked_touches" in kind_3[0]
           and check_command_for(case, "--not-asked", "3") in kind_3[0], described(result))
 
 
 def test_read_step_offers_a_rename_that_lacks_only_its_touches_line_while_the_old_name_is_still_in_files():
     case = rated_none_case(touches="#not_asked_rename poem-list poem-index\n\n", rating=WEAK_COST_ONLY)
-    (case.checkout / "docs" / "about.md").parent.mkdir(parents=True, exist_ok=True)
     (case.checkout / "docs" / "about.md").write_text("See the poem-list.\n")
     (case.checkout / "docs" / "poems-glossary.md").write_text("- **poem-index** — the page that lists every poem.\n")
     result = case.run(WAITING_ITEM_READ)
     kind_4 = [row for row in no_answer_rows_printed(result) if row.startswith("- kind 4:")]
     check("a rename with a rename line and no touches line is offered kind 4 as lacking only the touches line",
-          len(kind_4) == 1 and "Only evidence is missing" in kind_4[0] and "#not_asked_touches" in kind_4[0]
+          result.returncode == 0 and len(kind_4) == 1 and "Only evidence is missing" in kind_4[0] and "#not_asked_touches" in kind_4[0]
           and check_command_for(case, "--not-asked", "4") in kind_4[0], described(result))
 
 
