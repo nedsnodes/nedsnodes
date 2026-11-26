@@ -73,7 +73,9 @@ has an entry for every finding, the refusal says to finish the round with --chec
 the frozen-head and that answers file has an entry for every finding: the refusal says to finish the round
 with --check, or, when the answers describe fixes, whose commit was reset away, to delete the answers file
 and run this again; this program cannot tell the two apart. Otherwise write the answers file with a line
-"<n>. " per finding, replacing any file there, and print the brief:
+"<n>. (finding <comment ID>) " per finding, the finding's GitHub comment ID, followed by the answer that the
+file it replaces gave under that ID, if any; when that file held any other text, first copy it unchanged into
+this round's kept copies. Then print the brief:
 the frozen-head, ADVISOR_FIX_ROUND_INSTRUCTION when the round's number is ADVISOR_FIX_ROUND_NUMBER and on
 no other, each blocking finding word for word, then each nit word for word, numbered on from the blocking
 findings, to fix in the same round, how to dispatch the fix-round subagent, a fork without Claude Code's
@@ -90,7 +92,7 @@ clone has one: the commits from the frozen-head to --commit (default
 HEAD) must be none, or one non-merge commit, which may be followed by one more non-merge commit that changes
 only nn-architecture-overview pages, since an overview in a pull request that changes the code it describes
 names a commit earlier than the overview edit. The answers file holds one entry per blocking finding
-and per nit, each starting "<n>. " on its own line; an entry that starts with MOVED_TO_PULL_REQUEST_PREFIX_PATTERN,
+and per nit, each starting "<n>. " on its own line, optionally followed by "(finding <comment ID>) "; an entry that starts with MOVED_TO_PULL_REQUEST_PREFIX_PATTERN,
 in any case, must go on with MOVED_TO_PULL_REQUEST_PATTERN naming a pull request gh pr view finds, or --check refuses it;
 --check also refuses when, for any file of that pull request's gh pr diff, the file's whole patch reversed
 applies cleanly to the checked commit's tree, since the moved change is then still on this branch. A file
@@ -225,8 +227,9 @@ ROUND_RECORD_FORMAT = ("Fix-round answered without a commit: frozen-head {frozen
                        "after this comment starts a new fix-round.")
 ROUND_RECORD_PATTERN = re.compile(r"Fix-round answered without a commit: frozen-head ([0-9a-f]+), "
                                   r"reviews (\d+(?: \d+)*)\.")
-ANSWER_START_PATTERN = re.compile(r"^(\d+)\.\s+(\S.*)$")
-ANSWER_PLACEHOLDER_LINE_PATTERN = re.compile(rb"^\s*\d+\.\s*$")
+# "<n>." starts an entry, which the brief writes as "<n>. (finding <comment ID>) " and the agent writes the answer after.
+ANSWER_START_PATTERN = re.compile(r"^(\d+)\.(?=\s|$)\s*(?:\(finding ([^()\s]+)\)\s*)?(.*)$")
+ANSWER_FINDING_TAG_FORMAT = "(finding {finding_id})"
 MOVED_TO_PULL_REQUEST_PREFIX = "Moved to pull request "
 MOVED_TO_PULL_REQUEST_PREFIX_PATTERN = re.compile(
     re.escape(MOVED_TO_PULL_REQUEST_PREFIX.rstrip()) + r"\b", re.IGNORECASE)
@@ -645,7 +648,9 @@ def blocks_moved_into_review_body(review, reviewer_login):
     if (review.get("user") or {}).get("login") != reviewer_login:
         return []
     moved = outside_the_diff_comments_read_back_from_review_body(review.get("body") or "")
-    return [{**comment, "html_url": review.get("html_url")} for comment in marked(moved)]
+    # GitHub gives a moved comment no ID, so its place in its review's body is its ID.
+    return marked([{**comment, "html_url": review.get("html_url"), "id": f"{review.get('id')}-{index}"}
+                   for index, comment in enumerate(moved, 1)])
 
 
 def blocking_findings(number, anchor, reviews, reviewer_login=MERGE_LANE_2_REVIEWER_LOGIN):
@@ -834,18 +839,36 @@ def fix_round_brief_guarded_file_change_carrying_out_user_ruling_paragraph_compo
     return FIX_ROUND_BRIEF_GUARDED_FILE_CHANGE_CARRYING_OUT_USER_RULING_PARAGRAPH_TEMPLATE.format(marker=marker)
 
 
-def answer_entries(text):
-    """({finding number: the entry's lines}, numbers with more than one entry) of an answers file's text."""
-    entries, repeated, current = {}, [], None
+def answers_file_parse(text):
+    """The entries of an answers file's text, in order, each (finding number, finding comment ID or None, the
+    answer's lines as written, its first line without the "<n>. " start and tag), and whether any non-blank line
+    comes before the first entry."""
+    entries, stray = [], False
     for line in text.splitlines():
         match = ANSWER_START_PATTERN.match(line)
         if match:
-            current = int(match.group(1))
-            if current in entries:
-                repeated.append(current)
-            entries[current] = [match.group(2)]
-        elif current is not None and line.strip():
-            entries[current].append(line.strip())
+            entries.append((int(match.group(1)), match.group(2), [match.group(3)]))
+        elif entries:
+            entries[-1][2].append(line)
+        elif line.strip():
+            stray = True
+    return entries, stray
+
+
+def answered(lines):
+    return any(line.strip() for line in lines)
+
+
+def answer_entries(text):
+    """({finding number: the answer's non-blank lines, stripped}, numbers with more than one answer) of an answers
+    file's text; an entry with no answer, such as the line the brief writes, is left out."""
+    entries, repeated = {}, []
+    for number, _finding_id, lines in answers_file_parse(text)[0]:
+        if not answered(lines):
+            continue
+        if number in entries:
+            repeated.append(number)
+        entries[number] = [line.strip() for line in lines if line.strip()]
     return entries, repeated
 
 
@@ -893,15 +916,36 @@ def answers_kept_copies_oldest_first(kept_copies_directory):
                          f"{error}") from None
 
 
-def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
-    """The new file in kept_copies_directory that now holds path's bytes, or None when path is missing or holds
-    only blank lines and "<n>." lines, so that nothing is lost when path is then replaced."""
+def answers_kept_for_findings(data, finding_ids):
+    """({finding comment ID: the answer's lines} for each answered entry of data that names one of finding_ids,
+    whether data holds any other text), so that a rerun puts back what it can and copies the file otherwise."""
+    try:
+        text = data.decode()
+    except UnicodeDecodeError:
+        return {}, True
+    entries, stray = answers_file_parse(text)
+    kept, other = {}, stray
+    for _number, finding_id, lines in entries:
+        if not answered(lines):
+            continue
+        if finding_id in finding_ids and finding_id not in kept:
+            kept[finding_id] = lines
+        else:
+            other = True
+    return kept, other
+
+
+def answers_file_text_kept_in_new_copy(path, kept_copies_directory, finding_ids=()):
+    """(the new file in kept_copies_directory that now holds path's bytes, or None, {finding comment ID: the
+    answer's lines} for each answer path gives under one of finding_ids). The copy is made unless path is missing
+    or holds no text but those answers, so that nothing is lost when path is then replaced."""
     try:
         data = path.read_bytes()
     except FileNotFoundError:
-        return None
-    if all(not line.strip() or ANSWER_PLACEHOLDER_LINE_PATTERN.match(line) for line in data.splitlines()):
-        return None
+        return None, {}
+    kept_answers, other = answers_kept_for_findings(data, set(finding_ids))
+    if not other:
+        return None, kept_answers
     kept_copies_directory.mkdir(parents=True, exist_ok=True)
     # The .incomplete name keeps a copy cut short by a killed run from passing for a whole one.
     descriptor, incomplete = tempfile.mkstemp(prefix=f"{path.stem}-", suffix=".incomplete", dir=kept_copies_directory)
@@ -915,31 +959,37 @@ def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
     except OSError:
         os.unlink(incomplete)
         raise
-    return kept
+    return kept, kept_answers
 
 
-def fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(path, finding_count, kept_copies_directory):
+def fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(path, finding_ids, kept_copies_directory):
     """Write the answers file as answers_file_with_one_line_per_finding_write does, and return every whole copy
     of the round, oldest first."""
     # Listed before the write, so that a directory that cannot be listed stops the brief with nothing changed, and
     # again after it, so that a copy an overlapping brief run made meanwhile is named too.
     answers_kept_copies_oldest_first(kept_copies_directory)
-    answers_file_with_one_line_per_finding_write(path, finding_count, kept_copies_directory)
+    answers_file_with_one_line_per_finding_write(path, finding_ids, kept_copies_directory)
     return answers_kept_copies_oldest_first(kept_copies_directory)
 
 
-def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copies_directory):
-    """Write the answers file with a line "<n>. " per finding, which read_answers reads as no entry until the agent
-    writes the answer after it; return the new copy of the text it replaced, or None when it made none."""
+def answers_file_with_one_line_per_finding_write(path, finding_ids, kept_copies_directory):
+    """Write the answers file with a line "<n>. (finding <comment ID>) " per finding of finding_ids, in order,
+    which read_answers reads as no entry until the agent writes the answer after it, and after it the answer
+    the replaced file gave under that ID; return the new copy of the text it replaced, or None when it made none."""
     kept = None
     try:
-        kept = answers_file_text_kept_in_new_copy(path, kept_copies_directory)
+        kept, kept_answers = answers_file_text_kept_in_new_copy(path, kept_copies_directory, finding_ids)
+        text = ""
+        for index, finding_id in enumerate(finding_ids, 1):
+            first, *rest = kept_answers.get(finding_id, [""])
+            text += f"{index}. {ANSWER_FINDING_TAG_FORMAT.format(finding_id=finding_id)} {first}\n"
+            text += "".join(f"{line}\n" for line in rest)
         # A unique name, because two brief runs can overlap; .md, so that the ignore line covers a file a killed
         # run leaves.
         descriptor, temporary = tempfile.mkstemp(prefix=f"{path.stem}-", suffix=".md", dir=path.parent)
         try:
             with os.fdopen(descriptor, "w") as new_file:
-                new_file.write("".join(f"{index}. \n" for index in range(1, finding_count + 1)))
+                new_file.write(text)
             os.replace(temporary, path)
         except OSError:
             os.unlink(temporary)
@@ -1062,8 +1112,8 @@ def print_brief(number, reviewer_login):
     # meanwhile is named too.
     for directory in other_reviews_directories:
         answers_kept_copies_oldest_first(directory)
-    kept_copies = fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers_path, len(findings) + len(nits),
-                                                                     kept_copies_directory)
+    kept_copies = fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(
+        answers_path, [str(finding.get("id")) for finding in findings + nits], kept_copies_directory)
     other_reviews_kept_copies = [kept_answers for directory in other_reviews_directories
                                  for kept_answers in answers_kept_copies_oldest_first(directory)]
     lines = [
@@ -1072,14 +1122,13 @@ def print_brief(number, reviewer_login):
         f"The round's reviews: {review_link}",
     ]
     for kept_answers in kept_copies:
-        lines.append(f"The answers file held text, which may be numbered for another round, so this program copied it "
-                     f"unchanged to {kept_answers} and wrote a new answers file. Read that copy, and copy into the "
-                     "new file each answer that still answers a finding below, under that finding's number.")
+        lines.append(f"The answers file held answers to other findings, so this program copied it unchanged to "
+                     f"{kept_answers}.")
     # A copies directory named by another review on this frozen-head: one an earlier version of this program
     # named by the round's latest changes-requested review, or one named by a first review since dismissed.
     for kept_answers in other_reviews_kept_copies:
         lines.append(f"An earlier brief on this frozen-head kept a copy of the answers file under another review, "
-                     f"at {kept_answers}. Read that copy too, and copy into the new file each answer that still "
+                     f"at {kept_answers}. Read that copy, and copy into the new file each answer that still "
                      "answers a finding below, under that finding's number.")
     if fix_round_number == ADVISOR_FIX_ROUND_NUMBER:
         lines += ["", ADVISOR_FIX_ROUND_INSTRUCTION]
@@ -1126,8 +1175,9 @@ def print_brief(number, reviewer_login):
         "If no finding holds, make no commit. The one other commit a round may have is the one "
         "nn-architecture-overview commit the check in step 6 asks for when the round changes code an overview "
         "of the pull request describes.",
-        f"5. Fill in the answers file {answers_path}, which this program wrote with a line \"<n>. \" for each "
-        "finding above: after each number, on the same line, write what you fixed, why the finding does not hold, "
+        f"5. Fill in the answers file {answers_path}, which this program wrote with a line \"<n>. (finding <comment "
+        "ID>) \" for each finding above, followed by any answer an earlier run kept for it: after each line's "
+        "tag, on the same line, write what you fixed, why the finding does not hold, "
         "or, for a change moved as step 3 says, the new pull request; further lines of an entry may follow. "
         "Never commit it: "
         "the branch's .gitignore may not leave it out, and the check in step 6 refuses a commit "
