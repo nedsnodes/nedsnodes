@@ -2,7 +2,7 @@
 """Tests for merge-lane-pull-request-reviewer-brief-compose-with-facts.py.
 
 Runs the program against real git in a scratch repository that serves as
---review-tools-worktree-at-main: main, a first nc-head-commit and a fix-round nc-head-commit, with a
+--review-tools-worktree-at-main: main, a first nn-head-commit and a fix-round nn-head-commit, with a
 copy of this directory's compose-pull-request-reviewer-brief.py and an
 instructions file committed on main. wt/pr7-merged is a worktree of that
 repository. The reviewer's scratch directories are made in their own directory
@@ -10,7 +10,8 @@ of the scratch, in place of the default parent outside the log-store. The progra
 not exist, so a case passes only if the program drops it. A stand-in for gh
 on PATH serves the pull request's closing issues and description and the merged
 pull requests from routes each case arranges, and logs each call with the GH_TOKEN it saw;
-HOME is a scratch directory holding the merge account's token file.
+a stand-in for the follow-up request program, committed on main, does the same for the
+follow-up request blocks; HOME is a scratch directory holding the merge account's token file.
 
 Run: python3 scripts/merge-lane-pull-request-reviewer-brief-compose-with-facts-test.py
 """
@@ -63,6 +64,22 @@ sys.exit(route.get("exit", 0))
 '''
 
 
+FOLLOW_UP_REQUEST_PROGRAM_STAND_IN = r'''#!/usr/bin/env python3
+import json, os, sys
+argv = sys.argv[1:]
+with open(os.environ["BRIEF_COMPOSE_TEST_FOLLOW_UP_CALL_LOG"], "a") as log:
+    log.write(json.dumps({"argv": argv, "gh_token": os.environ.get("GH_TOKEN")}) + "\n")
+route = json.load(open(os.environ["BRIEF_COMPOSE_TEST_FOLLOW_UP_ROUTES"])).get(argv[0])
+if route is None:
+    sys.stderr.write("brief-compose-test follow-up stand-in: unarranged call %r\n" % (argv,))
+    sys.exit(97)
+sys.stdout.write(route.get("stdout", ""))
+sys.stderr.write(route.get("stderr", ""))
+sys.exit(route.get("exit", 0))
+'''
+FOLLOW_UP_REQUEST_PROGRAM_PATH = "scripts/pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py"
+
+
 def closing_route(closing_issues=(), body=DESCRIPTION):
     return {"stdout": json.dumps({"closingIssuesReferences": list(closing_issues), "body": body})}
 
@@ -97,7 +114,7 @@ def commit_file(repository, path, text, message):
     return git(repository, "rev-parse", "HEAD")
 
 
-def run_program(scratch, helpers, specs, *extra, gh_routes=None, token=TEST_TOKEN):
+def run_program(scratch, helpers, specs, *extra, gh_routes=None, token=TEST_TOKEN, follow_up_routes=None):
     specs_file = scratch / "brief-specs.json"
     specs_file.write_text(json.dumps(specs))
     stand_in_directory = scratch / "gh-stand-in"
@@ -106,6 +123,8 @@ def run_program(scratch, helpers, specs, *extra, gh_routes=None, token=TEST_TOKE
     (stand_in_directory / "gh").chmod(0o755)
     (scratch / "gh-routes.json").write_text(json.dumps(QUIET_GH_ROUTES if gh_routes is None else gh_routes))
     (scratch / "gh-calls.jsonl").write_text("")
+    (scratch / "follow-up-routes.json").write_text(json.dumps(follow_up_routes or {}))
+    (scratch / "follow-up-calls.jsonl").write_text("")
     home = scratch / "home"
     shutil.rmtree(home, ignore_errors=True)
     (home / ".config" / "nedsnodes").mkdir(parents=True)
@@ -123,11 +142,17 @@ def run_program(scratch, helpers, specs, *extra, gh_routes=None, token=TEST_TOKE
         env={**GIT_ENVIRONMENT, "GIT_DIR": str(scratch / "no-such-git-directory"), "HOME": str(home),
              "PATH": f"{stand_in_directory}{os.pathsep}{os.environ['PATH']}",
              "BRIEF_COMPOSE_TEST_GH_ROUTES": str(scratch / "gh-routes.json"),
-             "BRIEF_COMPOSE_TEST_GH_CALL_LOG": str(scratch / "gh-calls.jsonl")})
+             "BRIEF_COMPOSE_TEST_GH_CALL_LOG": str(scratch / "gh-calls.jsonl"),
+             "BRIEF_COMPOSE_TEST_FOLLOW_UP_ROUTES": str(scratch / "follow-up-routes.json"),
+             "BRIEF_COMPOSE_TEST_FOLLOW_UP_CALL_LOG": str(scratch / "follow-up-calls.jsonl")})
 
 
 def gh_calls(scratch):
     return [json.loads(line) for line in (scratch / "gh-calls.jsonl").read_text().splitlines()]
+
+
+def follow_up_calls(scratch):
+    return [json.loads(line) for line in (scratch / "follow-up-calls.jsonl").read_text().splitlines()]
 
 
 ISSUE_THIS_PULL_REQUEST_CLOSES = "https://github.com/nedsnodes/nedsnodes/issues/50"
@@ -161,6 +186,8 @@ def main():
                        env=GIT_ENVIRONMENT)
         commit_file(repository, "scripts/compose-pull-request-reviewer-brief.py",
                     COMPOSER.read_text(), "composer")
+        commit_file(repository, FOLLOW_UP_REQUEST_PROGRAM_PATH, FOLLOW_UP_REQUEST_PROGRAM_STAND_IN,
+                    "follow-up request program stand-in")
         main_commit = commit_file(repository, "docs/agents/pr-reviewer-instructions.md",
                                   INSTRUCTIONS, "instructions")
         git(repository, "checkout", "-q", "-b", "topic")
@@ -184,7 +211,7 @@ def main():
             "The ned-box addendum.\n\n"
             "## This pull request (facts from merge-lane-2)\n\n"
             f"- Pull request: #7, \"A title\", author `an author`.\n"
-            f"- nc-head-commit: `{first_head}`.\n"
+            f"- nn-head-commit: `{first_head}`.\n"
             f"- Merge base: `{main_commit}`.\n"
             f"- Main's tip when commissioned: `{main_commit}`.\n"
             f"- Merged tree (head merged onto main by merge-lane-2): `{merged_tree}`.\n"
@@ -192,7 +219,7 @@ def main():
             "Use it as `<your scratchpad>`.\n"
             "- Files the change touches: `scripts/thing.py` (+2/-0).\n"
             "- Test files the change touches: `scripts/thing-test.py`.\n"
-            "- First round: no nc-head-commit was reviewed before.\n"
+            "- First round: no nn-head-commit was reviewed before.\n"
             "- Other open pull requests changing the same files: none.\n"
             "- Merged pull requests whose not-fixed line links to an issue this pull request "
             "closes, or to this pull request: none.\n"
@@ -221,6 +248,98 @@ def main():
               and calls[0]["argv"][-2:] == ["--json", "closingIssuesReferences,body"]
               and "merged" in calls[1]["argv"] and "body" in calls[1]["argv"][-1]
               and all(call["gh_token"] == TEST_TOKEN for call in calls), json.dumps(calls))
+        check("a description that names no follow-up request runs no follow-up request program",
+              not follow_up_calls(scratch), json.dumps(follow_up_calls(scratch)))
+
+        follow_up_description = ("Follow-up to PR #31, from merge-lane-2's `#follow_up_request pull request 31`.\n\n"
+                                 "#follow_up_request pull request 4\n\n#no_defect_fixed\n")
+        block_31 = "#follow_up_request pull request 31\n1. fix-next: `scripts/a.py:3`: It drops a line.\n"
+        follow_up_gh_routes = {**QUIET_GH_ROUTES, "closing": closing_route(body=follow_up_description)}
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "12"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"31": {"stdout": block_31}, "4": {"stdout": ""}})
+        brief_file = helpers / "briefs" / "brief-12-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        program_line = ("`scripts/pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py {n} "
+                        "print-follow-up-request-block-from-merge-lane-2-reviews` prints it from merge-lane-2's reviews")
+        expected_follow_up_facts = (
+            "- merge-lane-2's follow-up request for pull request #4, which the description names, as "
+            + program_line.format(n=4) + ": it printed no finding, so merge-lane-2's reviews of that pull "
+            "request hold no non-blocking finding.\n"
+            "- merge-lane-2's follow-up request for pull request #31, which the description names, as "
+            + program_line.format(n=31) + ":\n\n"
+            "> #follow_up_request pull request 31\n> 1. fix-next: `scripts/a.py:3`: It drops a line.\n\n"
+            "- Hazards: Check the thing.\n")
+        check("the brief gives the follow-up request block of each pull request the description names, "
+              "anywhere in it, lowest number first, before the hazards",
+              completed.returncode == 0 and expected_follow_up_facts in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+        calls = follow_up_calls(scratch)
+        check("the follow-up request program is run once per named pull request, as the merge account",
+              [call["argv"] for call in calls]
+              == [["4", "print-follow-up-request-block-from-merge-lane-2-reviews"],
+                  ["31", "print-follow-up-request-block-from-merge-lane-2-reviews"]]
+              and all(call["gh_token"] == TEST_TOKEN for call in calls), json.dumps(calls))
+
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "13"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {
+                                    "exit": 1, "stderr": "ned-review-merge has no approving review of pull request 31\n"}})
+        check("the follow-up request program failing without a refusal exits 1, naming its error, and writes no brief",
+              completed.returncode == 1 and "brief not composed: StepFailed" in completed.stderr
+              and "has no approving review of pull request 31" in completed.stderr
+              and not (helpers / "briefs" / "brief-13-mac-claude.md").exists(),
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        saved_block_31 = repository / ".git" / "pull-request-follow-up-requests" / \
+            "pull-request-31-non-blocking-findings.md"
+        refusal = ("REFUSED: ned-review-merge's review 2 of pull request 31 holds 2 fix-next finding(s) on "
+                   "scripts/a.py worded as 1 earlier finding(s) but with new Codex finding ids.\n"
+                   "Write the block by hand.\n")
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        brief_file = helpers / "briefs" / "brief-14-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("a follow-up request program that refuses to print a block puts its refusal in the brief in the "
+              "block's place, and the brief is composed",
+              completed.returncode == 0
+              and ("- merge-lane-2's follow-up request for pull request #31, which the description names: "
+                   + program_line.format(n=31).replace(" prints it from merge-lane-2's reviews", "")
+                   + " refused to print it from merge-lane-2's reviews, saying:\n\n"
+                   "> REFUSED: ned-review-merge's review 2 of pull request 31 holds 2 fix-next finding(s) on "
+                   "scripts/a.py worded as 1 earlier finding(s) but with new Codex finding ids.\n"
+                   "> Write the block by hand.\n\n"
+                   f"No block merge-lane-2 wrote by hand is saved at `{saved_block_31}`, where the author's "
+                   "follow-up request hook saves the block merge-lane-2 sends it; an author on the Mac saves it on "
+                   "the Mac.\n") in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        hand_written_31 = ("#follow_up_request pull request 31\n1. fix-next: `scripts/a.py:3`: It drops a line.\n"
+                           "2. fix-next: `scripts/a.py:9`: It drops a second line.\n")
+        saved_block_31.parent.mkdir()
+        saved_block_31.write_text(hand_written_31)
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14s"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        brief_file = helpers / "briefs" / "brief-14s-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("a refused block is quoted with the block merge-lane-2 wrote by hand, as the author's hook saved it in "
+              "the review tools worktree's git common directory",
+              completed.returncode == 0
+              and ("> Write the block by hand.\n\n"
+                   "The block merge-lane-2 wrote by hand and sent the author instead, as the author's follow-up "
+                   f"request hook saved it at `{saved_block_31}`:\n\n"
+                   "> #follow_up_request pull request 31\n> 1. fix-next: `scripts/a.py:3`: It drops a line.\n"
+                   "> 2. fix-next: `scripts/a.py:9`: It drops a second line.\n") in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        saved_block_31.unlink()
+        saved_block_31.mkdir()
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14u"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        saved_block_31.rmdir()
+        check("a saved block that cannot be read exits 1, naming it, and writes no brief",
+              completed.returncode == 1 and "brief not composed: StepFailed" in completed.stderr
+              and f"could not read {saved_block_31}" in completed.stderr
+              and not (helpers / "briefs" / "brief-14u-mac-claude.md").exists(),
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         completed = run_program(scratch, helpers, [first_round, {**first_round, "tag": "7b"}],
                                 gh_routes=FOLLOW_UP_GH_ROUTES)
@@ -279,9 +398,9 @@ def main():
         brief = brief_file.read_text() if brief_file.exists() else ""
         detail = (f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
                   f"\n--- brief ---\n{brief}")
-        check("a fix-round brief names the nc-head-commit reviewed before and the answer",
+        check("a fix-round brief names the nn-head-commit reviewed before and the answer",
               completed.returncode == 0
-              and (f"- This nc-head-commit is a fix-round. nc-head-commit reviewed before: "
+              and (f"- This nn-head-commit is a fix-round. nn-head-commit reviewed before: "
                    f"`{first_head}` (review 1). One new commit.\n") in brief
               and "- The author's answer to each finding: fixed it\n" in brief, detail)
         check("a fix-round brief counts only the new commit's changes",

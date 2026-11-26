@@ -144,8 +144,10 @@ WHAT IS PINNED HERE.
 Run: python3 nn-systems/cold-read/tests/cold-read-cell-common-test.py
 """
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -850,6 +852,79 @@ with tempfile.TemporaryDirectory() as scratch:
           unavailable_detail is not None and "could not start git" in unavailable_detail,
           repr(unavailable_detail))
 
+    # The grid lifts only the cell-log line holding the phrase, so a path or git error of
+    # several lines must reach the log as one line, or the rest of it is dropped.
+    real_stray_writes_since = common_module.stray_writes_since
+
+    def stray_write_check_printed(stray_writes_since_stand_in):
+        common_module.stray_writes_since = stray_writes_since_stand_in
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(captured):
+                common_module.report_stray_writes("cell", set())
+        finally:
+            common_module.stray_writes_since = real_stray_writes_since
+        return captured.getvalue().splitlines()
+
+    stray_lines = stray_write_check_printed(lambda baseline, own: ["stray\nwrite.md", "plain.md"])
+    check("a stray-write path holding a newline stays on the STRAY WRITE line",
+          len(stray_lines) == 1 and "$'stray\\x0awrite.md', plain.md" in stray_lines[0], repr(stray_lines))
+
+    def git_status_failing_with_several_lines(baseline, own):
+        raise common_module.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository at '/x/two  spaces'\nTo add an exception, run:")
+
+    skipped_lines = stray_write_check_printed(git_status_failing_with_several_lines)
+    check("a git error of several lines stays on the check-skipped line, with its doubled space",
+          len(skipped_lines) == 1 and "'/x/two  spaces' To add an exception, run:" in skipped_lines[0],
+          repr(skipped_lines))
+
+    separator_path = "/x/a\u2028b\u0085c"
+    joined_remedy = common_module.join_error_text_lines_with_one_space(
+        f"fatal: dubious ownership at '{separator_path}'\nTo add an exception, run:\n\n"
+        f"\tgit config --global --add safe.directory '{separator_path}'")
+    copied_remedy = joined_remedy.split("To add an exception, run: ", 1)[1]
+    check("a U+2028 inside a quoted path in a git error leaves the line one line",
+          len(joined_remedy.splitlines()) == 1, repr(joined_remedy))
+    check("git's remedy, copied from the joined line, still names the original path",
+          subprocess.run(["bash", "-c", copied_remedy.replace("git config", "printf %s", 1)
+                          .replace(" --global --add safe.directory", "", 1)],
+                         capture_output=True, text=True).stdout == separator_path,
+          repr(copied_remedy))
+    apostrophe_path = "/x/a b'c"
+    git_quoted_apostrophe_path = "'" + apostrophe_path.replace("'", "'\\''") + "'"
+    joined_apostrophe_remedy = common_module.join_error_text_lines_with_one_space(
+        f"fatal: detected dubious ownership in repository at '{apostrophe_path}'\n"
+        "To add an exception for this directory, call:\n\n"
+        f"\tgit config --global --add safe.directory {git_quoted_apostrophe_path}")
+    copied_apostrophe_remedy = joined_apostrophe_remedy.split("call: ", 1)[1]
+    check("git's remedy for a path holding U+2028 and an apostrophe, copied from the joined "
+          "line, still names the original path",
+          len(joined_apostrophe_remedy.splitlines()) == 1
+          and subprocess.run(["bash", "-c", copied_apostrophe_remedy.replace("git config", "printf %s", 1)
+                              .replace(" --global --add safe.directory", "", 1)],
+                             capture_output=True, text=True).stdout == apostrophe_path,
+          repr(joined_apostrophe_remedy))
+    check("a U+2028 outside any quoted span is written as its escape",
+          common_module.join_error_text_lines_with_one_space("fatal: a\u2028b") == "fatal: a\\u2028b")
+    unparsable_command = common_module.join_error_text_lines_with_one_space(
+        "git config --global --add safe.directory '/x/a\u2028b")
+    check("a git command line shlex cannot split, holding U+2028 and an unmatched quote, stays "
+          "one line with the character escaped",
+          unparsable_command == "git config --global --add safe.directory '/x/a\\u2028b",
+          repr(unparsable_command))
+
+    # A cell whose pre-run snapshot failed passes git's reason, so the line the grid lifts carries it.
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured):
+        common_module.report_stray_writes("cell", common_module.WriteDetectorUnavailable(
+            "fatal: not a git repository\nhint: run git init"))
+    not_taken_lines = captured.getvalue().splitlines()
+    check("a failed pre-run snapshot's git reason is on the check-skipped line",
+          len(not_taken_lines) == 1 and STRAY_WRITE_CHECK_SKIPPED_PHRASE in not_taken_lines[0]
+          and "git status failed: fatal: not a git repository hint: run git init" in not_taken_lines[0],
+          repr(not_taken_lines))
+
     # A stamp whose reviewed file cannot be read says so instead of failing the report.
     with tempfile.TemporaryDirectory() as stamp_scratch:
         stamped_report = Path(stamp_scratch) / "report.md"
@@ -905,41 +980,26 @@ with tempfile.TemporaryDirectory() as scratch:
     PERMISSION_NOISE = ("Permission allow rule (/Users/el/.claude/settings.json): "
                         "Glob(//Users/el/agents/**) is not matched by file permission checks\n")
 
-    def classify(stdout="", stderr="", exit_code=1, model="claude-fable-5-1", start_error=""):
+    def classify(stdout="", stderr="", exit_code=1, start_error=""):
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
-            recognised_texts=claude_module.recognised_failure_texts_for_model(model),
+            recognised_texts=claude_module.RECOGNISED_FAILURE_TEXTS,
             start_error=start_error)
 
-    check("the weekly limit line is account-limit, the limit and its reset as detail",
+    check("the weekly limit line is no recognised text: exit-N, the line as detail",
           classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")
-          == ("account-limit", "weekly limit · resets Nov 7, 3am (America/Los_Angeles)"),
+          == ("exit-1", WEEKLY_LIMIT_LINE),
           repr(classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")))
-    check("a line starting \"You've hit your \" whose next words do not end in limit is exit-N",
-          classify(stdout="You've hit your limitless quota · resets Nov 7\n")[0] == "exit-1",
-          repr(classify(stdout="You've hit your limitless quota · resets Nov 7\n")))
-    check("three words before limit is still account-limit",
-          classify(stdout="You've hit your Opus weekly usage limit · resets Nov 7\n")
-          == ("account-limit", "Opus weekly usage limit · resets Nov 7"),
-          repr(classify(stdout="You've hit your Opus weekly usage limit · resets Nov 7\n")))
-    check("exactly four words before limit is exit-N",
-          classify(stdout="You've hit your a b c d limit\n")[0] == "exit-1",
-          repr(classify(stdout="You've hit your a b c d limit\n")))
-    check("a line whose \"limit\" comes five or more words after \"You've hit your \" is exit-N",
-          classify(stdout="You've hit your stride and now the speed limit\n")[0] == "exit-1",
-          repr(classify(stdout="You've hit your stride and now the speed limit\n")))
-    check("the Fable limit line is model-limit for a Fable attempt, the family as detail",
-          classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n") == ("model-limit", "Fable"),
+    check("the Fable limit line is no recognised text: exit-N, the line as detail",
+          classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n")
+          == ("exit-1", FABLE_LIMIT_LINE[:120]),
           repr(classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n")))
-    check("the same line on an Opus attempt is not that model's limit: exit-N",
-          classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")[0] == "exit-1",
-          repr(classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")))
     check("the logged-out capture is logged-out with the whole line as detail",
           classify(stdout=LOGGED_OUT_LINE + "\n") == ("logged-out", LOGGED_OUT_LINE),
           repr(classify(stdout=LOGGED_OUT_LINE + "\n")))
-    check("a limit text inside a line, not at its start, is not recognised",
-          classify(stdout=f"The document quotes: {WEEKLY_LIMIT_LINE}\n")[0] == "exit-1",
-          repr(classify(stdout=f"The document quotes: {WEEKLY_LIMIT_LINE}\n")))
+    check("a recognised text inside a line, not at its start, is not recognised",
+          classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")[0] == "exit-1",
+          repr(classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")))
     check("an agent-binary that could not be started is agent-binary-missing with the error",
           classify(exit_code=None, start_error="[Errno 2] No such file or directory: 'claude'")
           == ("agent-binary-missing", "[Errno 2] No such file or directory: 'claude'"))
@@ -959,10 +1019,10 @@ with tempfile.TemporaryDirectory() as scratch:
           classify(stdout="only stdout\n", exit_code=64) == ("exit-64", "only stdout")
           and classify(stdout="only stdout\n", stderr=" \n\n", exit_code=64) == ("exit-64", "only stdout")
           and classify(exit_code=-9) == ("exit--9", "no output"))
-    check("a Codex attempt recognises no text, so the Claude limit line is exit-1 there",
+    check("an attempt given no recognised texts makes the Claude logged-out line exit-1",
           common_module.classify_failed_attempt(
-              stdout=WEEKLY_LIMIT_LINE + "\n", stderr="", exit_code=1, recognised_texts=[])
-          == ("exit-1", WEEKLY_LIMIT_LINE))
+              stdout=LOGGED_OUT_LINE + "\n", stderr="", exit_code=1, recognised_texts=[])
+          == ("exit-1", LOGGED_OUT_LINE))
 
     # The Codex logged-out line carries the tracing logger's timestamp, which
     # the classifier skips before matching by how the line starts; the
@@ -970,7 +1030,7 @@ with tempfile.TemporaryDirectory() as scratch:
     def classify_codex(stdout="", stderr="", exit_code=1):
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
-            recognised_texts=codex_module.recognised_failure_texts_for_model("gpt-5-codex"))
+            recognised_texts=codex_module.RECOGNISED_FAILURE_TEXTS)
 
     check("the Codex 401 capture on stderr is logged-out, the line after its timestamp as detail",
           classify_codex(stderr=CODEX_LOGGED_OUT_LINE + "\n")
@@ -991,10 +1051,6 @@ with tempfile.TemporaryDirectory() as scratch:
           repr(classify_codex(stderr=f"{CODEX_LOGGED_OUT_TIMESTAMP} {WEEKLY_LIMIT_LINE}\n")))
     check("the Claude logged-out line still matches at column 0 with no timestamp",
           classify(stdout=LOGGED_OUT_LINE + "\n") == ("logged-out", LOGGED_OUT_LINE))
-    check("the family name is the model id's second word, capitalised",
-          claude_module.model_family_name("claude-fable-5-1") == "Fable"
-          and claude_module.model_family_name("claude-opus-5") == "Opus")
-
     # Through the real cells: the cause line is the last line of the attempt
     # in the log the grid reads, in the form the grid parses.
     shutil.rmtree(repository)
@@ -1005,26 +1061,26 @@ with tempfile.TemporaryDirectory() as scratch:
         {"claude-fable-5-1": {"exit": 1, "stdout": FABLE_LIMIT_LINE + "\n"}},
         report, "--tier", "second-strongest-model",
     )
-    check("a Claude cell that hit the Fable limit prints cause: model-limit — Fable",
+    check("a Claude cell that hit the Fable limit prints cause: exit-1 with the line as detail",
           result.returncode == 1
-          and "cold-read-claude-cell: cause: model-limit — Fable" in result.stderr,
+          and f"cold-read-claude-cell: cause: exit-1 — {FABLE_LIMIT_LINE[:120]}" in result.stderr,
           repr(result.stderr))
     cause_lines = [line for line in result.stderr.splitlines()
                    if line.startswith("cold-read-claude-cell: cause:")]
     check("the cause line is the last line of its own about the attempt",
           len(cause_lines) == 1
-          and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: model-limit"),
+          and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: exit-1"),
           repr(result.stderr))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
     report = repository / "cold-read-records" / "run-cause-b" / "codex-defect-hunt-second-strongest-model.md"
     result = run_codex_cell(
         repository, stubs,
-        {"*": {"exit": 1, "stdout": WEEKLY_LIMIT_LINE + "\n"}},
+        {"*": {"exit": 1, "stdout": LOGGED_OUT_LINE + "\n"}},
         report,
     )
-    check("a Codex cell printing the Claude limit text names exit-1, the line as detail",
-          f"cold-read-codex-cell: cause: exit-1 — {WEEKLY_LIMIT_LINE}" in result.stderr,
+    check("a Codex cell printing the Claude logged-out text names exit-1, the line as detail",
+          f"cold-read-codex-cell: cause: exit-1 — {LOGGED_OUT_LINE}" in result.stderr,
           repr(result.stderr))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
@@ -1129,6 +1185,9 @@ with tempfile.TemporaryDirectory() as scratch:
     )
     check("a cell that could not take a baseline says the check did not run",
           STRAY_WRITE_CHECK_SKIPPED_PHRASE in result.stderr, repr(result.stderr))
+    check("...giving git's reason on that line",
+          any(STRAY_WRITE_CHECK_SKIPPED_PHRASE in line and "git status failed:" in line
+              for line in result.stderr.splitlines()), repr(result.stderr))
     check("...and says a missing check is not a clean result",
           "failure to look, not a clean result" in result.stderr, repr(result.stderr))
 
@@ -1602,11 +1661,31 @@ with tempfile.TemporaryDirectory() as scratch:
     # relative to the working directory and blocked 1 of 3 canaries.
     passed_deny_rules = (json.loads(passed_settings).get("permissions", {}).get("deny", [])
                          if passed_settings.startswith("{") else [])
-    check("the Claude cell denies reading every credential path",
-          set(passed_deny_rules) >= {"Read(~/.config/nedsnodes/**)", "Read(~/.config/gh/**)",
-                                     "Read(~/.ssh/**)",
-                                     "Read(//**/*.token)", "Read(//**/.env)"},
-          repr(passed_deny_rules))
+    if sys.platform.startswith("linux"):
+        ned_box_file_rules = {f"Read(/{claude_scratch_home / path.relative_to(Path.home())})"
+                              for path in claude_module.common.CREDENTIAL_FILES_ON_NED_BOX}
+        check("on ned-box the Claude cell denies reading each listed credential file by its exact path, "
+              "and no folder or name pattern",
+              set(passed_deny_rules) >= ned_box_file_rules
+              and not any("**" in rule for rule in passed_deny_rules),
+              f"missing {sorted(ned_box_file_rules - set(passed_deny_rules))}")
+    else:
+        check("on the Mac the Claude cell denies reading every credential folder and name pattern",
+              set(passed_deny_rules) >= {"Read(~/.config/nedsnodes/**)", "Read(~/.config/gh/**)",
+                                         "Read(~/.ssh/**)", "Read(~/.steam/**)", "Read(~/nedsmessenger/**)",
+                                         "Read(//**/*.token)", "Read(//**/.env)"},
+              repr(passed_deny_rules))
+    # Both platforms' rules are built here on every machine; the module's lists name the real home,
+    # so only counts and relative names reach a failure line.
+    mac_rules = claude_module.credential_read_deny_rules("darwin")
+    linux_rules = claude_module.credential_read_deny_rules("linux")
+    check("the Claude cell's Mac rules keep the folders and name patterns, ~/.steam and ~/nedsmessenger among them",
+          {"Read(~/.steam/**)", "Read(~/nedsmessenger/**)", "Read(//**/*.token)", "Read(//**/.env)"}
+          <= set(mac_rules), len(mac_rules))
+    check("the Claude cell's Linux rules are one exact-path rule per credential file and login file",
+          len(linux_rules) == len(claude_module.common.CREDENTIAL_FILES_ON_NED_BOX)
+          + len(claude_module.common.reviewer_program_login_files())
+          and not any("**" in rule or "~" in rule for rule in linux_rules), len(linux_rules))
     # Every reviewer program's login file, Claude's own included (user-ruled
     # 2026-09-29): Claude Code reads its own login outside the Read tool,
     # so the rule leaves it logged in (measured on both machines).
@@ -1622,10 +1701,10 @@ with tempfile.TemporaryDirectory() as scratch:
     # profile extending :workspace, which Codex will not combine with
     # --sandbox. The cell runs with HOME at a scratch home holding
     # .config/nedsnodes, .config/gh, .steam and nedsmessenger and no .ssh,
-    # and three credential-named canaries, in the repository, in the home and
-    # in neither, which no profile names by path: a named path its owner
-    # deletes before Codex starts makes Codex stop or recreate it on the real
-    # disk (review 5346123311).
+    # two of ned-box's listed credential files, and three credential-named
+    # canaries, in the repository, in the home and in neither, which no
+    # profile names by path: a named path its owner deletes before Codex
+    # starts makes Codex stop or recreate it on the real disk (review 5346123311).
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
     report = report_path_for(repository, "codex-denies-credentials", "codex")
@@ -1634,6 +1713,9 @@ with tempfile.TemporaryDirectory() as scratch:
     (scratch_home / ".config" / "gh").mkdir(parents=True, exist_ok=True)
     (scratch_home / ".steam").mkdir(parents=True, exist_ok=True)
     (scratch_home / "nedsmessenger" / "secrets").mkdir(parents=True, exist_ok=True)
+    listed_present = [scratch_home / ".config" / "nedsnodes" / "ubuntu-claude.token",
+                      scratch_home / "nedsmessenger" / "secrets" / "claude-oauth-token"]
+    listed_absent = scratch_home / ".ssh" / "id_ed25519_mac_side_action"
     credential_canary = repository / "codex-credential-canary.token"
     home_canary = scratch_home / "projects" / "codex-home-canary.token"
     unscanned_canary = scratch / "neither-home-nor-repository" / "codex-unscanned-canary.token"
@@ -1644,7 +1726,7 @@ with tempfile.TemporaryDirectory() as scratch:
                       scratch_home / ".codex" / "auth.json",
                       scratch_home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"]
     absent_login_file = scratch_home / ".gemini" / "oauth_creds.json"
-    for canary in (credential_canary, home_canary, unscanned_canary, *login_canaries):
+    for canary in (credential_canary, home_canary, unscanned_canary, *login_canaries, *listed_present):
         canary.parent.mkdir(parents=True, exist_ok=True)
         canary.write_text("CANARY-NOT-A-SECRET-common-test\n", encoding="utf-8")
     received_argv_path = scratch / "codex-denies-credentials-argv.json"
@@ -1662,11 +1744,13 @@ with tempfile.TemporaryDirectory() as scratch:
                          if override.startswith("permissions.cold-read-no-credentials.filesystem=")),
                         "")
     home = str(scratch_home)
-    expected_denials = [f'"{home}/.config/nedsnodes"="deny"', f'"{home}/.config/gh"="deny"',
-                        f'"{home}/.steam"="deny"', f'"{home}/nedsmessenger"="deny"']
+    mac_directory_denials = [f'"{home}/.config/nedsnodes"="deny"', f'"{home}/.config/gh"="deny"',
+                             f'"{home}/.steam"="deny"', f'"{home}/nedsmessenger"="deny"']
+    if sys.platform.startswith("linux"):
+        expected_denials = [f'"{path}"="deny"' for path in listed_present]
+    else:
+        expected_denials = mac_directory_denials + ['"/**/*.token"="deny"', '"/**/.env"="deny"']
     expected_denials += [f'"{login}"="deny"' for login in login_canaries]
-    if not sys.platform.startswith("linux"):
-        expected_denials += ['"/**/*.token"="deny"', '"/**/.env"="deny"']
     check("a Codex cell's run reaches the runtime at all",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     check("the Codex cell runs under no --sandbox, which Codex will not combine with a profile",
@@ -1687,10 +1771,10 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the Codex cell's profile denies every credential path",
           all(denial in denied_table for denial in expected_denials),
           f"expected {expected_denials} in {denied_table!r}")
-    check("the Codex cell's profile names no credential directory that does not exist",
-          f'"{home}/.ssh"' not in denied_table, denied_table)
-    # No scan runs before a launch: a credential-named file outside the
-    # credential directories is named by no path, on either platform.
+    check("the Codex cell's profile names no credential directory or listed file that does not exist",
+          f'"{home}/.ssh"' not in denied_table and str(listed_absent) not in denied_table, denied_table)
+    # No scan runs before a launch: a credential-named file off the lists is
+    # named by no path, on either platform.
     check("the Codex cell's profile names no credential-named file by its path",
           not any(str(canary) in denied_table
                   for canary in (credential_canary, home_canary, unscanned_canary)),
@@ -1711,9 +1795,12 @@ with tempfile.TemporaryDirectory() as scratch:
     # Each is re-rooted from the real list rather than listed here, so a
     # directory dropped from CREDENTIAL_DIRECTORIES drops out of both tables.
     real_directories = codex_module.common.CREDENTIAL_DIRECTORIES
+    real_files = codex_module.common.CREDENTIAL_FILES_ON_NED_BOX
     real_login_files = codex_module.common.REVIEWER_PROGRAM_LOGIN_FILES
     codex_module.common.CREDENTIAL_DIRECTORIES = tuple(
         scratch_home / directory.relative_to(Path.home()) for directory in real_directories)
+    codex_module.common.CREDENTIAL_FILES_ON_NED_BOX = tuple(
+        scratch_home / path.relative_to(Path.home()) for path in real_files)
     codex_module.common.REVIEWER_PROGRAM_LOGIN_FILES = {
         "claude": (login_canaries[0],), "codex": (login_canaries[1],),
         "agy": (login_canaries[2], absent_login_file)}
@@ -1723,6 +1810,7 @@ with tempfile.TemporaryDirectory() as scratch:
             for platform in ("linux", "darwin")}
     finally:
         codex_module.common.CREDENTIAL_DIRECTORIES = real_directories
+        codex_module.common.CREDENTIAL_FILES_ON_NED_BOX = real_files
         codex_module.common.REVIEWER_PROGRAM_LOGIN_FILES = real_login_files
     check("the Linux profile keeps /tmp and $TMPDIR read-only",
           '":slash_tmp"="read"' in profile_tables["linux"]
@@ -1731,30 +1819,30 @@ with tempfile.TemporaryDirectory() as scratch:
           '":slash_tmp"' not in profile_tables["darwin"]
           and '":tmpdir"' not in profile_tables["darwin"], profile_tables["darwin"])
     scratch_credential_directory_denial = f'"{home}/.config/nedsnodes"="deny"'
-    check("the Linux profile denies the credential directory and names no credential-named file",
-          scratch_credential_directory_denial in profile_tables["linux"]
+    check("the Linux profile denies each listed credential file that exists, by its exact path, and no "
+          "folder, absent listed file, unlisted credential-named file or name pattern",
+          all(f'"{path}"="deny"' in profile_tables["linux"] for path in listed_present)
+          and not any(denial in profile_tables["linux"] for denial in mac_directory_denials)
+          and str(listed_absent) not in profile_tables["linux"]
           and str(home_canary) not in profile_tables["linux"]
           and "/**/" not in profile_tables["linux"], profile_tables["linux"])
     check("the macOS profile denies the credential directory, *.token and .env anywhere",
           scratch_credential_directory_denial in profile_tables["darwin"]
           and '"/**/*.token"="deny"' in profile_tables["darwin"]
           and '"/**/.env"="deny"' in profile_tables["darwin"], profile_tables["darwin"])
-    check("both platforms' profiles deny gh's login directory",
-          all(f'"{home}/.config/gh"="deny"' in profile_tables[platform]
-              for platform in ("linux", "darwin")), repr(profile_tables))
     present_scratch_directories = [
         scratch_home / directory.relative_to(Path.home()) for directory in real_directories
         if (scratch_home / directory.relative_to(Path.home())).is_dir()]
-    check("both platforms' profiles deny every credential directory that exists, "
-          "~/.steam and ~/nedsmessenger among them",
-          {scratch_home / ".steam", scratch_home / "nedsmessenger"} <= set(present_scratch_directories)
-          and all(f'"{directory}"="deny"' in profile_tables[platform]
-                  for directory in present_scratch_directories
-                  for platform in ("linux", "darwin")), repr(profile_tables))
-    check("neither platform's profile names the real home's credential directories",
-          not any(str(directory) in profile_tables[platform]
-                  for directory in real_directories for platform in ("linux", "darwin")),
-          "a table names a real credential directory")
+    check("the macOS profile denies every credential directory that exists, "
+          "~/.config/gh, ~/.steam and ~/nedsmessenger among them",
+          {scratch_home / ".config" / "gh", scratch_home / ".steam", scratch_home / "nedsmessenger"}
+          <= set(present_scratch_directories)
+          and all(f'"{directory}"="deny"' in profile_tables["darwin"]
+                  for directory in present_scratch_directories), profile_tables["darwin"])
+    check("neither platform's profile names the real home's credential directories or files",
+          not any(str(path) in profile_tables[platform]
+                  for path in (*real_directories, *real_files) for platform in ("linux", "darwin")),
+          "a table names a real credential path")
     check("both platforms' profiles deny each login file that exists",
           all(f'"{login}"="deny"' in profile_tables[platform]
               for login in login_canaries for platform in ("linux", "darwin")),
@@ -2216,6 +2304,36 @@ with tempfile.TemporaryDirectory() as instrument_scratch:
         check(f"a record directory holding only {file_name} "
               f"{'is' if built else 'is not'} taken as instrument-built",
               _instrument_common.instrument_built_record_directory(directory) is built)
+
+# Each launcher's --effort help states the efforts its own tier map pins, so
+# the help cannot name a launcher's effort the map no longer holds.
+# The agy cell refuses before argparse runs when no sandbox program is on PATH,
+# so the stand-ins go first on the child's PATH.
+help_sandbox_scratch = tempfile.TemporaryDirectory()
+help_environment = dict(os.environ, PATH=os.pathsep.join([
+    str(scratch_repository_fixture.install_fake_sandbox_programs(
+        Path(help_sandbox_scratch.name) / "fake-sandbox-programs")),
+    os.environ.get("PATH", "")]))
+for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
+                      "cold-read-codex-cell.py"):
+    launcher_help_run = subprocess.run(
+        [sys.executable, str(SYSTEM_DIRECTORY / launcher_file), "--help"],
+        capture_output=True, text=True, timeout=60, env=help_environment)
+    check(f"{launcher_file} --help exits 0", launcher_help_run.returncode == 0,
+          f"exit {launcher_help_run.returncode}; stderr: {launcher_help_run.stderr[-600:]}")
+    launcher_help = launcher_help_run.stdout
+    launcher_help_words = " ".join(launcher_help.split())
+    # argparse wraps after a hyphen, so compare with every space removed.
+    launcher_help_unspaced = "".join(launcher_help.split())
+    _launcher_spec = importlib.util.spec_from_file_location(
+        "cold_read_launcher_" + launcher_file.replace("-", "_").replace(".py", ""),
+        SYSTEM_DIRECTORY / launcher_file)
+    _launcher = importlib.util.module_from_spec(_launcher_spec)
+    _launcher_spec.loader.exec_module(_launcher)
+    for tier, effort in _launcher.TIER_TO_REASONING_EFFORT.items():
+        check(f"{launcher_file}'s --effort help says its {tier} tier runs at {effort}",
+              f"{tier}runsat{effort}" in launcher_help_unspaced, launcher_help_words[-600:])
+help_sandbox_scratch.cleanup()
 
 print()
 if failures:

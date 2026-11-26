@@ -1,0 +1,5 @@
+# Handoff-system: at launch, check that the waiting approval-walk item's page still exists, and that the successor's first message ends with the waiting item's closing line
+
+This proposal, not yet decided, is item 9 of Question 4, "What should be code", of the cold-read-full-run of `nn-systems/handoff/handoff.system.design.md` on 2026-11-20: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/handoff.system.design-2026-11-20-6/question-4-what-should-be-code-answer.md`. The queue-drain decides it: if promoted, it becomes a GHI of its own; if declined, this file is removed with the reason in the commit message.
+
+The successor is told to publish the waiting item's page again when the page is gone, and to end its first message with the item's closing line. The handoff-supervisor could check at launch whether the `#item_page` link answers and tell the successor which case applies, and a Stop hook on the successor's first turn could check that the message ends with the closing line. Nearest: GHI [Make the due-task raise hook decide an approval-walk item as the walk-me-through answer program does](https://github.com/nedsnodes/nedsnodes/issues/3659).

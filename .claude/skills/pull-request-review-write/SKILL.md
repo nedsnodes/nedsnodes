@@ -1,9 +1,11 @@
 ---
 name: pull-request-review-write
-description: 'Use when you are about to write or revise a review on a pull request, before you write it — whether asked by the user, by another agent, or as the merge-lane. Covers how each finding is written: one finding per comment, each naming the condition under which the wrong thing happens. Not for reading a review someone else wrote.'
+description: 'Use when you start reviewing a pull request, and before you write or revise a review on one — whether asked by the user, by another agent, or as the merge-lane. Covers how each finding is written: one finding per comment, each naming the condition under which the wrong thing happens. Not for reading a review someone else wrote.'
 ---
 
 # pull-request-review-write
+
+Before you review the pull request, read `docs/agents/pr-reviewer-instructions.md` and follow it.
 
 ## Write your review this way
 

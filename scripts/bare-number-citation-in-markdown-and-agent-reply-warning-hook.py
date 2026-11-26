@@ -32,7 +32,7 @@ matches. Not scanned: fenced code blocks, a block quote's included, inline
 code spans, a whole Markdown link `[text](target "title")` (its text included:
 a link is already a citation that can be opened), a bare URL, and a line a
 program reads: one that starts with `supports-issues:` or `issue-marker:`, or
-is, whole, one of ghi-guide-agent's reply lines, which ghi-guide-agent-ask.py parses
+is, whole, one of the answer lines ghi-guide-agent-ask.py prints
 (`verdict: related #<n>,#<m>`, `read #<n>, #<m>`). A fence opened inside a
 block quote closes where the block quote ends. A skipped span is blanked to a
 barrier character no match can cross, so `PR [title](url) 2 hours` is not read
@@ -117,6 +117,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+_repository_names_spec = importlib.util.spec_from_file_location(
+    "github_repository_name_and_name_before_project_rename_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "github-repository-name-and-name-before-project-rename-common.py")
+repository_names = importlib.util.module_from_spec(_repository_names_spec)
+_repository_names_spec.loader.exec_module(repository_names)
+
 MARKDOWN_SUFFIXES = (".md", ".markdown")
 HIT_LINES_LISTED_AT_MOST = 10
 GH_TIMEOUT_SECONDS = 5
@@ -125,8 +132,7 @@ LINK_TITLES_RECHECK_GH_TIMEOUT_SECONDS = 30
 LINK_TITLES_RECHECK_IN_FILE_COMMAND_LINE_FLAG = "--recheck-link-titles-in-file"
 LINK_TITLES_RECHECK_IN_REPLY_COMMAND_LINE_FLAG = "--recheck-link-titles-in-reply"
 EXIT_BAD_INVOCATION = 2
-GITHUB_REPOSITORY_OWNER = "nedsnodes"
-GITHUB_REPOSITORY_NAME = "nedsnodes"
+GITHUB_REPOSITORY_OWNER, GITHUB_REPOSITORY_NAME = repository_names.REPOSITORY.split("/")
 TITLE_ATTEMPT_WORDS_AT_LEAST = 3
 EXCERPT_CHARACTERS_EACH_SIDE = 40
 SESSION_ID_SAFE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -141,10 +147,10 @@ BARE_REFERENCE_PATTERN = re.compile(
     re.IGNORECASE)
 FENCE_PATTERN = re.compile(r"^\s*(?:>\s?)*\s*(?:[-*+]\s+|\d+[.)]\s+)?(`{3,}|~{3,})")
 ISSUE_NUMBER_LIST = r"#\d+(?:[ \t]*,[ \t]*#\d+)*"
-# ghi-guide-agent tags each closed issue in a reading list with "(closed <date>)" after its number.
+# ghi-guide-agent-ask.py tags each closed issue in a reading list with "(closed <date>)" after its number.
 READING_LIST_ENTRY = r"#\d+(?:[ \t]*\(closed[ \t]+\d{4}-\d{2}-\d{2}\))?"
 READING_LIST = READING_LIST_ENTRY + r"(?:[ \t]*,[ \t]*" + READING_LIST_ENTRY + r")*"
-# ghi-guide-agent's two reply shapes count only as whole lines, so a sentence that starts "Read #<n> before ..." is still read.
+# Its two answer shapes count only as whole lines, so a sentence that starts "Read #<n> before ..." is still read.
 PROGRAM_READ_LINE_PATTERN = re.compile(
     r"^\s*(?:(?:supports-issues|issue-marker):"
     r"|verdict:[ \t]*(?:(?:too-similar|related)[ \t]*" + ISSUE_NUMBER_LIST + r"|unrelated)[ \t]*$"
@@ -166,10 +172,8 @@ STRAIGHT_QUOTED_NAME_PATTERN = re.compile(r"\"[^\"\n]+\"")
 CURLY_QUOTED_NAME_PATTERN = re.compile(r"\u201c[^\u201d\n]+\u201d")
 LINK_TEXT_AND_TARGET_PATTERN = re.compile(
     r"\[(?P<text>(?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\((?P<target>(?:[^()\s]|\([^()\s]*\))*)")
-# GitHub redirects the repository's old name, and text written before the rename still holds it.
-OLD_REPOSITORY = "nedschorus/nedschorus"
 REPOSITORY_ITEM_URL_PATTERN = re.compile(
-    r"^<?https://github\.com/(?:" + GITHUB_REPOSITORY_OWNER + "/" + GITHUB_REPOSITORY_NAME + "|" + OLD_REPOSITORY + ")"
+    r"^<?https://github\.com/" + repository_names.REPOSITORY_NAME_OR_NAME_BEFORE_PROJECT_RENAME_PATTERN
     + r"/(?:pull|issues)/(?P<number>\d+)"
     # A link to a comment or a review, a review comment on the files tab
     # (#r<id>) included, cites that comment, not the item's title.

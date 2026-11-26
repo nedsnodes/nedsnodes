@@ -56,9 +56,9 @@ HOOK_MODULE = importlib.util.module_from_spec(HOOK_MODULE_SPEC)
 HOOK_MODULE_SPEC.loader.exec_module(HOOK_MODULE)
 
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
-    "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common",
+    "rule_enforcing_nn_test_suite_failure_message_closing_lines_text_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "rule-enforcing-nc-test-suite-failure-message-closing-lines-text-common.py")
+    / "rule-enforcing-nn-test-suite-failure-message-closing-lines-text-common.py")
 RULE_FAILURE_LINES = importlib.util.module_from_spec(_rule_failure_lines_spec)
 _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
 
@@ -534,8 +534,9 @@ def tracked_name_collisions_failure_detail(tracked_names, collisions):
         "Two tracked files may not share a basename, compared ignoring case, except SKILL.md, "
         "README.md and .gitkeep: the rule is in scripts/file-name-collision-warning-hook.py, "
         "because checks that find a moved file search by its name.",
-        "If a file your change added or renamed is among those files, rename it by CLAUDE.md's "
-        "naming rule and update what points at it.",
+        "If a file your change added or renamed is among those files, rename it by "
+        "docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md "
+        "and update what points at it.",
         RULE_FAILURE_LINES.FAILURE_MAY_COME_FROM_MAIN_NOT_YOUR_CHANGE_REPORT_IT_CLOSING_LINE])
 
 
@@ -594,8 +595,9 @@ with tempfile.TemporaryDirectory() as planted_temporary_directory:
               "Two tracked files may not share a basename, compared ignoring case, except SKILL.md, "
               "README.md and .gitkeep: the rule is in scripts/file-name-collision-warning-hook.py, "
               "because checks that find a moved file search by its name.",
-              "If a file your change added or renamed is among those files, rename it by CLAUDE.md's "
-              "naming rule and update what points at it.",
+              "If a file your change added or renamed is among those files, rename it by "
+              "docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md "
+              "and update what points at it.",
               RULE_FAILURE_LINES.FAILURE_MAY_COME_FROM_MAIN_NOT_YOUR_CHANGE_REPORT_IT_CLOSING_LINE],
           planted_detail)
 

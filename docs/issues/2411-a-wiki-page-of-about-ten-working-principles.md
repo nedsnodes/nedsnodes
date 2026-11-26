@@ -1,5 +1,5 @@
 ---
-issue: "[A wiki page of the project's goals and philosophies: how agents work with the user, and how they build and finish work](https://github.com/nedschorus/nedschorus/issues/2411)"
+issue: "[A wiki page of the project's goals and philosophies: how agents work with the user, and how they build and finish work](https://github.com/nedsnodes/nedsnodes/issues/2411)"
 ---
 
 # A wiki page of the project's goals and philosophies: how agents work with the user, and how they build and finish work
@@ -14,7 +14,7 @@ The section "Standing decisions" in `docs/nedsnodes-wiki/nedsnodes-ai-native-sof
 
 ## The principles
 
-The page pending approval, `docs/nedsnodes-wiki/queue/nedsnodes-goals-and-philosophy-founding-statement-and-agent-working-principles.md`, which reached the wiki queue on main through PR [Wiki queue: the project's goals-and-philosophies page for GHI 2411, pending the user's approval](https://github.com/nedschorus/nedschorus/pull/2513), holds the fourteen principles below and two more drawn from the user's founding statement of 2026-11-03, sixteen in all. The page numbers them differently: the list's principles 1 to 11 are the page's 6 to 16; the list's 13, 12 and 14 are the page's 1, 2 and 3; the page's 4 and 5 are the two from the founding statement. Each principle cites the user-rulings it comes from, which the page's section Sources quotes, gathered from the walk-minutes and his typed messages.
+The page pending approval, `docs/nedsnodes-wiki/queue/nedsnodes-goals-and-philosophy-founding-statement-and-agent-working-principles.md`, which reached the wiki queue on main through PR [Wiki queue: the project's goals-and-philosophies page for GHI 2411, pending the user's approval](https://github.com/nedsnodes/nedsnodes/pull/2513), holds the fourteen principles below and two more drawn from the user's founding statement of 2026-11-03, sixteen in all. The page numbers them differently: the list's principles 1 to 11 are the page's 6 to 16; the list's 13, 12 and 14 are the page's 1, 2 and 3; the page's 4 and 5 are the two from the founding statement. Each principle cites the user-rulings it comes from, which the page's section Sources quotes, gathered from the walk-minutes and his typed messages.
 
 How agents work with the user:
 
@@ -54,15 +54,24 @@ The user also said, on line 36, that the principles of 2026-11-03 belong in `CLA
 
 ## Related work, not duplicates
 
-- GHI [A wiki page on when a step given to an agent should become code and when it should stay with the model, with before-and-after examples of code-prompt-code from this project](https://github.com/nedschorus/nedschorus/issues/2127) plans the page that tells an agent, step by step, which steps go to code. This page states principle 13 and links to that page; it does not teach the decision.
-- GHI [Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedschorus/nedschorus/issues/2505) applies principle 13 to pull requests, their reviews and approval-walks, and quotes the same words of the user. Its GHI-MD links here for the principle.
-- GHI [code-prompt-code (CPC) design philosophy wiki page: systems as state machines whose nodes are code or prompts](https://github.com/nedschorus/nedschorus/issues/237), closed as not planned on 2026-09-21, asked for a page on the code-prompt-code design idea, which the objective page and the glossary carry.
-- GHI [Move mechanical agent chores into programs and hooks](https://github.com/nedschorus/nedschorus/issues/1036) lists chores to move into programs, an application of principle 13.
-- GHI [Save each lesson where agents meet it at the moment it applies, and decide whether a store that recalls lessons by subject is worth building](https://github.com/nedschorus/nedschorus/issues/1349) is about where single lessons live, not about one collected page.
+- GHI [A wiki page on when a step given to an agent should become code and when it should stay with the model, with before-and-after examples of code-prompt-code from this project](https://github.com/nedsnodes/nedsnodes/issues/2127) plans the page that tells an agent, step by step, which steps go to code. This page states principle 13 and links to that page; it does not teach the decision.
+- GHI [Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedsnodes/nedsnodes/issues/2505) applies principle 13 to pull requests, their reviews and approval-walks, and quotes the same words of the user. Its GHI-MD links here for the principle.
+- GHI [code-prompt-code (CPC) design philosophy wiki page: systems as state machines whose nodes are code or prompts](https://github.com/nedsnodes/nedsnodes/issues/237), closed as not planned on 2026-09-21, asked for a page on the code-prompt-code design idea, which the objective page and the glossary carry.
+- GHI [Move mechanical agent chores into programs and hooks](https://github.com/nedsnodes/nedsnodes/issues/1036) lists chores to move into programs, an application of principle 13.
+- GHI [Save each lesson where agents meet it at the moment it applies, and decide whether a store that recalls lessons by subject is worth building](https://github.com/nedsnodes/nedsnodes/issues/1349) is about where single lessons live, not about one collected page.
+
+## What is decided
+
+- The page moves out of the queue only after the user has rewritten it. He said on 2026-11-05, on item 3.2.5 of approval-walk walk-me-through-skill-refactor-approval-walk-2026-11-02: "I think I'm going to have to rewrite this page before we move it out of the queue. So I've deferred it."
+
+## Open questions
+
+- Do the objective page, `docs/nedsnodes-wiki/nedsnodes-ai-native-software-development-objective.md`, and this page become one page? The user settles this at his rewrite of this page, before the page moves, with the founding principles page, `docs/nedsnodes-wiki/nedsnodes-founding-principles-actors-and-repository-layout.md`, in view. He said on 2026-11-05, on item 3.2.2 of the same approval-walk: "I'm gonna rewrite the objective page first. Then probably I should rewrite the philosophy page. And then maybe we can merge them. Or maybe I'll merge them. Or at least get closer." His rewrite of the objective page merged in pull request [Objective wiki page: the user's cut, with the two "???" rows of Project organization fixed](https://github.com/nedsnodes/nedsnodes/pull/4130).
 
 ## Next action
 
-1. Give the wiki page `docs/nedsnodes-wiki/queue/nedsnodes-goals-and-philosophy-founding-statement-and-agent-working-principles.md` its cold-read-full-run with the /cold-read skill; it has had its cold-read-fast-read only.
-2. Put the page to the user in an approval-walk, one principle per item, with the proposed `CLAUDE.md` lines as items of their own. A principle he disapproves is dropped. A principle he revises is rewritten and goes back to him as a new item. The proposed `CLAUDE.md` lines are handled the same way, and do not hold up the page.
-3. In one pull request, move the approved page out of the queue to `docs/nedsnodes-wiki/` with `git mv`, change its relative links from `../` to the same directory, and add the objective page's link from the section "Standing decisions".
-4. After he approves the `CLAUDE.md` lines, add them in their own pull request, and tell each other agent-seat of the principles with SendMessage, naming the page.
+1. The user rewrites the wiki page `docs/nedsnodes-wiki/queue/nedsnodes-goals-and-philosophy-founding-statement-and-agent-working-principles.md` and settles the open question above. No agent starts the steps below before then. The agent-seat that picks up this GHI then revises steps 2 to 5 and the sections above to match: his own rewrite may need no approval-walk, a merged page needs no move, and the objective page no longer has the section "Standing decisions" that those sections describe.
+2. Give the rewritten page its cold-read-full-run with the /cold-read skill.
+3. Put the page to the user in an approval-walk, one principle per item, with the proposed `CLAUDE.md` lines as items of their own. A principle he disapproves is dropped. A principle he revises is rewritten and goes back to him as a new item. The proposed `CLAUDE.md` lines are handled the same way, and do not hold up the page.
+4. In one pull request, move the approved page out of the queue to `docs/nedsnodes-wiki/` with `git mv`, change its relative links from `../` to the same directory, and add a link to the page from the objective page, which no longer has the section "Standing decisions".
+5. After he approves the `CLAUDE.md` lines, add them in their own pull request, and tell each other agent-seat of the principles with SendMessage, naming the page.

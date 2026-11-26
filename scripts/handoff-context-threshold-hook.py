@@ -9,6 +9,10 @@ shows a running subagent, workflow or background shell task younger than its kin
 from BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND, or while a
 transcript it reads launch records from cannot be read, since it then cannot tell what runs.
 With no background_tasks list it counts nothing as running.
+The open-pull-request watcher counts as a one-shot run, not a watcher, only when --poll-once or
+--poll-once-write-baseline stands as an argument of its own; quoted or abbreviated, it is not
+handled, and the one-shot run is counted as the watcher. Written with "=", it is no one-shot run:
+argparse refuses a value for the flag, and the command exits at once.
 
 The post-compaction hook deletes only <session>-handoff-asked, so while <session>-handoff-deferred
 exists the hook still fires below the threshold once the awaited work has finished; it then
@@ -136,13 +140,10 @@ NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION = (
     "edit that finishes within your turn needs none of these. When you run the "
     "handoff writer script, nn-systems/handoff/handoff-write-and-check-supervisor.py, "
     "before this agent-session ends, it names in your session-handoff each subagent "
-    "still working, whenever it started, and each background Bash task that "
-    "started since this handoff-deferral began and is still running, so you need "
-    "not add that work to your task list; the end of this agent-session stops that "
-    "work. Your successor is shown that work, and decides whether to start it "
-    "again. A background Bash task started before the deferral and still running "
-    "is named, with its command, in the next-step file when the successor must "
-    "run it again; otherwise it is stopped at the session-handoff. Write work the "
+    "still working and each background Bash task still running, whenever it "
+    "started, so you need not add that work to your task list; the end of this "
+    "agent-session stops that work. Your successor is shown that work, and decides "
+    "whether to start it again. Write work the "
     "writer could not list into a new next-step file that holds your next step "
     "and names that work, and run the writer again with --next-step-file. Do not "
     "start long work, such as a cold-read-full-run or a pull-request review: add "
@@ -240,14 +241,16 @@ _COMMAND_PREFIX = r"\s*(?:(?:(?:cd|export)[ \t]+" + _WORD + r"|[A-Za-z_]\w*=(?:"
 _TO_THE_END = _REDIRECTIONS + r"[ \t]*;?\s*"
 _WATCHER = (r"(?:bash[ \t]+|python3(?:[ \t]+-u)?[ \t]+)?(?:" + _WORD + r"/)?"
             r"(?:watch-and-merge-provisional[\w.-]*|wait-review-runs[\w.-]*"
-            r"|wait-for-next-pull-request-event[\w.-]*|watch-open-pull-requests-hack\.py)"
+            r"|wait-for-next-pull-request-event[\w.-]*"
+            r"|merge-lane-open-prs-watch-and-reviewer-assign\.py(?!(?:[ \t]+" + _WORD
+            + r")*?[ \t]+--poll-once(?:-write-baseline)?(?![^\s;&|<>])))"
             + _ARGUMENTS + _REDIRECTIONS
             + r"""(?:[ \t]*\|[ \t]*(?:grep[ \t]+-v[ \t]+(?:'[^']*'|"[^"`$\\]*")|tail[ \t]+-n?[ \t]*\d+))*""")
 _LOOP_CONDITION_CHECK = r"(?:![ \t]+)?(?:grep|pgrep|kill[ \t]+-0|test|\[|true|:)" + _ARGUMENTS + _REDIRECTIONS
 _DEADLINE = r"\$\(date[ \t]+\+%s\)"
 WAIT_LIMIT_TABLE_WAITING_TASK_KIND_NAME = "waiting-task"
 BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND = (
-    ("nc-mutation-testing", (r".*(?:mutation|mutmut|mutant).*",), 105.0),
+    ("nn-mutation-testing", (r".*(?:mutation|mutmut|mutant).*",), 105.0),
     ("test-suite", (r".*(?:run-all-test-suites\.py|pytest|-test\.py\b|_test\.py\b|unittest"
                     r"|head-tests-with-retry|head-test-run|test-suite|run-suites).*",), 90.0),
     (WAIT_LIMIT_TABLE_WAITING_TASK_KIND_NAME, tuple(_COMMAND_PREFIX + shape + _TO_THE_END for shape in (
