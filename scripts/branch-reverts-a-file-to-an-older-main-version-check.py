@@ -76,31 +76,21 @@ class GitFailed(Exception):
     pass
 
 
-def run_git(arguments, input_text=None):
-    """Return git's stdout, or raise GitFailed naming the command and its error."""
+def run_git(arguments, input_text=None, as_bytes=False):
+    """Return git's stdout, as bytes when as_bytes, or raise GitFailed naming the
+    command and its error."""
     command = ["git"] + arguments
+    text_options = {} if as_bytes else {"text": True, "encoding": "utf-8",
+                                         "errors": "replace"}
     try:
         done = subprocess.run(command, input=input_text, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace")
+                              **text_options)
     except (OSError, ValueError) as error:
         raise GitFailed("`%s` could not be started: %s" % (" ".join(command), error))
     if done.returncode != 0:
+        stderr = done.stderr.decode("utf-8", "replace") if as_bytes else done.stderr
         raise GitFailed("`%s` exited %d: %s" % (" ".join(command), done.returncode,
-                                                done.stderr.strip()))
-    return done.stdout
-
-
-def run_git_bytes(arguments):
-    """Return git's stdout as bytes, or raise GitFailed naming the command and its error."""
-    command = ["git"] + arguments
-    try:
-        done = subprocess.run(command, capture_output=True)
-    except (OSError, ValueError) as error:
-        raise GitFailed("`%s` could not be started: %s" % (" ".join(command), error))
-    if done.returncode != 0:
-        raise GitFailed("`%s` exited %d: %s" % (
-            " ".join(command), done.returncode,
-            done.stderr.decode("utf-8", "replace").strip()))
+                                                stderr.strip()))
     return done.stdout
 
 
@@ -182,35 +172,43 @@ def commit_subject(commit):
     return run_git(["log", "-1", "--format=%s", commit]).strip()
 
 
-def blob_listed(listing, field):
-    """Return field `field` of the first `git ls-tree -z` or `git ls-files -s -z` entry, or None.
+def head_blob(path):
+    """Return HEAD's blob for path, or None when HEAD has no such file."""
+    entry = run_git(["ls-tree", "-z", "HEAD", "--", path], as_bytes=True).split(b"\0")[0]
+    return entry.split(b"\t")[0].split()[2].decode() if entry else None
 
-    ls-tree prints `mode type blob`, so the blob is field 2; ls-files -s prints
-    `mode blob stage`, so it is field 1."""
-    entry = listing.split(b"\0")[0]
-    if not entry:
-        return None
-    return entry.split(b"\t")[0].split()[field].decode()
+
+def index_blob(path):
+    """Return the index's stage-0 blob for path, or None when it has none.
+
+    A path with a merge conflict has only stages 1 to 3, which hold the merge
+    base's and the two sides' committed versions; its resolution is in the
+    working tree."""
+    for entry in run_git(["ls-files", "-s", "-z", "--", path],
+                         as_bytes=True).split(b"\0"):
+        fields = entry.split(b"\t")[0].split()
+        if len(fields) == 3 and fields[2] == b"0":
+            return fields[1].decode()
+    return None
 
 
 def save_uncommitted_copies(reverted):
     """Copy each reported file's working copy and staged version that differ from HEAD's.
 
-    Returns (directory, {path: [(what, saved path)]}, {path: error}); directory is
-    None when nothing needed saving."""
+    Returns ({path: [(what, saved path)]}, {path: error})."""
     top = run_git(["rev-parse", "--show-toplevel"]).strip()
     git_directory = run_git(["rev-parse", "--path-format=absolute",
                              "--git-common-dir"]).strip()
     wanted = {}
     for path, _ in reverted:
-        head_blob = blob_listed(run_git_bytes(["ls-tree", "-z", "HEAD", "--", path]), 2)
-        head_bytes = (run_git_bytes(["cat-file", "blob", head_blob])
-                      if head_blob else None)
-        index_blob = blob_listed(run_git_bytes(["ls-files", "-s", "-z", "--", path]), 1)
+        in_head = head_blob(path)
+        head_bytes = (run_git(["cat-file", "blob", in_head], as_bytes=True)
+                      if in_head else None)
+        in_index = index_blob(path)
         copies = []
-        if index_blob and index_blob != head_blob:
+        if in_index and in_index != in_head:
             copies.append(("staged version",
-                           run_git_bytes(["cat-file", "blob", index_blob])))
+                           run_git(["cat-file", "blob", in_index], as_bytes=True)))
         working = os.path.join(top, path)
         if os.path.isfile(working):
             with open(working, "rb") as handle:
@@ -219,8 +217,6 @@ def save_uncommitted_copies(reverted):
                 copies.append(("working copy", working_bytes))
         if copies:
             wanted[path] = copies
-    if not wanted:
-        return None, {}, {}
     directory = os.path.join(git_directory, SAVED_COPIES_DIRECTORY_NAME,
                              time.strftime("%Y-%m-%dT%H-%M-%S") + "-%d" % os.getpid())
     saved, errors = {}, {}
@@ -239,7 +235,7 @@ def save_uncommitted_copies(reverted):
                 errors[path] = "could not save its %s to %s: %s" % (what, target, error)
                 break
             saved.setdefault(path, []).append((what, target))
-    return directory, saved, errors
+    return saved, errors
 
 
 def report_lines(head_hash, base, reverted, saved=None, save_errors=None):
@@ -294,7 +290,7 @@ def main(argv=None):
         head_hash, reverted = find_reverted_files(args.head, args.base)
         saved, save_errors = {}, {}
         if reverted:
-            _, saved, save_errors = save_uncommitted_copies(reverted)
+            saved, save_errors = save_uncommitted_copies(reverted)
         lines = report_lines(head_hash, args.base, reverted, saved, save_errors)
     except GitFailed as error:
         print("branch-reverts-a-file-to-an-older-main-version-check: could not tell "

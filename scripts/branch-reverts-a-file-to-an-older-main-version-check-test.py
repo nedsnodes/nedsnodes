@@ -10,6 +10,7 @@ would.
 """
 
 import importlib.util
+import io
 import os
 import shutil
 import subprocess
@@ -107,6 +108,44 @@ def squashed_branch(repository, changed_days_before_now=1, path="shared file.txt
     return replaced
 
 
+def conflict_resolved_by_hand(repository, path):
+    """Merge into the branch a commit on main's tip that changes path, so the merge
+    stops with path unmerged, then resolve it in the working tree only."""
+    repository.git("switch", "--quiet", "-c", "side", "main")
+    repository.commit({path: "side\n"}, "Side changes the file", 0)
+    repository.git("switch", "--quiet", "work")
+    merge = subprocess.run(["git", "merge", "--quiet", "side"], cwd=str(repository.directory),
+                           env=repository.environment(), capture_output=True, text=True,
+                           timeout=60)
+    status = repository.git("status", "--porcelain", "--", path)
+    if merge.returncode == 0 or not status.startswith("UU "):
+        raise RuntimeError("the merge did not stop with %s unmerged: %s%s"
+                           % (path, merge.stdout, status))
+    (repository.directory / path).write_text("resolved by hand\n")
+
+
+def copy_read_back_differs(repository):
+    """Run the check's save in this process with every read of a saved copy
+    returning other bytes, as a disk that drops writes would."""
+    spec = importlib.util.spec_from_file_location("branch_reverts_check", CHECK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    saved_copies = str(repository.directory / ".git" / module.SAVED_COPIES_DIRECTORY_NAME)
+
+    def open_with_reads_of_saved_copies_changed(path, mode="r", *arguments, **options):
+        if mode == "rb" and str(path).startswith(saved_copies):
+            return io.BytesIO(b"other bytes")
+        return open(path, mode, *arguments, **options)
+
+    module.open = open_with_reads_of_saved_copies_changed
+    before = os.getcwd()
+    os.chdir(repository.directory)
+    try:
+        return module.save_uncommitted_copies([("shared file.txt", None)])
+    finally:
+        os.chdir(before)
+
+
 def main():
     scratch = Path(tempfile.mkdtemp(prefix="revert-check-test-")).resolve()
     try:
@@ -153,8 +192,17 @@ def run_cases(scratch):
                  (repository.directory / path).write_text("staged work\n"),
                  repository.git("add", path),
                  (repository.directory / path).write_text("old\n")),
-             "staged version", "staged work\n")):
-        repository = Repository(scratch / ("saved-" + saved_what.replace(" ", "-")))
+             "staged version", "staged work\n"),
+            ("a merge conflict resolved by hand in the working tree",
+             conflict_resolved_by_hand, "working copy", "resolved by hand\n"),
+            ("a binary staged version under unstaged text edits",
+             lambda repository, path: (
+                 (repository.directory / path).write_bytes(b"\0binary\n"),
+                 repository.git("add", path),
+                 (repository.directory / path).write_text("unstaged text edit\n")),
+             "working copy", "unstaged text edit\n")):
+        repository = Repository(scratch / ("saved-" + "-".join(case_name.split()[:4])
+                                           .replace("`", "")))
         squashed_branch(repository)
         prepare(repository, "shared file.txt")
         done = repository.run_check("--base", "main")
@@ -187,6 +235,15 @@ def run_cases(scratch):
           < done.stdout.find("`git checkout main -- <path>`")
           and "Copy the file outside this checkout yourself" in done.stdout,
           done.stdout + done.stderr)
+
+    repository = Repository(scratch / "read-back-differs")
+    squashed_branch(repository)
+    (repository.directory / "shared file.txt").write_text("uncommitted work\n")
+    saved, errors = copy_read_back_differs(repository)
+    check("when a saved copy reads back other bytes than the file's, the check reports "
+          "that file as not saved",
+          saved == {} and "the copy read back differs from the file"
+          in errors.get("shared file.txt", ""), (saved, errors))
 
     repository = Repository(scratch / "squashed-named")
     replaced = squashed_branch(repository)
