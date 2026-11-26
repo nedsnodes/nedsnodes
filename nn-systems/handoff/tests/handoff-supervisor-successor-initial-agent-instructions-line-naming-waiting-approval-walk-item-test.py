@@ -120,6 +120,14 @@ def run_walk_minutes_cases(workspace):
     check("no `#item_page` line for the waiting item: the line says so and says to publish it",
           lines_for(root) == (without_link_line(WALK, f"2 of 3, {POINT},", "2 of 3"),), repr(lines_for(root)))
 
+    root = workspace / "file-item-page"
+    file_link = "file:///Volumes/nedhome/agents/fixture/docs/walk/item-2.html"
+    walk_in(root, OPEN_MINUTES + f"#item_page item 2 of 3 {file_link}\n")
+    check("a newest `#item_page` line holding a `file:` link: the line keeps it and asks for no Artifact read",
+          lines_for(root) == (supervisor.WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE.format(
+              walk=WALK, count_and_point=f"2 of 3, {POINT},", count="2 of 3", link=file_link),)
+          and "Artifact tool's read action" not in lines_for(root)[0], repr(lines_for(root)))
+
     root = workspace / "publish-failed"
     walk_in(root, OPEN_MINUTES + "#item_page item 2 of 3 publish failed: the Artifact tool timed out\n")
     check("a newest `#item_page` line recording a failed publish: the line without a link",
