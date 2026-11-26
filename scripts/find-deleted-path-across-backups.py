@@ -421,7 +421,7 @@ DEFAULT_BOX_SEARCH_ROOTS = (
 # A bare-name search reads the newest snapshot's file-name list, which this program writes each hour,
 # because a find over a snapshot's trees takes minutes on the backup disk.
 TIMESHIFT_FILE_NAME_LIST_WRITE_PROGRAM_PATH = "scripts/timeshift-newest-snapshot-file-name-list-write.py"
-TIMESHIFT_FILE_NAME_LIST_WRITE_LOG = ".claude/timeshift-newest-snapshot-file-name-list-write.log"
+TIMESHIFT_FILE_NAME_LIST_WRITE_LOG = "~/.claude/timeshift-newest-snapshot-file-name-list-write.log"
 TIMESHIFT_FILE_NAME_LIST_DIRECTORY = "~/.cache/nedsnodes-timeshift-newest-snapshot-file-name-list"
 TIMESHIFT_FILE_NAME_LIST_SUFFIX = ".paths.gz"
 DEFAULT_TRANSCRIPTS_DIR = "~/.claude/projects"
