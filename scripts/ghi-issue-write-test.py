@@ -381,12 +381,12 @@ def run_remote_ghi_guide_agent_log_store_cases(scratch: Path):
     hands ssh, run here by bash."""
     remote_store = scratch / "remote-store"
     original_store = tool.ghi_guide_agent_log_store
-    original_date = tool.proposed_improvements_or_changes_file_date
+    original_date = tool.proposed_changes_file_date_for_today
     saved_override = os.environ.pop(tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE,
                                     None)
     tool.ghi_guide_agent_log_store = lambda: (tool.GHI_GUIDE_AGENT_LOG_STORE_HOST,
                                        str(remote_store))
-    tool.proposed_improvements_or_changes_file_date = lambda: "2026-10-03"
+    tool.proposed_changes_file_date_for_today = lambda: "2026-10-03"
     try:
         runner = SshRunsLocally({"gh issue view 46": Completed("T\n")})
         text = "# Héading — with \"quotes\" and $dollars\n\nBody `x`.\n"
@@ -398,14 +398,18 @@ def run_remote_ghi_guide_agent_log_store_cases(scratch: Path):
             runner, quiet, "edited")
         check("over ssh, the file is written whole into a directory the "
               "write makes, and a second of the same day gets -2",
-              lambda: (first == ("570-a-proposed-improvements-or-changes-ghi-guide-agent-"
-                        "2026-10-03.md")
-              and second == ("570-a-proposed-improvements-or-changes-ghi-"
-                             "guide-agent-2026-10-03-2.md")
+              lambda: (first == ("570-a-ghi-guide-agent-"
+                        "2026-10-03.proposed-changes.md")
+              and second == ("570-a-ghi-"
+                             "guide-agent-2026-10-03-2.proposed-changes.md")
               and (remote_store / first).read_text() == written_text),
               (first, second))
-        (remote_store / "570-ab-proposed-improvements-or-changes-ghi-guide-agent-"
-         "2026-10-03.md").write_text("another GHI-MD's\n")
+        (remote_store / "570-ab-ghi-guide-agent-"
+         "2026-10-03.proposed-changes.md").write_text("another GHI-MD's\n")
+        # A GHI-MD whose name starts with this one's head: its file shares
+        # the head, and only the whole-name match tells it apart.
+        (remote_store / "570-a-ghi-guide-agent-x-ghi-guide-agent-"
+         "2026-10-03.proposed-changes.md").write_text("another GHI-MD's\n")
         read_back = tool.ghi_guide_agent_files_in_log_store("570-a", runner)
         check("over ssh, the files read back are this GHI-MD's, each with "
               "its text exactly, a text long enough that GNU base64 wraps it",
@@ -426,7 +430,7 @@ def run_remote_ghi_guide_agent_log_store_cases(scratch: Path):
               "either machine",
               tool.ghi_guide_agent_log_store_citation(first)
               == ("nedlern@ned-box:/home/nedlern/nedsnodes-logs/"
-                  "ghi-guide-agent-proposed-improvements-or-changes/" + first))
+                  "ghi-guide-agent-proposed-changes/" + first))
         unreachable = Recorder({"ssh": Completed(
             "", returncode=255, stderr="ssh: connect to host ned-box: "
             "No route to host")})
@@ -443,7 +447,7 @@ def run_remote_ghi_guide_agent_log_store_cases(scratch: Path):
               unreachable_lines)
     finally:
         tool.ghi_guide_agent_log_store = original_store
-        tool.proposed_improvements_or_changes_file_date = original_date
+        tool.proposed_changes_file_date_for_today = original_date
         if saved_override is not None:
             os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE] = \
                 saved_override
@@ -592,10 +596,8 @@ def run_cases(scratch: Path):
     check("a word that ends exactly at the 180-character limit is kept whole",
           word_ending_at_limit_slug == "x" * 10 + "-" + "y" * 169,
           repr(word_ending_at_limit_slug))
-    log_store_name = (f"99999-{long_slug}"
-                      f"{tool.PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX}"
-                      f"{tool.PROPOSED_IMPROVEMENTS_OR_CHANGES_SOURCE_GHI_GUIDE_AGENT}"
-                      "-2026-11-02-99.md")
+    log_store_name = (f"{tool.ghi_guide_agent_file_name_head(f'99999-{long_slug}')}"
+                      f"2026-11-02-99{tool.PROPOSED_CHANGES_FILE_NAME_ENDING}")
     check("the longest log-store name built on a slug fits a file name",
           len(log_store_name.encode("utf-8")) <= 255, len(log_store_name))
     check("the pairing key follows the content, not the name",
@@ -1738,20 +1740,20 @@ def run_cases(scratch: Path):
     two_line_conflict = tool.adjudicate(REPO, "t", FILE_TEXT, scratch, Recorder(
         {ASK: ruling_answer(783, "closed issues are frozen,\nbut this one was reopened")}), quiet)
     check("a question over two lines is read back whole from the file it is saved in",
-          tool.ruling_question_lines(tool.proposed_improvements_or_changes_file_text(
+          tool.ruling_question_lines(tool.build_ghi_guide_agent_proposed_changes_file_text(
               REPO, two_line_conflict, "Closed issues are frozen", "2026-10-03",
               "filed", "t", "ghipair1234"))[1]
           == "closed issues are frozen, but this one was reopened",
           two_line_conflict)
 
-    original_date = tool.proposed_improvements_or_changes_file_date
-    tool.proposed_improvements_or_changes_file_date = lambda: "2026-10-03"
+    original_date = tool.proposed_changes_file_date_for_today
+    tool.proposed_changes_file_date_for_today = lambda: "2026-10-03"
     try:
         conflict_46 = tool.RulingConflict(46, "the ruling may not hold")
         check("a file from ghi-guide-agent is one entry, E1, in rule 1's entry form, "
               "naming the GHI-MD, citing the ruling's GHI by title and link, "
               "carrying the reviewed text's key, and saying who settles it",
-              tool.proposed_improvements_or_changes_file_text(
+              tool.build_ghi_guide_agent_proposed_changes_file_text(
                   REPO, conflict_46, "Closed issues are frozen",
                   "2026-10-03", "filed", "A statusline", "ghipair1234")
               == ("# Proposed improvements or changes from ghi-guide-agent, "
@@ -1776,28 +1778,28 @@ def run_cases(scratch: Path):
                   "State: open\n"))
         check("the GHI-MD the file points the subagent at is on main",
               (Path(__file__).resolve().parents[1]
-               / tool.PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD)
+               / tool.PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD)
               .is_file(),
-              tool.PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD)
+              tool.PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD)
         check("a question naming no GHI says so in the file",
               "may go against a user-ruling for which ghi-guide-agent named no "
-              "GHI\n" in tool.proposed_improvements_or_changes_file_text(
+              "GHI\n" in tool.build_ghi_guide_agent_proposed_changes_file_text(
                   REPO, tool.RulingConflict(None, "the ruling may not hold"),
                   None, "2026-10-03", "edited", "t", "k"))
 
         collision_store = log_store_at(scratch / "collision-store")
         collision_store.mkdir()
-        (collision_store / "a-proposed-improvements-or-changes-ghi-guide-agent-"
-         "2026-10-03.md").write_text("earlier\n")
+        (collision_store / "a-ghi-guide-agent-"
+         "2026-10-03.proposed-changes.md").write_text("earlier\n")
         second_name, _ = tool.record_ruling_question(
             "a", REPO, conflict_46, "t", "k",
             Recorder({"gh issue view 46": Completed("T\n")}), quiet, "filed")
         check("a file of the same name in the log-store gets a numeric "
               "suffix, and the earlier file is left as it was",
-              lambda: (second_name == ("a-proposed-improvements-or-changes-ghi-guide-agent-"
-                              "2026-10-03-2.md")
-              and (collision_store / "a-proposed-improvements-or-changes-"
-                   "ghi-guide-agent-2026-10-03.md").read_text() == "earlier\n"),
+              lambda: (second_name == ("a-ghi-guide-agent-"
+                              "2026-10-03-2.proposed-changes.md")
+              and (collision_store / "a-"
+                   "ghi-guide-agent-2026-10-03.proposed-changes.md").read_text() == "earlier\n"),
               second_name)
 
         store_is_a_file = scratch / "store-is-a-file"
@@ -1847,8 +1849,8 @@ def run_cases(scratch: Path):
         conflicting_text = ("# Reopen a closed issue to add its last "
                             "finding\n\nBody.\n")
         draft_slug = tool.slug("Reopen a closed issue to add its last finding")
-        proposed_name = (f"{draft_slug}-proposed-improvements-or-changes-"
-                         "ghi-guide-agent-2026-10-03.md")
+        proposed_name = (f"{draft_slug}-"
+                         "ghi-guide-agent-2026-10-03.proposed-changes.md")
         create_store = log_store_at(scratch / "create-store")
         draft_dir = scratch / "draft-dir"
         draft_dir.mkdir()
@@ -1960,8 +1962,8 @@ def run_cases(scratch: Path):
                   lambda: (sorted(design_create.staged)
                   == [f"docs/issues/573-{draft_slug}.tool.design.md"]
                   and sorted(item.name for item in design_store.iterdir())
-                  == [f"{draft_slug}.tool.design-proposed-improvements-or-"
-                      "changes-ghi-guide-agent-2026-10-03.md"]
+                  == [f"{draft_slug}.tool.design-"
+                      "ghi-guide-agent-2026-10-03.proposed-changes.md"]
                   and design_question_lines[-1].startswith("Filed GHI 573.")
                   and "Dispatch a forked subagent now"
                   in design_question_lines[-1]),
@@ -2145,7 +2147,7 @@ def run_cases(scratch: Path):
                           for line in quiet_lines),
               (sorted(quiet_create.staged), quiet_lines[-1:]))
     finally:
-        tool.proposed_improvements_or_changes_file_date = original_date
+        tool.proposed_changes_file_date_for_today = original_date
         log_store_at(scratch / "default-log-store")
 
     run_remote_ghi_guide_agent_log_store_cases(scratch)
@@ -2631,7 +2633,7 @@ def ran_with(recorder, *fragments):
                for call in recorder.calls)
 
 
-GHI_GUIDE_AGENT_HEAD = (f"{EDIT_NAME[:-len('.md')]}-proposed-improvements-or-changes-"
+GHI_GUIDE_AGENT_HEAD = (f"{EDIT_NAME[:-len('.md')]}-"
                  "ghi-guide-agent-")
 
 
@@ -2647,8 +2649,8 @@ def run_old_ghi_guide_agent_files_on_main_cases(scratch: Path):
     """Files from ghi-guide-agent that an older version of the tool landed on main
     beside a GHI-MD."""
     one_link = tool.links_body(REPO, [EDIT_RELATIVE])
-    old_file = f"docs/issues/{GHI_GUIDE_AGENT_HEAD}2026-10-19.md"
-    old_file_2 = f"docs/issues/{GHI_GUIDE_AGENT_HEAD}2026-10-19-2.md"
+    old_file = f"docs/issues/{GHI_GUIDE_AGENT_HEAD}2026-10-19.proposed-changes.md"
+    old_file_2 = f"docs/issues/{GHI_GUIDE_AGENT_HEAD}2026-10-19-2.proposed-changes.md"
     listing = Completed(f"{EDIT_RELATIVE}\0{old_file}\0{old_file_2}\0")
     check("a file from ghi-guide-agent beside a GHI-MD is not one of the issue's "
           "files",
@@ -2658,7 +2660,7 @@ def run_old_ghi_guide_agent_files_on_main_cases(scratch: Path):
     source = filed_ghi_md(scratch)
     store = log_store_at(scratch / "old-files-store")
     store.mkdir()
-    settled_name = f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.md"
+    settled_name = f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.proposed-changes.md"
     (store / settled_name).write_text(ghi_guide_agent_file(
         "does ruling one still hold?", "State: settled, not worth doing"))
     answers = {
@@ -2684,7 +2686,7 @@ def run_old_ghi_guide_agent_files_on_main_cases(scratch: Path):
           ran_with(renaming, "gh issue edit", "--title", EDIT_TITLE)
           and not ran_with(renaming, "gh issue edit", "--body"),
           str(renaming.commands()))
-    copied = store / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19-2.md"
+    copied = store / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19-2.proposed-changes.md"
     check("an open question on main that the log-store lacks is copied in "
           "under the next free name, and one the log-store already settled "
           "is not",
@@ -2728,7 +2730,7 @@ def run_old_ghi_guide_agent_files_on_main_cases(scratch: Path):
 
     unread_store = log_store_at(scratch / "old-files-unread")
     unread_store.mkdir()
-    held = unread_store / f"{GHI_GUIDE_AGENT_HEAD}2026-10-18.md"
+    held = unread_store / f"{GHI_GUIDE_AGENT_HEAD}2026-10-18.proposed-changes.md"
     held.write_text("held\n")
     held.chmod(0)
     unread_lines = []
@@ -2824,7 +2826,7 @@ def run_old_ghi_guide_agent_files_on_main_cases(scratch: Path):
           len(moved_left) == 2 and old_file in moved_left[0]
           and old_file_2 in moved_left[1], moved_lines)
 
-    (moved_store / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.md").write_text(
+    (moved_store / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.proposed-changes.md").write_text(
         ghi_guide_agent_file("does ruling two still hold?"))
     rerun_lines = []
     tool.edit(moved_source, REPO, scratch, Recorder(moved_answers),
@@ -2843,7 +2845,7 @@ def run_saved_question_on_resume_cases(scratch: Path):
     show the question."""
     store = log_store_at(scratch / "resume-store")
     store.mkdir()
-    saved = store / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.md"
+    saved = store / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.proposed-changes.md"
     saved.write_text(ghi_guide_agent_file("does the ruling still hold?"))
     source = filed_ghi_md(scratch)
     staged = staged_form()
@@ -2878,8 +2880,8 @@ def run_saved_question_on_resume_cases(scratch: Path):
               (resumed.commands(), lines[-2:]))
 
     created_name = "a-statusline-that-drops-its-branch-name"
-    created_saved = store / (f"{created_name}-proposed-improvements-or-"
-                             "changes-ghi-guide-agent-2026-10-19.md")
+    created_saved = store / (f"{created_name}-"
+                             "ghi-guide-agent-2026-10-19.proposed-changes.md")
     created_saved.write_text(ghi_guide_agent_file("may the filing go ahead?"))
     numbered = Recorder({
         "gh issue view 570": Completed(json.dumps(
@@ -2900,8 +2902,8 @@ def run_saved_question_on_resume_cases(scratch: Path):
 
     unreadable = log_store_at(scratch / "resume-unreadable")
     unreadable.mkdir()
-    (unreadable / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.md").write_text("x")
-    (unreadable / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.md").chmod(0)
+    (unreadable / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.proposed-changes.md").write_text("x")
+    (unreadable / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.proposed-changes.md").chmod(0)
     lines = []
     try:
         tool.edit(source, REPO, scratch, Recorder({
@@ -2910,7 +2912,7 @@ def run_saved_question_on_resume_cases(scratch: Path):
                                         tool.links_body(REPO, [EDIT_RELATIVE])),
             "git ls-tree": Completed(EDIT_RELATIVE + "\0")}), lines.append)
     finally:
-        (unreadable / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.md").chmod(0o600)
+        (unreadable / f"{GHI_GUIDE_AGENT_HEAD}2026-10-19.proposed-changes.md").chmod(0o600)
     check("a log-store that cannot be read at the end of a run is reported, "
           "with where to look and what to dispatch",
           any(line.startswith("could not read ghi-guide-agent's questions in the "
@@ -3034,12 +3036,12 @@ def run_remote_read_failure_cases(scratch: Path):
     original_store = tool.ghi_guide_agent_log_store
     remote = scratch / "remote-unreadable"
     remote.mkdir()
-    blocked = remote / "570-a-proposed-improvements-or-changes-ghi-guide-agent-2026-10-03.md"
+    blocked = remote / "570-a-ghi-guide-agent-2026-10-03.proposed-changes.md"
     blocked.write_text("held\n")
     # A readable file after it, so the loop's last step succeeds and only
     # the read's own failure can make the script exit nonzero.
-    (remote / "570-a-proposed-improvements-or-changes-ghi-guide-agent-"
-     "2026-10-04.md").write_text("readable\n")
+    (remote / "570-a-ghi-guide-agent-"
+     "2026-10-04.proposed-changes.md").write_text("readable\n")
     try:
         tool.ghi_guide_agent_log_store = lambda: (tool.GHI_GUIDE_AGENT_LOG_STORE_HOST,
                                            str(remote))
@@ -3358,11 +3360,11 @@ def run_edit_cases(scratch: Path):
           and not landing.ran("git ls-tree -r --name-only -z origin/main"),
           str(landing.commands()))
 
-    original_date = tool.proposed_improvements_or_changes_file_date
-    tool.proposed_improvements_or_changes_file_date = lambda: "2026-10-03"
+    original_date = tool.proposed_changes_file_date_for_today
+    tool.proposed_changes_file_date_for_today = lambda: "2026-10-03"
     edit_store = log_store_at(scratch / "edit-store")
-    proposed_name = (f"{EDIT_NAME[:-len('.md')]}-proposed-improvements-or-"
-                     "changes-ghi-guide-agent-2026-10-03.md")
+    proposed_name = (f"{EDIT_NAME[:-len('.md')]}-"
+                     "ghi-guide-agent-2026-10-03.proposed-changes.md")
     proposed_in_store = edit_store / proposed_name
     try:
         conflicting_edit_answers = {
@@ -3472,7 +3474,7 @@ def run_edit_cases(scratch: Path):
               and not quiet_rerun.ran("gh issue comment")),
               (quiet_rerun.commands(), quiet_rerun_lines[-1:]))
     finally:
-        tool.proposed_improvements_or_changes_file_date = original_date
+        tool.proposed_changes_file_date_for_today = original_date
         log_store_at(scratch / "default-log-store")
         source = filed_ghi_md(scratch)
     check("a heading the edit did change renames the issue",
@@ -3835,7 +3837,7 @@ def run_edit_cases(scratch: Path):
         })
         rejected_store = log_store_at(scratch / f"rejected-store-{len(case)}")
         rejected_case = (f"{case} with a ruling question refuses before "
-                         "writing a proposed-improvements-or-changes-file")
+                         "writing a proposed-changes-file")
         try:
             tool.edit(source, REPO, scratch, rejected_with_question, quiet)
             check(rejected_case, False, "it proceeded")
@@ -5826,8 +5828,8 @@ def run_whole_file_set_cases(scratch: Path):
     """A create with a ruling question lands the GHI-MD alone, so the
     checks that a write is already done compare main's GHI-MD with the
     draft's landed form and nothing else."""
-    original_date = tool.proposed_improvements_or_changes_file_date
-    tool.proposed_improvements_or_changes_file_date = lambda: "2026-10-03"
+    original_date = tool.proposed_changes_file_date_for_today
+    tool.proposed_changes_file_date_for_today = lambda: "2026-10-03"
     log_store_at(scratch / "file-set-store")
     try:
         (scratch / "scripts").mkdir(exist_ok=True)
@@ -5895,7 +5897,7 @@ def run_whole_file_set_cases(scratch: Path):
         except Exception as other:                    # noqa: BLE001
             check(linked_name, False, f"escaped unreported: {other!r}")
     finally:
-        tool.proposed_improvements_or_changes_file_date = original_date
+        tool.proposed_changes_file_date_for_today = original_date
 
 
 def run_adjudication_question_file_cases(scratch: Path):

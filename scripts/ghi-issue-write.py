@@ -25,11 +25,11 @@ sends the author here.
 A ruling question goes into a file for the same reason. When ghi-guide-agent
 answers a draft with a question about a ruling of the user's, the write goes
 ahead, and the tool writes the question as entry E1 of a
-proposed-improvements-or-changes-file in the log-store on ned-box,
+proposed-changes-file in the log-store on ned-box,
 GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY, named
-`<GHI-MD name>-proposed-improvements-or-changes-ghi-guide-agent-<YYYY-MM-DD>.md`.
+`<GHI-MD name>-ghi-guide-agent-<YYYY-MM-DD>.proposed-changes.md`.
 The file never reaches main: the subagent that settles the entry, by the
-rules of PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD, settles it
+rules of PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD, settles it
 in that file, and only the change an entry calls for lands, such as an
 edit of the GHI-MD through `edit`.
 So the run tells the agent to dispatch that subagent at once. The file is
@@ -45,8 +45,8 @@ THE SEQUENCE, and what makes each step safe to run twice:
                 heading carries no date.
   2. Adjudicate ask ghi-guide-agent whether an open issue already covers this.
                 Fail-open: unreachable means the write proceeds. A ruling
-                question is written to a proposed-improvements-or-changes-
-                file in the log-store before step 3; such a file carrying
+                question is written to a proposed-changes-file in the
+                log-store before step 3; such a file carrying
                 the key of this same text means step 2 is not asked again.
   3. File       gh issue create, title from the file's first heading, body a
                 placeholder carrying this file's pairing key.
@@ -445,8 +445,8 @@ RECONSIDERED_MARKER_NAME = ".ghi-issue-write-reconsidered"
 # the comparison. Measured 2026-09-21; see `read_issue`.
 GH_NO_SUCH_ISSUE_STDERR_FRAGMENT = "could not resolve to an issue"
 # A file name may be 255 bytes. The longest name built on a slug is the
-# log-store's `<number>-<slug>-proposed-improvements-or-changes-ghi-guide-agent-
-# <YYYY-MM-DD>-<n>.md`, whose other parts take up to 73 characters. A design's
+# log-store's `<number>-<slug>-ghi-guide-agent-<YYYY-MM-DD>-<n>.proposed-changes.md`,
+# whose other parts take up to 56 characters. A design's
 # `<slug>.<kind>.design` stands where `<slug>` does, so its slug is cut shorter
 # by the ending's length.
 GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT = 180
@@ -467,26 +467,29 @@ ADJUDICATION_TIMEOUT_SECONDS = 420 + GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
 # stay equal.
 GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH = "ghi-guide-agent's answer is not usable:"
 # ghi-guide-agent's ruling questions are kept in the log-store on ned-box, never on
-# main: one proposed-improvements-or-changes-file each (the glossary's entry),
-# named `<GHI-MD name>-proposed-improvements-or-changes-ghi-guide-agent-<YYYY-MM-DD>[-<n>].md`.
+# main: one proposed-changes-file each (the glossary's entry),
+# named `<GHI-MD name>-ghi-guide-agent-<YYYY-MM-DD>[-<n>].proposed-changes.md`.
 # GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE points a test at a local directory.
-PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX = "-proposed-improvements-or-changes-"
-PROPOSED_IMPROVEMENTS_OR_CHANGES_SOURCE_GHI_GUIDE_AGENT = "ghi-guide-agent"
+PROPOSED_CHANGES_FILE_NAME_ENDING = ".proposed-changes.md"
+PROPOSED_CHANGES_SOURCE_GHI_GUIDE_AGENT = "ghi-guide-agent"
+# The date, and the `-<n>` a second file of a day gets, between a file's
+# `<GHI-MD name>-<source>-` and its ending.
+PROPOSED_CHANGES_FILE_DATE_PATTERN = r"(\d{4}-\d{2}-\d{2})(?:-\d+)?"
 # Such a file's whole name, from any source. Older versions of this tool
 # landed them on main beside a GHI-MD; one found there is never counted or
 # linked as one of the issue's files.
-PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_PATTERN = re.compile(
-    re.escape(PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX)
-    + r"[a-z0-9]+(?:-[a-z0-9]+)*-(\d{4}-\d{2}-\d{2})(?:-\d+)?\.md$")
+PROPOSED_CHANGES_FILE_PATTERN = re.compile(
+    r"-[a-z0-9]+(?:-[a-z0-9]+)*-" + PROPOSED_CHANGES_FILE_DATE_PATTERN
+    + re.escape(PROPOSED_CHANGES_FILE_NAME_ENDING) + "$")
 GHI_GUIDE_AGENT_LOG_STORE_HOST = "nedlern@ned-box"
 GHI_GUIDE_AGENT_LOG_STORE_HOSTNAME = "ned-box"
-GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY = "/home/nedlern/nedsnodes-logs/ghi-guide-agent-proposed-improvements-or-changes"
+GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY = "/home/nedlern/nedsnodes-logs/ghi-guide-agent-proposed-changes"
 GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE = "GHI_ISSUE_WRITE_GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY"
 GHI_GUIDE_AGENT_LOG_STORE_SSH_COMMAND = ["ssh", "-o", "BatchMode=yes", "-o",
                                   "ConnectTimeout=10"]
 # The design of record for how the entries are settled: the subagent the run
 # tells the agent to dispatch follows its § The design, rules 3 to 7.
-PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD = "docs/issues/1132-concerns-about-a-ghi-are-handled-by-agents.md"
+PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD = "docs/issues/1132-concerns-about-a-ghi-are-handled-by-agents.md"
 
 RECONSIDER_LINE = (
     "If you believe this refusal is wrong, reconsider once against its stated "
@@ -1182,7 +1185,7 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     if answer.get("kind") == "ask-user-about-ruling":
         report("ghi-guide-agent raised a question about a ruling of the "
                "user's; the write goes ahead and records it in a "
-               "proposed-improvements-or-changes-file in the log-store")
+               "proposed-changes-file in the log-store")
         # The saved file holds the question on one line, and
         # ruling_question_lines() reads back only that line.
         # Each line is trimmed at both ends and the lines are joined with one
@@ -1219,7 +1222,7 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     return None
 
 
-def proposed_improvements_or_changes_file_date() -> str:
+def proposed_changes_file_date_for_today() -> str:
     """Today, as such a file's name and text carry it. A function so a test
     can fix the date."""
     return datetime.date.today().isoformat()
@@ -1245,14 +1248,22 @@ def ghi_guide_agent_log_store_citation(name: str) -> str:
     return f"{GHI_GUIDE_AGENT_LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}"
 
 
-def is_proposed_improvements_or_changes_file(path: str) -> bool:
-    return bool(PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_PATTERN.search(
-        Path(path).name))
+def is_proposed_changes_file(path: str) -> bool:
+    return bool(PROPOSED_CHANGES_FILE_PATTERN.search(Path(path).name))
 
 
 def ghi_guide_agent_file_name_head(prefix: str) -> str:
-    return (f"{prefix}{PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX}"
-            f"{PROPOSED_IMPROVEMENTS_OR_CHANGES_SOURCE_GHI_GUIDE_AGENT}-")
+    return f"{prefix}-{PROPOSED_CHANGES_SOURCE_GHI_GUIDE_AGENT}-"
+
+
+def is_ghi_guide_agent_proposed_changes_file_about_ghi_md(prefix: str, name: str) -> bool:
+    """Whether `name` is a file from ghi-guide-agent about the GHI-MD named
+    `prefix`. The date is matched whole, so a GHI-MD whose name merely starts
+    with `prefix` does not lend its files to it."""
+    return bool(re.fullmatch(
+        re.escape(ghi_guide_agent_file_name_head(prefix))
+        + PROPOSED_CHANGES_FILE_DATE_PATTERN
+        + re.escape(PROPOSED_CHANGES_FILE_NAME_ENDING), name))
 
 
 # The lines of a file from ghi-guide-agent that this tool reads back: entry E1's
@@ -1264,11 +1275,11 @@ GHI_GUIDE_AGENT_REVIEWED_TEXT_KEY_LINE_OPENING = "Key of the GHI-MD text ghi-gui
 GHI_GUIDE_AGENT_OPEN_STATE_LINE = "State: open"
 
 
-def proposed_improvements_or_changes_file_text(
+def build_ghi_guide_agent_proposed_changes_file_text(
         repo: str, conflict, ruling_title, date: str, operation_done: str,
         title: str, reviewed_text_key: str) -> str:
     """What a file from ghi-guide-agent says: one entry, E1, in the entry form of
-    PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD's rule 1. It
+    PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD's rule 1. It
     names the GHI-MD by its first heading, the issue's title, because on a
     new filing it is written before the issue exists. `operation_done` is
     "filed" or "edited"."""
@@ -1283,7 +1294,7 @@ def proposed_improvements_or_changes_file_text(
         f"scripts/ghi-issue-write.py {operation_done} it. The agent that ran "
         "the tool dispatches a forked subagent to settle each entry in this "
         "file by rules 3 to 7 of § The design in "
-        f"{PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD}. This file "
+        f"{PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD}. This file "
         "stays in the log-store; only the change an entry calls for goes to "
         "main, such as an edit of the GHI-MD through "
         "`scripts/ghi-issue-write.py edit`.\n\n"
@@ -1321,8 +1332,7 @@ def ghi_guide_agent_files_in_log_store(prefix: str, runner) -> list:
             return []
         return [(item.name, item.read_text(encoding="utf-8"))
                 for item in sorted(store.iterdir())
-                if item.is_file() and item.name.startswith(head)
-                and item.name.endswith(".md")]
+                if item.is_file() and is_ghi_guide_agent_proposed_changes_file_about_ghi_md(prefix, item.name)]
     # Each file goes out as its name and its base64 text, each ended by a
     # NUL, so no text can be mistaken for a separator. GNU base64 wraps its
     # lines and macOS's has no -w, so the wraps stay in and b64decode skips
@@ -1331,7 +1341,7 @@ def ghi_guide_agent_files_in_log_store(prefix: str, runner) -> list:
     # for one holding nothing.
     quoted = shlex.quote(directory)
     script = (f"[ -e {quoted} ] || exit 0; cd {quoted} || exit 1; "
-              f"for f in {shlex.quote(head)}*.md; do "
+              f"for f in {shlex.quote(head)}*{PROPOSED_CHANGES_FILE_NAME_ENDING}; do "
               "[ -f \"$f\" ] || continue; "
               "printf '%s\\0' \"$f\" && base64 < \"$f\" && printf '\\0' "
               "|| exit 1; done")
@@ -1339,7 +1349,8 @@ def ghi_guide_agent_files_in_log_store(prefix: str, runner) -> list:
     fields = (completed.stdout or "").split("\0")
     return [(fields[index],
              base64.b64decode(fields[index + 1]).decode("utf-8"))
-            for index in range(0, len(fields) - 1, 2)]
+            for index in range(0, len(fields) - 1, 2)
+            if is_ghi_guide_agent_proposed_changes_file_about_ghi_md(prefix, fields[index])]
 
 
 def ghi_guide_agent_file_for_reviewed_text(prefix: str, reviewed_text_key: str,
@@ -1365,7 +1376,7 @@ def ghi_guide_agent_file_for_reviewed_text(prefix: str, reviewed_text_key: str,
 def write_ghi_guide_agent_file_to_log_store(prefix: str, text: str, date: str,
                                      runner) -> str:
     """Writes a new file from ghi-guide-agent into the log-store under
-    `<prefix>-proposed-improvements-or-changes-ghi-guide-agent-<date>.md`, or with
+    `<prefix>-ghi-guide-agent-<date>.proposed-changes.md`, or with
     `-<n>` after the date, the lowest n from 2 that no file there has, and
     returns its name. Never replaces a file."""
     host, directory = ghi_guide_agent_log_store()
@@ -1373,20 +1384,22 @@ def write_ghi_guide_agent_file_to_log_store(prefix: str, text: str, date: str,
     if host is None:
         store = Path(directory)
         store.mkdir(parents=True, exist_ok=True)
-        name, suffix = f"{base}.md", 2
+        ending = PROPOSED_CHANGES_FILE_NAME_ENDING
+        name, suffix = f"{base}{ending}", 2
         while True:
             try:
                 with open(store / name, "x", encoding="utf-8") as written:
                     written.write(text)
                 return name
             except FileExistsError:
-                name, suffix = f"{base}-{suffix}.md", suffix + 1
+                name, suffix = f"{base}-{suffix}{ending}", suffix + 1
     encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
     script = (f"mkdir -p {shlex.quote(directory)} && "
               f"cd {shlex.quote(directory)} && set -C && "
-              f"n={shlex.quote(base + '.md')} && i=2 && "
+              f"n={shlex.quote(base + PROPOSED_CHANGES_FILE_NAME_ENDING)} && i=2 && "
               "while [ -e \"$n\" ]; do "
-              f"n={shlex.quote(base)}-$i.md; i=$((i+1)); done && "
+              f"n={shlex.quote(base)}-$i{PROPOSED_CHANGES_FILE_NAME_ENDING}; "
+              "i=$((i+1)); done && "
               f"printf %s {encoded} | base64 -d > \"$n\" && "
               "printf %s \"$n\"")
     completed = runner([*GHI_GUIDE_AGENT_LOG_STORE_SSH_COMMAND, host, script])
@@ -1407,8 +1420,8 @@ def record_ruling_question(prefix: str, repo: str, conflict, title: str,
             ruling_title = runner(
                 ["gh", "issue", "view", str(conflict.ruling_issue), "--repo",
                  repo, "--json", "title", "--jq", ".title"]).stdout.strip()
-        date = proposed_improvements_or_changes_file_date()
-        text = proposed_improvements_or_changes_file_text(
+        date = proposed_changes_file_date_for_today()
+        text = build_ghi_guide_agent_proposed_changes_file_text(
             repo, conflict, ruling_title, date, operation_done, title,
             reviewed_text_key)
         name = write_ghi_guide_agent_file_to_log_store(prefix, text, date, runner)
@@ -1463,7 +1476,7 @@ def report_ruling_question(number: int, operation_done: str, recorded,
         "in the log-store, not in the pull request.",
         "Dispatch a forked subagent now to settle the entry in that file by "
         "rules 3 to 7 of § The design in "
-        f"{PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD}; do not "
+        f"{PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD}; do not "
         "wait for the user's answer.",
         "If the subagent marks the entry as needing the user, bring the "
         "entry to him in your agent-seat's next approval-walk."]
@@ -1500,7 +1513,7 @@ def report_open_ruling_questions(number: int, operation_done: str, prefixes,
                 f"{ghi_guide_agent_log_store_citation(ghi_guide_agent_file_name_head(prefix))}"
                 "* yourself, and dispatch a forked subagent to settle each "
                 "entry whose state is open, by rules 3 to 7 of § The design "
-                f"in {PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD}.")
+                f"in {PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD}.")
     for name in sorted(found):
         report_ruling_question(number, operation_done, (name, found[name]),
                                report)
@@ -1510,12 +1523,11 @@ def ghi_guide_agent_files_beside_on_main(relative: str, revision: str,
                                   repository_root: Path, runner) -> list:
     """The files from ghi-guide-agent that main holds beside the GHI-MD at
     `relative`, landed there by an older version of this tool."""
-    head = ghi_guide_agent_file_name_head(Path(relative).name[:-len(".md")])
+    prefix = Path(relative).name[:-len(".md")]
     listed = runner(["git", "ls-tree", "--name-only", "-z", revision,
                      f"{Path(relative).parent}/"], cwd=str(repository_root))
     return [line for line in git_output.nul_separated_fields(listed.stdout or "")
-            if Path(line).name.startswith(head)
-            and is_proposed_improvements_or_changes_file(line)]
+            if is_ghi_guide_agent_proposed_changes_file_about_ghi_md(prefix, Path(line).name)]
 
 
 def migrate_ghi_guide_agent_files_on_main(relative: str, revision: str,
@@ -1547,7 +1559,7 @@ def migrate_ghi_guide_agent_files_on_main(relative: str, revision: str,
             continue
         failure = unread
         if failure is None:
-            date = PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_PATTERN.search(
+            date = PROPOSED_CHANGES_FILE_PATTERN.search(
                 Path(item).name).group(1)
             try:
                 name = write_ghi_guide_agent_file_to_log_store(prefix, text, date,
@@ -1567,7 +1579,7 @@ def migrate_ghi_guide_agent_files_on_main(relative: str, revision: str,
                 "Dispatch a forked subagent now to copy the file into "
                 f"{ghi_guide_agent_log_store_citation('')} and settle its entry "
                 "there by rules 3 to 7 of § The design in "
-                f"{PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD}; "
+                f"{PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD}; "
                 "do not wait for the user's answer.")
         else:
             report(
@@ -1609,9 +1621,10 @@ def report_ghi_guide_agent_files_left_at_moved_from(relative: str, moved_from: s
             "Dispatch a forked subagent to copy it into "
             f"{ghi_guide_agent_log_store_citation('')} under the name "
             f"{ghi_guide_agent_file_name_head(Path(relative).name[:-len('.md')])}"
-            "<date>.md, and to settle its entry there if it is open, by "
+            f"<date>{PROPOSED_CHANGES_FILE_NAME_ENDING}, and to settle its "
+            "entry there if it is open, by "
             "rules 3 to 7 of § The design in "
-            f"{PROPOSED_IMPROVEMENTS_OR_CHANGES_SETTLING_RULES_GHI_MD}.")
+            f"{PROPOSED_CHANGES_FILE_ENTRY_SETTLING_RULES_GHI_MD}.")
 
 
 def file_issue(repo: str, title: str, key: str, runner, report) -> int:
@@ -1700,7 +1713,7 @@ def ghi_md_paths_on_main(revision: str, repository_root: Path, runner):
     return [line for line in git_output.nul_separated_fields(listed.stdout or "")
             if str(Path(line).parent) == GHI_MD_DIRECTORY
             and issue_number_in_file_name(Path(line)) is not None
-            and not is_proposed_improvements_or_changes_file(line)]
+            and not is_proposed_changes_file(line)]
 
 
 def refuse_if_already_landed_on_main(repo: str, text: str, title: str,
@@ -2075,7 +2088,7 @@ def ghi_md_paths_for_issue(number: int, repository_root: Path, runner,
     real failure — a bad revision or a path outside the checkout, both
     128 — and never means "nothing there".
 
-    A proposed-improvements-or-changes-file that an older version of this
+    A proposed-changes-file that an older version of this
     tool landed beside a GHI-MD is not one of the issue's files: counted, a
     heading change on an issue with one GHI-MD no longer renamed it.
     `migrate_ghi_guide_agent_files_on_main` copies such a file into the log-store."""
@@ -2095,7 +2108,7 @@ def ghi_md_paths_for_issue(number: int, repository_root: Path, runner,
             # the depth rule, so the set this returns and the set `edit`
             # will land into cannot disagree.
             if (writable_relative_path(line)
-                    and not is_proposed_improvements_or_changes_file(line)):
+                    and not is_proposed_changes_file(line)):
                 selected.append(line)
         elif landed_design_relative_path(line):
             # A landed design's name carries no number, so its `issue:`

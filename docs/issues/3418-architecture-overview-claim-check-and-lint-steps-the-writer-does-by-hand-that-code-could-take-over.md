@@ -10,7 +10,7 @@ An nn-architecture-overview is checked by the claim-check program, `nn-systems/s
 
 CLAUDE.md allows a guard, validation or retry only when the failure has happened, or concrete evidence shows it is foreseeable within 30 days, and it would lose or damage work, stop work beyond the task that failed, or go unnoticed until it does. Most candidates below cite no such failure yet. Each says what evidence exists.
 
-Below, an overview's entries file is its proposed-improvements-or-changes-file, `nn-systems/<system>/docs/<system>-architecture-overview-proposed-improvements-or-changes-entries.md`, where the claim-check program appends the claims it ranks fix later.
+Below, an overview's entries file is its proposed-changes-file, `nn-systems/<system>/docs/<system>-architecture-overview-proposed-improvements-or-changes-entries.md`, where the claim-check program appends the claims it ranks fix later.
 
 The records, all under `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/`, are cited by a short name and the finding's number, so that "page Q4.1" is item 1 under Question 4 of the first record:
 - `nedsnodes-how-to-write-an-architecture-overview-2026-11-12/cold-read-fast-read.md`, the page, cited as "page".
