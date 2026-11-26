@@ -173,6 +173,12 @@ _git_output_spec = importlib.util.spec_from_file_location(
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
+_frozen_heads_record_spec = importlib.util.spec_from_file_location(
+    "pull_request_fix_round_frozen_heads_record_in_topic_worktree_git_directory_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "pull-request-fix-round-frozen-heads-record-in-topic-worktree-git-directory-common.py")
+frozen_heads_record = importlib.util.module_from_spec(_frozen_heads_record_spec)
+_frozen_heads_record_spec.loader.exec_module(frozen_heads_record)
 _ready_command_spec = importlib.util.spec_from_file_location(
     "pull_request_ready_for_review_mark_after_description_defect_line_and_test_suites_check",
     Path(__file__).resolve().parent
@@ -1052,8 +1058,12 @@ def print_brief(number, reviewer_login):
         return
     worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, len(findings) + len(nits),
                                              review_submitted_at, merge_lane)
+    # Step 1 may merge origin/main into the frozen-head; the record tells scripts/checkout-freshness-catch-up.py
+    # that merge is this round's, not the catch-up merge it reports.
+    frozen_heads_record.pull_request_fix_round_frozen_head_record_add(
+        Path(git(["-C", str(worktree), "rev-parse", "--absolute-git-dir"]).strip()), frozen_head)
     answers_path = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
-    kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
+    kept_copies_directory =pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
         worktree, number, round_review_id
     )
     common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()

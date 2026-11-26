@@ -398,6 +398,11 @@ def brief_cases(root, repository, base, frozen_head):
     code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head)]))
     check("brief: exit 0 for a changes-requested review of the current head", code == 0, err)
     check("brief: names the frozen-head", f"Frozen-head: {frozen_head}" in out, out)
+    topic_git_directory = Path(git(repository, "rev-parse", "--absolute-git-dir"))
+    check("brief: records the frozen-head in the topic-worktree's git directory, so the checkout-freshness check "
+          "leaves the round's merge of origin/main out",
+          frozen_head in load_program().frozen_heads_record.pull_request_fix_round_frozen_heads_recorded(
+              topic_git_directory), str(topic_git_directory))
     check("brief: the first changes-requested review's brief does not ask for the advisor",
           ADVISOR_SENTENCE not in out and "advisor" not in out, out)
     check("brief: carries both blocking findings word for word, in order, and not the note",

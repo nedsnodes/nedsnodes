@@ -2697,6 +2697,24 @@ with tempfile.TemporaryDirectory() as failing_git_scratch:
     check("(fixture) the seat's merge from main is found",
           len(catch_up_module.merges_from_main(merged_seat) or []) == 1,
           str(catch_up_module.merges_from_main(merged_seat)))
+
+    # A fix-round may merge origin/main into its frozen-head; the fix-round brief records that frozen-head, and the
+    # merge is not the banned catch-up.
+    _, fix_round_seat = seat_behind_main(own_commit=True)
+    fix_round_frozen_head = tip(fix_round_seat)
+    fix_round_git_dir = Path(git(["rev-parse", "--absolute-git-dir"], fix_round_seat).stdout.strip())
+    catch_up_module.frozen_heads_record.pull_request_fix_round_frozen_head_record_add(
+        fix_round_git_dir, fix_round_frozen_head)
+    git(["merge", "-q", "--no-edit", "origin/main"], fix_round_seat)
+    check("a fix-round's merge of origin/main into the frozen-head its brief recorded is not reported",
+          catch_up_module.merges_from_main(fix_round_seat) == [],
+          str(catch_up_module.merges_from_main(fix_round_seat)))
+    git(["reset", "-q", "--hard", fix_round_frozen_head], fix_round_seat)
+    git(["commit", "-q", "--allow-empty", "-m", "a commit after the recorded frozen-head"], fix_round_seat)
+    git(["merge", "-q", "--no-edit", "origin/main"], fix_round_seat)
+    check("a merge of origin/main into a commit that is not a recorded frozen-head is still reported",
+          len(catch_up_module.merges_from_main(fix_round_seat) or []) == 1,
+          str(catch_up_module.merges_from_main(fix_round_seat)))
     for case_name, matches in (
             ("a failed read of a merge's second parent",
              lambda arguments: arguments[:3] == ["rev-parse", "--verify", "--quiet"]
