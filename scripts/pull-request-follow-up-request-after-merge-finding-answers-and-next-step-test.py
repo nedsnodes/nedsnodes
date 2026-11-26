@@ -1792,6 +1792,53 @@ def test_print_block():
           "the one restated word for word",
           code == 1 and out == "" and "on line 9 of the same file, but worded differently" in err
           and "on line 3 of the same file" not in err, out + err)
+    rename_a, test_a = "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).", ("**fix-next** Add a test for the rename "
+                                                                                 "(Codex finding aaaaaaaaaaaa).")
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2), merge_lane_review(3),
+                                  merge_lane_review(4)],
+                                 [merge_lane_comment(10, 1, rename_a), merge_lane_comment(11, 1, test_a, line=9),
+                                  merge_lane_comment(20, 2, rename_a, line=25), merge_lane_comment(21, 2, test_a, line=9),
+                                  merge_lane_comment(30, 3, rename_a), merge_lane_comment(31, 3, test_a, line=25),
+                                  merge_lane_comment(40, 4, rename_a, line=25)])
+    check(f"{PRINT_BLOCK} refuses a comment worded as one of two findings under one Codex finding id on a line that "
+          "finding left and its sibling now holds, rather than fold it into the finding that once held the line",
+          code == 1 and out == "" and "review 4 of pull request 1964 holds a fix-next finding on scripts/thing.py, "
+          "line 25, under Codex finding id aaaaaaaaaaaa" in err and "on line 9 of the same file, but worded "
+          "differently" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, rename_a), merge_lane_comment(11, 1, test_a, line=9),
+                                  merge_lane_comment(20, 2, rename_a, line=30), merge_lane_comment(21, 2, test_a, line=40)])
+    check(f"{PRINT_BLOCK} pairs a later review's word-for-word restatements of two findings under one Codex finding id, "
+          "both moved, each with the finding worded as it, and prints both",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"
+                                               "2. fix-next: `scripts/thing.py:9`: Add a test for the rename "
+                                               "(Codex finding aaaaaaaaaaaa).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, rename_a), merge_lane_comment(20, 2, rename_a, line=25),
+                                  merge_lane_comment(21, 2, rename_a, line=25)])
+    check(f"{PRINT_BLOCK} prints a finding once when a later review restates it twice, word for word, on one moved line",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"), out + err)
+    two_forms = [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                 merge_lane_comment(11, 1, "**fix-next** Rename it Codex finding 0123456789ab.", line=7)]
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)], two_forms + [
+        merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+        merge_lane_comment(21, 2, "**fix-next** Rename it Codex finding 0123456789ab.", line=7)])
+    check(f"{PRINT_BLOCK} pairs a later review's restatements of a finding posted on two lines, on both its lines, "
+          "and prints it once",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)], two_forms + [
+        merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding 0123456789ab).", line=30),
+        merge_lane_comment(21, 2, "**fix-next** Rename it Codex finding 0123456789ab.", line=37)])
+    check(f"{PRINT_BLOCK} refuses a later review's two comments of a finding posted on two lines when both moved to "
+          "two lines, rather than guess which is the finding moved",
+          code == 1 and out == "" and "line 30, worded as an earlier finding on line(s) 3 of the same file" in err,
+          out + err)
     code, out, err = print_block([merge_lane_review(1), merge_lane_review(2), merge_lane_review(3)],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
                                   merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
