@@ -65,8 +65,4 @@ PR [merge-lane: move the merge helpers into scripts/, and retarget stacked pull 
 
 Last, `scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py` merges each pull request. The merge program first runs `scripts/merge-gate.sh`, which refuses, among the cases its header comment lists, on a missing approving review, and pins the merge to the nn-head-commit the newest approving review covered. merge-lane-2 posts the approving review from the merge account, the GitHub account `ned-review-merge`; GitHub refuses an approval from a pull request's author, so on a pull request that account opened the approving review comes from the GitHub account `mac-claude`. The user's approval of agent-instructions under rule 3 is a different approval. When the gate passes, the merge program retargets each open pull request stacked on the merging branch to that branch's base branch, because the merge deletes the branch and GitHub closes every open pull request whose base branch is deleted.
 
-## Open work
-
-`scripts/pull-request-review-plan.py`, from PR [pull-request-review-plan: compute a pull request's review tier, fix-round delta and brief facts](https://github.com/nedsnodes/nedsnodes/pull/943), states for one pull request its set of reviewers under rule 1, the review round, a fix-round's new commits, and the changed tool-messages-to-agent. It differs from rule 1 in one way, and until it is changed, rule 1 governs:
-
-- It gives the Codex review to every fenced code block in Markdown, where the review scope rule has reviewers review only those a pull request's description asks for.
+`scripts/pull-request-review-plan.py`, from PR [pull-request-review-plan: compute a pull request's review tier, fix-round delta and brief facts](https://github.com/nedsnodes/nedsnodes/pull/943), states for one pull request its set of reviewers under rule 1, the review round, a fix-round's new commits, and the changed tool-messages-to-agent.
