@@ -317,7 +317,8 @@ def is_only_the_own_words_message(result):
         lines = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n")
     except (ValueError, KeyError, TypeError, AttributeError):
         return False
-    return len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING) and lines[1] == SETTLED_LINE
+    return (len(lines) == 2 and re.fullmatch(OWN_WORDS_WAITING_ITEM_OPENING, lines[0]) is not None
+            and lines[1] == SETTLED_LINE)
 
 
 def test_retired_letters_o_and_other_prompts_print_nothing_with_no_walk_and_only_the_settled_line_on_one():
@@ -967,8 +968,8 @@ def test_r_whose_item_cannot_be_read_still_goes_to_the_agent():
     check("R on item 7 of 9, which its walk-document holds no heading for, says why it cannot be read, then tells "
           "the agent to publish it",
           not_blocked(result) and lines is not None
-          and lines[1].startswith("The hook could not read the text of item 7 of 9 from the walk-document ")
-          and "would refuse to build the item's page: the `#next_to_present` line" in lines[1]
+          and lines[1].startswith("The walk short-answer hook could not read the text of item 7 of 9 from the walk-document ")
+          and ": the `#next_to_present` line" in lines[1] and "would refuse to build the item's page" in lines[1]
           and lines[2:] == r_lines("R", "item 7 of 9"), f"lines {lines!r}")
     case = Case(next_to_present="item 4 of 9", document=None)
     result = case.run("r")
@@ -2570,6 +2571,9 @@ def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_
 
 
 OWN_WORDS_RULE_OPENING = "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
+# The walk-read failure opens with the same rule ID and also ends with SETTLED_LINE, so only this opening tells them apart.
+OWN_WORDS_WAITING_ITEM_OPENING = (
+    re.escape(OWN_WORDS_RULE_OPENING) + r".+ of approval-walk .+ is waiting for the user's answer, and his reply is in his own words\.")
 APPROVED_SENTENCE = (
     "When the discussion of an item settles on any option but its recommendation, even its alternative, rewrite the "
     "item's recommendation as that option and its alternative as the old recommendation, show the revised item, and "
@@ -2962,8 +2966,8 @@ def test_m_on_an_item_with_no_heading_reports_why_before_the_publish_steps():
     at = next((index for index, line in enumerate(lines or []) if line.startswith("The hook found no `#item_page`")),
               None)
     check("M on an item with no heading says the hook could not read it, and why, before the publish steps",
-          at is not None and lines[at - 1].startswith("The hook could not read the text of item 6 of 9 from the "
-                                                      "walk-document")
+          at is not None and lines[at - 1].startswith("The walk short-answer hook could not read the text of item 6 of 9 "
+                                                      "from the walk-document")
           and "no heading `Item 6`" in lines[at - 1], f"lines {lines!r}")
 
 
@@ -2972,7 +2976,11 @@ def test_the_own_words_predicates_fail_output_that_is_not_only_the_own_words_mes
         return subprocess.CompletedProcess([], returncode, stdout, stderr)
     own_words = Case(next_to_present="item 4 of 9").run("more responses 4")
     context = json.loads(own_words.stdout)["hookSpecificOutput"]["additionalContext"]
+    read_failed = "\n".join((HOOK_MODULE.WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(
+        error="OSError('disk')"), SETTLED_LINE))
     for name, output in (("not JSON", "not json"), ("JSON without hookSpecificOutput", "{}"),
+                         ("the walk-read failure, which shares the own-words rule ID and last line",
+                          json.dumps({"hookSpecificOutput": {"additionalContext": read_failed}})),
                          ("a context with a line after the own-words message",
                           json.dumps({"hookSpecificOutput": {"additionalContext": context + "\nAnd act on 4 as A."}}))):
         check(f"output that is {name} is neither only nor at most the own-words message",
