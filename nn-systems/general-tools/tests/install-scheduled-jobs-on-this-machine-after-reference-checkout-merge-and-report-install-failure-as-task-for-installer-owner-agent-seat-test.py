@@ -38,6 +38,7 @@ _git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
 _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 
 SUBJECT = after_merge.SCHEDULED_JOBS_INSTALLER_FAILURE_TASK_SUBJECT_FOR_OWNING_AGENT_SEAT_TASK_LIST
+METADATA_KEY = after_merge.SCHEDULED_JOBS_INSTALLER_FAILURE_TASK_MARKER_METADATA_KEY
 NED_BOX_OVERRIDE = after_merge.NED_BOX_REFERENCE_CHECKOUT_PATH_TEST_OVERRIDE_ENVIRONMENT_VARIABLE
 failures = 0
 
@@ -112,7 +113,7 @@ with tempfile.TemporaryDirectory() as scratch:
                 path.unlink()
 
     def run(ned_box_reference=None, installer_exit=0, task_lists_directory=None,
-            mac_reference=None, failed_line=None, keep_tasks=False, remove_exit=0):
+            mac_reference=None, failed_line=None, keep_tasks=False, remove_exit=0, argv=()):
         reset(keep_tasks)
         os.environ["STAND_IN_INSTALLER_EXIT"] = str(installer_exit)
         os.environ["STAND_IN_REMOVE_NOT_IN_TABLE_EXIT"] = str(remove_exit)
@@ -132,7 +133,7 @@ with tempfile.TemporaryDirectory() as scratch:
         os.chdir(repository)
         try:
             with redirect_stdout(printed), redirect_stderr(errors):
-                code = after_merge.main(environment, argv=[])
+                code = after_merge.main(environment, argv=list(argv))
         finally:
             os.chdir(before)
             after_merge.REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME[after_merge.MAC] = saved_mac
@@ -162,14 +163,18 @@ with tempfile.TemporaryDirectory() as scratch:
           code == 0 and calls == ["--install"] and errors == "" and printed == ""
           and len(written) == 1 and written[0]["status"] == "pending"
           and written[0]["subject"] == SUBJECT
+          and written[0].get("metadata") == {METADATA_KEY: True}
           and "the --install step failed: it exited 1, so ned-box may not run every job"
               in written[0]["description"]
           and "FAILED: the crontab write did not hold" in written[0]["description"]
-          and f"then run `python3 {repository}/nn-systems/general-tools/"
-              "install-scheduled-jobs-on-this-machine.py --install && python3 "
-              f"{repository}/nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py "
-              "--remove-not-in-table` on ned-box" in written[0]["description"]
-          and "once both exit 0 it marks this task completed" in written[0]["description"]
+          and f"Then run `cd {repository} && python3 {after_merge.PROGRAM} --print-outcome` on "
+              "ned-box: it runs both installer steps, `--install` and then "
+              "`--remove-not-in-table`, again, marks this task completed when both exit 0 or "
+              "rewrites this description with the new failure" in written[0]["description"]
+          and "\nWhen the fix needs something only the user can do, tell the user"
+              in written[0]["description"]
+          and written[0]["description"].endswith(
+              "The installer printed:\nFAILED: the crontab write did not hold")
           and "KEPT line" not in written[0]["description"],
           (code, errors, written))
 
@@ -185,17 +190,51 @@ with tempfile.TemporaryDirectory() as scratch:
     for task_id in ("9", "10"):
         (list_directory / f"{task_id}.json").write_text(json.dumps(
             {"id": task_id, "subject": SUBJECT, "description": "an older failure",
-             "status": "pending", "blocks": [], "blockedBy": []}), encoding="utf-8")
+             "status": "pending", "blocks": [], "blockedBy": [],
+             "metadata": {METADATA_KEY: True}}), encoding="utf-8")
     code, calls, printed, errors = run(ned_box_reference=repository, installer_exit=1,
                                        failed_line="FAILED: with several open", keep_tasks=True)
     written = {task["id"]: task for task in tasks()}
-    check("a failure while several tasks of the subject are open opens no new task and rewrites "
-          "every open one, 9.json and 10.json alike, with the latest failure",
+    check("a failure while several installer-failure tasks are open opens no new task and "
+          "rewrites every open one, 9.json and 10.json alike, with the latest failure",
           code == 0 and errors == "" and sorted(written) == ["1", "10", "9"]
           and all("FAILED: with several open" in task["description"]
                   for task in written.values()), (code, errors, written))
     for task_id in ("9", "10"):
         (list_directory / f"{task_id}.json").unlink()
+
+    reset()
+    for task_id, subject, metadata in (
+            ("1", "a subject the program no longer writes", {METADATA_KEY: True}),
+            ("2", SUBJECT, None), ("3", SUBJECT, ["not", "an", "object"])):
+        record = {"id": task_id, "subject": subject, "description": "an older failure",
+                  "status": "pending", "blocks": [], "blockedBy": []}
+        if metadata is not None:
+            record["metadata"] = metadata
+        (list_directory / f"{task_id}.json").write_text(json.dumps(record), encoding="utf-8")
+    code, calls, printed, errors = run(ned_box_reference=repository, installer_exit=1,
+                                       failed_line="FAILED: under another subject", keep_tasks=True)
+    written = {task["id"]: task for task in tasks()}
+    check("a failure while a task carrying the installer-failure metadata key is open under "
+          "another subject rewrites that task and opens no new one, and leaves a task of the "
+          "subject without the key untouched",
+          code == 0 and errors == "" and sorted(written) == ["1", "2", "3"]
+          and "FAILED: under another subject" in written["1"]["description"]
+          and written["2"]["description"] == written["3"]["description"] == "an older failure",
+          (code, errors, written))
+    code, calls, printed, errors = run(ned_box_reference=repository, keep_tasks=True)
+    written = {task["id"]: task for task in tasks()}
+    check("when both steps succeed, a task carrying the installer-failure metadata key under "
+          "another subject is marked completed, and a task of the subject without the key "
+          "stays open",
+          code == 0 and errors == printed == "" and written["1"]["status"] == "completed"
+          and written["2"]["status"] == written["3"]["status"] == "pending",
+          (code, errors, written))
+    # The next case needs one open task described by "FAILED: with several open".
+    reset()
+    code, calls, printed, errors = run(ned_box_reference=repository, installer_exit=1)
+    code, calls, printed, errors = run(ned_box_reference=repository, installer_exit=1,
+                                       failed_line="FAILED: with several open", keep_tasks=True)
 
     list_directory.chmod(0o500)
     try:
@@ -292,13 +331,14 @@ with tempfile.TemporaryDirectory() as scratch:
           code == 1 and "FAILED — after the latest merge into ned-box's reference-checkout" in errors
           and "writing the task into the task list directory" in errors
           and "NotADirectoryError" in errors
-          and "\nIf you are reboot-test, put right, on ned-box, what stopped that write, "
+          and "\nIf you are reboot-test, also put right, on ned-box, what stopped the task write, "
               f"such as the permissions of {not_a_directory}/nedsnodes-reboot-test-tasks" in errors
-          and f"Then run `cd {repository} && python3 {after_merge.PROGRAM}` on ned-box, which runs "
-              "both steps again.\nIf a step fails again, the program writes the failure as a "
-              "task on your task list and exits 0 with nothing printed" in errors
-          and "\nIf both steps exit 0, the program prints nothing, writes no task and exits 0"
+          and f"\nIf you are reboot-test, then run `cd {repository} && python3 "
+              f"{after_merge.PROGRAM} --print-outcome` on ned-box: it runs both installer steps, "
+              "`--install` and then `--remove-not-in-table`, again and prints how they ended.\n"
               in errors
+          and errors.index("what stopped the task write") < errors.index("then run `cd")
+              < errors.index("If you are a subagent")
           and "If you are any other agent, send this whole message to reboot-test with Claude Code's "
               "SendMessage tool, addressed to reboot-test" in errors
           and "If you are the user, paste this whole message into reboot-test's session." in errors
@@ -314,6 +354,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and "NotADirectoryError" in errors
           and "If you are reboot-test and the installer printed a KEPT line, that crontab line "
               "runs a job the table does not give ned-box" in errors
+          and errors.index("printed a KEPT line") < errors.index("then run `cd")
           and "KEPT: not in the table — the crontab line" in errors, (code, errors))
 
     code, calls, printed, errors = run(mac_reference=repository)
@@ -333,19 +374,100 @@ with tempfile.TemporaryDirectory() as scratch:
           "ned-box, and prints the FAILED message",
           code == 1 and tasks() == [] and "FAILED — after the latest merge into the Mac's" in errors
           and "the --install step failed" in errors
-          and "reboot-test's task list is on ned-box" in errors, (code, errors))
+          and "reboot-test's task list is on ned-box" in errors
+          and f"If you are reboot-test, then ask the user to run `cd {repository} && python3 "
+              f"{after_merge.PROGRAM} --print-outcome` in a Terminal on the Mac, which ned-box "
+              "cannot run commands on, and to paste what it prints into your session" in errors
+          and "what stopped the task write" not in errors, (code, errors))
+
+    outcome = after_merge.PRINT_OUTCOME_COMMAND_LINE_FLAG
+    code, calls, printed, errors = run(ned_box_reference=repository, installer_exit=1,
+                                       argv=[outcome])
+    check("--print-outcome after a failure written as a task prints the failed step and the "
+          "task's file name and directory",
+          code == 0 and errors == ""
+          and printed == f"The --install step failed again on ned-box (exit 1); its output is in "
+                         f"the open task 1.json in {list_directory}.\n",
+          (code, printed, errors))
+    code, calls, printed, errors = run(ned_box_reference=repository, keep_tasks=True,
+                                       argv=[outcome])
+    open_names = [path.name for path in sorted(list_directory.glob("*.json"))]
+    check("--print-outcome after both steps succeed prints that, naming the tasks it marked "
+          "completed",
+          code == 0 and errors == "" and printed.startswith(
+              "Both installer steps, --install and then --remove-not-in-table, exited 0 on "
+              "ned-box; open tasks marked completed: ")
+          and all(name in printed for name in open_names), (code, printed, errors))
+    code, calls, printed, errors = run(ned_box_reference=repository, argv=[outcome])
+    check("--print-outcome with no open task says none was marked",
+          code == 0 and printed.endswith("open tasks marked completed: none.\n"), printed)
+    run(ned_box_reference=repository, installer_exit=1)
+    list_directory.chmod(0o500)
+    try:
+        code, calls, printed, errors = run(ned_box_reference=repository, keep_tasks=True,
+                                           argv=[outcome])
+    finally:
+        list_directory.chmod(0o700)
+    check("--print-outcome reports an open task it could not mark completed, which the hook's "
+          "run leaves unreported, and still exits 0",
+          code == 0 and errors == "" and "but marking the open task completed failed: "
+          "PermissionError" in printed, (code, printed, errors))
+    code, calls, printed, errors = run(mac_reference=repository, argv=[outcome])
+    check("--print-outcome on the Mac after both steps succeed says so",
+          code == 0 and printed == "Both installer steps, --install and then "
+          "--remove-not-in-table, exited 0 on the Mac.\n", (code, printed, errors))
+    code, calls, printed, errors = run(argv=[outcome])
+    check("--print-outcome outside a reference-checkout says nothing was run and names both "
+          "reference-checkouts",
+          code == 0 and calls == [] and printed.endswith(
+              "is not a reference-checkout, so nothing was run; run this in "
+              f"{elsewhere} on ned-box or {after_merge.REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME[after_merge.MAC]} "
+              "on the Mac.\n"), (code, calls, printed))
+    reset()
 
     outside = scratch / "not-a-repository"
     outside.mkdir()
     reset()
-    before = os.getcwd()
-    os.chdir(outside)
-    try:
-        code = after_merge.main({**os.environ, **seams}, argv=[])
-    finally:
-        os.chdir(before)
-    check("outside any git checkout nothing is done", code == 0 and not installer_log.exists(),
-          code)
+    def run_outside(argv, directory=outside, extra_environment=None):
+        printed, errors = io.StringIO(), io.StringIO()
+        before = os.getcwd()
+        os.chdir(directory)
+        try:
+            if directory != outside:
+                os.rmdir(directory)
+            with redirect_stdout(printed), redirect_stderr(errors):
+                code = after_merge.main({**os.environ, **seams, **(extra_environment or {})},
+                                        argv=argv)
+        finally:
+            os.chdir(before)
+        return code, printed.getvalue(), errors.getvalue()
+
+    code, printed, errors = run_outside([])
+    check("outside any git checkout nothing is done and nothing is printed",
+          code == 0 and not installer_log.exists() and printed == errors == "",
+          (code, printed, errors))
+    code, printed, errors = run_outside([outcome])
+    check("--print-outcome outside any git checkout says nothing was run and names both "
+          "reference-checkouts",
+          code == 0 and not installer_log.exists() and errors == ""
+          and printed == "The current directory is not in a Git checkout, so nothing was run; "
+                         f"run this in {after_merge.REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME[after_merge.NED_BOX]} "
+                         f"on ned-box or {after_merge.REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME[after_merge.MAC]} "
+                         "on the Mac.\n", (code, printed, errors))
+    stale_git_directory = scratch / "stale-git-directory"
+    code, printed, errors = run_outside(
+        [outcome], extra_environment={"GIT_DIR": str(stale_git_directory)})
+    check("--print-outcome with a stale GIT_DIR prints git's error, not the rerun advice",
+          code == 0 and not installer_log.exists() and errors == ""
+          and printed.startswith("git rev-parse --show-toplevel exited ")
+          and str(stale_git_directory) in printed and "run this in" not in printed,
+          (code, printed, errors))
+    removed = scratch / "removed-directory"
+    removed.mkdir()
+    code, printed, errors = run_outside([], directory=removed)
+    check("a hook run from a removed directory does nothing, prints nothing and exits 0",
+          code == 0 and not installer_log.exists() and printed == errors == "",
+          (code, printed, errors))
 
     reset()
     helped = subprocess.run(["python3", str(PROGRAM_PATH), "--help"], cwd=repository,

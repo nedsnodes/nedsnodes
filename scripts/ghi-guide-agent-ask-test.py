@@ -92,16 +92,59 @@ def patch_module_function(module, name, value):
     setattr(module, name, value)
 
 
+SCHEMAS_GIVEN = []
+
+
 def fake_claude_queue(responses):
     """responses: list of (result_dict_or_None, error_or_None) popped in
-    call order. Each call is recorded as (prompt, resume_session_id)."""
+    call order. Each call is recorded as (prompt, resume_session_id), and
+    the schema it was given is appended to SCHEMAS_GIVEN."""
     calls = []
+    SCHEMAS_GIVEN.clear()
 
-    def fake_run_claude(prompt, resume_session_id, seat_dir, timeout_seconds):
+    def fake_run_claude(prompt, resume_session_id, seat_dir, timeout_seconds, json_schema):
         calls.append((prompt, resume_session_id))
+        SCHEMAS_GIVEN.append(json_schema)
         return responses.pop(0)
     patch("run_claude", fake_run_claude)
     return calls
+
+
+DESIGN_PATH = (Path(__file__).resolve().parent.parent / "docs" / "issues"
+               / "46-ghi-guide-agent.system.design.md")
+
+
+def design_prompt_lines(section):
+    """The non-blank lines of the quoted prompt under `### <section>` of the
+    design's § Prompts, with the Markdown escapes of `<` and `>` removed."""
+    lines = DESIGN_PATH.read_text(encoding="utf-8").splitlines()
+    start = next(index for index, line in enumerate(lines)
+                 if line.startswith(f"### {section}"))
+    quoted = []
+    for line in lines[start + 1:]:
+        if line.startswith("#"):
+            break
+        if line.startswith(">") and line[1:].strip():
+            quoted.append(line[1:].strip().replace("\\<", "<").replace("\\>", ">"))
+    return quoted
+
+
+@contextlib.contextmanager
+def patch_environment(name, value):
+    earlier = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        yield
+    finally:
+        if earlier is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = earlier
+
+
+def reading_list(*numbers, notes=()):
+    """ghi-guide-agent's structured_output for a reading list."""
+    return {"kind": "reading-list", "issues": list(numbers), "notes": list(notes)}
 
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -115,11 +158,11 @@ with tempfile.TemporaryDirectory() as temporary:
     ])
     claude_calls = fake_claude_queue([
         ({"session_id": "sess-A", "result": "(ack)"}, None),   # cold-start turn
-        ({"session_id": "sess-A", "result": "read #1"}, None),  # actual ask
+        ({"session_id": "sess-A", "structured_output": reading_list(1)}, None),  # actual ask
     ])
-    answer, error = ghi_ask.ask("what covers X?", False, seat, "x/y")
+    answer, closed_on, error = ghi_ask.ask("what covers X?", False, seat, "x/y")
     check("cold start (no state file) succeeds and returns the answer",
-          answer == "read #1" and error is None, (answer, error))
+          answer == reading_list(1) and error is None, (answer, error))
     check("cold start makes exactly two claude calls (cold-start turn, then ask)",
           len(claude_calls) == 2, claude_calls)
     check("a cold start's ask turn carries the plan-reuse sentence and its "
@@ -148,8 +191,8 @@ with tempfile.TemporaryDirectory() as temporary:
     ghi_ask.save_state(seat2 / ghi_ask.STATE_FILE_NAME,
                        {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-B", "closes_since_birth": 0, "recent_matches": []})
     refresh_calls = fake_refresh_queue([([7], {"7": issue(7)}, None)])
-    claude_calls = fake_claude_queue([({"session_id": "sess-B", "result": "read #7"}, None)])
-    answer, error = ghi_ask.ask("about #7?", False, seat2, "x/y")
+    claude_calls = fake_claude_queue([({"session_id": "sess-B", "structured_output": reading_list(7)}, None)])
+    answer, closed_on, error = ghi_ask.ask("about #7?", False, seat2, "x/y")
     check("a resumed ask makes exactly one claude call",
           len(claude_calls) == 1, claude_calls)
     check("the resume call carries the stored session id",
@@ -159,7 +202,7 @@ with tempfile.TemporaryDirectory() as temporary:
     check("only a delta refresh runs on an ordinary resume (no full refresh)",
           len(refresh_calls) == 1 and refresh_calls[0]["full"] is False, refresh_calls)
 
-    # --- every question ghi-guide-agent is sent carries the plan-reuse sentence ----
+    # --- every reading-list ask carries the plan-reuse sentence ----
     reuse = ghi_ask.GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE
     check("the plan-reuse sentence is the one the user approved",
           reuse == ("If the question describes a plan, also name any issue whose "
@@ -170,11 +213,98 @@ with tempfile.TemporaryDirectory() as temporary:
     for is_resume in (False, True):
         for include_closed in (False, True):
             composed = ghi_ask.compose_resume_ask_prompt(
-                "what covers Q?", include_closed, [9], is_resume)
+                "what covers Q?", include_closed, [9], is_resume,
+                request_form="reading-list")
             check(f"the ask prompt (resume={is_resume}, include_closed="
                   f"{include_closed}) carries the plan-reuse sentence right "
                   "after the question",
                   "what covers Q?\n\n" + reuse in composed, composed)
+
+    # --- each request form's whole ask prompt is its design section's text ---
+    # Read from § Prompts of the design, so that a change to the design's text
+    # fails here until the script follows it. The intended differences are left
+    # out: a draft-verdict ask relays the asker's question where the design
+    # lists the draft's title, GHI-MD and reply line, because the reply's shape
+    # is the JSON schema's, not a text line.
+    question = "the asker's question"
+
+    def design_slots_filled(line, mirror_path="", question_files_path=""):
+        line = re.sub(r"^<only on resume, and only when the refresh changed entries:> ", "", line)
+        line = line.replace("#<n>, #<m>", "#5")
+        line = re.sub(r"<the asker's question[^>]*>", question, line)
+        return (line.replace("<mirror-path>", mirror_path)
+                .replace("<question-files-path>", question_files_path))
+
+    resume_ask = design_prompt_lines("Resume ask prompt")
+    adjudication = design_prompt_lines("Adjudication request")
+    reading_list_opening, plan_reuse = resume_ask[1], resume_ask[2]
+    whole_ask_prompt_each_request_form_and_resume = {
+        ("reading-list", True): "\n\n".join(
+            design_slots_filled(line) for line in (resume_ask[0], reading_list_opening, plan_reuse)),
+        ("reading-list", False): "\n\n".join(
+            design_slots_filled(line) for line in (reading_list_opening, plan_reuse)),
+        ("draft-verdict", True): design_slots_filled(adjudication[0]) + "\n\n"
+            + adjudication[1] + " " + question,
+        ("draft-verdict", False): adjudication[1] + " " + question,
+    }
+    cold_start = design_prompt_lines("Cold-start prompt")
+    # Lines of § Cold-start prompt the cold-start turn carries whole, and parts
+    # of lines whose rest the JSON replies change.
+    cold_start_whole_line_openings = (
+        "You run inside a checkout", "- issues-open.md", "- <question-files-path>")
+    cold_start_line_parts = (
+        "Answer from these files only: never read issue state from GitHub",
+        "2. **You are shown a draft issue** — its title and its GHI-MD — and "
+        "asked whether the corpus already covers it.")
+    question_files_directory = str(root / "question-files")
+    for request_form, structured_output in (
+            ("reading-list", reading_list(5)),
+            ("draft-verdict", {"kind": "verdict", "verdict": "unrelated", "issues": []})):
+        for is_resume in (False, True):
+            seat_whole = root / f"seat-whole-{request_form}-resume-{is_resume}"
+            seat_whole.mkdir()
+            if is_resume:
+                ghi_ask.save_state(seat_whole / ghi_ask.STATE_FILE_NAME,
+                                   {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-W",
+                                    "closes_since_birth": 0, "recent_matches": []})
+                fake_refresh_queue([([5], {"5": issue(5)}, None)])
+                whole_calls = fake_claude_queue([
+                    ({"session_id": "sess-W", "structured_output": structured_output}, None)])
+            else:
+                fake_refresh_queue([([], {}, None)])
+                whole_calls = fake_claude_queue([
+                    ({"session_id": "sess-W", "result": "(ack)"}, None),
+                    ({"session_id": "sess-W", "structured_output": structured_output}, None)])
+            with patch_environment(
+                    ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE,
+                    question_files_directory):
+                answer, closed_on, error = ghi_ask.ask(question, False, seat_whole,
+                                                       "x/y", request_form=request_form)
+            expected = whole_ask_prompt_each_request_form_and_resume[(request_form, is_resume)]
+            check(f"a {request_form} ask's whole prompt (resume={is_resume}) is "
+                  "its design section's text",
+                  error is None and whole_calls[-1][0] == expected,
+                  (error, whole_calls[-1][0], expected))
+            if not is_resume:
+                cold_start_prompt = whole_calls[0][0]
+                mirror_path = str(seat_whole / ghi_ask.mirror_refresh.DEFAULT_MIRROR_DIR)
+                filled = [design_slots_filled(line, mirror_path, question_files_directory)
+                          for line in cold_start]
+                openings = tuple(design_slots_filled(opening, mirror_path, question_files_directory)
+                                 for opening in cold_start_whole_line_openings)
+                wanted = [line for line in filled if line.startswith(openings)]
+                wanted += [part for part in cold_start_line_parts
+                           if any(part in line for line in filled)]
+                missing = [line for line in wanted if line not in cold_start_prompt]
+                check(f"a {request_form} ask's cold-start turn carries § Cold-start "
+                      "prompt's mirror paragraph, issues-open.md bullet and "
+                      "question-files bullet whole, its GitHub sentence and form 2 "
+                      "opening, with both slots filled, the question files' slot "
+                      "with the directory the write tool's log-store resolver gives",
+                      len(wanted) == len(cold_start_whole_line_openings) + len(cold_start_line_parts)
+                      and not missing and "{" not in cold_start_prompt
+                      and "-path>" not in cold_start_prompt,
+                      (wanted, missing, cold_start_prompt[:3000]))
 
     # --- reincarnation: closes-since-birth over threshold forces a cold start ----
     seat3 = root / "seat3"
@@ -190,11 +320,11 @@ with tempfile.TemporaryDirectory() as temporary:
     ])
     claude_calls = fake_claude_queue([
         ({"session_id": "sess-NEW", "result": "(ack)"}, None),
-        ({"session_id": "sess-NEW", "result": "read #3"}, None),
+        ({"session_id": "sess-NEW", "structured_output": reading_list(3)}, None),
     ])
-    answer, error = ghi_ask.ask("q", False, seat3, "x/y")
+    answer, closed_on, error = ghi_ask.ask("q", False, seat3, "x/y")
     check("closes-since-birth at threshold forces a cold start (fresh session id)",
-          answer == "read #3", (answer, error))
+          answer == reading_list(3), (answer, error))
     state3 = json.loads((seat3 / ghi_ask.STATE_FILE_NAME).read_text(encoding="utf-8"))
     check("reincarnation replaces the old session id with the new one",
           state3[ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY] == "sess-NEW", state3)
@@ -210,8 +340,8 @@ with tempfile.TemporaryDirectory() as temporary:
         json.dumps({"session_id": "sess-LEGACY", "closes_since_birth": 0,
                     "recent_matches": []}) + "\n", encoding="utf-8")
     refresh_calls = fake_refresh_queue([([], {}, None)])
-    claude_calls = fake_claude_queue([({"session_id": "sess-LEGACY", "result": "read #5"}, None)])
-    answer, error = ghi_ask.ask("about #5?", False, seat_legacy, "x/y")
+    claude_calls = fake_claude_queue([({"session_id": "sess-LEGACY", "structured_output": reading_list(5)}, None)])
+    answer, closed_on, error = ghi_ask.ask("about #5?", False, seat_legacy, "x/y")
     check("a pre-rename state file resumes rather than cold-starting",
           len(claude_calls) == 1 and claude_calls[0][1] == "sess-LEGACY",
           (claude_calls, answer, error))
@@ -230,19 +360,19 @@ with tempfile.TemporaryDirectory() as temporary:
     refresh_calls = fake_refresh_queue([([], {}, None)])
     claude_calls = fake_claude_queue([
         ({"session_id": "sess-THROWAWAY", "result": "(ack)"}, None),
-        ({"session_id": "sess-THROWAWAY", "result": "read #9"}, None),
+        ({"session_id": "sess-THROWAWAY", "structured_output": reading_list(9)}, None),
     ])
     lock_path = seat4 / ghi_ask.LOCK_FILE_NAME
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     held_handle = open(lock_path, "a+")
     fcntl.flock(held_handle.fileno(), fcntl.LOCK_EX)
     try:
-        answer, error = ghi_ask.ask("q", False, seat4, "x/y")
+        answer, closed_on, error = ghi_ask.ask("q", False, seat4, "x/y")
     finally:
         fcntl.flock(held_handle.fileno(), fcntl.LOCK_UN)
         held_handle.close()
     check("a contended lock still returns an answer (a throwaway session)",
-          answer == "read #9", (answer, error))
+          answer == reading_list(9), (answer, error))
     check("a contended lock cold-starts (never resumes the held session)",
           claude_calls[0][1] is None, claude_calls)
     check("a contended lock never writes the state file",
@@ -271,16 +401,18 @@ with tempfile.TemporaryDirectory() as temporary:
     ])
     claude_calls = fake_claude_queue([
         ({"session_id": "sess-C", "result": "(ack)"}, None),               # cold-start
-        ({"session_id": "sess-C", "result": "read #13"}, None),            # stale answer
-        ({"session_id": "sess-C", "result": "read #24 instead"}, None),    # drift recheck
+        ({"session_id": "sess-C", "structured_output": reading_list(13)}, None),            # stale answer
+        ({"session_id": "sess-C", "structured_output": reading_list(24)}, None),  # drift recheck
     ])
-    answer, error = ghi_ask.ask("q", False, seat5, "x/y")
+    answer, closed_on, error = ghi_ask.ask("q", False, seat5, "x/y")
     check("a closed pointer (not --include-closed) triggers a third claude call",
           len(claude_calls) == 3, claude_calls)
-    check("the drift notice names the issue and its close date",
-          "#13" in claude_calls[2][0] and "2026-08-08" in claude_calls[2][0], claude_calls)
-    check("the corrected reply from the recheck is the final answer",
-          answer == "read #24 instead", answer)
+    check("the drift notice after a reading list is design 46's, naming the issue and its close date",
+          claude_calls[2][0] == "#13 closed on 2026-08-08 — the mirror is current; re-read its "
+          "entry in issues-closed.md, including any Superseded-by: link, and give a corrected "
+          "reading list.", claude_calls)
+    check("the corrected answer from the recheck is the final answer",
+          answer == reading_list(24) and closed_on == {}, (answer, closed_on))
     state5 = json.loads((seat5 / ghi_ask.STATE_FILE_NAME).read_text(encoding="utf-8"))
     check("a drift recheck counts as a stale match in state",
           state5["recent_matches"] == [True], state5)
@@ -293,14 +425,16 @@ with tempfile.TemporaryDirectory() as temporary:
     ])
     claude_calls = fake_claude_queue([
         ({"session_id": "sess-D", "result": "(ack)"}, None),
-        ({"session_id": "sess-D", "result": "#13 (closed 2026-08-08)"}, None),
+        ({"session_id": "sess-D", "structured_output": reading_list(13)}, None),
     ])
-    answer, error = ghi_ask.ask("q", True, seat6, "x/y")
+    answer, closed_on, error = ghi_ask.ask("q", True, seat6, "x/y")
     check("--include-closed makes a closed pointer expected: no third call",
           len(claude_calls) == 2, claude_calls)
     state6 = json.loads((seat6 / ghi_ask.STATE_FILE_NAME).read_text(encoding="utf-8"))
     check("an expected closed pointer is not counted as a stale match",
           state6["recent_matches"] == [False], state6)
+    check("and ask() hands back its close date from the mirror, for its tag",
+          closed_on == {13: "2026-08-08"}, closed_on)
 
     # --- the boundary replies pass through, no post-check -------------------
     seat7 = root / "seat7"
@@ -310,19 +444,22 @@ with tempfile.TemporaryDirectory() as temporary:
     ])
     claude_calls = fake_claude_queue([
         ({"session_id": "sess-E", "result": "(ack)"}, None),
-        ({"session_id": "sess-E", "result": "ask-user-about-ruling: does the 2026-08-01 ruling on #13 still bind?"}, None),
+        ({"session_id": "sess-E", "structured_output": {
+            "kind": "ask-user-about-ruling", "ruling_issue": 13,
+            "sentence": "does the 2026-08-01 ruling still bind?"}}, None),
     ])
-    answer, error = ghi_ask.ask("q", False, seat7, "x/y")
-    check("ask() hands main() an ask-user-about-ruling: reply as ghi-guide-agent wrote it, even mentioning #13",
-          answer.startswith("ask-user-about-ruling:"), answer)
-    check("a passthrough reply triggers no drift recheck",
+    answer, closed_on, error = ghi_ask.ask("q", False, seat7, "x/y")
+    check("ask() hands main() a ruling question whose issue is closed",
+          answer is not None and answer["kind"] == "ask-user-about-ruling"
+          and answer["ruling_issue"] == 13, (answer, error))
+    check("a ruling question triggers no drift recheck",
           len(claude_calls) == 2, claude_calls)
 
     # --- mirror refresh failure surfaces as an ask failure ------------------
     seat8 = root / "seat8"
     seat8.mkdir()
     fake_refresh_queue([(None, None, "gh rate limited")])
-    answer, error = ghi_ask.ask("q", False, seat8, "x/y")
+    answer, closed_on, error = ghi_ask.ask("q", False, seat8, "x/y")
     check("a mirror refresh failure fails the ask cleanly",
           answer is None and "gh rate limited" in error, (answer, error))
 
@@ -334,7 +471,7 @@ with tempfile.TemporaryDirectory() as temporary:
         ({"session_id": "sess-F", "result": "(ack)"}, None),
         (None, "claude exited 1: boom"),
     ])
-    answer, error = ghi_ask.ask("q", False, seat9, "x/y")
+    answer, closed_on, error = ghi_ask.ask("q", False, seat9, "x/y")
     check("a claude failure on the ask turn fails cleanly",
           answer is None and "boom" in error, (answer, error))
 
@@ -351,11 +488,11 @@ with tempfile.TemporaryDirectory() as temporary:
     refresh_calls = fake_refresh_queue([([], {}, None), ([], {}, None)])
     claude_calls = fake_claude_queue([
         ({"session_id": "sess-BIGGER", "result": "(ack)"}, None),
-        ({"session_id": "sess-BIGGER", "result": "read #1"}, None),
+        ({"session_id": "sess-BIGGER", "structured_output": reading_list(1)}, None),
     ])
-    answer, error = ghi_ask.ask("q", False, seat10, "x/y", projects_root=projects_root)
+    answer, closed_on, error = ghi_ask.ask("q", False, seat10, "x/y", projects_root=projects_root)
     check("an oversized transcript forces a cold start",
-          claude_calls[0][1] is None and answer == "read #1", (claude_calls, answer))
+          claude_calls[0][1] is None and answer == reading_list(1), (claude_calls, answer))
 
     # --- context-share reincarnation trigger ---------------------------------
     # 2026-09-16: ghi-guide-agent's session stood at 521,343 tokens of claude-sonnet-5's
@@ -366,7 +503,7 @@ with tempfile.TemporaryDirectory() as temporary:
         project_directory = ghi_ask.claude_code_session_transcript_lookup_and_text_search_common.project_directory_for_seat(seat, projects_root)
         project_directory.mkdir(parents=True, exist_ok=True)
         record = {"type": "assistant", "message": {
-            "model": "claude-sonnet-5",
+            "model": "claude-sonnet-5-5",
             "usage": {"input_tokens": 1_000, "cache_read_input_tokens": tokens - 1_000,
                       "cache_creation_input_tokens": 0}}}
         (project_directory / f"{session_id}.jsonl").write_text(
@@ -380,11 +517,11 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_refresh_queue([([], {}, None), ([], {}, None)])
     claude_calls = fake_claude_queue([
         ({"session_id": "sess-FRESH", "result": "(ack)"}, None),
-        ({"session_id": "sess-FRESH", "result": "read #1"}, None),
+        ({"session_id": "sess-FRESH", "structured_output": reading_list(1)}, None),
     ])
-    answer, error = ghi_ask.ask("q", False, seat10b, "x/y", projects_root=projects_root)
+    answer, closed_on, error = ghi_ask.ask("q", False, seat10b, "x/y", projects_root=projects_root)
     check("a session past the context threshold is reincarnated, not resumed",
-          claude_calls[0][1] is None and answer == "read #1", (claude_calls, answer))
+          claude_calls[0][1] is None and answer == reading_list(1), (claude_calls, answer))
 
     seat10c = root / "seat10c"
     seat10c.mkdir()
@@ -393,11 +530,11 @@ with tempfile.TemporaryDirectory() as temporary:
     transcript_at_context_tokens(seat10c, "sess-ROOM", 390_000)
     fake_refresh_queue([([], {}, None)])
     claude_calls = fake_claude_queue([
-        ({"session_id": "sess-ROOM", "result": "read #1"}, None),
+        ({"session_id": "sess-ROOM", "structured_output": reading_list(1)}, None),
     ])
-    answer, error = ghi_ask.ask("q", False, seat10c, "x/y", projects_root=projects_root)
+    answer, closed_on, error = ghi_ask.ask("q", False, seat10c, "x/y", projects_root=projects_root)
     check("a session under the context threshold is resumed",
-          claude_calls == [(claude_calls[0][0], "sess-ROOM")] and answer == "read #1",
+          claude_calls == [(claude_calls[0][0], "sess-ROOM")] and answer == reading_list(1),
           (claude_calls, answer))
 
 
@@ -412,30 +549,36 @@ with tempfile.TemporaryDirectory() as temporary:
                                             closed_at="2026-08-08T00:00:00Z")}, None)])
     budgets = []
 
-    def recording_run_claude(prompt, resume_session_id, seat_dir, timeout_seconds):
+    def recording_run_claude(prompt, resume_session_id, seat_dir, timeout_seconds, json_schema):
         budgets.append(timeout_seconds)
         replies = [
             {"session_id": "sess-T", "result": "(ack)"},
-            {"session_id": "sess-T", "result": "read #13"},   # cites a closed issue
-            {"session_id": "sess-T", "result": "read #24"},   # the drift recheck
+            {"session_id": "sess-T", "structured_output": reading_list(13)},   # cites a closed issue
+            {"session_id": "sess-T", "structured_output": reading_list(24)},   # the drift recheck
         ]
         return replies[len(budgets) - 1], None
     patch("run_claude", recording_run_claude)
-    answer, error = ghi_ask.ask("q", False, seat11, "x/y", timeout_seconds=300)
+    answer, closed_on, error = ghi_ask.ask("q", False, seat11, "x/y", timeout_seconds=300)
     check("all three turns of one ask draw on a single budget",
           len(budgets) == 3, budgets)
-    check("each turn is handed only what the ask has left, never the full budget again",
-          budgets == sorted(budgets, reverse=True) and budgets[0] <= 300
-          and budgets[-1] < budgets[0],
+    check("the cold-start turn gets the ask's budget plus GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS, and "
+          "each later turn only what the ask has left, never the full budget again",
+          budgets == sorted(budgets, reverse=True)
+          and 300 < budgets[0] <= 300 + ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
+          and budgets[1] <= budgets[0] and budgets[-1] < budgets[0],
           budgets)
 
     # An ask whose budget is already gone fails saying so, rather than
-    # starting a turn it cannot afford.
+    # starting a turn it cannot afford. A resumed session, since a cold
+    # start adds time of its own.
     seat12 = root / "seat12"
     seat12.mkdir()
+    ghi_ask.save_state(seat12 / ghi_ask.STATE_FILE_NAME,
+                       {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-S",
+                        "closes_since_birth": 0, "recent_matches": []})
     fake_refresh_queue([([1], {"1": issue(1)}, None)])
     spent_calls = fake_claude_queue([])
-    answer, error = ghi_ask.ask("q", False, seat12, "x/y", timeout_seconds=0)
+    answer, closed_on, error = ghi_ask.ask("q", False, seat12, "x/y", timeout_seconds=0)
     check("an ask with no budget left fails cleanly and starts no turn",
           answer is None and "budget was already spent" in error and not spent_calls,
           (answer, error, spent_calls))
@@ -469,7 +612,7 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_refresh_queue([([1], {"1": issue(1)}, None)])
     cs_calls = fake_claude_queue([
         ({"session_id": "sess-CS", "result": "(ack)"}, None),
-        ({"session_id": "sess-CS", "result": "read #1"}, None),
+        ({"session_id": "sess-CS", "structured_output": reading_list(1)}, None),
     ])
     ghi_ask.ask("q", False, seat_cs, "x/y")
     cold_prompt = cs_calls[0][0]
@@ -505,6 +648,15 @@ check("--include-closed rides the remote command when requested",
       "--include-closed" in command_closed, command_closed)
 check("--include-closed is absent when not requested",
       "--include-closed" not in command, command)
+command_json = ghi_ask.build_remote_command("q", False, "x/y", True, True)
+check("--print-answer-json rides the remote command when requested, and "
+      "only then",
+      " --print-answer-json" in command_json
+      and "--print-answer-json" not in command, command_json)
+command_form = ghi_ask.build_remote_command("q", False, "x/y", False, False, "draft-verdict")
+check("--request-form rides the remote command when it is not the default, and only then",
+      " --request-form draft-verdict" in command_form and "--request-form" not in command,
+      command_form)
 
 # Quoting is measured by a real POSIX shell, not derived: the question is an
 # operator value crossing one shell parse, and this project has been bitten
@@ -559,7 +711,7 @@ try:
         fake_refresh_queue([([1], {"1": issue(1)}, None)])
         fake_claude_queue([
             ({"session_id": "sess-M", "result": "(ack)"}, None),
-            ({"session_id": "sess-M", "result": "read #1"}, None),
+            ({"session_id": "sess-M", "structured_output": reading_list(1)}, None),
         ])
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -580,12 +732,90 @@ finally:
     patch("run_claude", run_claude_orig)
 
 
-# --- main(): the two boundary replies reach the caller as errors -----------
+# --- main(): a failed ask's reason reaches stderr on one line ---------------
+# scripts/ghi-issue-write.py reports the last stderr line of a failed ask, or
+# the line holding the not-usable opening, so the whole reason must be on it.
+MULTI_LINE_GH_STDERR = "HTTP 502: Bad Gateway\n  (https://api.github.com/graphql)\n"
+MULTI_LINE_CLAUDE_ERROR = "claude exited 1: Invalid API key\n  Please run claude auth login"
+
+
+def main_failing(seat, extra_arguments=()):
+    """main() against an explicit seat. Returns (exit code, stderr lines that
+    are not blank)."""
+    err = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        exit_code = ghi_ask.main(["q", "--seat-dir", str(seat), "--repo", "x/y",
+                                  *extra_arguments])
+    return exit_code, [line for line in err.getvalue().splitlines() if line.strip()]
+
+
+mirror_orig = ghi_ask.mirror_refresh.refresh
+run_claude_orig = ghi_ask.run_claude
+try:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+
+        seat_full = root / "seat-full-refresh-fails"
+        seat_full.mkdir()
+        fake_refresh_queue([([], {}, MULTI_LINE_GH_STDERR)])
+        fake_claude_queue([])
+        exit_code, lines = main_failing(seat_full)
+        check("a cold-start mirror refresh failing with multi-line gh stderr reaches stderr on one line",
+              exit_code == 1 and lines[-1] ==
+              "ghi-guide-agent-ask: mirror refresh (full, for cold-start) failed: "
+              "HTTP 502: Bad Gateway (https://api.github.com/graphql)", lines)
+
+        seat_delta = root / "seat-delta-refresh-fails"
+        seat_delta.mkdir()
+        (seat_delta / ghi_ask.STATE_FILE_NAME).write_text(json.dumps(
+            {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-D",
+             "closes_since_birth": 0, "recent_matches": []}), encoding="utf-8")
+        fake_refresh_queue([([], {}, MULTI_LINE_GH_STDERR)])
+        fake_claude_queue([])
+        exit_code, lines = main_failing(seat_delta)
+        check("a resuming ask's mirror refresh failing with multi-line gh stderr reaches stderr on one line",
+              exit_code == 1 and lines[-1] ==
+              "ghi-guide-agent-ask: mirror refresh failed: "
+              "HTTP 502: Bad Gateway (https://api.github.com/graphql)", lines)
+
+        seat_turn = root / "seat-turn-fails"
+        seat_turn.mkdir()
+        fake_refresh_queue([([1], {"1": issue(1)}, None)])
+        fake_claude_queue([({"session_id": "sess-T", "result": "(ack)"}, None),
+                           (None, MULTI_LINE_CLAUDE_ERROR)])
+        exit_code, lines = main_failing(seat_turn)
+        check("a claude turn failing with a multi-line error reaches stderr on one line",
+              exit_code == 1 and lines[-1] ==
+              "ghi-guide-agent-ask: ghi-guide-agent ask failed: "
+              "claude exited 1: Invalid API key Please run claude auth login", lines)
+
+        seat_not_usable = root / "seat-not-usable"
+        seat_not_usable.mkdir()
+        fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
+                                                closed_at="2026-08-08T00:00:00Z")}, None)])
+        fake_claude_queue([
+            ({"session_id": "sess-U", "result": "(ack)"}, None),
+            ({"session_id": "sess-U", "structured_output":
+              {"kind": "verdict", "verdict": "too-similar", "issues": [13]}}, None),
+            (None, MULTI_LINE_CLAUDE_ERROR),
+        ])
+        exit_code, lines = main_failing(seat_not_usable, ["--request-form", "draft-verdict"])
+        check("an unusable answer's multi-line reason reaches stderr on its not-usable line, "
+              "and the fallback instruction stays on the line after it",
+              exit_code == 1 and lines[-2].startswith(
+                  "ghi-guide-agent-ask: " + ghi_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING)
+              and lines[-2].endswith(
+                  "the turn failed: claude exited 1: Invalid API key Please run claude auth login")
+              and lines[-1] == ghi_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_CALLER_FALLBACK_LADDER_INSTRUCTION_STDERR_LINE,
+              lines)
+finally:
+    patch_module_function(ghi_ask.mirror_refresh, "refresh", mirror_orig)
+    patch("run_claude", run_claude_orig)
+
+
+# --- main(): the two boundary answers reach the caller as errors ----------
 # User-ruled 2026-09-29 (walk SKILL-ghi-write-2026-09-29-4, item 1 revised):
-# the two bare replies are no longer passed through on stdout with exit 0.
-# Renamed 2026-10-01: out-of-scope became not-about-issues, and escalate:
-# became ask-user-about-ruling:; the old words are still read (the module's
-# RETIRED_BOUNDARY_REPLY_WORDS), so both are sent here.
+# the two boundary replies are not passed through on stdout with exit 0.
 # The expected text is typed out here rather than read from the module, so a
 # change to the approved wording fails this file.
 APPROVED_NOT_ABOUT_ISSUES_MESSAGE = (
@@ -594,10 +824,10 @@ APPROVED_NOT_ABOUT_ISSUES_MESSAGE = (
     'If that is refused too, search yourself: gh issue list --repo nedsnodes/nedsnodes '
     '--state all --search "<terms>"\n')
 ESCALATE_SENTENCE = ("the 2026-09-19 body ruling in #46 may not hold after "
-                     "the 2026-09-29 ruling in #783")
+                     "the 2026-09-29 ruling")
 APPROVED_RULING_QUESTION_MESSAGE = (
     "ghi-guide-agent found a ruling of the user's that it cannot tell still applies: "
-    + ESCALATE_SENTENCE + "\n"
+    + ESCALATE_SENTENCE + " (held in GHI 783)\n"
     "If you are filing or editing a GHI, go on with scripts/ghi-issue-write.py as planned: it records this question in the log-store on ned-box and tells you to dispatch a subagent to settle it.\n"
     "If you are not filing or editing a GHI, ask the user whether that ruling still applies, and put the question on your task list.\n")
 
@@ -609,13 +839,14 @@ EXPECTED_OPEN_ISSUES_ONLY_HINT = (
     "covers a subject, rerun the same command with --include-closed added.\n")
 
 
-def main_with_reply(seat, reply_text, extra_arguments=()):
+def main_with_answer(seat, answer, extra_arguments=()):
     """main() against an explicit seat whose ghi-guide-agent cold-starts and then
-    answers reply_text. Returns (exit code, stdout, stderr)."""
+    answers with the structured_output `answer`. Returns (exit code, stdout,
+    stderr)."""
     fake_refresh_queue([([1], {"1": issue(1)}, None)])
     fake_claude_queue([
         ({"session_id": "sess-P", "result": "(ack)"}, None),
-        ({"session_id": "sess-P", "result": reply_text}, None),
+        ({"session_id": "sess-P", "result": "", "structured_output": answer}, None),
     ])
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -630,88 +861,160 @@ try:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
 
-        # The seat directories are numbered, not named for the reply word,
-        # because the checkout-refresh line on stderr prints the seat's path.
-        for index, word in enumerate(("not-about-issues", "out-of-scope")):
-            seat_scope = root / f"seat-not-a-question-{index}"
-            seat_scope.mkdir()
-            exit_code, out, err = main_with_reply(seat_scope, word)
-            check(f"a {word} reply exits 2",
-                  exit_code == ghi_ask.EXIT_NOT_ABOUT_ISSUES == 2, exit_code)
-            check(f"a {word} reply prints the approved message on stderr, and only it",
-                  err.endswith(APPROVED_NOT_ABOUT_ISSUES_MESSAGE)
-                  and word not in err, err)
-            check(f"a {word} reply prints nothing on stdout", out == "", out)
+        # The seat directories are numbered, not named for the kind, because
+        # the checkout-refresh line on stderr prints the seat's path.
+        seat_scope = root / "seat-not-a-question-0"
+        seat_scope.mkdir()
+        exit_code, out, err = main_with_answer(seat_scope, {"kind": "not-about-issues"})
+        check("a not-about-issues answer exits 2",
+              exit_code == ghi_ask.EXIT_NOT_ABOUT_ISSUES == 2, exit_code)
+        check("a not-about-issues answer prints the approved message on stderr, and only it",
+              err.endswith(APPROVED_NOT_ABOUT_ISSUES_MESSAGE)
+              and "not-about-issues" not in err, err)
+        check("a not-about-issues answer prints nothing on stdout", out == "", out)
 
-        for index, prefix in enumerate(("ask-user-about-ruling:", "escalate:")):
-            seat_ruling = root / f"seat-ruling-question-{index}"
-            seat_ruling.mkdir()
-            exit_code, out, err = main_with_reply(
-                seat_ruling, prefix + " " + ESCALATE_SENTENCE + "  ")
-            check(f"a {prefix} reply exits 3",
-                  exit_code == ghi_ask.EXIT_RULING_QUESTION == 3, exit_code)
-            check(f"a {prefix} reply prints the approved message on stderr, carrying ghi-guide-agent's sentence",
-                  err.endswith(APPROVED_RULING_QUESTION_MESSAGE)
-                  and prefix not in err, err)
-            check(f"a {prefix} reply prints nothing on stdout", out == "", out)
+        # The issue holding the ruling reaches the caller after the sentence,
+        # and, the answer being a ruling question, it is not checked against
+        # the mirror: the issue it names is not open there, and no drift turn
+        # is asked (the fake answers two turns only).
+        seat_ruling = root / "seat-ruling-question-0"
+        seat_ruling.mkdir()
+        exit_code, out, err = main_with_answer(seat_ruling, {
+            "kind": "ask-user-about-ruling", "ruling_issue": 783,
+            "sentence": ESCALATE_SENTENCE + "  "})
+        check("an ask-user-about-ruling answer exits 3",
+              exit_code == ghi_ask.EXIT_RULING_QUESTION == 3, exit_code)
+        check("an ask-user-about-ruling answer prints the approved message on "
+              "stderr, carrying ghi-guide-agent's sentence and then the issue "
+              "holding the ruling, and asks ghi-guide-agent nothing more",
+              err.endswith(APPROVED_RULING_QUESTION_MESSAGE), err)
+        check("an ask-user-about-ruling answer prints nothing on stdout", out == "", out)
 
-        # ghi-guide-agent opens every ruling question with the issue holding the
-        # ruling. The number reaches the caller after the sentence, and,
-        # the reply being a ruling question, it is not checked against the
-        # mirror: the issue it names is not open there, and no drift turn is asked
-        # (the fake answers two turns only).
-        seat_numbered = root / "seat-ruling-question-numbered"
-        seat_numbered.mkdir()
-        numbered = ("#783 the ruling that a closed issue is frozen may not "
-                    "cover a reopened issue")
-        exit_code, out, err = main_with_reply(
-            seat_numbered, "ask-user-about-ruling: " + numbered)
-        check("a ruling question opening with its issue number reaches the "
-              "caller with the number moved to the end, and asks ghi-guide-agent "
-              "nothing more",
-              exit_code == 3 and out == ""
-              and ("ghi-guide-agent found a ruling of the user's that it cannot tell "
-                   "still applies: the ruling that a closed issue is frozen "
-                   "may not cover a reopened issue (held in GHI 783)\n")
-              in err,
-              (exit_code, out, err))
+        seat_json = root / "seat-print-answer-json"
+        seat_json.mkdir()
+        ruling = {"kind": "ask-user-about-ruling", "ruling_issue": 783,
+                  "sentence": ESCALATE_SENTENCE}
+        exit_code, out, err = main_with_answer(seat_json, ruling, ("--print-answer-json",))
+        check("--print-answer-json prints the answer itself on stdout, with "
+              "the exit code the answer has without it",
+              exit_code == 3 and json.loads(out) == ruling, (exit_code, out, err))
 
         seat_list = root / "seat-reading-list"
         seat_list.mkdir()
-        exit_code, out, err = main_with_reply(seat_list, "read #1")
-        check("a reading list still prints on stdout with exit 0",
-              exit_code == 0 and out.strip() == "read #1", (exit_code, out, err))
+        exit_code, out, err = main_with_answer(
+            seat_list, reading_list(1, 2, notes=["Start with #2."]))
+        check("a reading list prints on stdout as `read #n, #m` and its notes, "
+              "with exit 0",
+              exit_code == 0 and out == "read #1, #2\nStart with #2.\n",
+              (exit_code, out, err))
         check("a reading list asked without --include-closed ends stderr with "
-              "the hint naming the flag, and leaves stdout the reading list alone",
-              exit_code == 0 and out == "read #1\n"
-              and err.endswith(EXPECTED_OPEN_ISSUES_ONLY_HINT), (exit_code, out, err))
+              "the hint naming the flag",
+              err.endswith(EXPECTED_OPEN_ISSUES_ONLY_HINT), (exit_code, out, err))
 
         seat_closed = root / "seat-reading-list-with-flag"
         seat_closed.mkdir()
-        exit_code, out, err = main_with_reply(seat_closed, "read #1",
-                                              ("--include-closed",))
+        exit_code, out, err = main_with_answer(seat_closed, reading_list(1),
+                                               ("--include-closed",))
         check("a reading list asked with --include-closed carries no hint",
               exit_code == 0 and out == "read #1\n"
               and "--include-closed" not in err and "open issues only" not in err,
               (exit_code, out, err))
 
-    check("any other reply has no caller message",
-          ghi_ask.caller_message_for_passthrough_reply("read #1, #2") is None
-          and ghi_ask.caller_message_for_passthrough_reply(
-              "Out-of-scope reasons are listed in #5") is None
-          and ghi_ask.caller_message_for_passthrough_reply(
-              "Not-about-issues reasons are listed in #5") is None)
-    check("the two bare replies are still recognized case-insensitively",
-          ghi_ask.caller_message_for_passthrough_reply("NOT-ABOUT-ISSUES")[1] == 2
-          and ghi_ask.caller_message_for_passthrough_reply("Ask-User-About-Ruling: x")[1] == 3
-          and ghi_ask.caller_message_for_passthrough_reply("OUT-OF-SCOPE")[1] == 2
-          and ghi_ask.caller_message_for_passthrough_reply("Escalate: x")[1] == 3)
-    check("the cold-start prompt teaches ghi-guide-agent the new reply words, not the old ones",
-          "reply exactly: not-about-issues." in ghi_ask.COLD_START_PROMPT_TEMPLATE
-          and "Reply: ask-user-about-ruling: #<issue> <" in ghi_ask.COLD_START_PROMPT_TEMPLATE
-          and "out-of-scope" not in ghi_ask.COLD_START_PROMPT_TEMPLATE
-          and "escalate:" not in ghi_ask.COLD_START_PROMPT_TEMPLATE,
-          ghi_ask.COLD_START_PROMPT_TEMPLATE[-600:])
+        seat_verdict = root / "seat-verdict"
+        seat_verdict.mkdir()
+        exit_code, out, err = main_with_answer(
+            seat_verdict, {"kind": "verdict", "verdict": "related", "issues": [3, 4]},
+            ("--request-form", "draft-verdict"))
+        check("a verdict prints as one `verdict:` line", exit_code == 0
+              and out == "verdict: related #3,#4\n", (exit_code, out, err))
+
+        # An unusable answer: the user-approved failure line, typed out here,
+        # then on its own line what the agent does next.
+        for extra in ((), ("--print-answer-json",)):
+            seat_unusable = root / f"seat-unusable-answer-{len(extra)}"
+            seat_unusable.mkdir()
+            exit_code, out, err = main_with_answer(seat_unusable, None, extra)
+            check(f"an unusable answer exits 1 with nothing on stdout {extra}",
+                  exit_code == 1 and out == "", (exit_code, out))
+            check(f"an unusable answer ends stderr with the not-usable line and then "
+                  f"the fallback instruction on a line of its own {extra}",
+                  err.endswith(
+                      "ghi-guide-agent-ask: ghi-guide-agent's answer is not usable: "
+                      "claude returned no JSON answer (structured_output is null); "
+                      "its text reply began: ''\n"
+                      "If you are filing or editing a GHI, go on down the ask's fallback "
+                      "ladder in .claude/skills/ghi-write/SKILL.md; for any other ask, go "
+                      "on without ghi-guide-agent's answer.\n"), err)
+
+    render =ghi_ask.ghi_guide_agent_answer_render_as_caller_stdout_stderr_and_exit_code
+    check("a closed issue in a reading list is tagged with its close date",
+          render(reading_list(31, 5), {31: "2026-08-08"})
+          == ("read #31 (closed 2026-08-08), #5", "", 0))
+    check("an unrelated verdict prints alone",
+          render({"kind": "verdict", "verdict": "unrelated", "issues": []}, {})
+          == ("verdict: unrelated", "", 0))
+    check("a reading list with notes and no issue prints only its notes",
+          render(reading_list(notes=["Nothing covers this."]), {})
+          == ("Nothing covers this.", "", 0))
+
+    # Each request form's schema: only its kinds, only their fields, and each
+    # kind's needed fields required by an if/then link, since the API
+    # refuses oneOf, anyOf and allOf at the top level.
+    for_kinds = ghi_ask.ghi_guide_agent_answer_json_schema_build_for_kinds
+    forms = ghi_ask.GHI_GUIDE_AGENT_ANSWER_KINDS_EACH_REQUEST_FORM_ALLOWS
+    check("a reading-list ask allows a reading list and the two boundary answers",
+          forms["reading-list"] == ("reading-list", "not-about-issues", "ask-user-about-ruling"),
+          forms)
+    check("a draft-verdict ask allows a verdict and a ruling question, not not-about-issues",
+          forms["draft-verdict"] == ("verdict", "ask-user-about-ruling"), forms)
+    reading_list_schema = for_kinds(forms["reading-list"])
+    check("the reading-list schema requires issues for a reading list and the "
+          "issue and sentence for a ruling question",
+          {key: reading_list_schema[key] for key in ("if", "then", "else")} == {
+              "if": {"properties": {"kind": {"const": "reading-list"}}},
+              "then": {"required": ["issues"]},
+              "else": {"if": {"properties": {"kind": {"const": "ask-user-about-ruling"}}},
+                       "then": {"required": ["ruling_issue", "sentence"]}}},
+          reading_list_schema)
+    check("the reading-list schema has only the fields its kinds use",
+          list(reading_list_schema["properties"])
+          == ["kind", "issues", "notes", "sentence", "ruling_issue"],
+          list(reading_list_schema["properties"]))
+    draft_schema = for_kinds(forms["draft-verdict"])
+    check("the draft-verdict schema requires the verdict and issues for a verdict",
+          draft_schema["if"] == {"properties": {"kind": {"const": "verdict"}}}
+          and draft_schema["then"] == {"required": ["verdict", "issues"]}
+          and draft_schema["else"]["then"] == {"required": ["ruling_issue", "sentence"]},
+          draft_schema)
+    check("each schema's kind enum is its form's kinds, and no field description changes",
+          all(for_kinds(kinds)["properties"]["kind"]["enum"] == list(kinds)
+              and all(value["description"]
+                      == ghi_ask.GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES[field]["description"]
+                      for field, value in for_kinds(kinds)["properties"].items())
+              for kinds in forms.values()))
+    check("no schema puts oneOf, anyOf or allOf at its top level",
+          not any(key in for_kinds(kinds) for kinds in forms.values()
+                  for key in ("oneOf", "anyOf", "allOf")))
+    check("a kind that needs no field adds no link",
+          "if" not in for_kinds(("not-about-issues",)), for_kinds(("not-about-issues",)))
+    check("building a schema leaves the shared kind enum whole",
+          len(ghi_ask.GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES["kind"]["enum"]) == 5)
+
+    check("the cold-start prompt names each kind the schema allows",
+          all(f"kind `{kind}`" in ghi_ask.COLD_START_PROMPT_TEMPLATE
+              for kind in ghi_ask.GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES["kind"]["enum"]),
+          ghi_ask.COLD_START_PROMPT_TEMPLATE[-1500:])
+    # The answer check refuses a reading list with no issue and no note, so
+    # the prompt asks for the note.
+    check("the cold-start prompt asks for a note when no issue bears on the topic",
+          "; when no issue bears on the topic, `issues` is empty and a note says so."
+          in ghi_ask.COLD_START_PROMPT_TEMPLATE, ghi_ask.COLD_START_PROMPT_TEMPLATE[-2500:])
+    check("the cold-start prompt answers a correction with the kind of the reply it corrects",
+          "and answer with the corrected reply the notice asks for."
+          in ghi_ask.COLD_START_PROMPT_TEMPLATE
+          and "the kind the notice asks for in form 3"
+          in ghi_ask.GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES["kind"]["description"],
+          ghi_ask.COLD_START_PROMPT_TEMPLATE[-2500:])
     check("the start-up prompt allows gh only for a link repair's issue edit, takes the issue's text from the mirror, and "
           "sends document changes through ghi-issue-write.py's pull request, never a push to main",
           "The one time you run gh is to make the issue edit a link repair (form 4) needs; "
@@ -723,18 +1026,17 @@ try:
           in ghi_ask.COLD_START_PROMPT_TEMPLATE
           and "landed on main immediately" not in ghi_ask.COLD_START_PROMPT_TEMPLATE,
           ghi_ask.COLD_START_PROMPT_TEMPLATE[:1500])
-    check("the cold-start prompt has every ruling question start with the "
-          "issue holding the ruling",
-          "Every ruling question starts with that issue number."
+    check("the cold-start prompt asks every ruling question for the issue "
+          "holding the ruling",
+          "the issue that holds the ruling in `ruling_issue`"
           in ghi_ask.COLD_START_PROMPT_TEMPLATE,
           ghi_ask.COLD_START_PROMPT_TEMPLATE[-900:])
     check("and gives a draft that conflicts with a ruling the ruling question, "
-          "not a verdict line",
+          "not a verdict",
           "a draft that conflicts with a ruling the user made gets the ruling "
           "question" in ghi_ask.COLD_START_PROMPT_TEMPLATE
-          and "When the draft conflicts with a ruling the user made, reply "
-          "instead with the ruling question" in ghi_ask.COLD_START_PROMPT_TEMPLATE
-          and "always gets a verdict line" not in ghi_ask.COLD_START_PROMPT_TEMPLATE,
+          and "When the draft conflicts with a ruling the user made, answer "
+          "instead with the ruling question" in ghi_ask.COLD_START_PROMPT_TEMPLATE,
           ghi_ask.COLD_START_PROMPT_TEMPLATE[-1500:])
 finally:
     patch_module_function(ghi_ask.mirror_refresh, "refresh", mirror_orig)
@@ -779,7 +1081,7 @@ try:
         seat = Path(temporary)
         ghi_ask.subprocess.run = fake_subprocess_run_returning(
             FakeCompletedProcess(1, LOGGED_OUT_STDOUT))
-        result, error = run_claude_real("q", None, seat, 5)
+        result, error = run_claude_real("q", None, seat, 5, {})
         check("run_claude: exit 1 with a JSON result reports the result text, not the blob",
               result is None and "OAuth session expired" in error
               and "duration_api_ms" not in error, (result, error))
@@ -789,22 +1091,22 @@ try:
 
         ghi_ask.subprocess.run = fake_subprocess_run_returning(
             FakeCompletedProcess(1, "", stderr="boom"))
-        result, error = run_claude_real("q", None, seat, 5)
+        result, error = run_claude_real("q", None, seat, 5, {})
         check("run_claude: exit 1 without JSON keeps the exit-code message",
               result is None and error == "claude exited 1: boom", (result, error))
 
         ghi_ask.subprocess.run = fake_subprocess_run_returning(
             FakeCompletedProcess(0, json.dumps({"is_error": True, "result": "rate limited"})))
-        result, error = run_claude_real("q", None, seat, 5)
+        result, error = run_claude_real("q", None, seat, 5, {})
         check("run_claude: exit 0 with is_error reports the result, and no login remedy",
               result is None and "rate limited" in error and "auth login" not in error,
               (result, error))
 
         ghi_ask.subprocess.run = fake_subprocess_run_returning(
-            FakeCompletedProcess(0, json.dumps({"session_id": "s", "result": "read #1"})))
-        result, error = run_claude_real("q", None, seat, 5)
+            FakeCompletedProcess(0, json.dumps({"session_id": "s", "structured_output": reading_list(1)})))
+        result, error = run_claude_real("q", None, seat, 5, {})
         check("run_claude: a clean result is returned unchanged",
-              error is None and result["result"] == "read #1", (result, error))
+              error is None and result["structured_output"] == reading_list(1), (result, error))
 
         # The handoff hook reads this variable in the claude it launches and
         # stays silent, so a handoff notice never comes back as the answer.
@@ -814,9 +1116,9 @@ try:
         def recording_run(command, **kwargs):
             recorded_commands.append(command)
             recorded_keyword_arguments.append(kwargs)
-            return FakeCompletedProcess(0, json.dumps({"session_id": "s", "result": "read #1"}))
+            return FakeCompletedProcess(0, json.dumps({"session_id": "s", "structured_output": reading_list(1)}))
         ghi_ask.subprocess.run = recording_run
-        run_claude_real("q", "sess-RESUMED", seat, 5)
+        run_claude_real("q", "sess-RESUMED", seat, 5, {})
         launched_environment = (recorded_keyword_arguments[0].get("env") or {}
                                 if recorded_keyword_arguments else {})
         check("run_claude: claude's environment tells the handoff hook this script "
@@ -965,11 +1267,11 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_refresh_queue([([1], {"1": issue(1)}, None)])
     fake_claude_queue([
         ({"session_id": "sess-FF", "result": "(ack)"}, None),
-        ({"session_id": "sess-FF", "result": "read #1"}, None),
+        ({"session_id": "sess-FF", "structured_output": reading_list(1)}, None),
     ])
-    answer, error = ghi_ask.ask("what covers X?", False, seat, "x/y")
+    answer, closed_on, error = ghi_ask.ask("what covers X?", False, seat, "x/y")
     check("an ordinary ask refreshes the checkout on the way in",
-          answer == "read #1" and (seat / "design.md").exists(), (answer, error))
+          answer == reading_list(1) and (seat / "design.md").exists(), (answer, error))
 
     # A contended run publishes into a throwaway mirror precisely so it
     # cannot disturb the lock holder. Swapping the checkout's files beneath
@@ -979,83 +1281,190 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_refresh_queue([([], {}, None)])
     fake_claude_queue([
         ({"session_id": "sess-THROWAWAY", "result": "(ack)"}, None),
-        ({"session_id": "sess-THROWAWAY", "result": "read #9"}, None),
+        ({"session_id": "sess-THROWAWAY", "structured_output": reading_list(9)}, None),
     ])
     lock_path = seat / ghi_ask.LOCK_FILE_NAME
     held_handle = open(lock_path, "a+")
     fcntl.flock(held_handle.fileno(), fcntl.LOCK_EX)
     try:
-        answer, error = ghi_ask.ask("q", False, seat, "x/y")
+        answer, closed_on, error = ghi_ask.ask("q", False, seat, "x/y")
     finally:
         fcntl.flock(held_handle.fileno(), fcntl.LOCK_UN)
         held_handle.close()
-    check("a CONTENDED ask still answers", answer == "read #9", (answer, error))
+    check("a CONTENDED ask still answers", answer == reading_list(9), (answer, error))
     check("but never moves the checkout under the lock holder's running claude",
           not (seat / "design.md").exists(), list(seat.iterdir()))
 
 
-    # --- the run's last message is not always the answer -----------------
+    # --- the answer is the structured_output, checked field by field ------
     # Measured 2026-09-17: ghi-guide-agent answered the question at 20:16:59Z and
     # then answered the checkout-freshness Stop hook 13 seconds later, and
-    # this script returns the run's last message. The hooks are gone from the
-    # run now; this check is what catches whatever else says something last.
-    check("a reply naming an issue is an answer",
-          ghi_ask.reply_answers_the_question("read #39, #29 — start with #39"))
-    check("the two passthrough replies are answers, in the new words and the old",
-          ghi_ask.reply_answers_the_question("not-about-issues")
-          and ghi_ask.reply_answers_the_question("ask-user-about-ruling: an old ruling may bind")
-          and ghi_ask.reply_answers_the_question("out-of-scope")
-          and ghi_ask.reply_answers_the_question("escalate: an old ruling may bind"))
-    check("a reply to a Stop hook is not an answer",
-          not ghi_ask.reply_answers_the_question(
-              "No action needed on my part — this session hasn't touched any "
-              "scripts or tests; I only read the GHI mirror to answer requests."))
+    # the ask returned that last message. The answer is now read from
+    # structured_output, so the text a hook drew out after it is not read.
+    def ask_with_one_reply(name, reply, question="q", request_form="reading-list"):
+        seat_case = root / name
+        seat_case.mkdir()
+        ghi_ask.save_state(seat_case / ghi_ask.STATE_FILE_NAME,
+                           {"session_id": "sess-U", "closes_since_birth": 0,
+                            "recent_matches": []})
+        fake_refresh_queue([([], {}, None)])
+        fake_claude_queue([(reply, None)])
+        return ghi_ask.ask(question, False, seat_case, "x/y", request_form=request_form)
 
-    # A draft-body request's "nothing covers this" names no issue; its verdict
-    # line is what makes it an answer. Both replies below are ghi-guide-agent's own.
-    unrelated_with_reasons = (
-        "No open or closed issue in the mirror mentions "
-        "`scripts/pull-request-review-plan.py`, a `--repository`/subdirectory-"
-        "vs-top-level defect in its `git diff`/`git ls-tree` pathspecs, or "
-        "resolving a program's repository argument via `git rev-parse "
-        "--show-toplevel`. Grepped both issues-open.md and issues-closed.md "
-        "for all of those terms — no matches anywhere.\n\nverdict: unrelated")
-    check("a verdict: unrelated line is an answer, with reasons above it or alone",
-          ghi_ask.reply_answers_the_question(unrelated_with_reasons)
-          and ghi_ask.reply_answers_the_question("verdict: unrelated")
-          and ghi_ask.reply_answers_the_question("Verdict: Unrelated  "))
-    check("a reply that only mentions the verdict is not an answer",
-          not ghi_ask.reply_answers_the_question(
-              "I would reply verdict: unrelated, but I have not read the draft.")
-          and not ghi_ask.reply_answers_the_question(
-              "I have not read the draft.\nOtherwise I would reply verdict: unrelated")
-          and not ghi_ask.reply_answers_the_question("verdict: unrelated to memory")
-          and not ghi_ask.reply_answers_the_question("verdict:"))
+    answer, closed_on, error = ask_with_one_reply("seat-hook-reply", {
+        "session_id": "sess-U", "structured_output": reading_list(39, 29),
+        "result": "No action needed on my part — this session hasn't "
+                  "touched any scripts or tests."})
+    check("a reply to a Stop hook after the answer does not replace the answer",
+          answer == reading_list(39, 29) and error is None, (answer, error))
 
-    seat_unrelated = root / "seat-unrelated-reply"
-    seat_unrelated.mkdir()
-    ghi_ask.save_state(seat_unrelated / ghi_ask.STATE_FILE_NAME,
-                       {"session_id": "sess-U", "closes_since_birth": 0, "recent_matches": []})
-    fake_refresh_queue([([], {}, None)])
-    fake_claude_queue([({"session_id": "sess-U", "result": unrelated_with_reasons}, None)])
-    answer, error = ghi_ask.ask("Does an open issue already cover this ground?",
-                                False, seat_unrelated, "x/y")
-    check("a verdict: unrelated reply is returned, not failed",
-          error is None and answer is not None
-          and answer.splitlines()[-1] == "verdict: unrelated", (answer, error))
+    # A verdict: unrelated names no issue and is still an answer.
+    unrelated = {"kind": "verdict", "verdict": "unrelated", "issues": []}
+    answer, closed_on, error = ask_with_one_reply(
+        "seat-unrelated-reply", {"session_id": "sess-U", "structured_output": unrelated},
+        "Does an open issue already cover this ground?", "draft-verdict")
+    check("a verdict: unrelated answer is returned, not failed",
+          answer == unrelated and error is None, (answer, error))
 
-    seat_hook = root / "seat-hook-reply"
-    seat_hook.mkdir()
-    ghi_ask.save_state(seat_hook / ghi_ask.STATE_FILE_NAME,
-                       {"session_id": "sess-H", "closes_since_birth": 0, "recent_matches": []})
-    fake_refresh_queue([([], {}, None)])
-    fake_claude_queue([({"session_id": "sess-H",
-                         "result": "No action needed on my part — this session "
-                                   "hasn't touched any scripts or tests."}, None)])
-    answer, error = ghi_ask.ask("what covers memory policy?", False, seat_hook, "x/y")
-    check("such a reply fails the ask instead of being returned",
-          answer is None and error is not None and "names no issue" in error,
-          (answer, error))
+    # claude -p exits 0 with "is_error": false and a null structured_output
+    # when the model never satisfied the schema.
+    answer, closed_on, error = ask_with_one_reply("seat-null-answer", {
+        "session_id": "sess-U", "subtype": "success", "is_error": False,
+        "structured_output": None,
+        "result": "I could not record a verdict in the schema."})
+    check("a null structured_output with exit 0 fails the ask, saying what came back",
+          answer is None and "structured_output is null" in error
+          and "I could not record a verdict" in error, (answer, error))
+
+    for case_name, structured_output, expected, *request_form in [
+            ("a verdict answer that lacks its verdict field fails the ask",
+             {"kind": "verdict", "issues": [3]}, "lacks its verdict field", "draft-verdict"),
+            ("a ruling question that lacks the issue holding the ruling fails the ask",
+             {"kind": "ask-user-about-ruling", "sentence": "s"}, "lacks its ruling_issue field"),
+            ("a verdict outside the schema fails the ask",
+             {"kind": "verdict", "verdict": "maybe", "issues": []},
+             "verdict 'maybe' is none the schema allows", "draft-verdict"),
+            ("a verdict to a reading-list ask fails the ask",
+             {"kind": "verdict", "verdict": "unrelated", "issues": []},
+             "kind 'verdict' is none the schema allows"),
+            ("a reading list to a draft-verdict ask fails the ask",
+             reading_list(3), "kind 'reading-list' is none the schema allows", "draft-verdict"),
+            ("not-about-issues to a draft-verdict ask fails the ask",
+             {"kind": "not-about-issues"}, "kind 'not-about-issues' is none the schema allows",
+             "draft-verdict"),
+            ("a repair, which no request form allows, fails the ask",
+             {"kind": "repair", "outcome": "done", "sentence": "s"},
+             "kind 'repair' is none the schema allows"),
+            ("a field no kind of the request form uses fails the ask",
+             {"kind": "reading-list", "issues": [1], "verdict": "related"},
+             'fields the schema does not: "verdict"'),
+            ("a field name holding a newline is quoted, so the message stays on one line",
+             {"kind": "not-about-issues", "re\nason": "x"},
+             'fields the schema does not: "re\\nason"'),
+            ("a kind outside the schema fails the ask",
+             {"kind": "escalate"}, "kind 'escalate' is none the schema allows"),
+            ("a kind that is not text fails the ask",
+             {"kind": ["verdict"]}, "kind ['verdict'] is none the schema allows"),
+            ("an answer with no kind fails the ask",
+             {"issues": [3]}, "kind None is none the schema allows"),
+            ("a field the schema does not have fails the ask",
+             {"kind": "not-about-issues", "reason": "x"}, 'fields the schema does not: "reason"'),
+            ("issue numbers given as text fail the ask",
+             {"kind": "reading-list", "issues": ["#3"]}, "issues is not a list of integers"),
+            ("a ruling issue given as text fails the ask",
+             {"kind": "ask-user-about-ruling", "ruling_issue": "#3", "sentence": "s"},
+             "ruling_issue is not of the schema's type integer"),
+            ("a reading list with no issue and no note, which the cold-start prompt asks for when no issue bears on the topic, fails the ask",
+             reading_list(), "names no issue and gives no note"),
+            ("a reading list with no issue and only blank notes fails the ask",
+             reading_list(notes=[" ", ""]), "names no issue and gives no note"),
+            ("a too-similar verdict that names no issue fails the ask",
+             {"kind": "verdict", "verdict": "too-similar", "issues": []},
+             "names no issue it is too similar to", "draft-verdict")]:
+        answer, closed_on, error = ask_with_one_reply(
+            "seat-" + case_name.replace(" ", "-")[:60],
+            {"session_id": "sess-U", "structured_output": structured_output},
+            request_form=(request_form or ["reading-list"])[0])
+        check(case_name, answer is None and error is not None and expected in error
+              and json.dumps(structured_output)[:40] in error, (answer, error))
+
+    # A drift recheck whose answer is not usable keeps the first answer.
+    seat_bad_recheck = root / "seat-bad-recheck"
+    seat_bad_recheck.mkdir()
+    fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
+                                            closed_at="2026-08-08T00:00:00Z")}, None)])
+    recheck_calls = fake_claude_queue([
+        ({"session_id": "sess-V", "result": "(ack)"}, None),
+        ({"session_id": "sess-V", "structured_output": reading_list(13)}, None),
+        ({"session_id": "sess-V", "structured_output": None, "result": "hm"}, None),
+    ])
+    answer, closed_on, error = ghi_ask.ask("q", False, seat_bad_recheck, "x/y")
+    check("a drift recheck with no usable answer keeps the first answer, its "
+          "closed issue tagged",
+          len(recheck_calls) == 3 and answer == reading_list(13)
+          and closed_on == {13: "2026-08-08"}, (recheck_calls, answer, closed_on, error))
+
+    # A verdict that cites a closed GHI is used only when its drift recheck
+    # gives a usable verdict citing no closed GHI; otherwise the ask fails as
+    # not usable, which ghi-issue-write.py reports as adjudication skipped.
+    first_verdict = {"kind": "verdict", "verdict": "too-similar", "issues": [13]}
+    for case_name, recheck, expected in [
+            ("a drift recheck after a verdict that answers with a reading list fails the ask",
+             ({"session_id": "sess-W", "structured_output": reading_list(14)}, None),
+             "kind 'reading-list' is none the schema allows"),
+            ("a drift recheck after a verdict that gives no JSON answer fails the ask",
+             ({"session_id": "sess-W", "structured_output": None, "result": "hm"}, None),
+             "claude returned no JSON answer"),
+            ("a drift recheck after a verdict whose turn fails fails the ask",
+             (None, "claude timed out"), "the turn failed: claude timed out"),
+            ("a drift recheck after a verdict that gives a too-similar verdict naming no GHI fails the ask",
+             ({"session_id": "sess-W", "structured_output":
+               {"kind": "verdict", "verdict": "too-similar", "issues": []}}, None),
+             "names no issue it is too similar to"),
+            ("a drift recheck after a verdict that cites the closed GHI again fails the ask",
+             ({"session_id": "sess-W", "structured_output": first_verdict}, None),
+             "the rechecked verdict still cites a closed GHI")]:
+        seat_verdict_recheck = root / ("seat-" + case_name.replace(" ", "-")[:60])
+        seat_verdict_recheck.mkdir()
+        fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
+                                                closed_at="2026-08-08T00:00:00Z")}, None)])
+        verdict_recheck_calls = fake_claude_queue([
+            ({"session_id": "sess-W", "result": "(ack)"}, None),
+            ({"session_id": "sess-W", "structured_output": first_verdict}, None),
+            recheck,
+        ])
+        answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_recheck, "x/y",
+                                               request_form="draft-verdict")
+        check(case_name,
+              len(verdict_recheck_calls) == 3 and answer is None and error is not None
+              and error.startswith(ghi_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING)
+              and "the verdict cited closed GHI #13" in error and expected in error,
+              (verdict_recheck_calls, answer, error))
+    seat_verdict_corrected = root / "seat-verdict-corrected"
+    seat_verdict_corrected.mkdir()
+    fake_refresh_queue([([13], {"13": issue(13, state="CLOSED", closed_at="2026-08-08T00:00:00Z"),
+                                "14": issue(14)}, None)])
+    corrected_verdict = {"kind": "verdict", "verdict": "too-similar", "issues": [14]}
+    verdict_corrected_calls = fake_claude_queue([
+        ({"session_id": "sess-X", "result": "(ack)"}, None),
+        ({"session_id": "sess-X", "structured_output": first_verdict}, None),
+        ({"session_id": "sess-X", "structured_output": corrected_verdict}, None),
+    ])
+    answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_corrected, "x/y",
+                                           request_form="draft-verdict")
+    # The draft-verdict schema allows no reading list, so a notice asking for
+    # one leaves the recheck no answer it can give.
+    check("the drift notice after a verdict asks for a corrected verdict, not a reading list",
+          verdict_corrected_calls[2][0].endswith("Superseded-by: link, and give a corrected verdict that cites no closed GHI.")
+          and "reading list" not in verdict_corrected_calls[2][0], verdict_corrected_calls)
+    check("a drift recheck after a verdict that cites only open GHIs is the final answer",
+          answer == corrected_verdict and closed_on == {} and error is None,
+          (answer, closed_on, error))
+    draft_verdict_schema = ghi_ask.ghi_guide_agent_answer_json_schema_build_for_kinds(
+        ("verdict", "ask-user-about-ruling"))
+    check("every turn of a draft-verdict ask, the cold start and the drift "
+          "recheck included, is given the draft-verdict schema",
+          SCHEMAS_GIVEN == [draft_verdict_schema] * 3, SCHEMAS_GIVEN)
 
     # And the run itself no longer loads this project's hooks.
     seat_flag = root / "seat-setting-sources"
@@ -1069,10 +1478,14 @@ with tempfile.TemporaryDirectory() as temporary:
     patch_module_function(ghi_ask.subprocess, "run", recording_run)
     try:
         # run_claude_real: the case before this one left a fake in its place.
-        run_claude_real("a question", None, seat_flag, 5)
+        run_claude_real("a question", None, seat_flag, 5, {"type": "object", "x": 1})
     except AssertionError:
         pass
     argv = recorded_command.get("argv", [])
+    check("run_claude passes the answer schema with --json-schema",
+          "--json-schema" in argv
+          and json.loads(argv[argv.index("--json-schema") + 1])
+          == {"type": "object", "x": 1}, argv)
     check("run_claude passes --setting-sources user, so no project hook runs",
           "--setting-sources" in argv
           and argv[argv.index("--setting-sources") + 1] == "user", argv)
@@ -1085,11 +1498,11 @@ with tempfile.TemporaryDirectory() as temporary:
     def stdin_recording_run(command, **keywords):
         recorded_stdin["argv"] = command
         recorded_stdin["input"] = keywords.get("input")
-        return FakeCompletedProcess(0, json.dumps({"session_id": "s", "result": "read #1"}))
+        return FakeCompletedProcess(0, json.dumps({"session_id": "s", "structured_output": reading_list(1)}))
 
     patch_module_function(ghi_ask.subprocess, "run", stdin_recording_run)
     long_prompt = "x" * 300_000
-    run_claude_real(long_prompt, "sess-R", seat_flag, 5)
+    run_claude_real(long_prompt, "sess-R", seat_flag, 5, {})
     check("run_claude hands claude the prompt on stdin and not as an argument",
           recorded_stdin.get("input") == long_prompt
           and long_prompt not in recorded_stdin.get("argv", []),
@@ -1103,7 +1516,8 @@ with tempfile.TemporaryDirectory() as temporary:
 
     def recording_ask(question, include_closed, seat_dir, repo, *rest, **keywords):
         asked["question"] = question
-        return "verdict: unrelated", None
+        asked["request_form"] = keywords.get("request_form")
+        return {"kind": "verdict", "verdict": "unrelated", "issues": []}, {}, None
 
     ask_orig = ghi_ask.ask
     patch("ask", recording_ask)
@@ -1116,6 +1530,13 @@ with tempfile.TemporaryDirectory() as temporary:
         check("--question-file asks the file's text, verbatim",
               exit_code == 0 and asked.get("question") == question_text,
               (exit_code, len(asked.get("question") or "")))
+        check("an ask without --request-form is a reading-list ask",
+              asked.get("request_form") == "reading-list", asked.get("request_form"))
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            ghi_ask.main(["q", "--request-form", "draft-verdict", "--seat-dir", str(seat_flag)])
+        check("--request-form draft-verdict reaches the ask",
+              asked.get("request_form") == "draft-verdict", asked.get("request_form"))
         hint = question_file_error.getvalue()
         check("a question from --question-file, asked without --include-closed, "
               "gets a hint naming neither the question nor the file, saying to "
@@ -1174,14 +1595,25 @@ with tempfile.TemporaryDirectory() as temporary:
                 exit_code = ghi_ask.main(["--question-file", str(question_path)])
                 from_file = dict(remote)
                 plain_exit_code = ghi_ask.main(["a short question"])
+                plain_command = remote["argv"][-1]
+                ghi_ask.main(["a short question", "--print-answer-json"])
+                json_command = remote["argv"][-1]
+                ghi_ask.main(["a short question", "--request-form", "draft-verdict"])
+                form_command = remote["argv"][-1]
         finally:
             patch("running_on_ned_box", running_on_ned_box_orig)
             ghi_ask.subprocess.run = subprocess_run_orig
         check("off the box, a question given as an argument still rides the "
               "remote command, with nothing on stdin",
               plain_exit_code == 0 and remote.get("input") is None
-              and "'a short question'" in remote["argv"][-1],
-              remote["argv"][-1][-300:])
+              and "'a short question'" in plain_command,
+              plain_command[-300:])
+        check("off the box, --print-answer-json rides the remote command",
+              "--print-answer-json" in json_command
+              and "--print-answer-json" not in plain_command, json_command[-300:])
+        check("off the box, --request-form rides the remote command",
+              "--request-form draft-verdict" in form_command
+              and "--request-form" not in plain_command, form_command[-300:])
         remote_command = (from_file.get("argv") or ["", "", ""])[-1]
         check("off the box, --question-file sends the text on ssh's stdin and "
               "the box reads it with --question-file /dev/stdin",
@@ -1364,6 +1796,213 @@ with tempfile.TemporaryDirectory() as temporary:
                     "--force", str(missing_seat))
     finally:
         patch("ask", ask_orig)
+
+
+# --- the box-side fast-forward runs before the seat's copy parses arguments ---
+# A seat whose copy of this script predates a flag the caller sends rejected it
+# at argparse, before its own fast-forward, so it could never update. Each case
+# runs the real remote command under /bin/sh against a seat whose copy lacks
+# --print-answer-json, with a gh that fails offline so the ask stops at its
+# mirror refresh, the first step after argument parsing.
+import shutil as _shutil
+import subprocess as _remote_subprocess
+
+_REPOSITORY_ROOT = SCRIPT_PATH.resolve().parent.parent
+
+
+def _files_the_ask_script_loads():
+    """The ask script and every repository .py file it loads, followed through
+    the files those load in turn, so each fixture copies these and not the
+    whole tree, which run-all-test-suites.py would record as this suite's inputs."""
+    by_name = {}
+    for directory in ("scripts", "nn-systems"):
+        for walked, subdirectories, names in os.walk(_REPOSITORY_ROOT / directory):
+            subdirectories[:] = [name for name in subdirectories if name != "__pycache__"]
+            for name in names:
+                if name.endswith(".py") and not name.endswith("-test.py"):
+                    by_name.setdefault(name, []).append(Path(walked) / name)
+    loaded, waiting = set(), [SCRIPT_PATH.resolve()]
+    while waiting:
+        path = waiting.pop()
+        if path in loaded:
+            continue
+        loaded.add(path)
+        for name in re.findall(r"[\"']([\w.-]+\.py)[\"']", path.read_text(encoding="utf-8")):
+            waiting.extend(by_name.get(name, []))
+    return sorted(path.relative_to(_REPOSITORY_ROOT) for path in loaded)
+
+
+_ASK_SCRIPT_AND_WHAT_IT_LOADS = _files_the_ask_script_loads()
+
+
+def _seat_whose_copy_predates_print_answer_json(root):
+    origin = root / "origin"
+    for relative in _ASK_SCRIPT_AND_WHAT_IT_LOADS:
+        (origin / relative).parent.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(_REPOSITORY_ROOT / relative, origin / relative)
+    script = origin / "scripts" / "ghi-guide-agent-ask.py"
+    new_text = script.read_text(encoding="utf-8")
+    script.write_text(new_text.replace('"--print-answer-json"', '"--flag-not-yet-added"'),
+                      encoding="utf-8")
+    _git(["init", "-q", "-b", "main"], origin)
+    _git(["config", "user.email", "test@example.invalid"], origin)
+    _git(["config", "user.name", "ghi test"], origin)
+    _git(["add", "-A"], origin)
+    _git(["commit", "-q", "-m", "the copy before --print-answer-json"], origin)
+    seat = root / "home" / "agents" / "ghi-guide-agent"
+    seat.parent.mkdir(parents=True)
+    _git(["clone", "-q", str(origin), str(seat)], root)
+    _git(["checkout", "-q", "--detach", "origin/main"], seat)
+    script.write_text(new_text, encoding="utf-8")
+    _git(["commit", "-q", "-a", "-m", "--print-answer-json lands"], origin)
+    fake_bin = root / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "gh").write_text("#!/bin/sh\necho 'fake gh: offline' >&2\nexit 1\n",
+                                 encoding="utf-8")
+    (fake_bin / "gh").chmod(0o755)
+    environment = {**os.environ, "HOME": str(root / "home"),
+                   "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    return origin, seat, environment
+
+
+def _run_remote_command(command, environment):
+    return _remote_subprocess.run(["/bin/sh", "-c", command], capture_output=True,
+                                  text=True, env=environment, check=False, timeout=300)
+
+
+remote_command_with_new_flag = ghi_ask.build_remote_command("q", False, "x/y", False, True)
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    fast_forward_line = ("if python3 -c " + shlex.quote(
+        ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + "; then\n"
+        f"  export {ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1\n"
+        "fi\n")
+    without_fast_forward_line = remote_command_with_new_flag.replace(fast_forward_line, "")
+    check("the test removes the fast-forward line from the remote command",
+          without_fast_forward_line != remote_command_with_new_flag, remote_command_with_new_flag)
+    stale = _run_remote_command(without_fast_forward_line, environment)
+    check("without the fast-forward line, a seat copy older than a flag rejects it "
+          "and stays stale: the failure this line fixes",
+          "unrecognized arguments: --print-answer-json" in stale.stderr
+          and _git(["rev-parse", "HEAD"], seat).stdout != _git(["rev-parse", "main"], origin).stdout,
+          stale.stderr)
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    updated = _run_remote_command(remote_command_with_new_flag, environment)
+    check("the remote command fast-forwards a seat copy older than a flag before "
+          "that copy parses it, so the ask gets past argument parsing",
+          _git(["rev-parse", "HEAD"], seat).stdout == _git(["rev-parse", "main"], origin).stdout
+          and "refreshed the seat checkout 1 commit(s)" in updated.stderr
+          and "unrecognized arguments" not in updated.stderr
+          and "ghi-guide-agent-ask: mirror refresh" in updated.stderr,
+          updated.stderr)
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    (seat / "scripts" / "ghi-mirror-refresh.py").write_text("# edit in progress\n",
+                                                            encoding="utf-8")
+    head_before = _git(["rev-parse", "HEAD"], seat).stdout
+    refused = _run_remote_command(remote_command_with_new_flag, environment)
+    check("when the fast-forward is refused, the remote command says why and the "
+          "stale copy runs on and fails at the flag, exiting nonzero, never silently",
+          "uncommitted tracked change(s); not refreshing it" in refused.stderr
+          and "unrecognized arguments: --print-answer-json" in refused.stderr
+          and refused.returncode != 0
+          and _git(["rev-parse", "HEAD"], seat).stdout == head_before,
+          (refused.returncode, refused.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    head_before = _git(["rev-parse", "HEAD"], seat).stdout
+    with open(seat / ghi_ask.LOCK_FILE_NAME, "a+") as held_lock:
+        fcntl.flock(held_lock.fileno(), fcntl.LOCK_EX)
+        contended = _run_remote_command(remote_command_with_new_flag, environment)
+    check("while another ask holds the state lock, the remote command leaves the "
+          "agent-home as it is, so no running ask has its files swapped",
+          _git(["rev-parse", "HEAD"], seat).stdout == head_before
+          and "refreshed the seat checkout" not in contended.stderr,
+          contended.stderr)
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    recorder = Path(temporary) / "record-stdin"
+    recorder.write_text('#!/bin/sh\ncat\n', encoding="utf-8")
+    recorder.chmod(0o755)
+    stdin_command = ghi_ask.build_remote_command("q", False, "x/y", True).replace(
+        "python3 scripts/ghi-guide-agent-ask.py --question-file", str(recorder))
+    piped = _remote_subprocess.run(["/bin/sh", "-c", stdin_command], input="the whole question\n",
+                                   capture_output=True, text=True, env=environment,
+                                   check=False, timeout=300)
+    check("a question sent on stdin reaches the ask whole after the fast-forward line runs",
+          piped.stdout == "the whole question\n"
+          and "refreshed the seat checkout 1 commit(s)" in piped.stderr,
+          (piped.stdout, piped.stderr))
+
+
+def _environment_whose_git_logs_each_fetch(root, environment):
+    real_git = _shutil.which("git")
+    log = root / "git-fetches"
+    logging_bin = root / "logging-bin"
+    logging_bin.mkdir()
+    (logging_bin / "git").write_text(
+        f'#!/bin/sh\ncase " $* " in *" fetch "*) echo fetch >> {shlex.quote(str(log))} ;; esac\n'
+        f'exec {shlex.quote(real_git)} "$@"\n', encoding="utf-8")
+    (logging_bin / "git").chmod(0o755)
+    return log, {**environment, "PATH": f"{logging_bin}{os.pathsep}{environment['PATH']}"}
+
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    _git(["merge", "-q", "--ff-only", "origin/main"], seat)
+    _git(["checkout", "-q", "--detach"], seat)
+    log, logging_environment = _environment_whose_git_logs_each_fetch(Path(temporary), environment)
+    once = _run_remote_command(ghi_ask.build_remote_command("q", False, "x/y"), logging_environment)
+    fetches = log.read_text(encoding="utf-8").count("fetch") if log.exists() else 0
+    check("over ssh, the seat checkout is fetched once: the ask does not fetch again after "
+          "the fast-forward line has, which could spend 60 of its seconds",
+          fetches == 1 and "ghi-guide-agent-ask: mirror refresh" in once.stderr,
+          (fetches, once.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    _git(["merge", "-q", "--ff-only", "origin/main"], seat)
+    _git(["checkout", "-q", "--detach"], seat)
+    log, logging_environment = _environment_whose_git_logs_each_fetch(Path(temporary), environment)
+    failing_line = ghi_ask.build_remote_command("q", False, "x/y").replace(
+        "ask.fast_forward_seat_checkout(seat)", "ask.name_no_copy_has(seat)")
+    fell_through = _run_remote_command(failing_line, logging_environment)
+    fetches = log.read_text(encoding="utf-8").count("fetch") if log.exists() else 0
+    check("when the fast-forward line fails before fetching, the ask fetches the seat "
+          "checkout itself",
+          fetches == 1 and "ghi-guide-agent-ask: mirror refresh" in fell_through.stderr,
+          (fetches, fell_through.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    fast_forward_line_alone = ["python3", "-c",
+                               ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE]
+    with open(seat / ghi_ask.LOCK_FILE_NAME, "a+") as held_lock:
+        fcntl.flock(held_lock.fileno(), fcntl.LOCK_EX)
+        while_held = _remote_subprocess.run(fast_forward_line_alone, cwd=seat, capture_output=True,
+                                            text=True, env=environment, check=False, timeout=300)
+    once_free = _remote_subprocess.run(fast_forward_line_alone, cwd=seat, capture_output=True,
+                                       text=True, env=environment, check=False, timeout=300)
+    check("the fast-forward line exits nonzero when another ask holds the lock and it did not "
+          "try, so that ask is not told the seat was already fetched, and exits 0 once it tried",
+          while_held.returncode != 0 and once_free.returncode == 0,
+          (while_held.returncode, while_held.stderr, once_free.returncode, once_free.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    (seat / ghi_ask.LOCK_FILE_NAME).mkdir()
+    unusable = _run_remote_command(ghi_ask.build_remote_command("q", False, "x/y"), environment)
+    check("when the agent-home's state lock cannot be opened, the remote command reports it "
+          "once, in the ask's one line, with no traceback, and exits nonzero",
+          unusable.stderr.count("is not usable") == 1 and "Traceback" not in unusable.stderr
+          and unusable.returncode != 0,
+          (unusable.returncode, unusable.stderr))
 
 
 # --- the seat directory, state file and state key, unpatched ----------------

@@ -911,7 +911,12 @@ with tempfile.TemporaryDirectory() as workspace:
             ("python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py --quick", 105),
             ("gh pr checks 3101 --watch --interval 30", 0),
             ("gh run watch 12345", 0),
-            ("python3 -u scripts/watch-open-pull-requests-hack.py --exit-after-first-poll-with-events", 0),
+            ("python3 -u scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --exit-after-first-poll-with-events", 0),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once-write-baseline", 75),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once", 75),
+            # --poll-once counts only as an argument of its own.
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --batch-events-for-seconds 1200 --token-file /x/--poll-once-token", 0),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --repo 'a;b' --poll-once", 75),
             ("cd /home/nedlern/x && until grep -q done out.txt; do sleep 5; done", 0),
             ("while kill -0 4242; do sleep 30; done", 0),
             ("sleep 120; echo finished", 75),
@@ -945,7 +950,7 @@ with tempfile.TemporaryDirectory() as workspace:
         f"bash {waiter}",
         waiter,
         f"bash {waiter} 2>&1 | tail -30",
-        "python3 -u scripts/watch-open-pull-requests-hack.py --exit-after-first-poll-with-events",
+        "python3 -u scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --exit-after-first-poll-with-events",
         "/tmp/claude-1000/x/scratchpad/wait-review-runs.sh",
         "until grep -q done out.txt; do sleep 5; done",
         "while kill -0 4242; do sleep 30; done",
@@ -1245,6 +1250,22 @@ with tempfile.TemporaryDirectory() as workspace:
                                      task_ids_ended_in_session_transcript=flight.ended_task_ids)
     check("a subagent's own transcript, read with the ids the session transcript ended, shows no "
           "background command the parent stopped",
+          own_flight.background_task_ids == [], str(own_flight.background_task_ids))
+    # A command both transcripts end must stay ended: an exclusive-or of the two sets of ended ids
+    # would drop it from both and count it as running.
+    command_ended_in_both_own = transcript_of(command_stopped_own.parent,
+                                              "command-ended-in-both-transcripts.jsonl", [
+        background_task_launch_record("b9otyo6lx"),
+        *notification_records(
+            "<task-notification>\n<task-id>b9otyo6lx</task-id>\n<status>stopped</status>\n"
+            "<summary>Task \"Wait for both close-suite runs to finish\" was stopped by main "
+            "session</summary>\n</task-notification>"),
+    ])
+    own_flight = hook.work_in_flight(str(command_ended_in_both_own), float("inf"),
+                                     now=grid_at_13_minutes,
+                                     task_ids_ended_in_session_transcript=flight.ended_task_ids)
+    check("a subagent's own transcript shows no background command that both it and the session "
+          "transcript ended",
           own_flight.background_task_ids == [], str(own_flight.background_task_ids))
 
     # An interim notification queued before the TaskStop can be delivered after it; the stop holds.
@@ -1631,10 +1652,17 @@ with tempfile.TemporaryDirectory() as workspace:
               "(subagent a2573a7737ae643dc)" in result.stderr, result.stderr[:600])
         check("the instruction on new work says the handoff writer, not the agent, adds stopped work to the session-handoff",
               "When you run the handoff writer script, nn-systems/handoff/handoff-write-and-check-supervisor.py,"
-              " before this agent-session ends, it names in your session-handoff each subagent still working,"
-              " whenever it started, and each background Bash task that started since this handoff-deferral"
-              " began and is still running, so you need not add that work to your task list"
+              " before this agent-session ends, it names in your session-handoff each subagent still working"
+              " and each background Bash task still running, whenever it started, so you need not add that"
+              " work to your task list"
               in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
+              hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
+        # Whether the agent names a background Bash task by hand depends on whether the writer can list it, not on when the task started.
+        check("the instruction on new work does not tell the agent to name a background Bash task"
+              " started before the deferral in the next-step file",
+              "started before the deferral" not in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION
+              and "is named, with its command, in the next-step file"
+              not in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
               hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
         check("the instruction on new work limits the subagent, background or detached rule to work left running at the turn's end",
               "Work you leave running when your turn ends must run as a subagent, a background Bash task,"
@@ -1642,12 +1670,6 @@ with tempfile.TemporaryDirectory() as workspace:
               " its result to a file; name that file in your next-step file, since the handoff writer script"
               " cannot name that process. A command or an edit that finishes within your turn needs none of"
               " these." in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
-              hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
-        check("the instruction on new work says what to do with a background Bash task started before the deferral",
-              "A background Bash task started before the deferral and still running is named, with its"
-              " command, in the next-step file when the successor must run it again; otherwise it is"
-              " stopped at the session-handoff."
-              in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
               hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
         writer_script = "nn-systems/handoff/handoff-write-and-check-supervisor.py"
         check("the instruction on new work says unlisted work means running the writer again with a new next-step file",
@@ -2189,7 +2211,7 @@ with tempfile.TemporaryDirectory() as workspace:
         # wait-limit, and one millisecond less.
         boundary_clock = clock.replace(microsecond=clock.microsecond // 1000 * 1000)
         for kind_name, command, limit_minutes in (
-                ("nc-mutation-testing",
+                ("nn-mutation-testing",
                  "python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py", 105),
                 ("test-suite", "cd /tmp/x && python3 scripts/run-all-test-suites.py", 90),
                 ("a command no kind matches", "python3 nn-systems/cold-read/cold-read-grid.py", 75)):

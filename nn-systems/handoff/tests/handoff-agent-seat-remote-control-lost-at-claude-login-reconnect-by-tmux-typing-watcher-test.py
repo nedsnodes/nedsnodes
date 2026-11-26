@@ -26,6 +26,7 @@ import sys
 import tempfile
 import time
 from contextlib import redirect_stderr
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SYSTEM_DIRECTORY = Path(__file__).resolve().parent.parent
@@ -186,6 +187,21 @@ class Fixture:
             time.sleep(0.05)
         return self.pane()
 
+    def typed_count(self, wanted) -> int:
+        """How many /remote-control lines the pane echoed, waiting up to 3 seconds for wanted of them."""
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and self.pane().count("/remote-control") < wanted:
+            time.sleep(0.05)
+        return self.pane().count("/remote-control")
+
+    def typings_made_older(self):
+        """Move every logged time back past the wait, as if the runs had happened minutes ago."""
+        path = self.logs / watcher.REMOTE_CONTROL_RECONNECT_WATCHER_DECISIONS_FILE_NAME
+        earlier = (datetime.now(timezone.utc)
+                   - timedelta(seconds=watcher.REMOTE_CONTROL_RECONNECT_SECONDS_TO_WAIT_FOR_REMOTE_CONTROL_ACTIVE_BEFORE_TYPING_COMMAND_AGAIN + 1)).isoformat()
+        path.write_text("".join(json.dumps({**entry, "at": earlier}) + "\n" for entry in self.entries()),
+                        encoding="utf-8")
+
     def kill_server(self):
         subprocess.run(["tmux", "-L", self.seat, "kill-server"], capture_output=True, check=False)
 
@@ -299,6 +315,121 @@ def case_types_on_disconnect(namespace):
         exit_code, errors = fixture.run()
         check("a new disconnect line in the same session is typed for again",
               exit_code == 0 and fixture.decisions() == ["typed", "typed"], (exit_code, errors, fixture.entries()))
+    finally:
+        fixture.close()
+
+
+def case_types_the_stored_remote_control_name(namespace):
+    fixture = lost_seat("renamed", namespace)
+    real_home = os.environ.get("HOME")
+    try:
+        with tempfile.TemporaryDirectory() as home:
+            handoffs = Path(home) / ".claude" / "handoffs"
+            handoffs.mkdir(parents=True)
+            (handoffs / f"{fixture.seat}-remote-control-name").write_text(
+                "----renamed in claude\n", encoding="utf-8")
+            os.environ["HOME"] = home
+            exit_code, errors = fixture.run()
+            check("an agent-seat renamed in claude.ai: types its stored Remote Control name",
+                  exit_code == 0 and "/remote-control ----renamed in claude" in fixture.typed(),
+                  (exit_code, errors, fixture.typed()))
+    finally:
+        os.environ["HOME"] = real_home
+        fixture.close()
+
+
+def case_stored_name_unreadable_while_waiting_after_a_typing(namespace):
+    fixture = lost_seat("name-unreadable-in-wait", namespace)
+    real_home = os.environ.get("HOME")
+    try:
+        with tempfile.TemporaryDirectory() as home:
+            name_file = Path(home) / ".claude" / "handoffs" / f"{fixture.seat}-remote-control-name"
+            name_file.parent.mkdir(parents=True)
+            os.environ["HOME"] = home
+            fixture.run()
+            name_file.mkdir()
+            exit_code, errors = fixture.run()
+            # The first typing may still bring Remote Control back; telling the user to type is premature.
+            check("a stored name that cannot be read while the watcher waits after its typing: "
+                  "nothing reported, nothing typed again",
+                  exit_code == 0 and fixture.decisions() == ["typed"] and not fixture.notices(),
+                  (exit_code, errors, fixture.entries(), fixture.notices()))
+    finally:
+        os.environ["HOME"] = real_home
+        fixture.close()
+
+
+def case_unreadable_stored_remote_control_name(namespace):
+    fixture = lost_seat("name-unreadable", namespace)
+    real_home = os.environ.get("HOME")
+    try:
+        with tempfile.TemporaryDirectory() as home:
+            (Path(home) / ".claude" / "handoffs" / f"{fixture.seat}-remote-control-name").mkdir(parents=True)
+            os.environ["HOME"] = home
+            exit_code, errors = fixture.run()
+            notices = fixture.notices()
+            notice = notices[0].read_text(encoding="utf-8") if notices else ""
+            # A raise here would leave check_seat for the whole run, and later agent-seats would go unchecked.
+            check("a stored name that cannot be read: reported for that agent-seat, nothing typed, "
+                  "exit 1, and no notice that the watcher's run failed",
+                  exit_code == 1 and "could not be read" in errors and "/remote-control" not in fixture.pane()
+                  and fixture.decisions() == ["failure", "user told"]
+                  and len(notices) == 1 and "remote-control-name-unreadable" in notices[0].name
+                  and f"/remote-control {fixture.seat}" in notice
+                  and "checking no agent-seat" not in notice,
+                  (exit_code, errors, fixture.entries(), notices))
+    finally:
+        os.environ["HOME"] = real_home
+        fixture.close()
+
+
+def case_typing_that_leaves_remote_control_off(namespace):
+    # The fixture pane echoes what is typed and Claude Code logs nothing: a typing accepted with no effect.
+    fixture = lost_seat("typing-no-effect", namespace)
+    limit = watcher.REMOTE_CONTROL_RECONNECT_COMMAND_TMUX_TYPINGS_PER_DISCONNECT_AT_MOST
+    try:
+        fixture.run()
+        for attempt in range(2, limit + 1):
+            fixture.typings_made_older()
+            exit_code, errors = fixture.run()
+            check(f"Remote Control still off past the wait after typing {attempt - 1} time(s): types again, exit 0",
+                  exit_code == 0 and fixture.typed_count(attempt) == attempt
+                  and fixture.decisions() == ["typed"] * attempt and fixture.notices() == [],
+                  (exit_code, errors, fixture.pane(), fixture.entries()))
+        fixture.typings_made_older()
+        exit_code, errors = fixture.run()
+        notices = fixture.notices()
+        notice = notices[0].read_text(encoding="utf-8") if notices else ""
+        check(f"still off past the wait after the last of {limit} typings: types no more, and reports on stderr, "
+              "in a notice opened on the Mac and by exit 1",
+              exit_code == 1 and fixture.typed_count(limit + 1) == limit
+              and fixture.decisions() == ["typed"] * limit + ["failure", "user told"]
+              and f"typed /remote-control {fixture.seat} into its tmux pane {limit} times" in errors
+              and len(notices) == 1 and len(fixture.ssh_requests()) == 1,
+              (exit_code, errors, fixture.pane(), fixture.entries()))
+        check("the notice says the agent-seat's Remote Control is still off and to type /remote-control in it",
+              f"Remote Control in {fixture.seat} is off" in notice
+              and f"  /remote-control {fixture.seat}\n" in notice, notice)
+        exit_code, errors = fixture.run()
+        check("a later run, Remote Control still off: types no more, exit 1, no second notice",
+              exit_code == 1 and fixture.typed_count(limit + 1) == limit and len(fixture.notices()) == 1
+              and len(fixture.ssh_requests()) == 1, (exit_code, errors, fixture.entries()))
+    finally:
+        fixture.close()
+
+
+def case_typing_again_stops_once_reconnected(namespace):
+    fixture = lost_seat("typing-again-then-reconnected", namespace)
+    try:
+        fixture.run()
+        fixture.typings_made_older()
+        fixture.run()
+        fixture.append_transcript(reconnect_line())
+        fixture.typings_made_older()
+        exit_code, errors = fixture.run()
+        check("a second typing that turns Remote Control on: no third typing and no report, exit 0",
+              exit_code == 0 and fixture.typed_count(3) == 2 and fixture.decisions() == ["typed", "typed"]
+              and fixture.notices() == [], (exit_code, errors, fixture.pane(), fixture.entries()))
     finally:
         fixture.close()
 
@@ -1176,6 +1307,11 @@ def main():
         case_prompt_line_reading()
         case_seat_finding(namespace)
         case_types_on_disconnect(namespace)
+        case_types_the_stored_remote_control_name(namespace)
+        case_unreadable_stored_remote_control_name(namespace)
+        case_stored_name_unreadable_while_waiting_after_a_typing(namespace)
+        case_typing_that_leaves_remote_control_off(namespace)
+        case_typing_again_stops_once_reconnected(namespace)
         case_typing_logged_under_decisions_file_name_before_program_prefix(namespace)
         case_reconnected(namespace)
         case_no_disconnect(namespace)

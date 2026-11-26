@@ -129,6 +129,44 @@ with tempfile.TemporaryDirectory() as scratch:
           "no high-water mark", raised is not None and list(refused.iterdir()) == [],
           sorted(path.name for path in refused.iterdir()))
 
+    # A second writer runs whole between the first writer's partial write and its rename.
+    together = root / "together"
+    together.mkdir()
+    real_replace = task_list.os.replace
+    second_writer = []
+
+    def replace_after_a_second_writer(source, target):
+        if not second_writer:
+            second_writer.append(None)
+            second_writer[0] = write(together, "second", "d")
+        return real_replace(source, target)
+
+    task_list.os.replace = replace_after_a_second_writer
+    try:
+        first_writer = write(together, "first", "d")
+    except OSError as error:
+        first_writer = error
+    finally:
+        task_list.os.replace = real_replace
+    check("two writers on one list at once each write a task and raise nothing, and no partial "
+          "file is left", first_writer == 1 and second_writer == [2]
+          and json.loads((together / "1.json").read_text())["subject"] == "first"
+          and json.loads((together / "2.json").read_text())["subject"] == "second"
+          and not list(together.glob("*.partial")),
+          (first_writer, second_writer, sorted(path.name for path in together.iterdir())))
+
+    unwritable_mark = root / "unwritable-mark"
+    unwritable_mark.mkdir()
+    (unwritable_mark / ".highwatermark").mkdir()
+    try:
+        task_list.agent_seat_task_list_high_water_mark_write(unwritable_mark, 5)
+        raised = None
+    except OSError as error:
+        raised = error
+    check("a high-water mark that cannot be replaced raises OSError and leaves no partial file",
+          raised is not None and sorted(path.name for path in unwritable_mark.iterdir())
+          == [".highwatermark"], (raised, sorted(path.name for path in unwritable_mark.iterdir())))
+
 if failures:
     print(f"\n{failures} case(s) failed")
     sys.exit(1)

@@ -1,18 +1,18 @@
 ---
-issue: "[Build ghi-guide-agent — the GHI knowledge agent](https://github.com/nedschorus/nedschorus/issues/46)"
+issue: "[Build ghi-guide-agent — the GHI knowledge agent](https://github.com/nedsnodes/nedsnodes/issues/46)"
 kind: design
 design-as-of: 2026-08-11
 ---
 
 # Build ghi-guide-agent — the GHI knowledge agent
 
-How agents work with GitHub issues (GHIs) in nedschorus: `ghi-guide-agent`, a long-lived knowledge agent over the issue corpus; a script-maintained local mirror; a write path whose hook routes raw writes through the project write tool; and the `ghi-write` skill carrying the judgment none of the machinery can. Throughout, **GHI author** means whichever agent is filing or editing an issue. Decision trail: `git show 6c9b437:docs/drafts/ghi-info-agent-plan-draft.md` (per-item dispositions, 2026-08-07) and `git show db917b5:md-review-records/2026-08-09-ghi-info-agent-design-2/dispositions.md`; the rejected single-gate direction is kept in § Why issue writes cannot be a credential gate, below, and in full at `git show 0860628:docs/drafts/ghi-gatekeeper-plan-draft.md`.
+How agents work with GitHub issues (GHIs) in nedsnodes: `ghi-guide-agent`, a long-lived knowledge agent over the issue corpus; a script-maintained local mirror; a write path whose hook routes raw writes through the project write tool; and the `ghi-write` skill carrying the judgment none of the machinery can. Throughout, **GHI author** means whichever agent is filing or editing an issue. Decision trail: `git show 6c9b437:docs/drafts/ghi-info-agent-plan-draft.md` (per-item dispositions, 2026-08-07) and `git show db917b5:md-review-records/2026-08-09-ghi-info-agent-design-2/dispositions.md`; the rejected single-gate direction is kept in § Why issue writes cannot be a credential gate, below, and in full at `git show 0860628:docs/drafts/ghi-gatekeeper-plan-draft.md`.
 
 The organizing idea: instead of building a vector or graph database of the GHIs, we use a modern agent — the corpus fits in its context window (measured 2026-08-07: 45 issues ≈ 109 KB). Mechanical work is script work — fetch, format, measure, filter; `ghi-guide-agent` spends model turns only on judgment.
 
 ## Build status
 
-Issue [Build ghi-guide-agent — the GHI knowledge agent](https://github.com/nedschorus/nedschorus/issues/46) builds the whole system this design describes: the GHI mirror and refresh script, the ghi-guide-agent-ask wrapper, the issue-write tool and its redirect hook, the maintenance sweep and fixer spawning, and the seat on the box. On main as of 2026-09-30:
+Issue [Build ghi-guide-agent — the GHI knowledge agent](https://github.com/nedsnodes/nedsnodes/issues/46) builds the whole system this design describes: the GHI mirror and refresh script, the ghi-guide-agent-ask wrapper, the issue-write tool and its redirect hook, the maintenance sweep and fixer spawning, and the seat on the box. On main as of 2026-09-30:
 
 - **The `ghi-write` skill**, the front-loading layer, landed 2026-08-12 (§ The three-layer stack).
 - **The mirror and the seat:** `scripts/ghi-mirror-refresh.py`, run in the seat's checkout `~/agents/ghi-guide-agent` on ned-box, which holds `ghi-mirror/`.
@@ -20,7 +20,7 @@ Issue [Build ghi-guide-agent — the GHI knowledge agent](https://github.com/ned
 - **The write tool:** `scripts/ghi-issue-write.py`, with its create and edit operations. It has no comment operation: the user ruled on 2026-09-24 that agents write no issue comments.
 - **The redirect hook:** `.claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py`. It refuses a hand-typed write rather than rewriting it into the tool as § The GHI write path describes; its docstring says why.
 - **The corpus migration:** done 2026-09-27, when every open issue's body became the links to its files (by a one-time migration program, deleted once the migration finished).
-- **Not built:** the maintenance sweep and fixer spawning (§ Maintenance and fixers); the decisions in § Decided and not yet built; the refresh's second feed and each entry's activity-relative freshness (§ The GHI mirror); the killed-ask message that tells the asker to ask with fewer tasks (§ The ask path); and the rule for reading a GHI-MD in the `ghi-write` skill (§ The GHI write path).
+- **Not built:** the maintenance sweep and fixer spawning (§ Maintenance and fixers); the decisions in § Decided and not yet built; the refresh's second feed and each entry's activity-relative freshness (§ The GHI mirror); the killed-ask message that tells the asker to ask with fewer tasks (§ The ask path); the tools a link repair needs ghi-guide-agent to use (§ Link-repair request); and the rule for reading a GHI-MD in the `ghi-write` skill (§ The GHI write path).
 
 ## Decided and not yet built
 
@@ -37,7 +37,7 @@ Build considerations beyond this design: the md-review rider, item 9 of `git sho
 
 ## What ghi-guide-agent is
 
-The first build of the domain-knowledge-agent class defined in [26-dynamic-agent-team-model.md](26-dynamic-agent-team-model.md) ("the GHIs" is that class's first listed domain). Three duties:
+The first build of the guide-agent class defined in [26-dynamic-agent-team-model.md](26-dynamic-agent-team-model.md) ("the GHIs" is that class's first listed domain). Three duties:
 
 1. **Answer asks.** A GHI author, before filing or editing, asks what it should read. The answer is a bare list — "read #13, #24, #31."
 2. **Maintain.** Cross-links between issues, and link integrity across the issue–MD boundary in both directions: every GHI→MD reference resolves on main; every GHI-MD backlinks its correct GHI(s). Link repairs are `ghi-guide-agent`'s own writes — its only write class. Detected problems beyond links — a GHI-MD stale relative to its issue, a body over the length limit — spawn fixers (§ Maintenance and fixers).
@@ -63,7 +63,7 @@ Two files, split by state: `issues-open.md` — every open issue near-raw (numbe
 
 ## The ghi-guide-agent session
 
-**Where it runs:** the Ubuntu box, `~/agents/ghi-guide-agent` (the box convention; see issue [Run named agents on the Ubuntu box, reachable from iTerm2 by name: launch-claude with tmux attach-or-create, and the migration it requires](https://github.com/nedschorus/nedschorus/issues/45)); wrapper state — session id, counters — lives there. Mac-side callers reach it over SSH (`scripts/launch-claude-ubuntu` — renamed from `launch-claude` 2026-08-13, when a Mac-local twin `scripts/launch-claude-mac` joined it; same issue).
+**Where it runs:** the Ubuntu box, `~/agents/ghi-guide-agent` (the box convention; see issue [Run named agents on the Ubuntu box, reachable from iTerm2 by name: launch-claude with tmux attach-or-create, and the migration it requires](https://github.com/nedsnodes/nedsnodes/issues/45)); wrapper state — session id, counters — lives there. Mac-side callers reach it over SSH (`scripts/launch-claude-ubuntu` — renamed from `launch-claude` 2026-08-13, when a Mac-local twin `scripts/launch-claude-mac` joined it; same issue).
 
 **Lifecycle:** active while taking a turn, otherwise exited — a session id, transcript, and the mirror persist; no process does. No idle state exists for this class.
 
@@ -76,7 +76,7 @@ Two files, split by state: `issues-open.md` — every open issue near-raw (numbe
 1. Run the mirror refresh (delta).
 2. Run the ask in a fork of the stored session: `claude -p --resume <stored session> --fork-session`. The fork starts with the stored session's whole context, answers the ask, takes step 4's drift notice when there is one, and is then discarded, so the stored session is left as it was. Every ask gets a fork of its own, so when two asks arrive together neither waits for the other, and no two share a transcript. Cold-start the stored session first when none exists or a reincarnation trigger has fired.
 3. Prompt: the question — plus, on resume, the changed-issue numbers with the instruction to re-read those entries from the mirror before answering. `--include-closed` marks a deliberate closed-history question (precedent, absence): `ghi-guide-agent` greps the closed file, and closed pointers are expected.
-4. Post-check: every returned pointer is verified against the mirror — plain script work; the fact is established here, never by the agent. An unexpected closed pointer triggers one drift notice back to the fork that gave the reply, carrying the fact and asking only for a judgment redo: "#31 closed on <date> — the mirror is current; re-read its entry in `issues-closed.md`, including any `Superseded-by:` link, and give a corrected reading list." One recheck per ask; the agent reads only the mirror, the files its open issues link to in its agent-home and its proposed-improvements-or-changes-files in the log-store, and never calls GitHub. Whatever remains is delivered with truthful tags ("#31 (closed 2026-08-08)"); note lines are plain sentences. Replies that are not reading lists — `ask-user-about-ruling:`, `not-about-issues` — pass through to the caller verbatim; the caller owns the escalation and must not swallow it. Unexpected closed pointers count toward the stale-match trigger; expected ones do not.
+4. Post-check: every returned pointer is verified against the mirror — plain script work; the fact is established here, never by the agent. An unexpected closed pointer triggers one drift notice back to the fork that gave the reply, carrying the fact and asking only for a judgment redo: "#31 closed on <date> — the mirror is current; re-read its entry in `issues-closed.md`, including any `Superseded-by:` link, and give a corrected reading list." After a verdict, the notice ends "and give a corrected verdict that cites no closed GHI." One recheck per ask; the agent reads only the mirror, the files its open issues link to in its agent-home and its proposed-improvements-or-changes-files in the log-store, and never calls GitHub. Whatever remains is delivered with truthful tags ("#31 (closed 2026-08-08)"); note lines are plain sentences. Replies that are not reading lists — `ask-user-about-ruling:`, `not-about-issues` — pass through to the caller verbatim; the caller owns the escalation and must not swallow it. Unexpected closed pointers count toward the stale-match trigger; expected ones do not.
 5. Print the list.
 
 One overall timeout (inside the hook budget); a killed run is a named failure. Auth is the box's two credentials — its `gh` login and its long-lived Claude token (interactive logins expire unattended). Precedent: nedsmessenger runs this pattern live (`~/Projects/nedsmessenger/adapter/adapter.py`, `ask_claude` — headless `claude -p --resume`, answer off the exit stream; NM runs three watchdogs where version 1 here starts with one timeout).
@@ -94,7 +94,7 @@ GHI authors write with `gh` as trained for create, edit, and close; comments are
 1. **Validate.** The file exists, opens with a heading, and is not already paired with an issue.
 2. **Adjudicate** (§ What ghi-guide-agent is; on an edit, the edit's own issue excluded). Fail-open: `ghi-guide-agent` unreachable means the write proceeds without adjudication — the mechanical checks still run.
 3. **File.** `gh issue create`, the title taken verbatim from the file's first heading, the body a placeholder. The tool generates the title rather than an agent typing it, so the two cannot disagree (user-ruled 2026-09-16 at the merge-lane seat: "the titles should be generated from them"). The tool relays `gh`'s own output verbatim and appends its lines after it.
-4. **Name and land.** Move the file to `docs/issues/<number>-<slug>.md` and land it on main through the tool's own pull request, merged by merge-lane exactly as every other pull request is (user-ruled 2026-09-20: "like every other change seems fine"). A raw push stays refused for every tool. This replaces the 2026-09-15 rule that the pull request merges without waiting on a person, which put the deferred approving identity of issue [Deferred: main-gatekeeper activation shape 2 — a reviewer attached to the gate and an approving identity of its own](https://github.com/nedschorus/nedschorus/issues/357) on this build's critical path; measured 2026-09-20, the lane merged 49 pull requests in a day against about 2.3 issues created a day over the preceding 30 days, so issue filings add roughly 5% to the lane's load and, counting edits to GHI-MDs, well under a fifth; and a GHI-MD is prose under `docs/`, which the review-scope rule makes silent, so the lane reads nothing and merges. **Accepted consequence:** between lane sessions an issue exists with a placeholder body and a link that does not yet resolve; the sequence is resumable, so the author reruns the tool and it continues.
+4. **Name and land.** Move the file to `docs/issues/<number>-<slug>.md` and land it on main through the tool's own pull request, merged by merge-lane exactly as every other pull request is (user-ruled 2026-09-20: "like every other change seems fine"). A raw push stays refused for every tool. This replaces the 2026-09-15 rule that the pull request merges without waiting on a person, which put the deferred approving identity of issue [Deferred: main-gatekeeper activation shape 2 — a reviewer attached to the gate and an approving identity of its own](https://github.com/nedsnodes/nedsnodes/issues/357) on this build's critical path; measured 2026-09-20, the lane merged 49 pull requests in a day against about 2.3 issues created a day over the preceding 30 days, so issue filings add roughly 5% to the lane's load and, counting edits to GHI-MDs, well under a fifth; and a GHI-MD is prose under `docs/`, which the review-scope rule makes silent, so the lane reads nothing and merges. **Accepted consequence:** between lane sessions an issue exists with a placeholder body and a link that does not yet resolve; the sequence is resumable, so the author reruns the tool and it continues.
 5. **Link.** Write the body from a glob of `docs/issues/<number>-*`: one link per file, in filename order, and nothing else. The list is derived at every write, so no author curates it and it cannot fall behind the files. An issue with a design, a design-contract and a test-design carries three links; most carry one.
 
 **The sequence is resumable.** Steps 3 to 5 are three separate remote operations and any of them can fail. Run again on the same file and the tool finds the issue it already created, from the pairing it recorded at step 3, and continues from the step that failed. It never files a second issue for one file.
@@ -139,7 +139,7 @@ Pair staleness is swept in one direction only — issue moved, GHI-MD not. The r
 
 1. **`ghi-write`** (skill; landed at [.claude/skills/ghi-write/SKILL.md](../../.claude/skills/ghi-write/SKILL.md), user-ruled 2026-08-12; decision trail at `git show 6bd0aa5:docs/drafts/ghi-write-skill-draft.md`): fires when a GHI author is about to file or edit; front-loads the right behavior — ask `ghi-guide-agent` first, route by state, edit rather than duplicate, and write the GHI-MD, which the tool then files, names, lands and links.
 2. **Hook + tool** — the correctness backstop when the skill does not fire: on the covered write path with `ghi-guide-agent` answering, a missed trigger costs efficiency — a late merge catch, one comment retry. The fail-open window and the enumeration holes are the accepted residuals, visible in the delta.
-3. **CLAUDE.md** — ambient documentation only (issue [Build ghi-write (step-1 founding skill): trigger on creating or revising a GHI; enforce edit-don't-comment-or-duplicate](https://github.com/nedschorus/nedschorus/issues/13) is this project's record of a written convention losing to trained habit).
+3. **CLAUDE.md** — ambient documentation only (issue [Build ghi-write (step-1 founding skill): trigger on creating or revising a GHI; enforce edit-don't-comment-or-duplicate](https://github.com/nedsnodes/nedsnodes/issues/13) is this project's record of a written convention losing to trained habit).
 
 ## Division of labor
 
@@ -162,6 +162,10 @@ Every prompt this design depends on, verbatim (user-ruled 2026-08-09/11): a prom
 
 > #\<n\> closed on \<date\> — the mirror is current; re-read its entry in `issues-closed.md`, including any `Superseded-by:` link, and give a corrected reading list.
 
+After a verdict:
+
+> #\<n\> closed on \<date\> — the mirror is current; re-read its entry in `issues-closed.md`, including any `Superseded-by:` link, and give a corrected verdict that cites no closed GHI.
+
 ### Cold-start prompt (ghi-guide-agent session birth)
 
 Delivered as the first prompt of a fresh session — cold start fires when no stored session exists or a reincarnation trigger has fired (ghi-guide-agent-ask step 2). The ask itself follows, worded per the resume-ask prompt. `<mirror-path>` and `<question-files-path>` are wrapper-filled.
@@ -180,7 +184,7 @@ Delivered as the first prompt of a fresh session — cold start fires when no st
 >
 > 1. **You are asked for a reading list**: what should an agent read before it files or edits an issue on some topic. Reply with a bare list — "read #13, #24, #31" — plus, only when needed, note lines in plain sentences. Closed issues belong in a reply only when the request says closed history is wanted; tag each truthfully: "#31 (closed 2026-08-08)".
 > 2. **You are shown a draft issue** — its title and its GHI-MD — and asked whether the corpus already covers it. When the draft is an edit of an existing issue, the request names that issue: leave it out of the comparison. Reply with exactly one line, nothing else: `verdict: too-similar #n` (an existing issue already covers this ground; #n is that issue), or `verdict: related #n,#m` (no collision, but the author should know these), or `verdict: unrelated`. In these shapes #n,#m stands for one or more issue numbers. A reply in any other shape is thrown away.
-> 3. **You are told a fact that corrects your last reply** — an issue you cited has closed — and asked to redo that one judgment. The fact is already established by script from the refreshed mirror: do not question or verify it; re-read the named entry in issues-closed.md, including any `Superseded-by:` link, and reply with a corrected reading list.
+> 3. **You are told a fact that corrects your last reply** — an issue you cited has closed — and asked to redo that one judgment. The fact is already established by script from the refreshed mirror: do not question or verify it; re-read the named entry in issues-closed.md, including any `Superseded-by:` link, and answer with the corrected reply the notice asks for.
 > 4. **You are asked to repair a link** — a cross-reference the maintenance sweep found broken. The request states the defect; repair exactly that link and nothing else. Issue edits go through gh as normal; document-side changes are landed through `scripts/ghi-issue-write.py`, whose pull request merge-lane-2 reviews and merges; never push to main yourself. Reply done: \<the repair\>, done: no change needed — \<why\>, or blocked: \<what stopped you\>.
 >
 > Boundaries:
@@ -222,6 +226,8 @@ Sent by the write tool for every body-bearing create or edit, before the write. 
 ### Link-repair request (sweep → ghi-guide-agent)
 
 Sent by the sweep for each link-integrity finding — `ghi-guide-agent`'s one write class. Rides the same wrapper as the other requests, hence the same changed-entries preamble. The done/blocked reply contract mirrors the fixer briefs'.
+
+Not built yet, and to be built with the sweep, which is the only sender of a link-repair request: `scripts/ghi-guide-agent-ask.py` runs every ask in dontAsk mode with `--allowedTools Read,Grep,Glob`, so ghi-guide-agent can neither run the `gh issue edit` that the GHI side of a repair needs nor change a file and run `scripts/ghi-issue-write.py`, which the document side needs (form 4 of § Cold-start prompt), and a link-repair request would end blocked today. The ask program is to allow those tools on a link-repair request only, because § Cold-start prompt makes a link repair ghi-guide-agent's one use of gh and its one write.
 
 > \<only on resume, and only when the refresh changed entries:\> Since your last request, these mirror entries changed: #\<n\>, #\<m\>. Re-read them in the mirror before answering.
 >
@@ -308,7 +314,7 @@ Each with its failure branch (item 7 is a plain measurement and carries none):
 
 **Constants** live as named values at the top of the owning script — no config file in version 1; starting values, tuned in live use: closes-since-birth reincarnation threshold 20; stale-match 2 in the last 10 answers; transcript threshold set at build from NM's working values; ask timeout 5 minutes, inside the hook budget; one drift recheck per ask.
 
-**Pinned to what landed:** commit [b9d8b4e](https://github.com/nedschorus/nedschorus/commit/b9d8b4e9e4ce8af26269dc03d1df325fe16051bb) on 2026-09-22 — `scripts/ghi-guide-agent-ask.py` as merged by PR [ghi-info-ask's state key names the session it holds](https://github.com/nedschorus/nedschorus/pull/637).
+**Pinned to what landed:** commit [b9d8b4e](https://github.com/nedsnodes/nedsnodes/commit/b9d8b4e9e4ce8af26269dc03d1df325fe16051bb) on 2026-09-22 — `scripts/ghi-guide-agent-ask.py` as merged by PR [ghi-info-ask's state key names the session it holds](https://github.com/nedsnodes/nedsnodes/pull/637).
 
 ## Deferred-decisions
 

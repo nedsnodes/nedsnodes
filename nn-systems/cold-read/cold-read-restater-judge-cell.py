@@ -161,7 +161,7 @@ def build_judge_argument_parser():
     parser.add_argument(
         "--restater", required=True, metavar="CLASS",
         help="the restater class under judgment, named as the roster names "
-             "its models (gemini-3.8-flash-low, gpt-6.1-sol, claude-opus-5); "
+             "its models (gemini-3.8-flash-low, gpt-6.2-sol, claude-opus-5); "
              "lowercase letters and digits joined by single hyphens or dots",
     )
     parser.add_argument(
@@ -279,11 +279,11 @@ def main() -> int:
     parser = build_judge_argument_parser()
     args = parser.parse_args()
 
-    # Snapshot before launch to distinguish this run’s writes; None means unchecked, not clean.
+    # Snapshot before launch to distinguish this run’s writes; a WriteDetectorUnavailable baseline means unchecked, not clean.
     try:
         baseline = common.working_tree_state()
     except common.WriteDetectorUnavailable as error:
-        baseline = None
+        baseline = error
         print(f"{PROGRAM}: could not snapshot the working tree ({error}); "
               "stray writes will not be checked for this run.", file=sys.stderr)
 

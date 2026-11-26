@@ -3,10 +3,11 @@
 
 Usage:
   scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py <pull request number>
-      <base commit> [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
+      <base commit> [--expected-head-commit COMMIT] [--main-commit COMMIT] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
-The base commit is the merge base for a first review, or the nc-head-commit
-reviewed before for a fix-round. Saves the pull request's description from
+The base commit is the merge base for a first review, or the nn-head-commit
+reviewed before for a fix-round, unless that fix-round merged main or rewrote
+history, when it is the merge base again. Saves the pull request's description from
 GitHub to
 cx/pr<n>-<first 8 characters of the base>/pull-request-description.md under
 the worktrees and outputs directory, then runs
@@ -16,17 +17,43 @@ pull request's, on pr<n>-head from the base commit, with
 the rules the review applies, so a pull request cannot change the rules its
 own review is held to. The report, codex-code-review-report.md, and stdout
 and stderr go to the same directory.
+The same directory also gets codex-review-run-record.json, holding
+"pull_request", "head_commit", "base_commit", "exit_code" and "report_file".
+It is removed before the run and written after it, so a run that was killed
+leaves none; a run refused because pr<n>-head's commit could not be read or is
+not --expected-head-commit leaves the earlier record as it was. A second run
+for the same pull request and base that passes those head checks always
+replaces the first run's record, so after a rerun that fails the posting
+program no longer sees the first run's findings and asks no grade for them; it replaces
+the report only when Codex ran, so a rerun stopped before Codex starts, by a
+missing review tool or an unreadable token, leaves the earlier report beside
+a record that names the failed run.
+With --expected-head-commit, the run refuses before the review when pr<n>-head
+holds another commit, since the review would record the wrong one. When
+pr<n>-head holds another commit after the review than before it, because
+another run rebuilt the worktree meanwhile, the run is recorded with exit
+code 2, since Codex may have reviewed the other commit. Its message prints
+the commands that rebuild the worktrees and review again only when
+--main-commit names the main commit pr<n>-merged was built on, as the review
+program passes it.
+merge-lane-pull-request-reviewer-review-post-and-read-back.py
+reads it to tell a Codex run that found nothing from one that failed.
 gh reads the description with the merge account's token, the one file every
 merge-lane helper and merge-gate.sh read.
 
 Exit codes: the review's exit code; 2 when the token, the description,
 --review-tools-worktree-at-main's scripts/code-review-codex-cell.py or its
 docs/agents/pr-reviewer-instructions.md could not be read, before the review
-runs.
+runs, or when the pull request's head commit could not be read or is not
+--expected-head-commit, or the run record could not be removed or written,
+or pr<n>-head's commit could not be read after the review or had changed.
 """
 
 import argparse
 import importlib.util
+import json
+import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -49,7 +76,13 @@ def parse_arguments(argv):
                     "commit, with the pull request's description.")
     parser.add_argument("pull_request", type=int, help="the pull request's number")
     parser.add_argument("base_commit",
-                        help="the merge base, or for a fix-round the nc-head-commit reviewed before")
+                        help="the merge base, or for a fix-round that neither merged main nor "
+                             "rewrote history, the nn-head-commit reviewed before")
+    parser.add_argument("--expected-head-commit",
+                        help="refuse unless pr<n>-head holds this commit")
+    parser.add_argument("--main-commit",
+                        help="the main commit pr<n>-merged was built on, for the rebuild command printed "
+                             "when pr<n>-head moves during the review")
     common.add_directory_options(parser, "cx/")
     return common.resolve_path_options(parser.parse_args(argv))
 
@@ -57,11 +90,97 @@ def parse_arguments(argv):
 def main(argv=None):
     arguments = parse_arguments(argv)
     number, base = arguments.pull_request, arguments.base_commit
-    helpers = arguments.merge_lane_worktrees_and_outputs_directory
-    review_tools_worktree = arguments.review_tools_worktree_at_main
-    outputs = helpers / "cx" / f"pr{number}-{base[:8]}"
+    outputs = arguments.merge_lane_worktrees_and_outputs_directory / "cx" / f"pr{number}-{base[:8]}"
     outputs.mkdir(parents=True, exist_ok=True)
     environment = run_all_test_suites.environment_without_git_redirecting_variables()
+    record = outputs / common.CODEX_REVIEW_RUN_RECORD_FILE_NAME
+    head = pull_request_head_commit(arguments, environment)
+    if head.returncode != 0:
+        print(f"PR {number}: Codex review not run: could not read the head commit of "
+              f"{common.pull_request_head_worktree(arguments, number)}: {head.stderr.strip()}\n"
+              f"Rebuild the pull request's worktrees, then run this again.")
+        return 2
+    if arguments.expected_head_commit and head.stdout.strip() != arguments.expected_head_commit:
+        print(f"PR {number}: Codex review not run: "
+              f"{common.pull_request_head_worktree(arguments, number)} holds commit "
+              f"{head.stdout.strip()}, not {arguments.expected_head_commit}, so the review would "
+              f"record the wrong commit.\nRebuild the pull request's worktrees at "
+              f"{arguments.expected_head_commit}, then run this again.")
+        return 2
+    try:
+        record.unlink(missing_ok=True)
+    except OSError as error:
+        print(f"PR {number}: Codex review not run: could not remove the earlier run record "
+              f"{record}: {error}\nFix the cause, then run this again.")
+        return 2
+    exit_code = codex_review_exit_code(arguments, outputs, environment)
+    head_after = pull_request_head_commit(arguments, environment)
+    if head_after.returncode != 0 or head_after.stdout.strip() != head.stdout.strip():
+        now_holds = (f"holds commit {head_after.stdout.strip()}" if head_after.returncode == 0
+                     else f"has a head commit that could not be read: {head_after.stderr.strip()}")
+        directory_options = common.directory_options_argv(arguments)
+        commit_to_review = arguments.expected_head_commit or head.stdout.strip()
+        if arguments.main_commit:
+            rebuild = shlex.join([str(Path(__file__).resolve().with_name(
+                "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py")), str(number), commit_to_review,
+                arguments.main_commit, *directory_options])
+            rerun = shlex.join([str(Path(__file__).resolve()), str(number), base, "--expected-head-commit",
+                                commit_to_review, "--main-commit", arguments.main_commit, *directory_options])
+            steps = (f"1. Rebuild the worktrees: {rebuild}\n"
+                     f"   If it fails, do what it prints.\n"
+                     f"2. Then review again: {rerun}\n")
+        else:
+            steps = (f"This run was given no --main-commit naming the main commit that "
+                     f"{common.pull_request_merged_worktree(arguments, number)} was built on, so it prints no "
+                     f"command to rebuild pr{number}-head and pr{number}-merged or to rerun this Codex review.\n"
+                     f"Do not run the review program, scripts/"
+                     f"merge-lane-pull-request-worktrees-reviewer-brief-codex-review-and-head-tests-run-without-"
+                     f"merge.py, again for this round: that program's Claude review step may already have posted "
+                     f"a review of {commit_to_review}. Send merge-lane-2 this output, word for word, with the "
+                     f"SendMessage tool; merge-lane-2 decides how this round's Codex review is run again.\n")
+        print(f"PR {number}: the Codex review exited {exit_code}, but "
+              f"{common.pull_request_head_worktree(arguments, number)} held commit {head.stdout.strip()} "
+              f"when the review started and now {now_holds}, so the review may not be of "
+              f"{head.stdout.strip()}. The run is recorded as failed, with exit code 2.\n"
+              f"Something changed pr{number}-head during the review, such as another run of "
+              f"merge-lane-pull-request-head-and-merged-worktrees-rebuild.py. To review {commit_to_review}:\n"
+              f"{steps}"
+              f"Use these steps only for {commit_to_review}; never put a newer head of the pull request into them, "
+              f"because they keep this run's base and Codex would review main's changes as the pull request's. "
+              f"A newer head is reviewed as a new round, by scripts/"
+              f"merge-lane-pull-request-worktrees-reviewer-brief-codex-review-and-head-tests-run-without-merge.py, "
+              f"which works out its base again.\n"
+              f"If the review fails this way a second time, do not retry: send merge-lane-2 this message and the "
+              f"second run's, with the SendMessage tool.")
+        exit_code = 2
+    temporary = record.with_name(f"{record.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps({
+            "pull_request": number, "head_commit": head.stdout.strip(), "base_commit": base,
+            "exit_code": exit_code,
+            "report_file": str(outputs / "codex-code-review-report.md")}) + "\n")
+        os.replace(temporary, record)
+    except OSError as error:
+        temporary.unlink(missing_ok=True)
+        print(f"PR {number}: the Codex review exited {exit_code}, but its run record {record} "
+              f"could not be written: {error}\nFix the cause, then run this again, because the "
+              f"review cannot be posted without the record.")
+        return 2
+    return exit_code
+
+
+def pull_request_head_commit(arguments, environment):
+    # -C would search upward, so a worktree that lost its .git inside another checkout would read that HEAD.
+    worktree = common.pull_request_head_worktree(arguments, arguments.pull_request)
+    return subprocess.run(
+        ["git", f"--git-dir={worktree / '.git'}", f"--work-tree={worktree}", "rev-parse",
+         "--verify", "HEAD^{commit}"],
+        capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+
+
+def codex_review_exit_code(arguments, outputs, environment):
+    number, base = arguments.pull_request, arguments.base_commit
+    review_tools_worktree = arguments.review_tools_worktree_at_main
 
     missing = (common.review_tool_missing_message(arguments, CODEX_CELL)
                or common.review_tool_missing_message(arguments, PULL_REQUEST_REVIEWER_INSTRUCTIONS))
