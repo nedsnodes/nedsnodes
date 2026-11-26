@@ -1160,6 +1160,58 @@ def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
         found = program.item_title(finder, line)
         check(f"`{line}` gives its item the title `{title}`: only `(revised)` and `revised:` are a label",
               found == title, repr(found))
+    for line, title, why in (
+            ("## __Item 3 of 9 revised__: the first", "revised: the first",
+             "the word `revised` ending at a closing emphasis is no label, so the title keeps it"),
+            ("## Item 3 of 9: revised the first", "revised the first",
+             "`revised` followed by a word stays in the title, though the item finder reads the heading as revised"),
+            ("## **Item 3 of 9: Keep this** (but not that)", "Keep this (but not that)",
+             "a heading's text after its emphasis closes is part of its title"),
+            ("- __Item 3 of 9: Fix foo__bar__ More detail.", "Fix foo__bar",
+             "a `__` with a letter after it, as in `foo__bar`, closes no emphasis"),
+            ("- **Item 3: the first** More detail.", "the first",
+             "an opening under a shared heading that leaves out `of M` gives its title as the finder reads its label")):
+        found = program.item_title(finder, line)
+        check(f"`{line}` gives its item the title `{title}`: {why}", found == title, repr(found))
+    for later in ("## Item 3 of 10 revised_estimates", "## __Item 3 of 10 revised__estimates__: keep",
+                  "## __Item 3 of 10 revised__: keep"):
+        document = f"## Item 3 of 10: First version\n\nThe first.\n\n{later}\n\nThe second.\n"
+        spans = finder.item_unit_spans(document, finder.markdown_parser())
+        check(f"a heading `{later}`, whose `revised` is followed by `_` or an emphasis delimiter, does not supersede "
+              f"the earlier heading for item 3 as a revision, so the finder refuses the two loudly",
+              [span[3] for span in spans if "3" in span[0]] == [0, 4], repr(spans))
+    for later in ("## **Item 3 of 10 revised**: New", "## Item 3 of 10 (revised again): New",
+                  "## Item 3 of 10, revised again: New", "## Item 3 of 10, revised twice: New"):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "walk.md"
+            path.write_text(f"# A walk\n\n## Item 3 of 9: Old\n\nThe first.\n\n{later}\n\nThe second.\n")
+            total, units = finder.waiting_item_units(path, "item 3 of 9", ["3"], "9", finder.markdown_parser())
+        check(f"a later heading `{later}` with another total is a revision, so the minutes' `item 3 of 9` finds it, "
+              f"not the superseded `## Item 3 of 9: Old`", [unit[1] for unit in units] == ["10"], repr(units))
+    for line, title in (("- __Item 3 of 9: Fix foo___ More detail.", "Fix foo"),
+                        ("**Item 3 of 9: x ** 2 is small** More.", "x ** 2 is small")):
+        found = program.item_title(finder, line)
+        check(f"`{line}` gives its item the title `{title}`, where CommonMark closes the emphasis",
+              found == title, repr(found))
+    parser = finder.markdown_parser()
+    hook = program.load_module("walk_me_through_user_short_answer_hook", program.SHORT_ANSWER_HOOK_FILE)
+    for title in ("Use `` `x` `` here", "Use `` a` `` here"):
+        dropped = program.markdown_with_link_syntax_dropped(title, parser, hook)
+        check(f"a code span whose content starts or ends with a backtick keeps its padding: `{title}`",
+              dropped == title, repr(dropped))
+
+
+def test_the_waiting_item_read_step_prints_an_agent_session_naming_two_shared_heading_titles_once():
+    document = ("# A walk\n\n## Items 3 and 4 of 9: two openings\n\n**Item 3 of 9: the first**\n\n"
+                "The tests are still running.\n#case_against weak: the page grows.\n\nRecommendation: change it.\n\n"
+                "**Item 4 of 9: the second**\n\nThe page ends.\n#case_against weak: it is short.\n\n"
+                "Recommendation: keep it.\n")
+    case = Case(next_to_present="items 3 and 4 of 9", document=document)
+    session_dialog_with_its_transcript_write(case.log_store, "s13", [
+        "Items 3 and 4 of 9: two openings, then Item 3 of 9: the first", "Both at once."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("an agent-session naming the shared heading's title and one item's own title is printed once",
+          result.returncode == 0 and result.stdout.count("Both at once.") == 1, described(result))
 
 
 def test_the_waiting_item_read_step_searches_a_bold_list_opening_by_its_title_alone():
