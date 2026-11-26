@@ -135,8 +135,9 @@ merge-program.lock in --merge-lane-worktrees-and-outputs-directory, waiting for
 it, and holds it until it exits, so no merge starts while another run's
 after-merge test run is still running. When the program exits 3 or 4, it writes
 merge-queue-stopped.txt in that directory, naming the pull request and the exit
-code; the merge queue program starts no merge while that file exists. When the
-lock file cannot be opened, the program merges nothing and exits 2.
+code; the merge queue program starts no merge while that file exists, and this
+program, once it holds the lock, merges nothing and exits 2 while it exists. When
+the lock file cannot be opened, the program merges nothing and exits 2.
 
 Last, once the pull request has merged, the program runs
 merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py,
@@ -1412,6 +1413,23 @@ def main(argv=None, wait=time.sleep):
             print(f"waiting for {lock_path}: another run of this program is merging or "
                   f"testing main; this run goes on by itself when that one ends", flush=True)
             fcntl.flock(lock, fcntl.LOCK_EX)
+        # Read only once the lock is held, since the run that held it may have just written it.
+        stop_file = outputs / MERGE_QUEUE_STOP_FILE_NAME
+        try:
+            stop_reason = stop_file.read_text().strip()
+        except FileNotFoundError:
+            stop_reason = None
+        except OSError as error:
+            stop_reason = f"it exists but could not be read: {error}"
+        if stop_reason is not None:
+            print(f"STOP: not merged: the merge queue is stopped, because {stop_file} says: "
+                  f"{stop_reason}\n"
+                  f"No merge may start until main is handled. If you are merge-lane-2, handle "
+                  f"the stop as its stopped notice says, then resume the merge queue with its "
+                  f"merge-batch-resume subcommand, which removes {stop_file}; otherwise tell "
+                  f"merge-lane-2 this message, with Claude Code's SendMessage tool, naming pull "
+                  f"request {arguments.pull_request}.")
+            return EXIT_COULD_NOT_RUN
         exit_code = merged_and_main_tested(arguments, wait)
         if exit_code in EXITS_THAT_STOP_THE_MERGE_QUEUE:
             merge_queue_stopped(outputs / MERGE_QUEUE_STOP_FILE_NAME, arguments.pull_request,

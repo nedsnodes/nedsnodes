@@ -250,6 +250,50 @@ def merging_cases(scratch):
     check("--merge-only merges the named pull request first, then the rest in order",
           [call[0] for call in case.merge_calls()] == ["11", "10"], case.merge_calls())
 
+    case = Case(scratch, "held-during-a-merge", [approved(10, A), approved(11, B), approved(12, C)],
+                {"10": pr(A), "11": pr(B), "12": pr(C)},
+                merge_outcomes={"10": {"exit": 0, "merged": True,
+                                       "queue_append": [approved(11, B, hold="HOLD-lane ")]}})
+    case.run("merge-batch-run-in-queue-order")
+    check("a HOLD- line appended while an earlier pull request merges holds that pull request "
+          "in the same pass",
+          [call[0] for call in case.merge_calls()] == ["10", "12"]
+          and "MERGED 11" not in case.queue_text(), f"{case.merge_calls()}\n{case.queue_text()}")
+
+    case = Case(scratch, "merge-only-stacked", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B, base="topic-12")}, branches={"topic-12": [12]})
+    case.run("merge-batch-run-in-queue-order", "--merge-only", "11")
+    stop = case.stop_text() or ""
+    check("a --merge-only pull request that is stacked and passed over stops the batch, with "
+          "the stop file and a stopped notice, and nothing else merges",
+          case.merge_calls() == []
+          and "pull request 11, named by --merge-only to merge first, did not merge" in stop
+          and "passed over" in stop
+          and any(name.startswith("stopped-") for name in case.notices()),
+          f"{case.merge_calls()}\n{stop}\n{case.notices()}")
+
+    case = Case(scratch, "merge-only-refused", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B)},
+                merge_outcomes={"11": {"exit": 1, "output": "GATE REFUSED (#11): the approval covers x"}})
+    case.run("merge-batch-run-in-queue-order", "--merge-only", "11")
+    stop = case.stop_text() or ""
+    check("a --merge-only pull request the gate refuses gets its HELD line, then stops the "
+          "batch before any other pull request merges",
+          [call[0] for call in case.merge_calls()] == ["11"]
+          and "HELD 11 refused: GATE REFUSED (#11)" in case.queue_text()
+          and "MERGED 10" not in case.queue_text()
+          and "did not merge with a passing after-merge test run" in stop and "HELD 11" in stop,
+          f"{case.merge_calls()}\n{case.queue_text()}\n{stop}")
+
+    case = Case(scratch, "merge-only-merged-outside", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": {**pr(B, state="MERGED"), "mergeCommit": {"oid": "f" * 40}}})
+    case.run("merge-batch-run-in-queue-order", "--merge-only", "11")
+    stop = case.stop_text() or ""
+    check("a --merge-only pull request already merged outside the merge queue stops the batch, "
+          "since its after-merge test run was not seen",
+          case.merge_calls() == [] and "this program did not see its after-merge test run" in stop,
+          f"{case.merge_calls()}\n{stop}")
+
     case = Case(scratch, "appended-after-the-last-pass", [approved(10, A)],
                 {"10": pr(A), "11": pr(B)})
     real_one_pass = program.MergeQueuePullRequestMergeBatchRunner.one_pass

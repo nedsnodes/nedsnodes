@@ -1095,7 +1095,9 @@ def merge_program_lock_and_merge_queue_stop_file_cases(scratch):
           f"exit {exit_code}\n{stop_text}\n{output}")
 
     def stop_file_unwritable(directory):
-        (directory / "outputs" / stop_file_name).mkdir(parents=True)
+        # A link into a missing directory reads as no stop file, yet cannot be written.
+        (directory / "outputs").mkdir(parents=True, exist_ok=True)
+        (directory / "outputs" / stop_file_name).symlink_to(directory / "missing" / "stop")
     exit_code, output, _, _, _ = run_case(
         scratch, "stop-file-unwritable", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
         review_worktrees_state="head-not-a-worktree", before_the_program_runs=stop_file_unwritable)
@@ -1137,6 +1139,49 @@ def merge_program_lock_and_merge_queue_stop_file_cases(scratch):
           exit_code == 0 and released and "another run of this program is merging or testing "
                                            "main" in output and len(gate_calls) == 1,
           f"exit {exit_code} released {released}\n{output}")
+
+    def lock_held_then_stop_file_written(directory):
+        outputs = directory / "outputs"
+        outputs.mkdir(parents=True, exist_ok=True)
+        holder = open(outputs / program.MERGE_PROGRAM_RUN_LOCK_FILE_NAME, "a")
+        fcntl.flock(holder, fcntl.LOCK_EX)
+
+        def stop_then_release():
+            time.sleep(1)
+            (outputs / stop_file_name).write_text("pull request 9's merge program exited 3, x\n")
+            fcntl.flock(holder, fcntl.LOCK_UN)
+            holder.close()
+        threading.Thread(target=stop_then_release, daemon=True).start()
+    exit_code, output, gh_calls, gate_calls, _ = run_case(
+        scratch, "lock-held-then-stop-file", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        before_the_program_runs=lock_held_then_stop_file_written)
+    check("a run that waited for the lock while its holder wrote the stop file merges nothing "
+          "and exits 2, quoting the stop file",
+          exit_code == 2 and "STOP: not merged: the merge queue is stopped, because " in output
+          and "pull request 9's merge program exited 3, x" in output and gate_calls == []
+          and index_of(argvs(gh_calls), ["pr", "merge"]) is None,
+          f"exit {exit_code}\n{output}")
+
+    def stop_file_unreadable(directory):
+        (directory / "outputs" / stop_file_name).mkdir(parents=True)
+    exit_code, output, gh_calls, gate_calls, _ = run_case(
+        scratch, "stop-file-unreadable", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        before_the_program_runs=stop_file_unreadable)
+    check("a stop file that exists but cannot be read stops the run before the gate, exit 2",
+          exit_code == 2 and "it exists but could not be read: " in output and gate_calls == []
+          and index_of(argvs(gh_calls), ["pr", "merge"]) is None,
+          f"exit {exit_code}\n{output}")
+
+    def stop_file_present(directory):
+        (directory / "outputs").mkdir(parents=True, exist_ok=True)
+        (directory / "outputs" / stop_file_name).write_text("stopped by hand\n")
+    exit_code, output, gh_calls, gate_calls, _ = run_case(
+        scratch, "stop-file-present", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        before_the_program_runs=stop_file_present)
+    check("a stop file present before the run starts stops it before the gate, exit 2",
+          exit_code == 2 and "because " in output and "stopped by hand" in output
+          and gate_calls == [] and index_of(argvs(gh_calls), ["pr", "merge"]) is None,
+          f"exit {exit_code}\n{output}")
 
 
 def failed_suites_kept_in_view_cases(scratch):

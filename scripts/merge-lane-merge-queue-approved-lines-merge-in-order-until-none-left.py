@@ -30,7 +30,9 @@ requests merge in the order of their last lines.
 merge-batch-run-in-queue-order takes merge-batch.lock without waiting, and exits 0 when
 another process holds it. It makes passes over the queue file until a pass neither merges
 nor appends, then releases the lock and reads the file's size again, and makes another
-pass when a line was appended meanwhile. For each waiting pull request it reads GitHub:
+pass when a line was appended meanwhile. A pass chooses each next pull request from the
+queue file as it is once the next merge may start, so a HOLD- line appended during a merge
+holds that pull request. For each waiting pull request it reads GitHub:
 merged already gets a MERGED line; closed, or an nn-head-commit other than the queued one,
 gets a HELD line; a base branch other than main that is exactly one open pull request's
 branch is passed over until that pull request merges; any other base branch gets a HELD
@@ -54,8 +56,9 @@ merge-batch-resume once a stopped merge batch is handled.
 
 merge-batch-resume refuses while a merge batch holds merge-batch.lock; otherwise it removes
 the stop file and the in-progress file and starts a merge batch. With --merge-only, that
-pull request, which must be waiting, merges first; the merge batch then goes on only when
-its outcome lets it.
+pull request, which must be waiting, merges first; the merge batch goes on only when it
+merged and its after-merge test run passed, and otherwise stops again, with the stop file
+and a stopped notice naming its outcome.
 
 merge-batch-list-waiting prints, without merging, each waiting pull request with its state
 on GitHub and its base branch.
@@ -157,6 +160,7 @@ class MergeQueuePullRequestMergeBatchRunner:
                           / merge_program.MERGE_QUEUE_STOP_FILE_NAME)
         self.in_progress_file = self.directory / MERGE_IN_PROGRESS_FILE_NAME
         self.notices = self.directory / MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME
+        self.merged_cleanly = None
 
     # The merge queue file
 
@@ -299,22 +303,48 @@ class MergeQueuePullRequestMergeBatchRunner:
             lock.close()
 
     def one_pass(self, merge_only):
-        """Try each waiting pull request once; return whether any line was appended."""
-        waiting = self.waiting(self.queue_lines())
-        if merge_only is not None:
-            first = [line for line in waiting if int(line["pr"]) == merge_only]
-            if not first:
-                raise Stop(f"pull request {merge_only}, named by --merge-only, is not waiting")
-            waiting = first + [line for line in waiting if int(line["pr"]) != merge_only]
+        """Try each waiting pull request once; return whether any line was appended.
+
+        Each next pull request is chosen from the queue file as it is once the next merge may
+        start, so a HOLD- line a lane appends while the previous merge runs is obeyed.
+        """
+        tried = set()
         appended = False
-        for line in waiting:
+        while True:
             while (decision := self.next_merge_may_start())[0] == NEXT_MERGE_WAITS:
                 self.log(f"waiting: {decision[1]}")
                 self.wait(SECONDS_BETWEEN_NEXT_MERGE_MAY_START_CHECKS)
             if decision[0] == NEXT_MERGE_STOPS:
                 raise StopFileFound(decision[1])
+            waiting = [line for line in self.waiting(self.queue_lines())
+                       if int(line["pr"]) not in tried]
+            if merge_only is not None and merge_only not in tried:
+                first = [line for line in waiting if int(line["pr"]) == merge_only]
+                if not first:
+                    raise Stop(f"pull request {merge_only}, named by --merge-only, is not waiting")
+                waiting = first
+            if not waiting:
+                return appended
+            line = waiting[0]
+            tried.add(int(line["pr"]))
+            self.merged_cleanly = None
             appended |= self.one_pull_request(line)
-        return appended
+            if int(line["pr"]) == merge_only and self.merged_cleanly != merge_only:
+                raise Stop(f"pull request {merge_only}, named by --merge-only to merge first, "
+                           f"did not merge with a passing after-merge test run, so no other "
+                           f"pull request merges onto main before it: "
+                           f"{self.outcome_named_by_last_line(merge_only)}")
+
+    def outcome_named_by_last_line(self, number):
+        for line in reversed(self.queue_lines()):
+            if HELD_LINE.match(line) and int(HELD_LINE.match(line)["pr"]) == number:
+                return line
+            if DONE_LINE.match(line) and int(DONE_LINE.match(line)["pr"]) == number:
+                return f"{line}; this program did not see its after-merge test run"
+            if APPROVED_LINE.match(line) and int(APPROVED_LINE.match(line)["pr"]) == number:
+                break
+        return ("it is stacked on a pull request that has not merged, so it was passed over; "
+                "merge that one first with --merge-only")
 
     def next_merge_may_start(self):
         """Return (NEXT_MERGE_STARTS, NEXT_MERGE_WAITS or NEXT_MERGE_STOPS, why).
@@ -388,6 +418,7 @@ class MergeQueuePullRequestMergeBatchRunner:
         if on_github:
             self.append(f"MERGED {number} {merge_commit}")
         if exit_code == 0 and on_github:
+            self.merged_cleanly = number
             self.in_progress_file.unlink(missing_ok=True)
             self.notice(f"merged-{number}-{merge_commit[:12]}.txt",
                         f"MERGED {number} {merge_commit} {author}\n"
