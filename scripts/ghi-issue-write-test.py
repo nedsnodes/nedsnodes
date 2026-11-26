@@ -470,6 +470,22 @@ def run_remote_ghi_guide_agent_log_store_cases(scratch: Path):
           relative_store == (None, absolute_store)
           and relative_citation == os.path.join(absolute_store, "a-file.md"),
           (relative_store, relative_citation))
+    os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE] = "link/../store"
+    try:
+        dot_dot_store = tool.ghi_guide_agent_log_store()
+        dot_dot_citation = tool.ghi_guide_agent_log_store_citation("a-file.md")
+    finally:
+        if saved_override is None:
+            del os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE]
+        else:
+            os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE] = saved_override
+    dot_dot_absolute = os.path.join(os.getcwd(), "link/../store")
+    check("a store override holding \"..\" keeps it, so where link is a symlink "
+          "the store is the directory the path names, not the one a lexical "
+          "collapse would give",
+          dot_dot_store == (None, dot_dot_absolute)
+          and dot_dot_citation == os.path.join(dot_dot_absolute, "a-file.md"),
+          (dot_dot_store, dot_dot_citation))
 
 
 def run_cases(scratch: Path):

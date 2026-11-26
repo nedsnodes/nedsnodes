@@ -1225,12 +1225,18 @@ def proposed_improvements_or_changes_file_date() -> str:
     return datetime.date.today().isoformat()
 
 
+def ghi_guide_agent_log_store_override_absolute(override: str) -> str:
+    # Not os.path.abspath: it collapses ".." before symlinks are followed, so
+    # link/../store could name another directory than the one the path names.
+    return str(Path(override).absolute())
+
+
 def ghi_guide_agent_log_store():
     """(the ssh host the store is reached through, or None where it is a
     directory on this machine; the store's directory)."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return None, os.path.abspath(override)
+        return None, ghi_guide_agent_log_store_override_absolute(override)
     if socket.gethostname().split(".")[0] == GHI_GUIDE_AGENT_LOG_STORE_HOSTNAME:
         return None, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
     return GHI_GUIDE_AGENT_LOG_STORE_HOST, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
@@ -1241,7 +1247,7 @@ def ghi_guide_agent_log_store_citation(name: str) -> str:
     as the local path when a test points the store at a directory."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return os.path.join(os.path.abspath(override), name)
+        return os.path.join(ghi_guide_agent_log_store_override_absolute(override), name)
     return f"{GHI_GUIDE_AGENT_LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}"
 
 
