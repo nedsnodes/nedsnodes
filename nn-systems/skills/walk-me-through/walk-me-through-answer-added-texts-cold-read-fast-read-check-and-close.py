@@ -287,6 +287,18 @@ M the walk finder's count of the items shown and waiting, and names it with
 the same K and M. The line naming the next item gives that counted M,
 whatever M the walk-document's headings give.
 
+COPIED USER MESSAGES, as the walk finder's docstring defines them. CHECK refuses
+an A, AO or Aa answer, or answers to parts with any part approved, writing
+nothing, while a message copied about the item has `open` as its newest
+outcome. CLOSE refuses, writing nothing, when it
+would write `none, closed` while a copied message has no valid outcome, and
+when it would write `<accepted>` for an item, a held item included, while a
+message copied about that item has `open`, or `changed` while the item's text
+is unchanged; it finds both by running itself on a scratch copy of the walk's
+two files, which it does only while a copied message has no outcome or `open`. Each refusal
+names the messages and gives the commands that record their outcomes, and the
+same command then succeeds.
+
 PREREQUISITE ENTRY. Last of what CLOSE prints when it names a next item, and
 last of what APPROVAL-WALK-WAITING-ITEM-COLD-READ-FAST-READ prints when it
 says to present the item, comes one line for each walk-document unit holding
@@ -970,7 +982,6 @@ OBVIOUS_HASHTAG = " #approved_obvious"
 AFTER_ADVISOR_HASHTAG = " #approved_after_advisor"
 APPROVED, DISAPPROVED, DEFERRED, MOVED_ON = "approved", "disapproved", "deferred", "moved on, no decision"
 ALREADY_DECIDED_PREFIX, MOVED_ON_PREFIX = "already decided by ", "moved on, no decision: "
-NAVIGATION_WORD_ALONE = re.compile(r"^(?:next|n|continue|go)[.!]*$", re.I)
 OUTCOMES = {APPROVED: "<accepted>", DISAPPROVED: "<rejected>"}
 PART_WORDS = {"A": APPROVED, "AO": APPROVED + OBVIOUS_HASHTAG, "D": DISAPPROVED}
 PART_ARGUMENT = re.compile(r"^(\d+)=(ao|a|d)$", re.I)
@@ -1180,6 +1191,55 @@ CLOSE_NO_NEXT_ITEM = ("No item is left to present, and the minutes' `#next_to_pr
                       "`none, closed`: go on to the walk-me-through skill's closing.")
 NEXT_MARKER_LINE = "#next_to_present {value}"
 CLOSED_MARKER_VALUE = "none, closed"
+COPIED_MESSAGE_WORDS_SHOWN_LIMIT = 200
+COPIED_MESSAGE_ENTRY = "- id {id}, {item}, at {time}: {words}{unchanged}"
+COPIED_MESSAGE_UNCHANGED_NOTE = (" (its newest outcome says `changed`, which is not valid yet: the item's text in the "
+                                 "walk-document is the same as when the message was copied)")
+COPIED_MESSAGE_OUTCOME_COMMAND = "  {outcome}: printf '%s\\n' '#user_message_outcome {id} {outcome}' >> {quoted_minutes}"
+CLOSE_COPIED_MESSAGE_NEEDS_OUTCOME = (
+    "nothing written: this close would end the approval-walk, and the walk-minutes {minutes} hold {count} copied user "
+    "message(s) with no valid outcome. Once the approval-walk is closed, no hook reads those messages, so a change "
+    "agreed with the user could be lost:\n"
+    "{entries}\n"
+    "For every id above, run one of the printf commands listed under the id; the newest outcome line for an id counts.\n"
+    "If you and the user agreed a change to the text of the item an entry names, and the walk-document {document} did "
+    "not hold the change when the message was copied, write the change there unless you already have, then run the "
+    "command labelled `changed`.\n"
+    "If the walk-document already held that change when the message was copied, or the message needs no change to "
+    "that item's text, run the command labelled `no change`.\n"
+    "If you and the user agreed a change to another item's text, write the change into that item in the walk-document, "
+    "unless the walk-document already holds the change.\n"
+    "If the discussion is still going on, run the command labelled `open`, do not run close yet, and ask the user what "
+    "the discussion still needs, quoting his message and the item's current text, with your recommendation and what "
+    "you will do for each answer; if you are a subagent, put that question to the agent that dispatched you. When he "
+    "has answered, run the command labelled `changed` or `no change`.\n"
+    "When every id has an outcome and no discussion is going on, run this same command, which records the answer the "
+    "check step already wrote, so the user need not answer again:\n"
+    "{command}")
+COPIED_MESSAGE_OUTCOME_OPEN_INSTRUCTIONS = (
+    "{entries}\n"
+    "For every id above, run one of the two printf commands listed under the id; the newest outcome line for an id "
+    "counts.\n"
+    "If you and the user agreed a change to this item's text, and the walk-document {document} did not hold the change "
+    "when the message was copied, write the change there unless you already have, then run the command labelled "
+    "`changed`, which is valid only once the item's text differs from its text at the copy.\n"
+    "If the walk-document already held that change when the message was copied, or the message needs no change to this "
+    "item's text, run the command labelled `no change`.\n"
+    "If you cannot tell whether his approval settles the discussion, leave the outcome as it is, do not run {step}, and "
+    "ask him, quoting his message and the item's current text; if you are a subagent, put that question to the agent "
+    "that dispatched you.\n"
+    "Once every id above has `no change`, or `changed` with the item's text edited, run this same command, so the user "
+    "need not retype his answer:\n"
+    "{command}\n"
+    "From now on, replace an `open` outcome as soon as the discussion of the item settles.")
+CHECK_COPIED_MESSAGE_OUTCOME_OPEN = (
+    "nothing written: the user's approval of {item} is not recorded, because {count} message(s) copied about that item "
+    "into {minutes} have as their newest outcome `open`, or `changed` while the item's text is the same as at the copy. Recording the approval now could approve the item's text "
+    "without a change the user asked for in that message:\n" + COPIED_MESSAGE_OUTCOME_OPEN_INSTRUCTIONS)
+CLOSE_COPIED_MESSAGE_OUTCOME_OPEN = (
+    "nothing written: the answer the check step recorded for {item} does not take effect yet, because {count} "
+    "message(s) copied about that item into {minutes} have as their newest outcome `open`, or `changed` while the item's text is the same as at the copy. Closing now could accept the "
+    "item's text without a change the user asked for in that message:\n" + COPIED_MESSAGE_OUTCOME_OPEN_INSTRUCTIONS)
 PROGRAM_LINE_ITEMS = re.compile(r"^(items?\s[^:]*): ", re.I)
 
 
@@ -2798,7 +2858,7 @@ def check(arguments):
         raise Failure(USER_WORDS_NOT_ASKED.format(flag=not_shown_flag))
     if not not_shown_flag and not words:
         raise Failure(USER_WORDS_MISSING.format(command=check_command_with_cwd(top, *check_words(arguments))))
-    if NAVIGATION_WORD_ALONE.match(words) and not arguments.moved_on_no_decision:
+    if walk_finder.NAVIGATION_WORD_ALONE.match(words) and not arguments.moved_on_no_decision:
         raise Failure(NAVIGATION_WORD_REFUSED.format(words=words, item=item,
                                                      answered=answered_word(arguments, walk_finder),
                                                      command=moved_on_no_decision_command))
@@ -2811,6 +2871,14 @@ def check(arguments):
     if arguments.already_decided is not None and not arguments.now_over_later_already_decided:
         refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(arguments.already_decided, item,
                                                                                     walk_finder)
+    if answer_approves_the_item(answered_word(arguments, walk_finder)):
+        still_open = copied_messages_about_items_without_settled_outcome(walk_finder, minutes, item, parser)
+        if still_open:
+            raise Failure(CHECK_COPIED_MESSAGE_OUTCOME_OPEN.format(
+                item=item, count=len(still_open), minutes=minutes,
+                document=minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md"),
+                entries=copied_message_entries(still_open, ("changed", "no change"), minutes), step="check",
+                command=check_command_with_cwd(top, *check_words(arguments))))
     if arguments.now_over_later_already_decided:
         document, problems = now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
         if problems:
@@ -4830,6 +4898,26 @@ def ruling_given_comments_posted(walk_name, rulings, top, gh_program, timeout):
     return output, failed
 
 
+def item_units_titled(walk_finder, lines, units, title_words):
+    """Return the units of units whose heading has the title title_words, as heading_title reads both."""
+    title = heading_title(walk_finder, "## " + title_words.strip().lstrip("# "))
+    return [unit for unit in units if heading_title(walk_finder, lines[unit[3]]) == title]
+
+
+def whether_user_bump_message_title_names_approval_walk_item_not_yet_shown(walk_finder, top, minutes, value, parser, title_words):
+    """Whether title_words is the title of an item not yet shown, the only item `check --bump` moves. A walk-document
+    that cannot be read as items holds no such item."""
+    try:
+        _, numbers, total = waiting_items(walk_finder, value, minutes)
+        _, _, _, units, placing = walk_document_items(walk_finder, minutes, value, numbers, total, parser,
+                                                      "check --bump", top, stamp=False)
+    except Failure:
+        return False
+    document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+    lines = document.read_text(encoding="utf-8").split("\n")
+    return any(unit[3] in placing for unit in item_units_titled(walk_finder, lines, units, title_words))
+
+
 def bump(arguments):
     """Make the unshown item arguments.bump names the waiting item, standing right before the item that waited,
     as the docstring's --bump paragraph says."""
@@ -4849,8 +4937,7 @@ def bump(arguments):
                                                   "check --bump", top, stamp=False)
     document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
     lines = document.read_text(encoding="utf-8").split("\n")
-    title = heading_title(walk_finder, "## " + arguments.bump.strip().lstrip("# "))
-    named = [unit for unit in units if heading_title(walk_finder, lines[unit[3]]) == title]
+    named = item_units_titled(walk_finder, lines, units, arguments.bump)
     unshown = [unit for unit in named if unit[3] in placing]
     if not unshown:
         if named:
@@ -4884,9 +4971,124 @@ def bump(arguments):
     return 0
 
 
+def copied_message_entries(copied, outcomes, minutes):
+    """The refusal's lines for copied, [(id, time, item, words, whether `changed` is not valid yet)]: an entry for each
+    message, then one printf command per outcome in outcomes."""
+    quoted_minutes = shlex.quote(str(minutes))
+    lines = []
+    for copied_id, time_copied, item, words, unchanged in copied:
+        lines.append(COPIED_MESSAGE_ENTRY.format(id=copied_id, item=item, time=time_copied,
+                                                 words=words[:COPIED_MESSAGE_WORDS_SHOWN_LIMIT],
+                                                 unchanged=COPIED_MESSAGE_UNCHANGED_NOTE if unchanged else ""))
+        lines += [COPIED_MESSAGE_OUTCOME_COMMAND.format(outcome=outcome, id=copied_id, quoted_minutes=quoted_minutes)
+                  for outcome in outcomes]
+    return "\n".join(lines)
+
+
+def answer_approves_the_item(answered):
+    """Whether answered, the answer as the walk-minutes write it, is A, AO, Aa or holds an approved part; O2, O3 and an
+    item settled unasked do not count."""
+    return answered == APPROVED or (PART_IN_ANSWER.match(answered) is not None
+                                    and any(word == APPROVED for _, word in PART_IN_ANSWER.findall(answered)))
+
+
+def copied_messages_about_items_without_settled_outcome(walk_finder, minutes, item, parser):
+    """Return copied_message_entries' tuples for each message about item, a running count, whose newest outcome is
+    `open`, or `changed` while the item's text still has its baseline digest. A message is about item when the two
+    share a number, whatever `of M` each gives, unless each resolves to a different walk-document heading."""
+    minutes_text = minutes.read_text(encoding="utf-8")
+    document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+    # With no walk-document the caller's next step reports that failure.
+    units = walk_finder.item_unit_spans(document.read_text(encoding="utf-8"), parser) if document.is_file() else None
+    unchanged_ids = {entry[0] for entry in
+                     walk_finder.approval_walk_user_message_lines_copied_to_walk_minutes_without_valid_outcome_find(
+                         minutes_text, document, parser) if entry[4]} if units is not None else set()
+
+    def headings_named(value, numbers, total):
+        if units is None:
+            return None
+        try:
+            return walk_finder.waiting_item_units(document, value, numbers, total, parser, units)[1]
+        except walk_finder.UnusableRange:
+            return None
+
+    numbers, total = walk_finder.parse_items(item)
+    item_headings = headings_named(item, numbers, total)
+    found = []
+    for match, outcome in walk_finder.approval_walk_user_message_lines_copied_to_walk_minutes_each_paired_with_newest_outcome_or_none_find(
+            minutes_text, parser):
+        unchanged = match["id"] in unchanged_ids
+        if outcome != walk_finder.WALK_MINUTES_USER_MESSAGE_OUTCOME_LINE_OPEN_OUTCOME_WORD and not unchanged:
+            continue
+        try:
+            copied_numbers, copied_total = walk_finder.parse_items(match["item"])
+        except walk_finder.UnusableRange as problem:
+            raise Failure(f"nothing written: the copied message line with id {match['id']} names `{match['item']}`, "
+                          f"which {problem}. Correct that line's item in the walk-minutes, then run this command again.")
+        if not set(copied_numbers) & set(numbers):
+            continue
+        copied_headings = headings_named(match["item"], copied_numbers, copied_total)
+        if item_headings is None or copied_headings is None or any(unit in item_headings for unit in copied_headings):
+            found.append((match["id"], match["time"], match["item"], match["words"], unchanged))
+    return found
+
+
+def close_rehearsed_on_scratch_copy(arguments, walk_finder, top, minutes, value, parser):
+    """Return (whether this close would write `none, closed`, the running counts it would write `<accepted>` for,
+    held items included), found by running it on a scratch copy of the walk's two files, because both depend on what
+    the close records. A close that fails on the copy returns None, so that the real close prints the failure with
+    the real paths."""
+    document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+    with tempfile.TemporaryDirectory(prefix=PROGRAM + "-") as scratch:
+        scratch_minutes = Path(scratch) / minutes.name
+        shutil.copyfile(minutes, scratch_minutes)
+        if document.is_file():
+            shutil.copyfile(document, Path(scratch) / document.name)
+        before = scratch_minutes.read_text(encoding="utf-8")
+        try:
+            ends_walk = close_answer_in_walk_files(arguments, walk_finder, top, scratch_minutes, value, parser,
+                                                   rehearsal=True)
+        except Failure:
+            return None
+        written = scratch_minutes.read_text(encoding="utf-8")[len(before):].split("\n")
+    accepted = [line.split(": ")[0] for line in written if OUTCOMES[APPROVED] in line and ": " in line]
+    return ends_walk, list(dict.fromkeys(accepted))
+
+
 def close(arguments):
     walk_finder = load_walk_finder()
     top, minutes, value, parser = the_open_walk(walk_finder, arguments.cwd)
+    document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+    minutes_text = minutes.read_text(encoding="utf-8")
+    missing = walk_finder.approval_walk_user_message_lines_copied_to_walk_minutes_without_valid_outcome_find(
+        minutes_text, document, parser)
+    # Only a copied message with no outcome, or with `open`, can stop this close, so most closes rehearse nothing.
+    rehearsed = (close_rehearsed_on_scratch_copy(arguments, walk_finder, top, minutes, value, parser)
+                 if missing or any(outcome == walk_finder.WALK_MINUTES_USER_MESSAGE_OUTCOME_LINE_OPEN_OUTCOME_WORD for _, outcome in
+                                   walk_finder.approval_walk_user_message_lines_copied_to_walk_minutes_each_paired_with_newest_outcome_or_none_find(
+                                       minutes_text, parser))
+                 else None)
+    command = shlex.join(["python3", str(Path(__file__).resolve()), "close", "--cwd", str(top)])
+    if rehearsed and missing and rehearsed[0]:
+        raise Failure(CLOSE_COPIED_MESSAGE_NEEDS_OUTCOME.format(
+            minutes=minutes, count=len(missing), document=document,
+            entries=copied_message_entries(missing, ("changed", "no change", "open"), minutes), command=command))
+    unsettled = {}
+    for accepted_item in rehearsed[1] if rehearsed else []:
+        for entry in copied_messages_about_items_without_settled_outcome(walk_finder, minutes, accepted_item, parser):
+            unsettled.setdefault(accepted_item, []).append(entry)
+    if unsettled:
+        still_open = list({entry[0]: entry for entries in unsettled.values() for entry in entries}.values())
+        raise Failure(CLOSE_COPIED_MESSAGE_OUTCOME_OPEN.format(
+            item=" and ".join(unsettled), count=len(still_open), minutes=minutes, document=document,
+            entries=copied_message_entries(still_open, ("changed", "no change"), minutes), step="close",
+            command=command))
+    return close_answer_in_walk_files(arguments, walk_finder, top, minutes, value, parser)
+
+
+def close_answer_in_walk_files(arguments, walk_finder, top, minutes, value, parser, rehearsal=False):
+    """Record the last answer and name the next item. With rehearsal, on scratch copies, stop once the
+    `#next_to_present` line is written and return whether it closes the walk."""
     item, answered, statuses, settled = last_answer(walk_finder, minutes, parser, top)
     waiting, waiting_numbers, total = waiting_items(walk_finder, value, minutes)
     try:
@@ -4902,6 +5104,8 @@ def close(arguments):
                                                   summary)
         waiting, waiting_numbers, total = waiting_items(walk_finder, value, minutes)
     if not set(answered_numbers) <= set(waiting_numbers):
+        if rehearsal:
+            return False
         append_to_minutes(minutes, [CLOSE_HELD_MINUTES.format(item=item, new_item=waiting),
                                     NEXT_MARKER_LINE.format(value=value)])
         output = ([line.format(item=item, new_item=waiting) for line in CLOSE_HELD_LINES] + statuses
@@ -5013,6 +5217,8 @@ def close(arguments):
         shown_total = unit[1] if unit is not None and unit[1] is not None else count
     named = items_named(numbers, shown_total)
     append_to_minutes(minutes, [NEXT_MARKER_LINE.format(value=named if numbers else CLOSED_MARKER_VALUE)])
+    if rehearsal:
+        return not numbers
     if numbers:
         not_started = start_read_ahead_of_item_after(walk_finder, top, minutes, parser, numbers, shown_total,
                                                      arguments.fast_read_program)

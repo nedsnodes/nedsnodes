@@ -151,6 +151,22 @@ def is_at_most_the_own_words_message(result):
     return is_only_the_own_words_message(result)
 
 
+COPY_FAILED_RULE_OPENING = "[rule walk-me-through-user-message-copied-to-walk-minutes] "
+COPY_FAILED_LATER_LINES = getattr(HOOK_MODULE, "WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_WHEN_USER_MESSAGE_NOT_COPIED_TO_WALK_MINUTES_LINES", ("",))[1:]
+COPIED_LINE = re.compile(r"\n+#user_message_copied(?:_needs_no_outcome)? [^\n]*")
+
+
+def without_copy_failed_lines(lines):
+    """lines with the hook's copy-failed message taken out, for cases about the answer's own message; the
+    test_every_typed_message_* cases check that message."""
+    return [line for line in lines if not line.startswith(COPY_FAILED_RULE_OPENING) and line not in COPY_FAILED_LATER_LINES]
+
+
+def minutes_without_copied_lines(text):
+    """The walk-minutes text with each line copying a user's message, and the blank line before it, taken out."""
+    return COPIED_LINE.sub("", text)
+
+
 class Case:
     """One case's own checkout and walk files."""
 
@@ -215,7 +231,7 @@ class Case:
                 or set(specific) != {"hookEventName", "additionalContext"}):
             return None
         context = specific["additionalContext"].replace(str(self.walk / f"{WALK_NAME}-minutes.md"), "<minutes>")
-        lines = context.split("\n")
+        lines = without_copy_failed_lines(context.split("\n"))
         # Most cases compare the answer's lines alone; the reply line every walk answer ends with is checked here.
         if lines[-1].startswith(USER_REPLY_LINE_OPENING):
             expected = USER_REPLY_LINE.format(reply=shlex.quote(" ".join(prompt.split())))
@@ -314,7 +330,7 @@ def is_only_the_own_words_message(result):
     if result.returncode != 0 or result.stderr or not result.stdout.strip():
         return False
     try:
-        lines = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n")
+        lines = without_copy_failed_lines(json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n"))
     except (ValueError, KeyError, TypeError, AttributeError):
         return False
     return len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING) and lines[1] == SETTLED_LINE
@@ -738,7 +754,7 @@ def test_r_on_an_open_walk_goes_to_the_agent_and_does_not_block():
               and lines[1:] == r_lines(word, "item 4 of 9", "a filter")
               and not any("leave the filter out" in line or "old rows" in line for line in lines),
               f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
-    check("R records nothing in the minutes", (case.walk / f"{WALK_NAME}-minutes.md").read_text() == before)
+    check("R records nothing in the minutes but its copy", minutes_without_copied_lines((case.walk / f"{WALK_NAME}-minutes.md").read_text()) == before)
     lines = Case(next_to_present="items 5 and 6 of 9").lines("r")
     check("R on items shown together and with no page tells the agent to publish each, in the one wording",
           lines is not None and lines[1:] == (r_lines("R", "item 5 of 9", "two small corrections")
@@ -778,7 +794,7 @@ def test_r_hands_the_agent_the_closing_line_of_the_items_newest_page():
               not_blocked(result) and lines is not None
               and lines[1] == page_line(prompt[:1].upper() + prompt[1:], "item 4 of 9", closing)
               and not any(PAGE_1 in line for line in lines), f"lines {lines!r}")
-    check("R with a page records nothing in the minutes", minutes.read_text() == before)
+    check("R with a page records nothing in the minutes but its copy", minutes_without_copied_lines(minutes.read_text()) == before)
     lines = case.lines("3 r")
     check("a numbered R hands the agent the closing line of the item it names",
           lines is not None and page_line("3 R", "item 3 of 9",
@@ -1039,7 +1055,7 @@ def test_numbered_r_alone_tells_the_agent_to_show_the_items_it_names_and_records
           and lines[1:9] == (numbered_r_lines("38", "item 38 of 9", "a second numbered item")
                              + numbered_r_lines("37.4", "item 37.4 of 9", "R with a number"))
           and not any("check step" in line or "`#next_to_present`" in line for line in lines), f"lines {lines!r}")
-    check("numbered R records nothing in the minutes", (case.walk / f"{WALK_NAME}-minutes.md").read_text() == before)
+    check("numbered R records nothing in the minutes but its copy", minutes_without_copied_lines((case.walk / f"{WALK_NAME}-minutes.md").read_text()) == before)
 
 
 ITEM_37_53_SECTION = """## Item 37.53 of 9: an item numbered 37.53
@@ -2590,8 +2606,8 @@ APPROVED_SENTENCE = (
 
 
 def context_lines(result):
-    return OutputLines(json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n")
-                       if result.stdout else [])
+    return OutputLines(without_copy_failed_lines(
+        json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n")) if result.stdout else [])
 
 
 def test_settled_line_holds_the_sentence_the_skill_holds_word_for_word():
@@ -2782,8 +2798,8 @@ def test_settled_line_failure_reading_the_walk_keeps_short_answer_output_and_rep
 
 
 OWN_WORDS_REPLY_RECORDED = re.compile(
-    r'\nUser \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), on item 4 of 9 while it waited, a reply in his words that is not a '
-    r'short answer: "(.*)"\n$')
+    r'\n#user_message_copied \d+ \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ item 4 of 9 baseline (?:[0-9a-f]{16}|none), in his words: '
+    r'(.*)\n$')
 
 
 def test_a_reply_in_his_own_words_is_recorded_in_the_walk_minutes_against_the_waiting_item():
@@ -2803,17 +2819,16 @@ def test_a_reply_in_his_own_words_is_recorded_in_the_walk_minutes_against_the_wa
           walk_finder.next_to_present(minutes.read_text(), walk_finder.markdown_parser())[0] == "item 4 of 9",
           minutes.read_text())
     before = minutes.read_text()
-    for prompt in ("a", "<task-notification>a task ended</task-notification>"):
-        case.run(prompt)
-        check(f"{prompt[:24]!r}, a short answer or a prompt he did not type, adds nothing to the walk-minutes",
-              minutes.read_text() == before, minutes.read_text())
+    case.run("<task-notification>a task ended</task-notification>")
+    check("a prompt he did not type adds nothing to the walk-minutes", minutes.read_text() == before,
+          minutes.read_text())
     case.run("take the other option", environment={"CLAUDE_CODE_SESSION_ATTENDED": "0"})
     check("a reply in a headless agent-session adds nothing to the walk-minutes", minutes.read_text() == before,
           minutes.read_text())
     transcript = case.checkout.parent / "unreadable-transcript.jsonl"
     transcript.write_bytes(b"\xff\xfe not a record\n")
-    case.run("take the other option", transcript_path=transcript)
-    check("a reply whose author the unreadable transcript leaves unknown adds nothing to the walk-minutes",
+    case.run("<task-notification>a task ended</task-notification>", transcript_path=transcript)
+    check("a prompt that opens as a program's, with the transcript unreadable, adds nothing to the walk-minutes",
           minutes.read_text() == before, minutes.read_text())
     paused = Case(next_to_present="item 4 of 9")
     paused_minutes = paused.minutes("#next_to_present item 4 of 9\n#approval_walk_paused")
@@ -2864,11 +2879,12 @@ def test_a_reply_in_his_own_words_that_cannot_be_recorded_says_why_and_gives_the
     lines = context_lines(result)
     check("the append fails: the hook exits 0, says why naming the walk-minutes, gives the line to add, and keeps the "
           "settled line last",
-          result.returncode == 0 and len(lines) == 5 and lines[0].startswith(OWN_WORDS_RULE_OPENING)
-          and lines[1].startswith(f"The hook could not record the user's reply in the walk-minutes {minutes}: ")
-          and "PermissionError" in lines[1] and lines[2].startswith("Add this line as the last line")
-          and OWN_WORDS_REPLY_RECORDED.search("\n" + lines[3] + "\n") is not None and lines[-1] == SETTLED_LINE
-          and "User (" not in minutes.read_text(),
+          result.returncode == 0 and len(lines) == 5
+          and lines[0].startswith(f"The hook could not record the user's reply in the walk-minutes {minutes}: ")
+          and "PermissionError" in lines[0] and lines[1].startswith("Add this line as the last line")
+          and OWN_WORDS_REPLY_RECORDED.search("\n" + lines[2] + "\n") is not None
+          and lines[3].startswith(OWN_WORDS_RULE_OPENING) and lines[-1] == SETTLED_LINE
+          and "#user_message_copied" not in minutes.read_text(),
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 
@@ -2994,6 +3010,351 @@ def test_the_own_words_predicates_fail_output_that_is_not_only_the_own_words_mes
     check("no output at all is at most the own-words message", is_at_most_the_own_words_message(result("")))
     check("the hook's own-words message is at most the own-words message",
           is_at_most_the_own_words_message(own_words), f"stdout {own_words.stdout!r}")
+
+
+
+
+def test_a_plain_english_form_means_its_answer_only_as_the_whole_prompt():
+    case = Case(next_to_present="item 4 of 9")
+
+    def with_word_replaced(lines, word):
+        shown = word[:1].upper() + word[1:].lower() + " "
+        return None if lines is None else [
+            "<answer> " + line[len(shown):] if line.startswith(shown) else line.replace(f'"{word}"', '"<answer>"')
+            for line in lines]
+
+    for prompt, same_as in (("I approve", "approve"), ("i approve.", "approve"),
+                            ("I approve your recommendation", "approve"), ("I APPROVE YOUR RECOMMENDATION.", "approve"),
+                            ("I disapprove", "disapprove"), ("i disapprove.", "disapprove"),
+                            ("more", "more responses"), ("More.", "more responses")):
+        word = prompt.strip().rstrip(".")
+        lines = with_word_replaced(case.lines(prompt), word)
+        check(f"{prompt!r} gets the instructions {same_as!r} gets", lines is not None
+              and lines == with_word_replaced(case.lines(same_as), same_as), lines)
+    for prompt in ("more detail please", "More importantly, why?", "more of this", "more if you can", "more, please",
+                   "more 4", "I approve of the page", "I approve, but reword it", "I approve item 4", "I approve 4",
+                   "I approve if the tests pass", "I disapprove because it is wrong",
+                   "I approve your recommendation but reword it", "yes", "Yes.", "I agree"):
+        result = case.run(prompt)
+        check(f"{prompt!r} is no answer, so the hook prints only the own-words message",
+              is_only_the_own_words_message(result),
+              f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
+COPY_WALK_DOCUMENT = "# A walk\n\n## Item 3 of 9: the poem page\n\nThe page goes in the wiki.\n\nRecommendation: put it there.\n"
+CHECK_PROGRAM_FILE = HOOK_SCRIPT.parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py"
+COPY_WALK_FINDER = HOOK_MODULE.load_walk_finder()
+
+
+class CopyCase:
+    """A checkout whose open approval-walk `poem` waits on item 3 of 9, for the cases on copying his messages."""
+
+    counter = 0
+
+    def __init__(self, marker="#next_to_present item 3 of 9"):
+        CopyCase.counter += 1
+        self.checkout = SUITE_ROOT / f"copy-case-{CopyCase.counter}"
+        self.walk = self.checkout / "docs" / "walk"
+        self.walk.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(self.checkout)], check=True)
+        (self.walk / "poem.md").write_text(COPY_WALK_DOCUMENT)
+        self.minutes = self.walk / "poem-minutes.md"
+        self.minutes.write_text(f"# Minutes\n\n{marker}\n")
+
+    def run(self, prompt, environment_extra=None, stdin_text=None, hook_start=None, cwd=None):
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": "test-session", "cwd": str(cwd or self.checkout),
+                   "transcript_path": str(self.checkout / "no-transcript.jsonl"), "prompt": prompt}
+        environment = ATTENDANCE_CHECK.environment_without_agent_session_attendance_variables(os.environ)
+        environment.update(environment_extra or {})
+        return subprocess.run(hook_start or HOOK_START, input=json.dumps(payload) if stdin_text is None else stdin_text,
+                              capture_output=True, text=True, env=environment, cwd=self.checkout)
+
+    def copied_lines(self):
+        return [line for line in self.minutes.read_text().split("\n") if line.startswith("#user_message_copied ")]
+
+    def bare_lines(self):
+        return [line for line in self.minutes.read_text().split("\n")
+                if line.startswith("#user_message_copied_needs_no_outcome ")]
+
+
+def copy_failed_context(result):
+    """The context's lines of the copy-failed message, or [] when it has none."""
+    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if result.stdout.strip() else ""
+    return [line for line in context.split("\n")
+            if line.startswith(COPY_FAILED_RULE_OPENING) or line in COPY_FAILED_LATER_LINES]
+
+
+def test_every_typed_message_that_is_not_only_an_answer_is_copied_with_the_time_item_and_baseline():
+    case = CopyCase()
+    result = case.run("why does the page go in the wiki?")
+    lines = case.copied_lines()
+    check("a question is copied, and the hook reports no failure",
+          result.returncode == 0 and copy_failed_context(result) == [] and len(lines) == 1, f"{result!r} {lines}")
+    check("the copied line holds its id, UTC time, item, baseline and words in a code span",
+          bool(lines) and re.fullmatch(r"#user_message_copied 1 \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ item 3 of 9 baseline "
+                                       r"[0-9a-f]{16}, in his words: `why does the page go in the wiki\?`",
+                                       lines[0]) is not None, lines)
+    case.run("a second\nmessage on two lines")
+    lines = case.copied_lines()
+    check("the next copied line takes the next id and is one line",
+          len(lines) == 2 and lines[1].startswith("#user_message_copied 2 ")
+          and lines[1].endswith("`a second message on two lines`"), lines)
+
+
+def test_every_typed_message_with_other_words_needs_an_outcome_and_a_bare_answer_or_navigation_word_does_not():
+    for prompt in ("a but keep the old name", "a if the tests pass", "d, and tell me why", "unrelated: is ned-box up?",
+                   "more detail please", "I approve, but reword it", "yes"):
+        case = CopyCase()
+        case.run(prompt)
+        check(f"{prompt!r} is copied as needing an outcome", len(case.copied_lines()) == 1 and case.bare_lines() == [],
+              case.minutes.read_text())
+    for prompt in ("a", "A.", "approved", "ao", "d", "z", "r", "m", "all a", "3 a", "1 a 2 d", "approve item 3",
+                   "I approve", "I approve your recommendation", "I disapprove", "more", "more responses",
+                   "n", "next", "Continue.", "go"):
+        case = CopyCase()
+        result = case.run(prompt)
+        lines = case.bare_lines()
+        check(f"{prompt!r} is copied with the time and item, needing no outcome",
+              result.returncode == 0 and copy_failed_context(result) == [] and case.copied_lines() == []
+              and len(lines) == 1
+              and re.fullmatch(r"#user_message_copied_needs_no_outcome \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ item 3 of 9, "
+                               r"in his words: `" + re.escape(prompt) + "`", lines[0]) is not None,
+              f"{result!r} {lines}")
+    for prompt in ("   ", ""):
+        case = CopyCase()
+        result = case.run(prompt)
+        check(f"{prompt!r} holds no message, so nothing is copied",
+              result.returncode == 0 and case.copied_lines() == [] and case.bare_lines() == [], case.minutes.read_text())
+
+
+def test_every_typed_message_counts_only_a_bump_naming_an_item_not_yet_shown_as_a_bare_answer():
+    unshown_heading = ("\n## the code proposals\n\n#approval_walk_item_in_category_fix_next\n\nThe proposals.\n\n"
+                       "Recommendation: take them.\n")
+    for prompt, bare in (("bump the code proposals", True), ("BUMP  The Code Proposals", True),
+                         ("bump the retry limit to five and reword this item", False),
+                         ("bump the poem page", False)):
+        case = CopyCase()
+        (case.walk / "poem.md").write_text(COPY_WALK_DOCUMENT + unshown_heading)
+        result = case.run(prompt)
+        check(f"{prompt!r} is copied as {'a bare answer' if bare else 'needing an outcome'}",
+              result.returncode == 0 and copy_failed_context(result) == []
+              and len(case.bare_lines()) == (1 if bare else 0) and len(case.copied_lines()) == (0 if bare else 1),
+              f"{result!r} {case.minutes.read_text()}")
+    case = CopyCase()
+    (case.walk / "poem.md").unlink()
+    result = case.run("bump the code proposals")
+    check("a bump with no walk-document to name an item in is reported as a failed copy, not lost silently",
+          result.returncode == 0 and copy_failed_context(result) != [] and case.bare_lines() == [], f"{result!r}")
+
+
+def test_every_typed_message_copies_a_bare_answer_with_the_walk_document_missing():
+    case = CopyCase()
+    (case.walk / "poem.md").unlink()
+    result = case.run("a")
+    check("a bare answer needs no baseline, so a missing walk-document does not stop its copy",
+          result.returncode == 0 and copy_failed_context(result) == [] and len(case.bare_lines()) == 1, f"{result!r}")
+
+
+def test_every_typed_message_copied_as_a_bare_answer_decides_nothing_until_the_check_programs_close_step():
+    rulings_store = load_module_by_path("standing_user_rulings_store_for_copy_test", CHECKOUT / "scripts" / (
+        "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.py"))
+    conversion = load_module_by_path("walk_minutes_conversion_hack_for_copy_test", HOOK_SCRIPT.parent / (
+        "walk-me-through-open-walk-minutes-hand-written-decision-lines-to-program-lines-one-time-conversion-hack.py"))
+    check_program = load_module_by_path("walk_check_program_for_bare_answer_copy_test", CHECK_PROGRAM_FILE)
+    parser = COPY_WALK_FINDER.markdown_parser()
+    for prompt in ("a", "approved", "I approve", "d", "disapproved", "z", "next"):
+        case = CopyCase()
+        case.run(prompt)
+        text = case.minutes.read_text()
+        line = case.bare_lines()[0] if case.bare_lines() else ""
+        decided, deferred = check_program.minutes_record(COPY_WALK_FINDER, text, parser)
+        check(f"the copied {prompt!r} neither decides nor defers an item", line != "" and not decided and not deferred,
+              f"{line} {decided} {deferred}")
+        check(f"the copied {prompt!r} leaves the approval-walk at its item",
+              COPY_WALK_FINDER.next_to_present(text, parser) == ("item 3 of 9", False, False), text)
+        check(f"the copied {prompt!r} is no answer line", check_program.ANSWER_LINE.match(line) is None, line)
+        check(f"the copied {prompt!r} is no user-ruling in the standing store",
+              rulings_store.walk_minutes_said_at(line) is None, line)
+        check(f"the copied {prompt!r} is no line the one-time conversion reads as an item",
+              conversion.RECORDED_ITEMS.match(line) is None, line)
+    case = CopyCase()
+    (case.walk / "poem.md").write_text(COPY_WALK_DOCUMENT + "\n#case_against weak: nothing argues against it.\n")
+    case.run("a")
+    environment = ATTENDANCE_CHECK.environment_without_agent_session_attendance_variables(os.environ)
+    # These flags keep the check program away from the real log-store and GitHub.
+    scratch = case.checkout.parent / f"check-program-paths-{CopyCase.counter}"
+    (scratch / "cold-read-records").mkdir(parents=True)
+    (scratch / "gh").write_text("#!/bin/sh\necho '[]'\n")
+    (scratch / "gh").chmod(0o755)
+    isolating_flags = ["--cwd", str(case.checkout), "--cold-read-records", str(scratch / "cold-read-records"),
+                       "--counts-log", str(scratch / "counts.tsv"), "--gh-program", str(scratch / "gh")]
+    for step in (["check", "--user-reply-as-typed", "a"], ["close"]):
+        result = subprocess.run([sys.executable, str(CHECK_PROGRAM_FILE), *step, *isolating_flags], capture_output=True,
+                                text=True, cwd=case.checkout, env=environment)
+        check(f"the check program's `{step[0]}` step runs on walk-minutes holding a copied bare answer",
+              result.returncode == 0, f"{result.stdout} {result.stderr}")
+        if step[0] == "check":
+            decided, _ = check_program.minutes_record(COPY_WALK_FINDER, case.minutes.read_text(), parser)
+            check("after `check` alone the item is not decided", "3" not in decided, case.minutes.read_text())
+    decided, _ = check_program.minutes_record(COPY_WALK_FINDER, case.minutes.read_text(), parser)
+    check("the `close` step decides the item", "3" in decided, case.minutes.read_text())
+
+
+def test_every_typed_message_copy_leaves_out_a_prompt_no_user_typed():
+    for name, prompt in (("a background-task notice", "<task-notification>\n<task-id>a1</task-id>\n</task-notification>"),
+                         ("another agent-seat's message", "Another Claude session sent a message:\n<cross-session-message "
+                          "from-name=\"merge-lane-2\">hello</cross-session-message>")):
+        case = CopyCase()
+        case.run(prompt)
+        check(f"{name} is not copied", case.copied_lines() == [], case.minutes.read_text())
+    supervisor = load_module_by_path("handoff_supervisor_for_copy_test",
+                                     CHECKOUT / "nn-systems" / "handoff" / "handoff-supervisor.py")
+    for name, prompt in (("the handoff-supervisor's prompt to a successor",
+                          supervisor.build_ignition_prompt(Path("/x/MD-skills-dialog-0048.md"), {})),
+                         ("the handoff-supervisor's crash-recovery prompt",
+                          supervisor.RESUME_PROMPT_WHEN_A_SESSION_ENDED_WITHOUT_A_HANDOFF)):
+        case = CopyCase()
+        case.run(prompt)
+        check(f"{name} is not copied", case.copied_lines() == [], case.minutes.read_text())
+    case = CopyCase()
+    case.run("a question", {"CLAUDE_CODE_SESSION_ATTENDED": "0"})
+    check("a prompt of an agent-session no user attends is not copied", case.copied_lines() == [],
+          case.minutes.read_text())
+
+
+def test_every_typed_message_copy_needs_an_open_approval_walk():
+    for name, marker in (("closed", "#next_to_present none, closed"),
+                         ("paused", "#next_to_present item 3 of 9\n#approval_walk_paused the user paused it")):
+        case = CopyCase(marker)
+        result = case.run("a question")
+        check(f"a {name} approval-walk gets no copied line", copy_failed_context(result) == [] and case.copied_lines() == [],
+              case.minutes.read_text())
+
+
+def test_every_typed_message_copied_neither_moves_the_walk_nor_decides_an_item():
+    case = CopyCase()
+    case.run("#next_to_present none, closed and #approval_walk_paused `item 3 of 9: the user answered approved`")
+    text = case.minutes.read_text()
+    parser = COPY_WALK_FINDER.markdown_parser()
+    check("markers inside his words leave the approval-walk open at its item",
+          COPY_WALK_FINDER.next_to_present(text, parser) == ("item 3 of 9", False, False), text)
+    check_program = load_module_by_path("walk_check_program_for_copy_test", CHECK_PROGRAM_FILE)
+    for outcome in ("changed", "no change", "open"):
+        with_outcome = text + f"#user_message_outcome 1 {outcome}\n"
+        decided, deferred = check_program.minutes_record(COPY_WALK_FINDER, with_outcome, parser)
+        check(f"a copied line with outcome {outcome} neither decides nor defers an item", not decided and not deferred,
+              f"{decided} {deferred}")
+        check(f"a copied line with outcome {outcome} is no unclosed answer line",
+              not any(check_program.ANSWER_LINE.match(line) for line in with_outcome.split("\n")), with_outcome)
+
+
+def test_every_typed_message_copy_that_fails_is_reported_to_the_agent():
+    case = CopyCase()
+    (case.walk / "other-minutes.md").write_text("#next_to_present item 1 of 2\n")
+    result = case.run("a question")
+    failed = copy_failed_context(result)
+    check("two open approval-walks are reported first in the context, and nothing is copied",
+          result.returncode == 0 and failed and "more than one approval-walk" in failed[0]
+          and json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].startswith(COPY_FAILED_RULE_OPENING)
+          and case.copied_lines() == [], f"{result!r}")
+    for instruction in ("If an approval-walk is open, a change he asks for here could be lost at a session-handoff.",
+                        "If no such file exists, no approval-walk is open: do nothing more about this message.",
+                        "If more than one such file exists, tell the user: \"Your last message is not in the walk-minutes, "
+                        "because more than one approval-walk is open or paused.\"",
+                        "If your write to that file fails, tell the user: \"Your last message is not in the walk-minutes, "
+                        "because <the error your write reported>.\""):
+        check(f"the copy-failed message gives the line {instruction!r}", instruction in "\n".join(failed), failed)
+    case = CopyCase("#next_to_present the next one")
+    result = case.run("a question")
+    check("a `#next_to_present` value naming no item is reported, and nothing is copied",
+          "does not open with an item" in "\n".join(copy_failed_context(result)) and case.copied_lines() == [],
+          f"{result!r}")
+    case = CopyCase()
+    case.minutes.chmod(0o444)
+    try:
+        result = case.run("a")
+    finally:
+        case.minutes.chmod(0o644)
+    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if result.stdout else ""
+    check("a bare answer whose append fails gets the line to add before its own message, exit 0",
+          result.returncode == 0 and context.startswith("The hook could not record the user's reply in the walk-minutes")
+          and "PermissionError" in context and "#user_message_copied_needs_no_outcome" in context
+          and "The user answered \"a\" to item 3 of 9" in context, f"{result!r}")
+
+
+def hook_copy_beside_walk_finder_that_cannot_load():
+    """The hook in a scratch tree whose walk finder fails at import, as the real one does on the Mac's Python 3.9; the
+    tree's other directories are links to this checkout's, so the hook finds every other module it loads."""
+    root = SUITE_ROOT / "hook-with-walk-finder-that-cannot-load"
+    skill = root / "nn-systems" / "skills" / "walk-me-through"
+    skill.mkdir(parents=True)
+    for name in ("general-tools", "handoff", "cold-read"):
+        (root / "nn-systems" / name).symlink_to(CHECKOUT / "nn-systems" / name)
+    (root / "scripts").symlink_to(CHECKOUT / "scripts")
+    for source in HOOK_SCRIPT.parent.glob("*.py"):
+        shutil.copy(source, skill)
+    (skill / WALK_FINDER_FILE_NAME).write_text("import re\nre.compile('(?P<')\n")
+    return [sys.executable, str(skill / HOOK_SCRIPT.name)]
+
+
+WALK_FINDER_FILE_NAME = "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+
+
+def test_every_typed_message_copy_with_a_walk_finder_that_cannot_load_warns_only_where_walk_minutes_exist():
+    hook_start = hook_copy_beside_walk_finder_that_cannot_load()
+    case = CopyCase()
+    case.minutes.unlink()
+    result = case.run("a", hook_start=hook_start)
+    check("a checkout with no walk-minutes never loads the walk finder for the copy, so no copy failure is reported",
+          result.returncode == 0 and COPY_FAILED_RULE_OPENING not in result.stdout, f"{result!r}")
+    case = CopyCase()
+    subdirectory = case.checkout / "scripts"
+    subdirectory.mkdir()
+    result = case.run("a question", hook_start=hook_start, cwd=subdirectory)
+    check("walk-minutes are found from a subdirectory of the checkout, and the failed load is reported",
+          result.returncode == 0 and COPY_FAILED_RULE_OPENING in result.stdout, f"{result!r}")
+
+
+def test_every_typed_message_is_copied_from_a_directory_git_places_in_the_checkout():
+    case = CopyCase()
+    (case.checkout / "scripts").mkdir()
+    outside = SUITE_ROOT / f"outside-checkout-{CopyCase.counter}"
+    outside.mkdir()
+    (outside / "link").symlink_to(case.checkout / "scripts")
+    result = case.run("a question", cwd=outside / "link")
+    check("a cwd that is a symlink from outside the checkout into a subdirectory gets the message copied",
+          result.returncode == 0 and len(case.copied_lines()) == 1, f"{result!r} {case.minutes.read_text()}")
+    case = CopyCase()
+    (case.checkout / "sub" / ".git").mkdir(parents=True)
+    result = case.run("a question", cwd=case.checkout / "sub")
+    check("a subdirectory holding an empty `.git` directory gets the message copied",
+          result.returncode == 0 and len(case.copied_lines()) == 1, f"{result!r} {case.minutes.read_text()}")
+
+
+def test_every_typed_message_copy_from_a_directory_git_cannot_answer_for_warns_only_beside_walk_minutes():
+    case = CopyCase()
+    case.minutes.unlink()
+    bare = SUITE_ROOT / f"bare-{CopyCase.counter}.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    outside = SUITE_ROOT / f"no-checkout-{CopyCase.counter}"
+    outside.mkdir()
+    for name, directory in (("inside a `.git` directory", case.checkout / ".git"), ("in a bare repository", bare),
+                            ("removed since the agent-session started", case.checkout / "removed"),
+                            ("outside any checkout", outside)):
+        result = case.run("a question", cwd=directory)
+        check(f"with no walk-minutes, a cwd {name} gets no copy warning",
+              result.returncode == 0 and COPY_FAILED_RULE_OPENING not in result.stdout, f"{result!r}")
+    case = CopyCase()
+    for name, directory in (("inside `.git`", case.checkout / ".git"), ("removed", case.checkout / "removed")):
+        result = case.run("a question", cwd=directory)
+        check(f"with walk-minutes, a cwd {name} gets the copy-failed warning, because the message was not copied",
+              result.returncode == 0 and COPY_FAILED_RULE_OPENING in result.stdout and case.copied_lines() == [],
+              f"{result!r}")
+    notice = "<task-notification>\n<task-id>a1</task-id>\n</task-notification>"
+    for name, directory in (("inside `.git`", case.checkout / ".git"), ("since removed", case.checkout / "removed")):
+        result = case.run(notice, cwd=directory)
+        check(f"an untyped prompt from a cwd {name} gets no copy warning",
+              result.returncode == 0 and COPY_FAILED_RULE_OPENING not in result.stdout, f"{result!r}")
 
 
 def main():

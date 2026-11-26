@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Find the open approval-walk and its waiting items: the walk-minutes' last
 `#next_to_present` line, and the units of the walk-document that hold the
-items it names. The walk-me-through Stop hook, the short-answer
-UserPromptSubmit hook and the check program load this module by path, so all
-three read the walk files the same way.
+items it names. The walk-me-through hooks, the check program and the
+threshold-hook load this module by path, so all read the walk files the same
+way.
 
 THE OPEN APPROVAL-WALK. The walk-me-through skill keeps a `#next_to_present`
 line in each walk's docs/walk/<name>-minutes.md. The marker is found anywhere
@@ -143,11 +143,30 @@ ends with that line and holds no recommendation, so that the answer
 program's --moved-on-no-decision, which refuses an item with a recommendation,
 accepts each of them.
 
+COPIED USER MESSAGES. While an approval-walk is open, the short-answer hook
+writes each message the user typed into the walk-minutes. A bare answer or
+navigation word is written as `#user_message_copied_needs_no_outcome <UTC time>
+<running count>, in his words: <his words in a code span>`, which no program
+reads as a decision and which asks nothing of the agent: only the check
+program's close step decides an item. Any other message is written as
+`#user_message_copied <id> <UTC time> <running count> baseline <digest>, in his
+words: <his words in a code span>`. Both hold `his words` after the running
+count, so the check program's fresh-agent brief finds them as it finds the
+check step's answer lines. The agent records what became of it with a line of its
+own, `#user_message_outcome <id> changed`, `no change` or `open`; the newest
+such line for an id counts. The digest is the first 16 hexadecimal digits of
+the SHA-256 of the waiting items' text as shown to the user, with whitespace
+squeezed and each `of M` and deferred note taken out, so that adding an item
+or deferring one is no change; `none` when the walk-document held no such item.
+`changed` counts only while the item's digest now differs from the baseline, so
+an item since removed counts as changed. None of these lines opens with an
+item's running count, so none is an answer line or a line that decides an item.
+
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 """
+import hashlib
 import importlib.util
-import os
 import re
 from pathlib import Path
 
@@ -163,15 +182,25 @@ MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT = r"(?:(?:[-*+]|\d+[.)
 APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN = re.compile(
     rf"^\s*(?:{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}|Part \d+\.\s+)*(#new(?:_if_d)?)\b[:\s]*(.*)$")
 
+
+def load_module(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
 REPOSITORY_TOP = Path(__file__).resolve().parents[3]
-SUITE_RUNNER_FILE = REPOSITORY_TOP / "scripts" / "run-all-test-suites.py"
-GIT_MODULE_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
-                   / "git-machine-readable-output-runner-and-parser-common.py")
+walk_minutes_checkout_lookup = load_module(
+    "walk_me_through_top_directory_of_git_checkout_holding_walk_minutes_file_lookup_common",
+    Path(__file__).resolve().with_name(
+        "walk-me-through-top-directory-of-git-checkout-holding-walk-minutes-file-lookup-common.py"))
+checkout_top = walk_minutes_checkout_lookup.checkout_top
 MARKDOWN_PARSER_MODULE_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
                                / "markdown-commonmark-parser-with-tables-common.py")
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
-WALK_DIRECTORY = Path("docs") / "walk"
-MINUTES_SUFFIX = "-minutes.md"
+WALK_DIRECTORY = walk_minutes_checkout_lookup.WALK_DIRECTORY
+MINUTES_SUFFIX = walk_minutes_checkout_lookup.MINUTES_SUFFIX
 # Group 1 is set only for the hashtag; the old form is read so that open walks it marks are migrated.
 # The value runs to the line's end, the next marker or a pause hashtag, so two markers on a line are read as two
 # and a pause on the marker's line is not read as part of the value.
@@ -237,6 +266,16 @@ ITEM_PAGE_LINE_PATTERN = re.compile(
 ITEM_PAGE_NOTE_VERSION = re.compile(r"\bversion[ \t]+(\d+)", re.I)
 # A link has no space in it, so no link can equal this value.
 ITEM_PAGE_PUBLISH_FAILED = "publish failed"
+# A navigation word moves the walk on and says nothing else.
+NAVIGATION_WORD_ALONE = re.compile(r"^(?:next|n|continue|go)[.!]*$", re.I)
+USER_MESSAGE_COPIED_LINE = re.compile(
+    r"^#user_message_copied (?P<id>\d+) (?P<time>\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (?P<item>items? .+?) "
+    r"baseline (?P<baseline>[0-9a-f]{16}|none), in his words: (?P<words>.+)$")
+USER_MESSAGE_COPIED_NEEDS_NO_OUTCOME_HASHTAG = "#user_message_copied_needs_no_outcome"
+WALK_MINUTES_USER_MESSAGE_OUTCOME_LINE_CHANGED_OUTCOME_WORD = "changed"
+WALK_MINUTES_USER_MESSAGE_OUTCOME_LINE_OPEN_OUTCOME_WORD = "open"
+WALK_MINUTES_USER_MESSAGE_OUTCOME_LINE = re.compile(r"^#user_message_outcome (?P<id>\d+) (?P<outcome>changed|no change|open)[ \t]*$")
+USER_MESSAGE_NO_ITEM_BASELINE = "none"
 NOT_A_FORM_PROBLEM = (
     "does not open with an item in one of the forms `item N of M`, `item N.K of M`, "
     "`items N and P of M` or `items N to P of M`")
@@ -255,26 +294,6 @@ class MoreThanOneUnclosedApprovalWalk(Exception):
 class UnusableRange(ValueError):
     """A running count names no item, or the walk-document does not hold the items one names; its
     argument says why."""
-
-
-def load_module(name, path):
-    specification = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(module)
-    return module
-
-
-def checkout_top(directory):
-    """Return the top of directory's checkout, or None outside one."""
-    runner = load_module("run_all_test_suites", SUITE_RUNNER_FILE)
-    git = load_module("git_machine_readable_output_runner_and_parser_common", GIT_MODULE_FILE)
-    environment = {name: value for name, value in os.environ.items()
-                   if name not in runner.GIT_REDIRECTING_ENVIRONMENT_VARIABLES}
-    output = git.run_git_unless_outside_a_repository(
-        directory, ["rev-parse", "--show-toplevel"], environment=environment)
-    if output is None:
-        return None
-    return Path(os.fsdecode(output).rstrip("\n"))
 
 
 def approval_walk_item_heading_with_deferred_note_removed(line):
@@ -1013,3 +1032,62 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
         raise UnusableRange("its walk-document has " + "; and it has ".join(problems) + ".")
     shown_total = total if total is not None else approval_walk_item_total_shown_and_waiting_counted_from_walk_document(all_units)
     return shown_total, [unit for unit in all_units if unit in chosen]
+
+
+def approval_walk_items_text_as_shown_to_user_digest(document, item_count, parser):
+    """The digest the module docstring's COPIED USER MESSAGES describes, of the items the running count item_count
+    names in the walk-document, or USER_MESSAGE_NO_ITEM_BASELINE when it holds no such item."""
+    text = document.read_text(encoding="utf-8")
+    units = item_unit_spans(text, parser)
+    try:
+        numbers, total = parse_items(item_count)
+        _, chosen = waiting_item_units(document, item_count, numbers, total, parser, units)
+    except UnusableRange:
+        return USER_MESSAGE_NO_ITEM_BASELINE
+    shown = [approval_walk_item_heading_with_deferred_note_removed(approval_walk_item_text_as_shown_to_user(
+                 text, parser, units, next(unit for unit in chosen if number in unit[0]), number))
+             for number in numbers]
+    squeezed = " ".join(approval_walk_text_with_running_count_totals_removed("\n".join(shown)).split())
+    return hashlib.sha256(squeezed.encode("utf-8")).hexdigest()[:16]
+
+
+def approval_walk_minutes_user_message_copied_line_build(minutes_text, value, document, message, moment, parser,
+                                                         needs_no_outcome=False):
+    """The line that copies message into the walk-minutes, in the form the module docstring's COPIED USER MESSAGES
+    gives for needs_no_outcome, the walk's `#next_to_present` value naming the waiting items. Raise UnusableRange when
+    the value names no item."""
+    count = VALUE_COUNT.match(value)
+    if not count:
+        raise UnusableRange(NOT_A_FORM_PROBLEM)
+    if needs_no_outcome:
+        return (f"{USER_MESSAGE_COPIED_NEEDS_NO_OUTCOME_HASHTAG} {moment.strftime('%Y-%m-%dT%H:%M:%SZ')} {count[0]}, "
+                f"in his words: {text_wrapped_as_markdown_code_span(message)}")
+    copied_ids = [int(match["id"]) for match in map(USER_MESSAGE_COPIED_LINE.match, prose_lines(minutes_text, parser))
+                  if match]
+    baseline = approval_walk_items_text_as_shown_to_user_digest(document, count[0], parser)
+    return (f"#user_message_copied {max(copied_ids, default=0) + 1} {moment.strftime('%Y-%m-%dT%H:%M:%SZ')} "
+            f"{count[0]} baseline {baseline}, in his words: {text_wrapped_as_markdown_code_span(message)}")
+
+
+def approval_walk_user_message_lines_copied_to_walk_minutes_each_paired_with_newest_outcome_or_none_find(minutes_text, parser):
+    """Return [(the copied line's USER_MESSAGE_COPIED_LINE match, its id's newest outcome or None)]."""
+    lines = prose_lines(minutes_text, parser)
+    outcomes = {match["id"]: match["outcome"] for match in map(WALK_MINUTES_USER_MESSAGE_OUTCOME_LINE.match, lines) if match}
+    return [(match, outcomes.get(match["id"])) for match in filter(None, map(USER_MESSAGE_COPIED_LINE.match, lines))]
+
+
+def approval_walk_user_message_lines_copied_to_walk_minutes_without_valid_outcome_find(minutes_text, document, parser):
+    """Return [(id, time, running count, his words in their code span, whether the newest outcome says `changed`
+    while the item's text still has its baseline digest)] for each copied line with no outcome that counts."""
+    digests = {}
+    missing = []
+    for match, outcome in approval_walk_user_message_lines_copied_to_walk_minutes_each_paired_with_newest_outcome_or_none_find(
+            minutes_text, parser):
+        unchanged = False
+        if outcome == WALK_MINUTES_USER_MESSAGE_OUTCOME_LINE_CHANGED_OUTCOME_WORD:
+            if match["item"] not in digests:
+                digests[match["item"]] = approval_walk_items_text_as_shown_to_user_digest(document, match["item"], parser)
+            unchanged = digests[match["item"]] == match["baseline"]
+        if outcome is None or unchanged:
+            missing.append((match["id"], match["time"], match["item"], match["words"], unchanged))
+    return missing

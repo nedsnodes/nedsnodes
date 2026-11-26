@@ -8373,6 +8373,383 @@ def test_a_printed_command_gives_an_option_like_value_in_flag_equals_value_form(
           rerun.returncode == 0 and "--no-cache" in case.minutes.read_text(), described(rerun))
 
 
+COPIED_MESSAGE_WALK = ("# A walk\n\n## Item 1 of 2: one\n\nText one.\n\nRecommendation: do it.\n\n"
+                       "## Item 2 of 2: two\n\nText two.\n\nRecommendation: do it.\n")
+COPIED_MESSAGE_WALK_WITH_SUB_STEP = ("# A walk\n\n## Item 1 of 2: one\n\nText one.\n\nRecommendation: do it.\n\n"
+                                     "### Item 1.1 of 2: part\n\nText part.\n\nRecommendation: do it.\n\n"
+                                     "## Item 2 of 2: two\n\nText two.\n\nRecommendation: do it.\n")
+COPIED_MESSAGE_WALK_ASKING_NO_DECISION = "# A walk\n\n## Item 1 of 2: one\n\nA summary.\n\n## Item 2 of 2: two\n\nText.\n"
+# Differs from every digest of these walks, so a `changed` outcome counts without an edit to the walk-document.
+COPIED_MESSAGE_BASELINE = "0123456789abcdef"
+
+
+def copied_message_line(copied_id, item, words="reword the title"):
+    return (f"#user_message_copied {copied_id} 2026-11-23T17:38:04Z {item} baseline {COPIED_MESSAGE_BASELINE}, in his words: "
+            f"`{words}`")
+
+
+def minutes_appended(case, *lines):
+    case.minutes.write_text(case.minutes.read_text() + "".join(line + "\n" for line in lines))
+
+
+def run_printed_outcome_command(result, outcome):
+    command = next(line.split(": ", 1)[1] for line in result.stderr.split("\n")
+                   if line.startswith(f"  {outcome}: printf"))
+    return subprocess.run(command, shell=True, capture_output=True, text=True)
+
+
+def case_waiting_on_last_item_with_answer_checked(*copied_lines):
+    """A walk whose item 1 is decided and whose last item, 2, holds copied_lines and a checked answer."""
+    case = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    case.run("check")
+    case.run("close")
+    minutes_appended(case, *copied_lines)
+    case.run("check")
+    return case
+
+
+def test_close_that_would_end_the_walk_refuses_a_copied_message_with_no_outcome_and_closes_after_the_outcome():
+    case = case_waiting_on_last_item_with_answer_checked(copied_message_line(1, "item 2 of 2"))
+    minutes, document = case.minutes.read_text(), walk_document(case)
+    refused = case.run("close")
+    close_command = shlex.join(["python3", str(PROGRAM), "close", "--cwd", str(case.checkout.resolve())])
+    check("close refuses to end the walk, naming the message and each instruction",
+          refused.returncode == 1
+          and "nothing written: this close would end the approval-walk" in refused.stderr
+          and "hold 1 copied user message(s) with no valid outcome" in refused.stderr
+          and "- id 1, item 2 of 2, at 2026-11-23T17:38:04Z: `reword the title`" in refused.stderr
+          and all(f"  {outcome}: printf" in refused.stderr for outcome in ("changed", "no change", "open"))
+          and "write the change there unless you already have, then run the command labelled `changed`" in refused.stderr
+          and "that item's text, run the command labelled `no change`" in refused.stderr
+          and "write the change into that item in the walk-document" in refused.stderr
+          and "run the command labelled `open`, do not run close yet, and ask the user" in refused.stderr
+          and "quoting his message and the item's current text, with your recommendation" in refused.stderr
+          and "if you are a subagent, put that question to the agent that dispatched you" in refused.stderr
+          and close_command in refused.stderr, described(refused))
+    check("a refused close changes neither the walk-minutes nor the walk-document",
+          case.minutes.read_text() == minutes and walk_document(case) == document)
+    check("the refused close posts no ruling comment", case.gh_comments() == [], str(case.gh_comments()))
+    recorded = run_printed_outcome_command(refused, "no change")
+    closed = case.run("close")
+    check("after the printed command records the outcome, the same close ends the walk",
+          recorded.returncode == 0 and closed.returncode == 0
+          and case.minutes.read_text().rstrip().endswith("#next_to_present none, closed"),
+          described(recorded) + described(closed) + case.minutes.read_text())
+
+
+def test_close_that_would_end_the_walk_refuses_a_changed_outcome_whose_item_text_is_unchanged():
+    case = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    case.run("check")
+    case.run("close")
+    finder = importlib.util.spec_from_file_location(
+        "walk_finder_for_copied_message_digest",
+        PROGRAM.parent / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
+    walk_finder = importlib.util.module_from_spec(finder)
+    finder.loader.exec_module(walk_finder)
+    digest = walk_finder.approval_walk_items_text_as_shown_to_user_digest(
+        case.minutes.with_name(f"{WALK_NAME}.md"), "item 2 of 2", walk_finder.markdown_parser())
+    minutes_appended(case, copied_message_line(1, "item 2 of 2").replace(COPIED_MESSAGE_BASELINE, digest),
+                     "#user_message_outcome 1 changed")
+    case.run("check", "--disapproved")
+    refused = case.run("close")
+    check("close that would end the walk refuses a `changed` outcome while the item's text still has its baseline "
+          "digest, and says so",
+          refused.returncode == 1 and "this close would end the approval-walk" in refused.stderr
+          and "its newest outcome says `changed`, which is not valid yet" in refused.stderr,
+          described(refused))
+
+
+def test_close_that_does_not_end_the_walk_passes_with_a_copied_message_without_an_outcome():
+    case = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    minutes_appended(case, copied_message_line(1, "item 1 of 2"))
+    case.run("check")
+    closed = case.run("close")
+    check("a close that names a next item is not refused",
+          closed.returncode == 0 and "#next_to_present item 2 of 2" in case.minutes.read_text(), described(closed))
+
+
+def test_close_that_ends_the_walk_passes_with_only_a_needs_no_outcome_line_or_a_recorded_outcome():
+    bare = case_waiting_on_last_item_with_answer_checked(
+        "#user_message_copied_needs_no_outcome 2026-11-23T17:38:04Z item 2 of 2, in his words: `A`")
+    closed = bare.run("close")
+    check("a bare answer's copied line needs no outcome at close",
+          closed.returncode == 0 and "#next_to_present none, closed" in bare.minutes.read_text(), described(closed))
+    recorded = case_waiting_on_last_item_with_answer_checked(copied_message_line(1, "item 2 of 2"),
+                                                             "#user_message_outcome 1 no change")
+    closed = recorded.run("close")
+    check("a copied message with an outcome does not stop the close",
+          closed.returncode == 0 and "#next_to_present none, closed" in recorded.minutes.read_text(),
+          described(closed))
+
+
+def test_check_refuses_each_approval_while_a_message_about_the_item_is_open_and_passes_after_the_outcome():
+    for flags in ((), ("--obvious",), ("--after-advisor",), ("--part-answer", "1=A", "--part-answer", "2=D"),
+                  ("--part-answer", "1=AO")):
+        case = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+        minutes_appended(case, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open")
+        minutes = case.minutes.read_text()
+        refused = case.run("check", *flags)
+        check(f"check {flags} refuses, naming the message and each instruction",
+              refused.returncode == 1
+              and "nothing written: the user's approval of item 1 of 2 is not recorded" in refused.stderr
+              and "1 message(s) copied about that item" in refused.stderr
+              and "- id 1, item 1 of 2, at 2026-11-23T17:38:04Z: `reword the title`" in refused.stderr
+              and "  changed: printf" in refused.stderr and "  no change: printf" in refused.stderr
+              and "  open: printf" not in refused.stderr
+              and "then run the command labelled `changed`" in refused.stderr
+              and "item's text, run the command labelled `no change`" in refused.stderr
+              and "leave the outcome as it is, do not run check, and ask him" in refused.stderr
+              and "so the user need not retype his answer" in refused.stderr
+              and check_command_for(case, *flags, "--user-reply-as-typed", "a") in refused.stderr,
+              described(refused))
+        check(f"check {flags} refused leaves the walk-minutes unchanged and runs no fast read",
+              case.minutes.read_text() == minutes and case.calls.read_text() == "")
+        recorded = run_printed_outcome_command(refused, "no change")
+        again = case.run("check", *flags)
+        check(f"check {flags} passes when run again after the printed command",
+              recorded.returncode == 0 and again.returncode == 0 and "\nitem 1 of 2: " in case.minutes.read_text(),
+              described(recorded) + described(again))
+
+
+def test_check_does_not_refuse_d_z_options_moved_on_or_a_part_answer_of_all_d_while_a_message_is_open():
+    for flags, document in ((("--disapproved",), COPIED_MESSAGE_WALK), (("--deferred",), COPIED_MESSAGE_WALK),
+                            (("--option", "2"), COPIED_MESSAGE_WALK.replace("Text one.", "Option 2: other text.")),
+                            (("--option", "3"), COPIED_MESSAGE_WALK.replace("Text one.", "Option 3: other text.")),
+                            (("--moved-on-no-decision",), COPIED_MESSAGE_WALK_ASKING_NO_DECISION),
+                            (("--moved-on", "the user moved on"), COPIED_MESSAGE_WALK),
+                            (("--part-answer", "1=D"), COPIED_MESSAGE_WALK)):
+        case = Case(next_to_present="item 1 of 2", document=document)
+        minutes_appended(case, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open")
+        result = case.run("check", *flags)
+        check(f"check {flags} is not refused while a message about the item is open",
+              result.returncode == 0 and "\nitem 1 of 2: " in case.minutes.read_text(), described(result))
+
+
+def test_check_reads_only_the_newest_outcome_of_messages_about_the_item():
+    other = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    minutes_appended(other, copied_message_line(1, "item 2 of 2"), "#user_message_outcome 1 open")
+    result = other.run("check")
+    check("an `open` message about another item does not refuse the approval", result.returncode == 0,
+          described(result))
+    settled = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    minutes_appended(settled, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open",
+                     "#user_message_outcome 1 no change")
+    result = settled.run("check")
+    check("an older `open` under a newer `no change` does not refuse the approval", result.returncode == 0,
+          described(result))
+    reopened = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    minutes_appended(reopened, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 no change",
+                     "#user_message_outcome 1 open")
+    result = reopened.run("check")
+    check("a newer `open` over an older `no change` refuses the approval", result.returncode == 1, described(result))
+    other_total = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    minutes_appended(other_total, copied_message_line(1, "item 1 of 7"), "#user_message_outcome 1 open")
+    result = other_total.run("check")
+    check("a message copied when the walk's `of M` was different is still about the item", result.returncode == 1,
+          described(result))
+
+
+def test_check_does_not_count_a_message_about_a_sub_step_or_its_parent_as_about_the_item():
+    for waiting, copied in (("item 1 of 2", "item 1.1 of 2"), ("item 1.1 of 2", "item 1 of 2")):
+        case = Case(next_to_present=waiting, document=COPIED_MESSAGE_WALK_WITH_SUB_STEP)
+        minutes_appended(case, copied_message_line(1, copied), "#user_message_outcome 1 open")
+        result = case.run("check")
+        check(f"approving {waiting} is not refused by an open message about {copied}",
+              result.returncode == 0, described(result))
+
+
+def test_close_with_a_copied_message_and_no_checked_answer_prints_the_ordinary_failure_with_the_real_path():
+    case = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    minutes_appended(case, copied_message_line(1, "item 1 of 2"))
+    minutes, document = case.minutes.read_text(), walk_document(case)
+    result = case.run("close")
+    check("a close that fails on the scratch copy reports the failure against the real walk-minutes",
+          result.returncode == 1 and f"{case.minutes.resolve()} has no line recording the user's answer" in result.stderr,
+          described(result))
+    check("that failed close changes neither file and leaves no scratch copy",
+          case.minutes.read_text() == minutes and walk_document(case) == document
+          and case.left_in_temporary_directory() == [], str(case.left_in_temporary_directory()))
+
+
+def test_close_that_holds_the_answer_is_not_refused_and_prints_once_with_a_copied_message_without_an_outcome():
+    document = ("# A walk\n\n## Item 1 of 2: one\n\n#case_against none.\n\nText one.\n\nRecommendation: do it.\n\n"
+                + unshown_item("the change a finding raised", FIX_NEXT_LINE))
+    case = Case(next_to_present="item 1 of 2", document=document)
+    minutes_appended(case, copied_message_line(1, "item 1 of 2"))
+    answered = case.run("check")
+    held = case.run("close", "--hold-answer-until-new-item-answered")
+    check("a close that holds the answer for a new item goes on, and the scratch copy prints nothing",
+          answered.returncode == 0 and held.returncode == 0
+          and held.stdout.count("answer does not take effect yet") == 1
+          and ": answer held: " in case.minutes.read_text(), described(answered) + described(held))
+
+
+def test_close_refuses_an_approval_whose_message_became_open_after_check_and_passes_after_the_outcome():
+    last_item = case_waiting_on_last_item_with_answer_checked(copied_message_line(1, "item 2 of 2"))
+    run_printed_outcome_command(last_item.run("close"), "open")
+    earlier_item = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    earlier_item.run("check")
+    minutes_appended(earlier_item, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open")
+    parts = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    parts.run("check", "--part-answer", "1=A", "--part-answer", "2=D")
+    minutes_appended(parts, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open")
+    obvious = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    obvious.run("check", "--obvious")
+    minutes_appended(obvious, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open")
+    after_advisor = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    after_advisor.run("check", "--after-advisor")
+    minutes_appended(after_advisor, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open")
+    for name, case, item in (("the last item", last_item, "item 2 of 2"), ("an earlier item", earlier_item, "item 1 of 2"),
+                             ("a part answer", parts, "item 1 of 2"), ("an AO answer", obvious, "item 1 of 2"),
+                             ("an Aa answer", after_advisor, "item 1 of 2")):
+        minutes, document = case.minutes.read_text(), walk_document(case)
+        refused = case.run("close")
+        close_command = shlex.join(["python3", str(PROGRAM), "close", "--cwd", str(case.checkout.resolve())])
+        check(f"close of {name} refuses, naming the message and each instruction",
+              refused.returncode == 1
+              and f"nothing written: the answer the check step recorded for {item} does not take effect yet" in refused.stderr
+              and f"- id 1, {item}, at 2026-11-23T17:38:04Z: `reword the title`" in refused.stderr
+              and "  changed: printf" in refused.stderr and "  no change: printf" in refused.stderr
+              and "  open: printf" not in refused.stderr
+              and "leave the outcome as it is, do not run close, and ask him" in refused.stderr
+              and close_command in refused.stderr, described(refused))
+        check(f"the refused close of {name} writes nothing and posts no ruling comment",
+              case.minutes.read_text() == minutes and walk_document(case) == document and case.gh_comments() == [],
+              str(case.gh_comments()))
+        recorded = run_printed_outcome_command(refused, "no change")
+        closed = case.run("close")
+        check(f"close of {name} records the answer after the printed command",
+              recorded.returncode == 0 and closed.returncode == 0 and f"\n{item}: " in case.minutes.read_text(),
+              described(recorded) + described(closed))
+
+
+def test_close_does_not_refuse_a_disapproval_or_a_hold_while_a_message_about_the_item_is_open():
+    disapproved = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    disapproved.run("check", "--disapproved")
+    minutes_appended(disapproved, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open")
+    result = disapproved.run("close")
+    check("close records a disapproval over an open message", result.returncode == 0
+          and "<rejected>" in disapproved.minutes.read_text(), described(result))
+    document = ("# A walk\n\n## Item 1 of 2: one\n\n#case_against none.\n\nText one.\n\nRecommendation: do it.\n\n"
+                + unshown_item("the change a finding raised", FIX_NEXT_LINE))
+    held = Case(next_to_present="item 1 of 2", document=document)
+    held.run("check")
+    minutes_appended(held, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open")
+    result = held.run("close", "--hold-answer-until-new-item-answered")
+    check("a close that only holds the answer accepts nothing, so an open message does not refuse it",
+          result.returncode == 0 and ": answer held: " in held.minutes.read_text()
+          and "item 1 of 2: approved" not in held.minutes.read_text(), described(result))
+
+
+def copied_message_line_with_real_baseline(case, copied_id, item):
+    walk_finder = load_program().load_walk_finder()
+    digest = walk_finder.approval_walk_items_text_as_shown_to_user_digest(
+        case.minutes.with_name(f"{WALK_NAME}.md"), item, walk_finder.markdown_parser())
+    return copied_message_line(copied_id, item).replace(COPIED_MESSAGE_BASELINE, digest)
+
+
+def test_check_and_close_refuse_an_approval_over_a_changed_outcome_until_the_items_text_differs():
+    at_check = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    minutes_appended(at_check, copied_message_line_with_real_baseline(at_check, 1, "item 1 of 2"),
+                     "#user_message_outcome 1 changed")
+    at_close = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    at_close.run("check")
+    minutes_appended(at_close, copied_message_line_with_real_baseline(at_close, 1, "item 1 of 2"),
+                     "#user_message_outcome 1 changed")
+    for step, case in (("check", at_check), ("close", at_close)):
+        minutes = case.minutes.read_text()
+        refused = case.run(step)
+        check(f"{step} refuses an unedited `changed` outcome and says why",
+              refused.returncode == 1 and "`changed` while the item's text is the same as at the copy" in refused.stderr
+              and "its newest outcome says `changed`, which is not valid yet" in refused.stderr
+              and case.minutes.read_text() == minutes, described(refused))
+        document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+        document.write_text(document.read_text().replace("Text one.", "Text one, reworded."))
+        passed = case.run(step)
+        check(f"{step} passes once the item's text differs", passed.returncode == 0, described(passed))
+
+
+def test_check_with_a_changed_outcome_and_no_walk_document_prints_the_ordinary_failure():
+    case = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    minutes_appended(case, copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 changed")
+    (case.checkout / "docs" / "walk" / f"{WALK_NAME}.md").unlink()
+    result = case.run("check")
+    check("a missing walk-document is reported as a failure, with no traceback",
+          result.returncode == 1 and "Traceback" not in result.stderr and "does not exist" in result.stderr,
+          described(result))
+
+
+def test_an_open_message_about_another_heading_with_the_same_number_does_not_refuse_the_approval():
+    two_headings = ("# A walk\n\n## Item 3 of 9: old three\n\nOld text.\n\nRecommendation: do it.\n\n"
+                    "## Item 3 of 12: new three\n\nNew text.\n\nRecommendation: do it.\n")
+    revised = ("# A walk\n\n## Item 3 of 9: three\n\nOld text.\n\nRecommendation: do it.\n\n"
+               "## Item 3 of 10 revised: three\n\nNew text.\n\nRecommendation: do it.\n")
+    one_heading = "# A walk\n\n## Item 3 of 9: three\n\nText.\n\nRecommendation: do it.\n"
+    for name, document, waiting, copied, refused in (
+            ("another heading sharing the number", two_headings, "item 3 of 12", "item 3 of 9", False),
+            ("the same one of two headings", two_headings, "item 3 of 12", "item 3 of 12", True),
+            ("a revision of the heading, under its old M", revised, "item 3 of 10", "item 3 of 9", True),
+            ("the only heading, under another M", one_heading, "item 3 of 9", "item 3 of 12", True)):
+        case = Case(next_to_present=waiting, document=document)
+        minutes_appended(case, copied_message_line(1, copied), "#user_message_outcome 1 open")
+        result = case.run("check")
+        check(f"an open message on {copied} about {name} {'refuses' if refused else 'does not refuse'} {waiting}",
+              result.returncode == (1 if refused else 0)
+              and ("copied about that item" in result.stderr) == refused, described(result))
+
+
+def case_with_answer_held_for_new_item_and_new_item_checked(flags, message_after_hold):
+    document = ("# A walk\n\n## Item 1 of 2: one\n\n#case_against none.\n\nText one.\n\nRecommendation: do it.\n\n"
+                + unshown_item("the change a finding raised", FIX_NEXT_LINE))
+    case = Case(next_to_present="item 1 of 2", document=document)
+    case.run("check")
+    open_message = (copied_message_line(1, "item 1 of 2"), "#user_message_outcome 1 open")
+    if not message_after_hold:
+        minutes_appended(case, *open_message)
+    case.run("close", "--hold-answer-until-new-item-answered")
+    if message_after_hold:
+        minutes_appended(case, *open_message)
+    case.run("check", *flags)
+    return case
+
+
+def test_close_refuses_to_accept_a_held_answer_while_a_message_about_the_held_item_is_open():
+    for message_after_hold in (False, True):
+        case = case_with_answer_held_for_new_item_and_new_item_checked((), message_after_hold)
+        minutes, document = case.minutes.read_text(), walk_document(case)
+        refused = case.run("close")
+        check(f"close refuses to accept the held item (message after hold: {message_after_hold})",
+              refused.returncode == 1
+              and "nothing written: the answer the check step recorded for item 1 of 2 does not take effect yet"
+              in refused.stderr and "- id 1, item 1 of 2, at 2026-11-23T17:38:04Z" in refused.stderr, described(refused))
+        check(f"the refused close writes nothing (message after hold: {message_after_hold})",
+              case.minutes.read_text() == minutes and walk_document(case) == document and case.gh_comments() == [])
+        recorded = run_printed_outcome_command(refused, "no change")
+        closed = case.run("close")
+        check(f"close accepts the held item after the printed command (message after hold: {message_after_hold})",
+              recorded.returncode == 0 and closed.returncode == 0
+              and "item 1 of 2: already decided by the user's answer to item 2 of 2" in case.minutes.read_text(),
+              described(recorded) + described(closed))
+
+
+def test_close_that_rejects_a_held_answer_is_not_refused_by_an_open_message_about_the_held_item():
+    case = case_with_answer_held_for_new_item_and_new_item_checked(("--disapproved",), False)
+    closed = case.run("close")
+    check("a disapproval of the new item passes, rejecting the held item", closed.returncode == 0
+          and "for which its answer was held; the walk does not come back to it. <rejected>" in case.minutes.read_text(),
+          described(closed))
+
+
+def test_check_reports_an_open_copied_line_whose_item_cannot_be_read():
+    case = Case(next_to_present="item 1 of 2", document=COPIED_MESSAGE_WALK)
+    minutes_appended(case, copied_message_line(1, "item one"), "#user_message_outcome 1 open")
+    minutes = case.minutes.read_text()
+    result = case.run("check")
+    check("check names the copied line whose item it cannot read, writing nothing",
+          result.returncode == 1 and "the copied message line with id 1 names `item one`" in result.stderr
+          and case.minutes.read_text() == minutes, described(result))
+
+
 def stopped_by_sigterm(*_):
     raise SystemExit(1)  # So main()'s finally removes the suite's scratch directory.
 
@@ -8744,16 +9121,15 @@ def test_the_waiting_item_read_step_prints_a_fresh_agent_brief_at_the_third_revi
 
 SHORT_ANSWER_HOOK_FILE = (Path(__file__).resolve().parents[1]
                           / "walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py")
+# The line the short-answer hook writes for a message that needs an outcome, as the walk finder builds it.
+COPIED_USER_MESSAGE_LINE = "#user_message_copied 1 {date_and_time} {item} baseline none, in his words: {words}"
 
 
 def test_the_fresh_agent_brief_holds_the_raising_item_s_answer_words_and_the_hook_s_own_words_reply_lines():
     """Item 3 was raised by a fast-read finding on item 2's answer, and the user replied to sub-step 3.1 in his own
     words, which the short-answer hook records in the walk-minutes."""
-    spec = importlib.util.spec_from_file_location("walk_short_answer_hook_for_brief_test", SHORT_ANSWER_HOOK_FILE)
-    hook = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(hook)
-    own_words = hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
-        date_and_time="2026-11-25 09:20Z", item="item 3.1 of 9", words="`all our hashtags can have a trailing #`")
+    own_words = COPIED_USER_MESSAGE_LINE.format(
+        date_and_time="2026-11-25T09:20:00Z", item="item 3.1 of 9", words="`all our hashtags can have a trailing #`")
     raising = ('item 2 of 9: the user answered approved (2026-11-25 06:22Z) in his words "`A I think we should have '
                'a wiki page with all the hashtags`", which makes its change. Fast reads:')
     unrelated = 'item 5 of 9: the user answered approved (2026-11-25 06:30Z) in his words "`a word on item 5`", which makes its change. Fast reads:'
@@ -8786,13 +9162,10 @@ def test_the_fresh_agent_brief_holds_the_raising_item_s_answer_words_and_the_hoo
 def test_the_fresh_agent_brief_holds_the_bumped_item_s_raising_reply_and_not_a_note_naming_another_walk_s_item():
     """Item 3 was added and bumped while item 2 waited, from the user's own-words reply to item 2; an agent's note
     in the walk-minutes quotes his words on item 3 of another walk."""
-    spec = importlib.util.spec_from_file_location("walk_short_answer_hook_for_bump_brief_test", SHORT_ANSWER_HOOK_FILE)
-    hook = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(hook)
-    reply = hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
-        date_and_time="2026-11-25 16:32Z", item="item 2 of 8", words="`I thought file types were dots`")
-    other_reply = hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
-        date_and_time="2026-11-25 16:40Z", item="item 5 of 9", words="`a word on item 5`")
+    reply = COPIED_USER_MESSAGE_LINE.format(
+        date_and_time="2026-11-25T16:32:00Z", item="item 2 of 8", words="`I thought file types were dots`")
+    other_reply = COPIED_USER_MESSAGE_LINE.format(
+        date_and_time="2026-11-25T16:40:00Z", item="item 5 of 9", words="`a word on item 5`")
     note = ('- 2026-11-24 ruling relayed by another agent-seat: the user named it "guide-book" (his words, its walk, '
             'item 3 of 47: "spell it GUIDE-book")')
     agent_record = "2026-11-25T16:35Z, the user on item 3 of 9 (the dots item), in his words: `an agent's record`"

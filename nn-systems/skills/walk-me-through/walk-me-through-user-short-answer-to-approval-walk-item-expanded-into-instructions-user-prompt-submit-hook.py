@@ -11,7 +11,9 @@ letters of AO, O2 and O3 (`A-O`, `a - o`, `O-2`):
 
   SINGLE      one answer: A, AO, Aa, D, Z, R, E, O, O2, O3 or M, or a word
               approve, approved, approve as obvious, disapprove, disapproved,
-              defer, later, repeat or more responses.
+              defer, later, repeat or more responses; or, only as the whole
+              prompt, I approve, I approve your recommendation, I disapprove
+              or more.
   ALL         `all a`, `a to all`, `all ao`, `ao to all`.
   NUMBERED    one or more pairs of a number and A, AO, D, Z or R:
               `8a`, `6 - a`, `1 a 2 d`, `5 d, 6 z`, `item 3 ao`, `37.4 r`; or a
@@ -42,7 +44,7 @@ after the opening line, a refused answer's included, because it can override
 the lines after it. A numbered answer naming a number no item has, which
 the hook does not expand, counts as a reply in his own words. A reply in his own
 words gets WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and nothing else
-but the lines A REPLY IN HIS OWN WORDS IS RECORDED, below, adds when recording it fails.
+but the lines EVERY MESSAGE HE TYPES IS COPIED, below, adds when copying it fails.
 Both get the line only when he typed the prompt in an agent-session he attends,
 as the pending-user-alerts hook's typed_by_user and
 agent-session-unattended-by-user-check-common.py decide. With no item waiting,
@@ -54,14 +56,21 @@ or another agent-seat's message, the reply gets
 WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE
 before that line, and its opening does not say the user wrote it.
 
-A REPLY IN HIS OWN WORDS IS RECORDED. When the user typed a reply in his own
-words while an item waits, and the transcript was read, the hook appends
-APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE, naming the
-waiting item, to the walk-minutes, his words squeezed into one code span, so
-that the check program's fresh-agent brief for rewriting the item finds his
-words on it, which the check step records only for a reply that answers the
-item. When the append fails, the text says why and gives the line for the
-agent to add.
+EVERY MESSAGE HE TYPES IS COPIED. While an approval-walk is open, before
+anything else, the hook appends each prompt the user typed, as
+prompt_typed_by_user_and_transcript_read_error decides, in an agent-session
+he attends, to the walk-minutes, in the forms WALK_FINDER_FILE's docstring
+gives under COPIED USER MESSAGES, as a paragraph of its own. A bare answer
+needs no outcome from the agent: a single, all or numbered answer, a `bump`
+naming an item not yet shown, or a navigation word alone. An answer with a
+condition or a rider holds other words, so it needs an outcome, as does every
+other message, a reply in his own words included. The check program's
+fresh-agent brief for rewriting the item finds his words on it in these lines.
+A checkout with no walk-minutes never loads WALK_FINDER_FILE for the copy,
+because the Mac's Python 3.9 cannot compile its patterns. When the append
+fails, the text adds APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_NOT_RECORDED_LINES,
+which say why and give the line for the agent to add; when the copy fails
+before its line is built, it adds WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_WHEN_USER_MESSAGE_NOT_COPIED_TO_WALK_MINUTES_LINES.
 
 A, AO, Aa and D answer the item's recommendation: A, AO and Aa approve it,
 Aa only after an advisor check, which the agent makes as AA_SKILL_TEXT, the
@@ -200,6 +209,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parents[2]
 WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+WALK_MINUTES_CHECKOUT_LOOKUP_FILE = HERE / "walk-me-through-top-directory-of-git-checkout-holding-walk-minutes-file-lookup-common.py"
 CHECK_PROGRAM = HERE / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py"
 TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude-code-session-transcript-records-read-backward-common.py"
 EXPLAIN_SKILL = CHECKOUT / ".claude" / "skills" / "explain" / "SKILL.md"
@@ -207,6 +217,8 @@ EXPLAIN_SKILL = CHECKOUT / ".claude" / "skills" / "explain" / "SKILL.md"
 # Longer forms first, so `ao` is not read as `a` and `approve as obvious` not as `approve`.
 WORDS = {"approve as obvious": "AO", "approved": "A", "approve": "A", "disapproved": "D",
          "disapprove": "D", "defer": "Z", "later": "Z", "repeat": "R", "more responses": "M"}
+# Kept out of WORDS, whose words also open a condition, a rider or a numbered answer: "more detail please" is no answer.
+WHOLE_PROMPT_ONLY_WORDS = {"i approve your recommendation": "A", "i approve": "A", "i disapprove": "D", "more": "M"}
 NUMBER = r"\d+(?:\.\d+)*"
 JOINER = r"(?:\s*-\s*)?"
 AO = rf"a{JOINER}o"
@@ -315,13 +327,23 @@ WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_P
 WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE = (
     "The hook could not read the transcript {path}, so it could not tell who wrote this prompt: {error}. "
     "If the user did not type this prompt, the last line does not apply.")
-# Opens with `User`, not with the item, because the check program reads a line opening with an item as one it wrote.
-APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE = (
-    "User ({date_and_time}), on {item} while it waited, a reply in his words that is not a short answer: \"{words}\"")
 APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_NOT_RECORDED_LINES = (
     "The hook could not record the user's reply in the walk-minutes {minutes}: {error}.",
     "Add this line as the last line of those walk-minutes yourself, word for word, because a fresh-agent rewriting "
     "the item reads his words on it only from there:\n{line}")
+WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_WHEN_USER_MESSAGE_NOT_COPIED_TO_WALK_MINUTES_LINES = (
+    "[rule walk-me-through-user-message-copied-to-walk-minutes] The hook did not copy the user's message into an "
+    "approval-walk's walk-minutes, because {error!r}. If an approval-walk is open, a change he asks for here could be "
+    "lost at a session-handoff.",
+    "If exactly one file docs/walk/*-minutes.md in this checkout has a last `#next_to_present` line that is not `none` "
+    "or `closed`, add to that file, before you end this turn, one line holding the UTC time and his exact words, "
+    "opening with neither an item's running count nor a hashtag, so that no program reads it as a decision.",
+    "If no such file exists, no approval-walk is open: do nothing more about this message.",
+    "If more than one such file exists, tell the user: \"Your last message is not in the walk-minutes, because more "
+    "than one approval-walk is open or paused.\" A subagent gives that sentence to the agent that dispatched it instead.",
+    "If your write to that file fails, tell the user: \"Your last message is not in the walk-minutes, because <the "
+    "error your write reported>.\" A subagent gives that sentence to the agent that dispatched it instead.",
+)
 ANSWERS_THAT_APPROVE = ("A", "AO", "AA")
 PENDING_USER_ALERTS_HOOK_FILE = HERE / "walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py"
 ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py"
@@ -645,7 +667,7 @@ def answer_code(answer):
     """The answer's code, A, AO, AA for Aa, D, Z, R, E, O, O2, O3 or M, from a letter or a word in any case and
     spacing, with any hyphen between the letters dropped."""
     lowered = " ".join(answer.lower().split())
-    return WORDS.get(lowered) or re.sub(r"[\s-]", "", lowered).upper()
+    return WORDS.get(lowered) or WHOLE_PROMPT_ONLY_WORDS.get(lowered) or re.sub(r"[\s-]", "", lowered).upper()
 
 
 def parsed_answer(prompt):
@@ -653,7 +675,7 @@ def parsed_answer(prompt):
     raw = prompt.strip()
     text = raw[:-1].rstrip() if raw.endswith(".") else raw
     lowered = " ".join(text.lower().split())
-    if SINGLE_LETTER.match(text) or lowered in WORDS:
+    if SINGLE_LETTER.match(text) or lowered in WORDS or lowered in WHOLE_PROMPT_ONLY_WORDS:
         return {"form": "single", "answer": text, "code": answer_code(text)}
     match = ALL.match(text)
     if match:
@@ -1231,6 +1253,65 @@ def bump_output(payload, bump):
 
 
 def output_for(payload):
+    """Return the hook's output for the payload as a dict, or None, once the prompt is copied into the walk-minutes."""
+    not_copied = user_message_copied_to_walk_minutes(payload)
+    output = answer_output_for(payload)
+    if not not_copied:
+        return output
+    # First, so the answer's own message keeps the order its lines depend on, such as the settled line coming last.
+    context = (output or {}).get("hookSpecificOutput", {}).get("additionalContext")
+    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                   "additionalContext": "\n".join([*not_copied, *([context] if context else [])])}}
+
+
+def user_message_copied_to_walk_minutes(payload):
+    """Copy the prompt into the open approval-walk's walk-minutes, as the docstring's EVERY MESSAGE HE TYPES IS COPIED
+    says; return the lines the context adds: none, or, when the copy fails, what to do."""
+    prompt = payload.get("prompt") or ""
+    minutes = line = None
+    try:
+        if not prompt.strip() or agent_session_unattended() or not prompt_typed_by_user_and_transcript_read_error(payload)[0]:
+            return []
+        top = load_module_by_path(
+            "walk_me_through_top_directory_of_git_checkout_holding_walk_minutes_file_lookup_common",
+            WALK_MINUTES_CHECKOUT_LOOKUP_FILE).top_directory_of_git_checkout_holding_walk_minutes_file_or_none(
+                Path(payload.get("cwd") or os.getcwd()))
+        if top is None:
+            return []
+        walk_finder = load_walk_finder()
+        parser = walk_finder.markdown_parser()
+        walk = walk_finder.open_walk(top / walk_finder.WALK_DIRECTORY, parser)
+        if walk is None:
+            return []
+        minutes, value, _ = walk
+        document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+        line = walk_finder.approval_walk_minutes_user_message_copied_line_build(
+            minutes.read_text(encoding="utf-8"), value, document, prompt, datetime.datetime.now(datetime.timezone.utc),
+            parser, needs_no_outcome=bare_answer_or_navigation_word(prompt, walk_finder, top, minutes, value, parser))
+        walk_finder.append_to_minutes(minutes, [line], paragraph_of_its_own=True)
+    except Exception as error:  # noqa: BLE001 - every failure to copy is reported to the agent
+        if line is not None:
+            return [text.format(minutes=minutes, error=repr(error), line=line)
+                    for text in APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_NOT_RECORDED_LINES]
+        return [text.format(error=error) for text in WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_WHEN_USER_MESSAGE_NOT_COPIED_TO_WALK_MINUTES_LINES]
+    return []
+
+
+def bare_answer_or_navigation_word(prompt, walk_finder, top, minutes, value, parser):
+    """Whether prompt is a bare answer, as the docstring's EVERY MESSAGE HE TYPES IS COPIED defines it."""
+    text = prompt.strip()
+    bump = BUMP.match(text)
+    if bump:
+        return load_module_by_path("walk_me_through_answer_added_texts_cold_read_fast_read_check_and_close",
+                                   CHECK_PROGRAM).whether_user_bump_message_title_names_approval_walk_item_not_yet_shown(
+                                       walk_finder, top, minutes, value, parser, bump["title"])
+    if walk_finder.NAVIGATION_WORD_ALONE.match(text):
+        return True
+    answer = parsed_answer(text)
+    return answer is not None and answer["form"] not in ("condition", "rider")
+
+
+def answer_output_for(payload):
     """Return the hook's output for the payload as a dict, or None."""
     bump = BUMP.match((payload.get("prompt") or "").strip())
     if bump:
@@ -1311,9 +1392,7 @@ def own_words_output(payload, walk=WALK_NOT_READ):
         return own_words_context(
             payload,
             WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(**waiting),
-            WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting),
-            (walk.minutes, walk.item) if walk.numbers and walk.minutes else None)
-    recorded_item = None
+            WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting))
     try:
         walk_finder = load_walk_finder()
         top = walk_finder.checkout_top(Path(payload.get("cwd") or os.getcwd()))
@@ -1328,15 +1407,13 @@ def own_words_output(payload, walk=WALK_NOT_READ):
                    "walk": minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]}
         opening = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(**waiting)
         opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting)
-        recorded_item = (minutes, count[0]) if count else None
     except Exception as error:
         opening = opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(error=repr(error))
-    return own_words_context(payload, opening, opening_author_unknown, recorded_item)
+    return own_words_context(payload, opening, opening_author_unknown)
 
 
-def own_words_context(payload, opening, opening_author_unknown, recorded_item=None):
-    """own_words_output's output once the opening for the waiting item, or for a failed read, is known.
-    recorded_item, (walk-minutes path, the waiting item's running count) or None, names where his reply is recorded."""
+def own_words_context(payload, opening, opening_author_unknown):
+    """own_words_output's output once the opening for the waiting item, or for a failed read, is known."""
     typed, transcript_error = prompt_typed_by_user_and_transcript_read_error(payload)
     if not typed:
         return None
@@ -1345,26 +1422,8 @@ def own_words_context(payload, opening, opening_author_unknown, recorded_item=No
         lines = [opening_author_unknown,
                  WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(
                      path=payload.get("transcript_path"), error=repr(transcript_error))]
-    elif recorded_item is not None:
-        lines += approval_walk_waiting_item_user_own_words_reply_appended_to_walk_minutes(*recorded_item,
-                                                                                          payload["prompt"])
     context = "\n".join([*lines, WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE])
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
-
-
-def approval_walk_waiting_item_user_own_words_reply_appended_to_walk_minutes(minutes, item, prompt):
-    """Append the line recording prompt as the user's reply in his own words to item; return no lines, or, when the
-    append fails, the lines telling the agent to add it."""
-    walk_finder = load_walk_finder()
-    line = APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
-        date_and_time=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%MZ"), item=item,
-        words=walk_finder.text_wrapped_as_markdown_code_span(prompt))
-    try:
-        walk_finder.append_to_minutes(minutes, [line], paragraph_of_its_own=True)
-    except OSError as error:
-        return [text.format(minutes=minutes, error=repr(error), line=line)
-                for text in APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_NOT_RECORDED_LINES]
-    return []
 
 
 def named_item_missing(answer, walk, walk_error):
