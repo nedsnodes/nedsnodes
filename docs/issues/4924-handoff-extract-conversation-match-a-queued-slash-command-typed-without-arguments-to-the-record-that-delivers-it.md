@@ -1,5 +1,5 @@
 ---
-issue: "[handoff-extract-conversation: match a queued slash command typed without arguments to the record that delivers it](https://github.com/nedsnodes/nedsnodes/issues/4924)"
+issue: "[Handoff dialog: match a queued slash command typed without arguments to the record that delivers it](https://github.com/nedsnodes/nedsnodes/issues/4924)"
 ---
 
 # handoff-extract-conversation: match a queued slash command typed without arguments to the record that delivers it
