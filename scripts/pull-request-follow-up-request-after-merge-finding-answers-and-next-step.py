@@ -11,9 +11,10 @@ Usage:
   PROGRAM <number> finish-and-print-merge-lane-2-message
   PROGRAM <number> remove-topic-branches-and-worktrees
   PROGRAM <number> print-follow-up-request-block-from-merge-lane-2-reviews
+  PROGRAM <number> print-fix-in-maintenance-findings-block-for-maintenance-fix-agent-from-merge-lane-2-reviews
 
 merge-lane-2 ends a merge message that asks for follow-ups with the line
-"#follow_up_request pull request <number>", then each non-blocking finding on a
+"#follow_up_request pull request <number>", then each fix-next or file-for-later finding on a
 numbered line of its own, "1. ", "2. " and so on, which
 print-follow-up-request-block-from-merge-lane-2-reviews prints for it. The hook
 nn-systems/general-tools/pull-request-follow-up-request-from-merge-lane-2-message-save-and-forked-subagent-brief-hand-over-user-prompt-submit-hook.py
@@ -96,9 +97,10 @@ do, and the exit code is 1.
 print-follow-up-request-block-from-merge-lane-2-reviews, run by merge-lane-2 after the merge: read every
 review of the pull request that merge-lane-2's GitHub account posted, with its inline comments, replies left out, and
 the comments the posting program, POSTING_PROGRAM_FILE_NAME, moved into its body; read each comment's category by the
-mark that program opened it with; then print the request line and one numbered line for each fix-next,
-fix-in-maintenance or file-for-later finding, "<n>. <category>: `<path>:<line>`: <text>", its text joined onto one
-line; a nit is a fix-in-maintenance finding, so it is printed as one, whether or not a fix-round fixed it. A finding a later review restates, with the same category, path and text, is printed once; the text is compared without its "(Codex finding <id>)" mark, since a Codex finding's id changes when its line range does. Before printing,
+mark that program opened it with; then print the request line and one numbered line for each fix-next or
+file-for-later finding, "<n>. <category>: `<path>:<line>`: <text>", its text joined onto one
+line. A fix-in-maintenance finding, a nit included, is left out: it goes to maintenance-fix-agent instead, by
+print-fix-in-maintenance-findings-block-for-maintenance-fix-agent-from-merge-lane-2-reviews. A finding a later review restates, with the same category, path and text, is printed once; the text is compared without its "(Codex finding <id>)" mark, since a Codex finding's id changes when its line range does. Before printing,
 the block is parsed back with parse_follow_up_request_blocks_from_message_text(), as the hook parses it, and must
 read back as the same lines. With no such finding it prints nothing. It refuses when merge-lane-2 has no approving
 review of the pull request, and when one of merge-lane-2's comments opens with no mark, as a review posted before
@@ -106,6 +108,15 @@ the posting program wrote category marks does. The findings of merge-lane-2's re
 replaces, by its description's #replaces lines followed as REPLACES_READER_FILE_NAME reads them, come first, oldest
 pull request first, read the same way but with no approving review needed; a #replaces line that reader cannot
 follow is refused.
+
+print-fix-in-maintenance-findings-block-for-maintenance-fix-agent-from-merge-lane-2-reviews, run by merge-lane-2
+after the merge: read the reviews, and refuse, as print-follow-up-request-block-from-merge-lane-2-reviews does;
+then print FIX_IN_MAINTENANCE_BLOCK_FIRST_LINE_FORMAT's line and one numbered line for each fix-in-maintenance
+finding that subcommand leaves out, a nit included, in the form maintenance-fix-agent's list takes a finding:
+"<n>. Pull request <link>, review comment <link>, `<path>:<line>`: <text>". The review comment's link is the
+review's own for a comment the posting program moved into the review body. merge-lane-2 sends what it prints to
+maintenance-fix-agent with SendMessage. No line of it starts with #follow_up_request, so the hook saves none of it
+for the author. With no such finding it prints nothing.
 
 A block that differs from the saved one is a new request: saving it removes
 the answers file, with its started findings and its finished mark, but keeps the topic branch records,
@@ -165,6 +176,12 @@ REPOSITORY = "nedsnodes/nedsnodes"
 POSTING_PROGRAM_FILE_NAME = "merge-lane-pull-request-reviewer-review-post-and-read-back.py"
 REPLACES_READER_FILE_NAME = "pull-request-description-replaces-line-replaced-pull-request-chain-reader-common.py"
 FOLLOW_UP_REQUEST_LINE_START = "#follow_up_request"
+PRINT_FOLLOW_UP_REQUEST_BLOCK_SUBCOMMAND = "print-follow-up-request-block-from-merge-lane-2-reviews"
+PRINT_FIX_IN_MAINTENANCE_FINDINGS_BLOCK_SUBCOMMAND = (
+    "print-fix-in-maintenance-findings-block-for-maintenance-fix-agent-from-merge-lane-2-reviews")
+FIX_IN_MAINTENANCE_CATEGORY = "fix-in-maintenance"
+FIX_IN_MAINTENANCE_BLOCK_FIRST_LINE_FORMAT = ("Fix-in-maintenance findings of pull request {number}, from merge-lane-2's "
+                                              "reviews, for maintenance-fix-agent:")
 FOLLOW_UP_REQUEST_BLOCK_SAVE_HOOK_PATH = ("nn-systems/general-tools/pull-request-follow-up-request-from-merge-lane-2-message-save-and-"
                   "forked-subagent-brief-hand-over-user-prompt-submit-hook.py")
 MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR = "the SendMessage message in which merge-lane-2 tells the pull request's author that the pull request merged"
@@ -222,11 +239,15 @@ def command(number, subcommand):
     return f"python3 {PROGRAM} {number} {subcommand}"
 
 
+def pull_request_link(number):
+    return f"https://github.com/{REPOSITORY}/pull/{number}"
+
+
 @functools.lru_cache(maxsize=None)
 def build_followed_up_pull_request_citation_with_title_and_link(number):
     """"pull request [<title>](<link>)" for the pull request followed up, or "pull request <link>" when gh pr view
     gives no title. Fetched only when a sentence for the user is built, so no other step waits on GitHub."""
-    link = f"https://github.com/{REPOSITORY}/pull/{number}"
+    link = pull_request_link(number)
     try:
         title = gh(["pr", "view", str(number), "--repo", REPOSITORY, "--json", "title", "--jq", ".title"],
                    timeout_seconds=TITLE_TIMEOUT_SECONDS).strip()
@@ -956,8 +977,8 @@ def gh_api_pages(path):
 
 
 def merge_lane_2_reviews_and_their_comments(number, posting, account):
-    """merge-lane-2's reviews of the pull request, and their comments, each marked with the pull request's number
-    and its review's id."""
+    """merge-lane-2's reviews of the pull request, and their comments, each marked with the pull request's number,
+    its review's id and its link: the comment's own, or its review's for a comment moved into the review body."""
     try:
         reviews = sorted((review for review in gh_api_pages(f"pulls/{number}/reviews")
                           if review["user"]["login"] == account), key=lambda review: review["id"])
@@ -968,9 +989,11 @@ def merge_lane_2_reviews_and_their_comments(number, posting, account):
         comments = []
         for review in reviews:
             comments += [{"path": comment["path"], "line": comment.get("line") or comment.get("original_line"),
-                          "body": comment["body"], "review": review["id"]}
+                          "body": comment["body"], "review": review["id"],
+                          "link": f"{pull_request_link(number)}#discussion_r{comment['id']}"}
                          for comment in inline if comment["pull_request_review_id"] == review["id"]]
-            comments += [{**comment, "review": review["id"]}
+            comments += [{**comment, "review": review["id"],
+                          "link": f"{pull_request_link(number)}#pullrequestreview-{review['id']}"}
                          for comment in posting.outside_the_diff_comments_read_back_from_review_body(review.get("body") or "")]
     except (KeyError, TypeError, AttributeError) as error:
         raise StepFailed(f"GitHub's reviews of pull request {number} were not in the expected shape: "
@@ -992,7 +1015,9 @@ def replaced_pull_request_numbers(number, description):
         raise Refused(f"{error} No {FOLLOW_UP_REQUEST_LINE_START} block was printed.") from None
 
 
-def print_follow_up_request_block_from_merge_lane_2_reviews(number):
+def print_follow_up_request_block_from_merge_lane_2_reviews(number, for_maintenance_fix_agent=False):
+    """Print the author's #follow_up_request block, or, for_maintenance_fix_agent, the fix-in-maintenance findings
+    that block leaves out."""
     # Loaded here, not at the top, so the hook, which loads this program for every merge-lane-2 message, does not load it.
     posting = load_script_beside_this_one(POSTING_PROGRAM_FILE_NAME)
     account = posting.MERGE_LANE_ACCOUNT
@@ -1016,17 +1041,23 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                       f"changes and has not yet approved the author's fixes. No "
                       f"{FOLLOW_UP_REQUEST_LINE_START} block was printed.\n"
                       f"After {account} posts an approving review of pull request {number}, run: "
-                      f"{command(number, 'print-follow-up-request-block-from-merge-lane-2-reviews')}")
+                      + command(number, PRINT_FIX_IN_MAINTENANCE_FINDINGS_BLOCK_SUBCOMMAND if for_maintenance_fix_agent
+                                else PRINT_FOLLOW_UP_REQUEST_BLOCK_SUBCOMMAND))
     replaced_comments = []
     for replaced in replaced_pull_request_numbers(number, description):
         replaced_comments += merge_lane_2_reviews_and_their_comments(replaced, posting, account)[1]
     write_block_by_hand = (
-        "If merge-lane-2's reviews of the pull request hold a fix-next, fix-in-maintenance or file-for-later "
+        "If merge-lane-2's reviews of the pull request hold a fix-next or file-for-later "
         f"finding, write the block by hand at the end of {MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR}: "
         "the line "
         f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}, then one line for each such finding, numbered "
         "from 1, such as: 1. fix-next: `<path>:<line>`: <the finding on one line>\n"
-        "If merge-lane-2's reviews hold no such finding, write no block.")
+        "If they hold a fix-in-maintenance finding, a nit included, leave it out of that block, and send "
+        "maintenance-fix-agent with SendMessage the line "
+        f"\"{FIX_IN_MAINTENANCE_BLOCK_FIRST_LINE_FORMAT.format(number=number)}\", then one line for each such "
+        "finding, numbered from 1, such as: 1. Pull request <link>, review comment <link>, `<path>:<line>`: "
+        "<the finding on one line>\n"
+        "If they hold no finding of either kind, write neither.")
     findings = []
     for review, review_comments in itertools.groupby(replaced_comments + comments,
                                                      key=lambda comment: (comment["pull_request"], comment["review"])):
@@ -1042,6 +1073,7 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
             category, text, _nit = marked
             parsed.append({
                 "finding": (category, comment["path"], " ".join(text.split())), "line": comment["line"],
+                "pull_request": comment["pull_request"], "link": comment["link"],
                 "compared": (category, comment["path"],
                              " ".join(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.sub("", text).split())),
                 "codex_finding_ids": frozenset(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.findall(text))})
@@ -1120,6 +1152,15 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                 found = {**comment, "review": review}
                 findings.append(found)
                 in_this_review.append(found)
+    if for_maintenance_fix_agent:
+        maintenance = [found for found in findings if found["finding"][0] == FIX_IN_MAINTENANCE_CATEGORY]
+        if maintenance:
+            print("\n".join([FIX_IN_MAINTENANCE_BLOCK_FIRST_LINE_FORMAT.format(number=number)] + [
+                f"{index}. Pull request {pull_request_link(found['pull_request'])}, review comment {found['link']}, "
+                f"`{found['finding'][1]}:{found['line']}`: {found['finding'][2]}"
+                for index, found in enumerate(maintenance, 1)]))
+        return
+    findings = [found for found in findings if found["finding"][0] != FIX_IN_MAINTENANCE_CATEGORY]
     if not findings:
         return
     lines = [f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"] + [
@@ -1196,13 +1237,18 @@ def main(argv=None):
                                           "for merge-lane-2")
     subcommands.add_parser("remove-topic-branches-and-worktrees", help="in the author's checkout, once the subagent has ended: "
                                             "remove each recorded worktree and topic branch")
-    subcommands.add_parser("print-follow-up-request-block-from-merge-lane-2-reviews",
-                           help="after the merge: print the #follow_up_request block of the non-blocking findings in "
-                                "merge-lane-2's reviews, for the end of its merge message")
+    subcommands.add_parser(PRINT_FOLLOW_UP_REQUEST_BLOCK_SUBCOMMAND,
+                           help="after the merge: print the #follow_up_request block of the fix-next and "
+                                "file-for-later findings in merge-lane-2's reviews, for the end of its merge message")
+    subcommands.add_parser(PRINT_FIX_IN_MAINTENANCE_FINDINGS_BLOCK_SUBCOMMAND,
+                           help="after the merge: print the fix-in-maintenance findings in merge-lane-2's reviews, "
+                                "for merge-lane-2 to send to maintenance-fix-agent with SendMessage")
     arguments = parser.parse_args(argv)
     try:
-        if arguments.subcommand == "print-follow-up-request-block-from-merge-lane-2-reviews":
+        if arguments.subcommand == PRINT_FOLLOW_UP_REQUEST_BLOCK_SUBCOMMAND:
             print_follow_up_request_block_from_merge_lane_2_reviews(arguments.number)
+        elif arguments.subcommand == PRINT_FIX_IN_MAINTENANCE_FINDINGS_BLOCK_SUBCOMMAND:
+            print_follow_up_request_block_from_merge_lane_2_reviews(arguments.number, for_maintenance_fix_agent=True)
         elif arguments.subcommand == "next-step":
             next_step(arguments.number)
         elif arguments.subcommand == "start-topic-branch":

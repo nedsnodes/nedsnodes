@@ -224,7 +224,7 @@ def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
         texts.append(f"{fact}, as {program} prints it from merge-lane-2's reviews"
                      + (":\n\n" + quoted(block) + "\n" if block else
                         ": it printed no finding, so merge-lane-2's reviews of that pull request hold no "
-                        "non-blocking finding."))
+                        "fix-next or file-for-later finding."))
     return texts
 
 

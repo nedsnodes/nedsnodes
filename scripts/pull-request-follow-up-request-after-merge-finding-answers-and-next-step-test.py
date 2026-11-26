@@ -213,7 +213,8 @@ def test_help():
                                             ("next-step", "start-topic-branch", "open-pull-request", "record-finding-leave-out-reason",
                                              "record-finding-as-waiting-for-user-ruling", "reopen-waiting-finding-with-user-ruling",
                                              "finish-and-print-merge-lane-2-message", "remove-topic-branches-and-worktrees",
-                                             "print-follow-up-request-block-from-merge-lane-2-reviews")),
+                                             "print-follow-up-request-block-from-merge-lane-2-reviews",
+                                             "print-fix-in-maintenance-findings-block-for-maintenance-fix-agent-from-merge-lane-2-reviews")),
           completed.stdout)
     for label, arguments, words in (
             ("no subcommand", (), "required: subcommand"),
@@ -1448,8 +1449,8 @@ PRINT_BLOCK = "print-follow-up-request-block-from-merge-lane-2-reviews"
 
 
 def print_block(reviews, comments, gh_failure=None, read_back=None, description="", replaced=None,
-                author="another-seat-account"):
-    """Run PRINT_BLOCK in process, gh answering with reviews and comments as one page each, or raising
+                author="another-seat-account", subcommand=PRINT_BLOCK):
+    """Run subcommand, PRINT_BLOCK by default, in process, gh answering with reviews and comments as one page each, or raising
     gh_failure; read_back replaces the block parser. `replaced` maps a replaced pull request's number to its
     (description, reviews, comments); author is the login gh pr view prints for the pull request's author.
     Return (exit code, stdout, stderr)."""
@@ -1474,7 +1475,7 @@ def print_block(reviews, comments, gh_failure=None, read_back=None, description=
     out, err = io.StringIO(), io.StringIO()
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = program.main([str(NUMBER), PRINT_BLOCK])
+            code = program.main([str(NUMBER), subcommand])
     finally:
         program.gh, program.parse_follow_up_request_blocks_from_message_text = saved_gh, saved_parser
     return code, out.getvalue(), err.getvalue()
@@ -1811,7 +1812,71 @@ def test_print_block_with_replaced_pull_requests():
           and err.rstrip().endswith("No #follow_up_request block was printed."), err)
 
 
-for test in (test_help, test_block_parsing, test_print_block, test_print_block_with_replaced_pull_requests, test_brief_text, test_no_saved_block, test_start,
+
+
+def test_print_block_leaves_fix_in_maintenance_findings_to_the_maintenance_fix_agent_block():
+    maintenance_block = program.PRINT_FIX_IN_MAINTENANCE_FINDINGS_BLOCK_SUBCOMMAND
+    reviews = [merge_lane_review(1)]
+    comments = [merge_lane_comment(10, 1, "**fix-next** Rename it."),
+                merge_lane_comment(11, 1, "**fix-in-maintenance** Tidy the docstring.", line=8),
+                merge_lane_comment(12, 1, "**fix-in-maintenance, nit** A misspelt name.", line=9)]
+    code, out, err = print_block(reviews, comments)
+    check(f"{PRINT_BLOCK} leaves out the fix-in-maintenance findings, a nit included, and keeps the fix-next one",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it.\n"), out + err)
+    code, out, err = print_block(reviews, comments, subcommand=maintenance_block)
+    expected = (f"Fix-in-maintenance findings of pull request {NUMBER}, from merge-lane-2's reviews, for "
+                "maintenance-fix-agent:\n"
+                f"1. Pull request {FOLLOWED_UP_LINK}, review comment {FOLLOWED_UP_LINK}#discussion_r11, "
+                "`scripts/thing.py:8`: Tidy the docstring.\n"
+                f"2. Pull request {FOLLOWED_UP_LINK}, review comment {FOLLOWED_UP_LINK}#discussion_r12, "
+                "`scripts/thing.py:9`: A misspelt name.\n")
+    check(f"{maintenance_block} prints only the fix-in-maintenance findings, a nit included, each with its pull "
+          "request, its review comment's link, its place and its text",
+          code == 0 and err == "" and out == expected, out + err)
+    check(f"the hook reads no #follow_up_request block in what {maintenance_block} prints",
+          program.parse_follow_up_request_blocks_from_message_text(out) == [], out)
+    check("the category the maintenance block takes is one the posting program writes",
+          program.FIX_IN_MAINTENANCE_CATEGORY in program.load_script_beside_this_one(
+              program.POSTING_PROGRAM_FILE_NAME).FINDING_CATEGORIES, program.FIX_IN_MAINTENANCE_CATEGORY)
+    only_maintenance = [merge_lane_comment(11, 1, "**fix-in-maintenance** Tidy the docstring.", line=8)]
+    code, out, err = print_block(reviews, only_maintenance)
+    check(f"{PRINT_BLOCK} prints nothing when the reviews hold only fix-in-maintenance findings",
+          code == 0 and out == "" and err == "", out + err)
+    code, out, err = print_block(reviews, [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
+                                 subcommand=maintenance_block)
+    check(f"{maintenance_block} prints nothing when the reviews hold no fix-in-maintenance finding",
+          code == 0 and out == "" and err == "", out + err)
+    code, out, err = print_block([merge_lane_review(
+        1, body="APPROVE\n\nBody.\n\nComments on lines outside this pull request's diff:\n"
+                "- `a.py:4`: **fix-in-maintenance** Moved out of the diff.")], [], subcommand=maintenance_block)
+    check(f"{maintenance_block} links a comment moved into the review body to its review",
+          code == 0 and err == "" and out.endswith(
+              f"1. Pull request {FOLLOWED_UP_LINK}, review comment {FOLLOWED_UP_LINK}#pullrequestreview-1, "
+              "`a.py:4`: Moved out of the diff.\n"), out + err)
+    link = "https://github.com/nedsnodes/nedsnodes/pull/"
+    code, out, err = print_block(reviews, comments, description=f"#replaces {link}1900", replaced={1900: (
+        "", [merge_lane_review(5, state="CHANGES_REQUESTED")],
+        [merge_lane_comment(50, 5, "**fix-in-maintenance** An old finding.", line=2)])}, subcommand=maintenance_block)
+    check(f"{maintenance_block} gives a replaced pull request's finding that pull request and its comment's link, "
+          "first",
+          code == 0 and err == "" and out.split("\n")[1] == (
+              f"1. Pull request {link}1900, review comment {link}1900#discussion_r50, `scripts/thing.py:2`: "
+              "An old finding."), out + err)
+    code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED")], comments,
+                                 subcommand=maintenance_block)
+    check(f"{maintenance_block} refuses when merge-lane-2 has no approving review, naming itself as the command to "
+          "run again",
+          code == 1 and out == "" and err.rstrip().endswith(f"python3 {program.PROGRAM} {NUMBER} {maintenance_block}"),
+          err)
+    code, out, err = print_block(reviews, [merge_lane_comment(10, 1, "Rename it.")], subcommand=maintenance_block)
+    check(f"{maintenance_block} refuses an unmarked comment, saying how to write both blocks by hand",
+          code == 1 and out == "" and "leave it out of that block, and send maintenance-fix-agent with SendMessage "
+                                      "the line" in err, err)
+
+
+for test in (test_help, test_block_parsing, test_print_block, test_print_block_with_replaced_pull_requests,
+             test_print_block_leaves_fix_in_maintenance_findings_to_the_maintenance_fix_agent_block, test_brief_text, test_no_saved_block, test_start,
              test_open_refusals, test_open, test_build_pull_request_description_ending_with_follow_up_request_line,
              test_new_shared_names_wait_for_the_dispatching_agent,
              test_open_pushes_the_checked_out_recorded_branch_not_the_last,

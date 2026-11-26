@@ -264,7 +264,7 @@ def main():
         expected_follow_up_facts = (
             "- merge-lane-2's follow-up request for pull request #4, which the description names, as "
             + program_line.format(n=4) + ": it printed no finding, so merge-lane-2's reviews of that pull "
-            "request hold no non-blocking finding.\n"
+            "request hold no fix-next or file-for-later finding.\n"
             "- merge-lane-2's follow-up request for pull request #31, which the description names, as "
             + program_line.format(n=31) + ":\n\n"
             "> #follow_up_request pull request 31\n> 1. fix-next: `scripts/a.py:3`: It drops a line.\n\n"
