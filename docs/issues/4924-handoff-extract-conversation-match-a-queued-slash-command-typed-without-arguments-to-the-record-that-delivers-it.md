@@ -1,8 +1,8 @@
 ---
-issue: "[Handoff dialog: match a queued slash command typed without arguments to the record that delivers it](https://github.com/nedsnodes/nedsnodes/issues/4924)"
+issue: "[handoff-extract-conversation: match a queued slash command typed without arguments to the record that delivers it](https://github.com/nedsnodes/nedsnodes/issues/4924)"
 ---
 
-# Handoff dialog: match a queued slash command typed without arguments to the record that delivers it
+# handoff-extract-conversation: match a queued slash command typed without arguments to the record that delivers it
 
 `scripts/handoff-extract-conversation.py` lists, in the conversation-tail a successor starts from, the user's queued messages that the agent never read. It works this out from the queue records of the agent-session's transcript: each `enqueue` adds a message, and each `dequeue` removes the message that the next user record shows.
 
