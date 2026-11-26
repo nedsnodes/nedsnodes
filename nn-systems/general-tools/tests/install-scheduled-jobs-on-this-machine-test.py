@@ -210,6 +210,10 @@ MAC_NN_SHARED_DATABASE_BACKUP_COPY_PLIST = {
     "StandardErrorPath": "/Users/el/.claude/nn-shared-database-newest-backup-copy-to-mac.log",
 }
 # The deletion of agent-seat terminal captures older than seven days, last in the table.
+NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE = (
+    "* * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
+    "merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once >> "
+    "/home/nedlern/.claude/merge-lane-open-prs-watch-and-reviewer-assign-poll-once.log 2>&1")
 NED_BOX_TERMINAL_CAPTURES_DELETE_LINE = (
     "45 5 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/handoff/"
     "agent-seat-terminal-captures-older-than-seven-days-delete.py >> "
@@ -344,7 +348,8 @@ check("the table's jobs are the two typed by hand before this program, the workt
       "requests' check, approval and merge, the daily search for credential files no "
       "cold-read-cell is denied, the weekly count of each hook rule ID in both machines' "
       "transcripts, the one count of cold-read-fast-read finding outcomes, the deletion of "
-      "old agent-seat terminal captures, the standing user-rulings store's each-minute add, and no other",
+      "old agent-seat terminal captures, the open-pull-request watcher's poll, the standing "
+      "user-rulings store's each-minute add, and no other",
       sorted(real_jobs) == ["agent-seat-idle-sweep-headless-judge-wake-messages-send-and-"
                             "user-alerts-write",
                             "agent-seat-terminal-captures-older-than-seven-days-delete",
@@ -363,6 +368,7 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "tmux-typing-watcher",
                             "log-store-session-dialogs-refresh",
                             "merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge",
+                            "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job",
                             "nn-shared-database-newest-backup-copy-to-mac",
                             "nn-shared-database-nightly-backup-with-integrity-check",
                             "no-sandbox-test-suites-run-on-main-in-a-quiet-gap",
@@ -552,7 +558,9 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "cold-read-fast-read-finding-outcomes-count-as-user-alert-once-14-days-after-own-first-cron-run — cron "
           "line:", NED_BOX_FINDING_OUTCOMES_COUNT_LINE,
           "agent-seat-terminal-captures-older-than-seven-days-delete — cron line:",
-          NED_BOX_TERMINAL_CAPTURES_DELETE_LINE],
+          NED_BOX_TERMINAL_CAPTURES_DELETE_LINE,
+          "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job — cron line:",
+          NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE],
       (exit_code, printed.getvalue(), errors.getvalue()))
 printed, errors = io.StringIO(), io.StringIO()
 with redirect_stdout(printed), redirect_stderr(errors):

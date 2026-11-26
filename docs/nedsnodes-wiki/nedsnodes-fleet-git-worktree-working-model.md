@@ -57,14 +57,7 @@ passing review.
   the credential able to push main belongs to a dedicated system user,
   reached only through the main-gatekeeper, which logs every use). Dormant
   until its credential work lands.
-- **The PR process** — until the gate activates: each pull request
-  merges one atomic nn-topic-branch, and
-  the merge-lane agent-seat reviews and merges every PR (deputization, recorded
-  at R13, is the ruled exception). Recorded in CLAUDE.md's PR-process paragraph.
-  The earlier form — commits accumulating on a seat-branch, cherry-picked
-  onto a fresh branch later — was retired 2026-08-28 after a three-commit
-  topic written on a Tuesday took until Friday to reach main, every
-  cherry-pick re-resolving conflicts against a head that had moved.
+- **The PR process** — until the gate activates: each pull request merges one atomic nn-topic-branch, and merge-lane-2 merges every PR, and it, merge-lane-1 and merge-lane-3 manage their reviews (deputization, recorded at R13, is the ruled exception). Recorded in CLAUDE.md's PR-process paragraph. The earlier form — commits accumulating on a seat-branch, cherry-picked onto a fresh branch later — was retired 2026-08-28 after a three-commit topic written on a Tuesday took until Friday to reach main, every cherry-pick re-resolving conflicts against a head that had moved.
 - **The override markers** — `.walk-approved` (instruction-file guard) and `.location-write-approved` (session-location guard), both gitignored, each by convention holding the user's quoted approval words, consumed by the one guarded call it approves (see Marker honesty); `.walk-approved` holds instead `#pre_approved_change` and the reason for a change that `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md` does not require his approval for.
 - **The launchers** — `scripts/launch-claude-mac` and
   `scripts/launch-claude-ubuntu`.

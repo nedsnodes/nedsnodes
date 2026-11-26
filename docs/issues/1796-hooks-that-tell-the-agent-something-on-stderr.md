@@ -57,7 +57,7 @@ Line numbers are at origin/main commit `1846c5282`, and each cites the line that
 ### Says the agent need not act
 
 - `scripts/cold-read-fast-read-due-for-linked-document-reminder-hook.py:120` (Stop).
-- `nn-systems/skills/walk-me-through/walk-me-through-current-item-shown-to-user-after-each-agent-message-stop-hook.py:539` (Stop).
+- `nn-systems/skills/walk-me-through/walk-me-through-agent-reply-to-user-not-ending-with-waiting-item-closing-line-refusal-stop-hook.py:498` (Stop). This one hook is cited by its name and line at origin/main commit `972f8e50e`, because it had another name at `1846c5282`.
 
 These two say the agent need not act, so an agent that never reads them loses nothing. They are listed so that step 2 of the next action decides their channel too: leave them at exit 1, or move them with the rest.
 

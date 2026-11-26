@@ -235,6 +235,16 @@
         },
         "ned-box": {"scheduler": "cron", "schedule": "45 5 * * *"}
       }
+    },
+    {
+      "name": "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job",
+      "owner": "merge-lane-2",
+      "program": "scripts/merge-lane-open-prs-watch-and-reviewer-assign.py",
+      "arguments": ["--poll-once"],
+      "output": ".claude/merge-lane-open-prs-watch-and-reviewer-assign-poll-once.log",
+      "on": {
+        "ned-box": {"scheduler": "cron", "schedule": "* * * * *"}
+      }
     }
   ]
 }

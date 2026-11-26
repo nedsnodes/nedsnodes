@@ -24,7 +24,7 @@ This page tells an agent-seat how to run Codex and Gemini, and what to expect fr
 
 **What it is.** Gemini runs through the Antigravity CLI, `agy`, the agent behind the Antigravity IDE; there is no `gemini` command. On ned-box `agy` is `~/.local/bin/agy` and its configuration is under `~/.gemini/antigravity-cli/` (version 1.4.0 on 2026-10-17). `agy update` updates it and `agy --version` reports it.
 
-**Model ids carry the effort.** `agy models` lists them: `gemini-3.8-flash-high`, `gemini-3.8-flash-medium`, `gemini-3.8-flash-low`, `gemini-4-argon-high`, `gemini-4-argon-medium` and `gemini-4-argon-low` (ned-box, 2026-10-17). The cold-read-fast-read runs on `gemini-3.8-flash-medium`, and on `claude-sonnet-5-5` at low effort when Gemini fails.
+**Model ids carry the effort.** `agy models` lists them: `gemini-3.8-flash-high`, `gemini-3.8-flash-medium`, `gemini-3.8-flash-low`, `gemini-4-argon-high`, `gemini-4-argon-medium` and `gemini-4-argon-low` (ned-box, 2026-10-17). The cold-read-fast-read runs on `gemini-4-neon-low`, and on `claude-sonnet-5-5` at low effort when Gemini fails.
 
 **What a new runner must handle.** The launcher handles all of these; they matter only to someone changing it.
 
@@ -32,7 +32,7 @@ This page tells an agent-seat how to run Codex and Gemini, and what to expect fr
 2. Pass the repository with `--add-dir <repo>`, or nothing from the repository loads, `AGENTS.md` included.
 3. Without `--dangerously-skip-permissions`, a headless run still reads files in its working directory, and runs the commands an allow-rule under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` permits: under the rule `command(agy)` it ran `agy --version` and `agy --help`. It was denied every other file read, in the home and in `/etc` included, and every other command it tried; a denied run ends with "no output produced — a tool required the X permission that headless mode cannot prompt for" (agy 1.4.12 on ned-box, 2026-10-31). The launcher passes the flag so that agy can write its report, and that flag is why the launcher runs agy inside the operating system's sandbox.
 4. Gemini sometimes writes the whole review as its answer instead of into the report file. The launcher then takes the answer as the report when it is at least 120 words; a shorter answer with no report file counts as a failed run.
-5. `--print-timeout` defaults to `0s`, no limit; the launcher sets `30m`, so a run that hangs is stopped.
+5. `--print-timeout` defaults to `0s`, no limit; the launcher sets `15m` for the cold-read-fast-read and `40m` for the cold-read-grid's Gemini cell, so a run that hangs is stopped.
 
 **Its own documentation.** On ned-box, agy's customization guide is `~/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md`, with the rule-loading details in `~/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/rules.md`. Read it before asking agy about itself: asked about itself, agy may spend its whole run on experiments and time out.
 
@@ -42,7 +42,7 @@ These are the cold-read-research agent-seat's results, on the models and CLI ver
 
 - A Codex run at `max` effort on a document of 1,500 to 2,300 words took 13 to 32 minutes (`gpt-6-astra` and `gpt-5.6-sol`).
 - Codex hit no account limit in the campaign; Claude hit its limit three times in one day.
-- `gemini-3.8-flash-low` read a 700 to 1,500-word skill in 21 to 31 seconds, found as many of the known defects as `gpt-5.6-terra` at low effort in a quarter of the time, and found no defect that no other reviewer found. Measured on 2026-09-07, as `nn-systems/cold-read/cold-read-agy-cell.py` records: on one defect list, `gemini-3.8-flash-medium` found 42% and low 19%, which is why the cold-read-fast-read runs on medium.
+- `gemini-3.8-flash-low` read a 700 to 1,500-word skill in 21 to 31 seconds, found as many of the known defects as `gpt-5.6-terra` at low effort in a quarter of the time, and found no defect that no other reviewer found. Measured on 2026-09-07, as `nn-systems/cold-read/cold-read-agy-cell.py` records: on one defect list, `gemini-3.8-flash-medium` found 42% and low 19%, which is why the cold-read-fast-read ran on medium until it moved to `gemini-4-neon-low`.
 
 ## Things that went wrong once and will again
 
