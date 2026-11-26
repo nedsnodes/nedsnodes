@@ -1056,8 +1056,11 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
 
         # A Codex finding id is a hash of the finding's priority and heading only, so a later comment under an
         # earlier finding's id but worded differently may be that finding reworded or another defect with the
-        # same heading: refuse rather than guess.
+        # same heading: refuse rather than guess. A comment with an earlier finding's own text and id is that
+        # finding on any line, however its siblings under the id are worded.
         for comment in parsed:
+            if any(same_finding(comment, found) for found in earlier):
+                continue
             for found in earlier:
                 if (comment["finding"][0] != posting.BLOCKING_CATEGORY
                         and comment["compared"][:2] == found["compared"][:2] and comment["compared"] != found["compared"]
@@ -1079,8 +1082,8 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
             restates[index] = next((found for found in earlier if same_finding(comment, found)
                                     and not any(paired is found for paired in restates)), None)
         # A moved line range gives a restatement a new Codex finding id, and then nothing tells it from a new
-        # finding worded alike: pair it only when one earlier finding and one finding of this review are left
-        # with that text, and otherwise refuse rather than guess.
+        # finding worded alike: refuse rather than guess. Only a comment or an earlier finding with no Codex
+        # finding id pairs by its text, when one earlier finding and one finding of this review are left with it.
         for compared in dict.fromkeys(comment["compared"] for index, comment in enumerate(parsed)
                                       if restates[index] is None):
             free = [found for found in earlier if found["compared"] == compared
@@ -1096,7 +1099,8 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                     distinct.append(comment)
             if not free or not unpaired:
                 continue
-            if len(free) == 1 and len(distinct) == 1:
+            if len(free) == 1 and len(distinct) == 1 and not (distinct[0]["codex_finding_ids"]
+                                                              and free[0]["codex_finding_ids"]):
                 restates[unpaired[0][0]] = free[0]
                 continue
             category, path, text = compared
