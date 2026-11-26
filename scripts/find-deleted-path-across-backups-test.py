@@ -1049,7 +1049,7 @@ if newest_transcript_write_before_the_order_cases is not None:
 
 skip_local = FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository"))])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "",
-                              "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
+                              "/mnt/backup/timeshift/snapshots", finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY,
                               skip={"localsnapshots", "box", "timemachine"}, runner=skip_local, on_ned_box=False,
                               log_store_root=NO_LOG_STORE_ON_THIS_MACHINE)
 skip_local_report_lines = [line for r in reports for line in r.lines]
@@ -1061,7 +1061,7 @@ check("--skip localsnapshots drops the surface and lists no snapshots",
 order_probe = FakeRunner([LISTS_SNAPSHOTS, MOUNTS_FINE, RELEASES_FINE, ("test -e", (1, "", "")),
                           ("rev-parse --git-dir", (128, "", "not a git repository"))])
 reports = finder.build_report("/private/tmp/x/b.md", "/not-a-repo", "/nonexistent-transcripts", "",
-                              "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
+                              "/mnt/backup/timeshift/snapshots", finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY,
                               skip={"box", "timemachine"}, runner=order_probe, on_ned_box=False,
                               log_store_root=NO_LOG_STORE_ON_THIS_MACHINE)
 order_probe_report_lines = [line for r in reports for line in r.lines]
@@ -1691,7 +1691,7 @@ finder.running_on_ned_box = lambda: False
 # so the flag bought nothing but a ConnectTimeout wait.
 skip_box = FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository"))])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
-                              "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
+                              "/mnt/backup/timeshift/snapshots", finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY,
                               skip={"box", "timemachine"}, runner=skip_box,
                               log_store_root=NO_LOG_STORE_ON_THIS_MACHINE)
 check("--skip box sends nothing over ssh",
@@ -1708,7 +1708,7 @@ skip_timeshift = FakeRunner([
     ("ssh", (1, "", "")),
 ])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
-                              "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
+                              "/mnt/backup/timeshift/snapshots", finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY,
                               skip={"timeshift", "timemachine"}, runner=skip_timeshift,
                               log_store_root=NO_LOG_STORE_ON_THIS_MACHINE)
 check("--skip timeshift still greps the box's transcripts",
@@ -1720,44 +1720,37 @@ check("--skip timeshift still greps the box's transcripts",
 # timeshift on the box
 # --------------------------------------------------------------------------
 
+# Loaded here rather than at the top: scripts/run-all-test-suites.py cites this file's line 793 by number.
+_list_writer_spec = importlib.util.spec_from_file_location(
+    "timeshift_newest_snapshot_file_name_list_write",
+    Path(__file__).resolve().with_name("timeshift-newest-snapshot-file-name-list-write.py"))
+list_writer = importlib.util.module_from_spec(_list_writer_spec)
+_list_writer_spec.loader.exec_module(list_writer)
+
 timeshift_hit = FakeRunner([
-    ("ssh", (0, "HIT /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedsnodes/a/b.md\n"
+    ("ssh", (0, "NEWEST 2026-08-14_11-35-50\n"
+               "HIT /mnt/backup/timeshift/snapshots/2026-08-14_11-35-50/localhost/home/nedlern/agents/seat-b/a/b.md\n"
                "HIT /mnt/backup/timeshift/snapshots/2026-08-14_11-35-50/localhost/home/nedlern/Projects/nedsnodes/a/b.md\n", "")),
 ])
 report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
-                                 finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_hit)
-check("timeshift reports FOUND with the newest snapshot first",
+                                 finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY, timeshift_hit)
+check("timeshift reports FOUND from the newest snapshot's list, and says it searched only that snapshot",
       report.status == FOUND and report.versions and "2026-08-14" in report.versions[0].source
-      and report.versions[0].name == "timeshift-2026-08-14_11-35-50-b.md", str(version_sources(report)))
+      and any(l.startswith("searched only snapshot 2026-08-14_11-35-50 on nedlern@ned-box") for l in report.lines),
+      "%s %s" % (version_sources(report), report.lines))
 
-# A fake runner cannot execute the shell this builds, so the one thing it CAN
-# check is the text: a seat-directory root must reach the box with its glob
-# unquoted. It shipped quoted once (found by inspecting the generated script,
-# not by any passing test), which silently searched none of the seat dirs while
-# the report still said "searched every snapshot under ...".
-glob_probe = FakeRunner([("ssh", (0, "", ""))])
-finder.search_timeshift("a/b.md", "nedlern@ned-box", "/root",
-                        finder.DEFAULT_BOX_SEARCH_ROOTS, glob_probe)
-generated = glob_probe.calls[0]
-check("a seat-directory root keeps its glob unquoted so the shell expands it",
-      "/home/nedlern/agents/*" in generated and "'/home/nedlern/agents/*" not in generated
-      and "agents/*'" not in generated,
-      generated)
-check("the snapshots are searched under the reference-checkout's name before the project rename too, which "
-      "snapshots taken before the rename hold",
-      '"$snap/localhost"/home/nedlern/Projects/nedsnodes ' in generated
-      and '"$snap/localhost"/home/nedlern/Projects/'
-      + finder.REFERENCE_CHECKOUT_DIRECTORY_NAME_BEFORE_PROJECT_RENAME + " " in generated,
-      generated)
-check("the suffix pattern reaches find as one quoted word, so the shell cannot expand its '*'",
-      "-path '*/a/b.md'" in generated, generated)
-check("the suffix search's find is not piped, so a find that fails is reported",
-      "|" not in generated.replace("||", ""), generated)
+# A fake runner cannot execute the shell this builds, so these cases check its text.
+list_probe = FakeRunner([("ssh", (0, "", ""))])
+finder.search_timeshift("a/b.md", "nedlern@ned-box", "/root", "~/lists", list_probe)
+generated = list_probe.calls[0]
+check("a bare-name search reads the newest snapshot's list under the box's own home, not this machine's",
+      'list="$HOME"/lists/"$newest"' in generated and os.path.expanduser("~") not in generated, generated)
+check("a bare-name search runs no find over the snapshots' trees", "find " not in generated, generated)
+check("the list is read through a pipe whose failure fails the probe", "set -o pipefail" in generated, generated)
+check("the wanted name reaches awk through the environment, quoted, so awk cannot read it as code",
+      "WANTED=/a/b.md awk" in generated and 'ENVIRON["WANTED"]' in generated, generated)
 
-# The generated script runs for real against a fake snapshot tree. The first
-# version tested only <root>/<wanted>, so the documented fragment form
-# ("dispositions.md") could never hit, and the surface said "searched every
-# snapshot under ..." for a file that was in every snapshot.
+# The generated script runs for real against a fake snapshot tree and a list written by the list writer.
 with tempfile.TemporaryDirectory() as tmp:
     box = Path(tmp, "box")
     snapshots = Path(box, "mnt", "backup", "timeshift", "snapshots")
@@ -1766,65 +1759,87 @@ with tempfile.TemporaryDirectory() as tmp:
             records = Path(snapshots, snap, "localhost", seat, "md-review-records", "x")
             records.mkdir(parents=True)
             Path(records, "dispositions.md").write_text("eleven deferred findings\n")
-    roots = ("/seat-a", "/seats/*")
+    Path(snapshots, "2026-08-13_10-00-00", "localhost", "seat-a", "only-in-the-older-snapshot.md").write_text("x\n")
+    Path(snapshots, "2026-08-14_11-35-50", "localhost", "seat-a", "name with 'quote' and [glob].md").write_text("x\n")
+    lists = Path(box, "lists")
+    lists.mkdir()
+    written = list_writer.write_list(str(snapshots), "2026-08-14_11-35-50", str(lists), ("/seat-a", "/seats/*"))
 
-    def timeshift(wanted, root=str(snapshots)):
+    def timeshift(wanted, root=str(snapshots), list_directory=str(lists)):
         runner = LocalShellRunner([], box)
-        return finder.search_timeshift(wanted, "nedlern@ned-box", root, roots, runner)
+        return finder.search_timeshift(wanted, "nedlern@ned-box", root, list_directory, runner)
 
     report = timeshift("md-review-records/x/dispositions.md")
-    check("timeshift, real shell: the repo-relative form is FOUND, newest snapshot first",
-          report.status == FOUND and report.versions and "2026-08-14" in report.versions[0].source, "%s %s" % (report.status, report.lines))
+    check("timeshift, real shell: the repo-relative form is FOUND in the newest snapshot's list",
+          report.status == FOUND and report.versions and "2026-08-14" in report.versions[0].source
+          and not any("2026-08-13" in l for l in report.lines), "%s %s" % (report.status, report.lines))
     report = timeshift("dispositions.md")
-    check("timeshift, real shell: the documented fragment form is FOUND in the same snapshots",
-          report.status == FOUND and any("2026-08-13" in l for l in report.lines) and report.versions and "2026-08-14" in report.versions[0].source,
-          "%s %s" % (report.status, report.lines))
-    check("timeshift, real shell: a seat-glob root is searched by suffix too",
-          any("/seats/s1/" in l for l in report.lines), str(report.lines))
+    check("timeshift, real shell: the documented fragment form is FOUND, under a seat-glob root too",
+          report.status == FOUND and any("/seats/s1/" in l for l in report.lines), "%s %s" % (report.status, report.lines))
     report = timeshift("x/dispositions.md")
     check("timeshift, real shell: a two-component fragment is FOUND", report.status == FOUND, str(report.lines))
     report = timeshift("ispositions.md")
     check("timeshift, real shell: a partial component is NOT FOUND (suffix means whole components)",
           report.status == NOT_FOUND, "%s %s" % (report.status, report.lines))
-    report = timeshift("nowhere.md")
-    check("timeshift, real shell: an absent file is NOT FOUND after a real search",
-          report.status == NOT_FOUND and any("searched every snapshot under" in l for l in report.lines),
-          "%s %s" % (report.status, report.lines))
-    report = timeshift("/seat-a/md-review-records/x/dispositions.md")
-    check("timeshift, real shell: an absolute box path is tested exactly under each snapshot",
+    report = timeshift("[glob].md")
+    check("timeshift, real shell: a name holding glob and quote characters is matched as fixed text",
+          report.status == NOT_FOUND, "%s %s" % (report.status, report.lines))
+    report = timeshift("name with 'quote' and [glob].md")
+    check("timeshift, real shell: a name holding spaces, quotes and brackets is FOUND as written",
           report.status == FOUND, "%s %s" % (report.status, report.lines))
+    report = timeshift("only-in-the-older-snapshot.md")
+    check("timeshift, real shell: a file only an older snapshot holds is NOT FOUND, and the line says only the "
+          "newest snapshot was searched and how to search them all",
+          report.status == NOT_FOUND and report.lines == [
+              "searched only snapshot 2026-08-14_11-35-50 on nedlern@ned-box, from its file-name list; a full path, "
+              "starting with /, searches every snapshot"], "%s %s" % (report.status, report.lines))
+    report = timeshift("/seat-a/only-in-the-older-snapshot.md")
+    check("timeshift, real shell: an absolute box path is tested exactly under every snapshot",
+          report.status == FOUND and "2026-08-13" in report.versions[0].source, "%s %s" % (report.status, report.lines))
     report = timeshift("dispositions.md", root=str(Path(box, "no-such-root")))
     check("timeshift, real shell: a missing snapshot root is UNAVAILABLE",
           report.status == UNAVAILABLE and any("is the backup drive mounted" in l for l in report.lines),
           "%s %s" % (report.status, report.lines))
+    Path(box, "empty-root").mkdir()
+    report = timeshift("dispositions.md", root=str(Path(box, "empty-root")))
+    check("timeshift, real shell: a snapshot root with no snapshot is UNAVAILABLE",
+          report.status == UNAVAILABLE and any("holds no snapshot" in l for l in report.lines),
+          "%s %s" % (report.status, report.lines))
+    Path(snapshots, "2026-08-15_09-00-00", "localhost").mkdir(parents=True)
+    report = timeshift("dispositions.md")
+    check("timeshift, real shell: a newest snapshot with no list yet is UNAVAILABLE, not NOT FOUND, and names the "
+          "writer and the full-path search",
+          report.status == UNAVAILABLE
+          and report.lines[0] == "not searched — the newest snapshot, 2026-08-15_09-00-00, has no file-name list "
+                                 "in %s on nedlern@ned-box yet" % lists
+          and finder.TIMESHIFT_FILE_NAME_LIST_WRITER in report.lines[1], "%s %s" % (report.status, report.lines))
+    shutil.rmtree(Path(snapshots, "2026-08-15_09-00-00"))
+    Path(written).write_bytes(b"not gzip")
+    report = timeshift("dispositions.md")
+    check("timeshift, real shell: a list zcat cannot read makes the search UNAVAILABLE, not NOT FOUND",
+          report.status == UNAVAILABLE and any("did not complete" in l for l in report.lines),
+          "%s %s" % (report.status, report.lines))
 
 timeshift_timeout = FakeRunner([("ssh", (124, "", "timed out after 120s: ssh ..."))])
 report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
-                                 finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_timeout)
+                                 finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY, timeshift_timeout)
 check("a Timeshift search that times out is UNAVAILABLE, not 'searched every snapshot'",
       report.status == UNAVAILABLE and any("did not complete" in l for l in report.lines),
       "%s %s" % (report.status, report.lines))
 
-timeshift_probefail = FakeRunner([("ssh", (0, "PROBEFAIL /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedsnodes\n", ""))])
-report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
-                                 finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_probefail)
-check("a find that failed under a snapshot directory makes the surface UNAVAILABLE",
-      report.status == UNAVAILABLE and any("find failed under 1 snapshot directory" in l for l in report.lines),
-      "%s %s" % (report.status, report.lines))
-
 timeshift_empty = FakeRunner([("ssh", (0, "", ""))])
-report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
-                                 finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_empty)
+report = finder.search_timeshift("/home/nedlern/a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
+                                 finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY, timeshift_empty)
 check("timeshift reports NOT FOUND only after a real search", report.status == NOT_FOUND)
 
 timeshift_no_root = FakeRunner([("ssh", (0, "NOROOT\n", ""))])
 report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
-                                 finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_no_root)
+                                 finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY, timeshift_no_root)
 check("an unmounted backup drive on the box is UNAVAILABLE", report.status == UNAVAILABLE)
 
 timeshift_down = FakeRunner([("ssh", (255, "", "ssh: connect to host ned-box port 22: No route to host\n"))])
 report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
-                                 finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_down)
+                                 finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY, timeshift_down)
 check("an unreachable box is UNAVAILABLE and says the snapshots are fine",
       report.status == UNAVAILABLE and any("cannot see them" in l for l in report.lines), str(report.lines))
 
@@ -2200,7 +2215,7 @@ with tempfile.TemporaryDirectory() as tmp:
     here_skip_box = RunsLocallyRefusesSsh([("rev-parse --git-dir", (128, "", "not a git repository"))])
     reports = finder.build_report("docs/drafts/pr-main-process-design.md", "/not-a-repo", "/nonexistent-transcripts",
                                   "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
-                                  finder.DEFAULT_BOX_SEARCH_ROOTS, skip={"localsnapshots", "box", "timemachine"},
+                                  finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY, skip={"localsnapshots", "box", "timemachine"},
                                   runner=here_skip_box, log_store_root=str(store))
     check("--skip box on the machine that holds the store still reads it in place, sending nothing over ssh",
           [r.status for r in reports if r.surface == "log-store"] == [FOUND]
@@ -2209,7 +2224,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
 skip_log_store = FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository")), ("ssh", (1, "", ""))])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
-                              "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
+                              "/mnt/backup/timeshift/snapshots", finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY,
                               skip={"localsnapshots", "logstore", "reflog", "timemachine"}, runner=skip_log_store,
                               log_store_root=NO_LOG_STORE_ON_THIS_MACHINE)
 check("--skip logstore and --skip reflog drop those two surfaces and nothing else",
@@ -2219,7 +2234,7 @@ check("--skip logstore and --skip reflog drop those two surfaces and nothing els
 
 order_everything = FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository")), ("ssh", (1, "", ""))])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
-                              "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
+                              "/mnt/backup/timeshift/snapshots", finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY,
                               skip={"localsnapshots", "timemachine"}, runner=order_everything,
                               log_store_root=NO_LOG_STORE_ON_THIS_MACHINE)
 check("the surfaces run in the docstring's order: the two fast new ones before transcripts and Timeshift",
@@ -2262,7 +2277,8 @@ def run_as_if_on(machine_is_ned_box, wanted, box, runner, snapshot_root=None,
     finder.running_on_ned_box = lambda: machine_is_ned_box
     try:
         return finder.build_report(wanted, "/not-a-repo", str(Path(box, ".claude", "projects")), "nedlern@ned-box",
-                                   snapshot_root or str(Path(box, "snapshots")), ("/seat-a",), skip=set(skip),
+                                   snapshot_root or str(Path(box, "snapshots")), str(Path(box, "lists")),
+                                   skip=set(skip),
                                    runner=runner, log_store_root=log_store_root)
     finally:
         finder.running_on_ned_box = lambda: False
@@ -2274,6 +2290,8 @@ with tempfile.TemporaryDirectory() as tmp:
     kept.mkdir(parents=True)
     Path(kept, "b.md").write_text("content Timeshift kept\n")
     Path(box, "snapshots", "2026-08-13_10-00-00", "localhost", "seat-a").mkdir(parents=True)
+    Path(box, "lists").mkdir()
+    list_writer.write_list(str(Path(box, "snapshots")), "2026-08-14_11-35-50", str(Path(box, "lists")), ("/seat-a",))
     projects = Path(box, ".claude", "projects", "p")
     projects.mkdir(parents=True)
     Path(projects, "quiet.jsonl").write_text('{"text": "nothing relevant"}\n')
@@ -2291,7 +2309,8 @@ with tempfile.TemporaryDirectory() as tmp:
           str(on_box.calls))
     check("on the box: Timeshift is searched, and NOT FOUND after a real search on ned-box",
           by_surface["timeshift"].status == NOT_FOUND
-          and by_surface["timeshift"].lines == ["searched every snapshot under %s on ned-box" % Path(box, "snapshots")],
+          and by_surface["timeshift"].lines == ["searched only snapshot 2026-08-14_11-35-50 on ned-box, from its "
+                                                "file-name list; a full path, starting with /, searches every snapshot"],
           "%s %s" % (by_surface["timeshift"].status, by_surface["timeshift"].lines))
     check("on the box, with no log-store copy of the Mac's transcripts: transcripts names ned-box, says the Mac "
           "was not searched and why, and names the copy it looked for",
@@ -2317,7 +2336,7 @@ with tempfile.TemporaryDirectory() as tmp:
           and len(by_surface["timeshift"].copied) == 1
           and os.path.basename(by_surface["timeshift"].copied[0]).startswith("timeshift-")
           and Path(by_surface["timeshift"].copied[0]).read_bytes() == Path(kept_copy).read_bytes()
-          and by_surface["timeshift"].lines[0] == "1 snapshot(s) on ned-box still have it, newest first:",
+          and by_surface["timeshift"].lines[0] == "1 snapshot path(s) on ned-box have it, newest first:",
           "%s %s %s" % (by_surface["timeshift"].status, by_surface["timeshift"].lines, by_surface["timeshift"].recovery))
     check("on the box: a transcript of the box's that mentions it is FOUND, named as ned-box's",
           by_surface["transcripts"].status == FOUND
@@ -3082,7 +3101,7 @@ announced = []
 recording = RecordsWhatWasAnnouncedAtEachCall([("rev-parse --git-dir", (128, "", "not a git repository")),
                                                ("ssh", (1, "", ""))], announced)
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
-                              "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
+                              "/mnt/backup/timeshift/snapshots", finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY,
                               skip={"localsnapshots", "timemachine"}, runner=recording,
                               log_store_root=NO_LOG_STORE_ON_THIS_MACHINE, on_surface_done=announced.append)
 timeshift_call = [seen for joined, seen in recording.announced_at_call if "timeshift/snapshots" in joined]
@@ -3105,7 +3124,7 @@ streamed_args = ["md-review-records/x/dispositions.md", "--repo", "/repo", "--tr
                  "--skip", "localsnapshots", "--skip", "timemachine"]
 code, text = run_main(streamed_args, FakeRunner(completed_table))
 reports = finder.build_report("md-review-records/x/dispositions.md", "/repo", "/nonexistent", "nedlern@ned-box",
-                              "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
+                              "/mnt/backup/timeshift/snapshots", finder.TIMESHIFT_FILE_NAME_LIST_DIRECTORY,
                               skip={"localsnapshots", "timemachine"}, runner=FakeRunner(completed_table),
                               log_store_root=NO_LOG_STORE_ON_THIS_MACHINE)
 check("a run that completes prints exactly the report it printed before streaming, summary last",
