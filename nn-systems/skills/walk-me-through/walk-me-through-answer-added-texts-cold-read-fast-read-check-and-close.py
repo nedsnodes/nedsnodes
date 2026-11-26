@@ -2494,12 +2494,34 @@ def answer_check_commands(top):
     return "\n".join(commands)
 
 
+printed_command_path_override_words = []
+
+
 def step_command_with_cwd(top, step, *words):
     """The command for one step of this program that it tells the agent to run. Every such command is built here,
     shell-quoted, because each must survive a path holding a space and must name the walk's checkout with --cwd:
     the agent may run it from another checkout, which it would otherwise act on instead. step may hold a flag, as
     `close --hold-answer-until-new-item-answered` does."""
-    return shlex.join(["python3", str(Path(__file__).resolve()), *step.split(), *words, "--cwd", str(top)])
+    return shlex.join(["python3", str(Path(__file__).resolve()), *step.split(), *words, "--cwd", str(top),
+                       *printed_command_path_override_words])
+
+
+def explicit_path_override_words(arguments):
+    """The path overrides this run was given, absolute because a printed command may run from another directory.
+    Without them a printed command would run another reader, search other records or log counts elsewhere."""
+    words = []
+    for directory in arguments.cold_read_records or []:
+        words += ["--cold-read-records", os.path.abspath(directory)]
+    if arguments.fast_read_program != FAST_READ_PROGRAM:
+        words += ["--fast-read-program", os.path.abspath(arguments.fast_read_program)]
+    if arguments.counts_log:
+        words += ["--counts-log", os.path.abspath(arguments.counts_log)]
+    return words
+
+
+def flag_and_value_words(flag, value):
+    """The words for a flag and its value; argparse rejects a separate value that opens with a dash."""
+    return [f"{flag}={value}"] if value.startswith("-") else [flag, value]
 
 
 def check_command_with_cwd(top, *words):
@@ -2528,7 +2550,7 @@ def check_words(arguments):
     if arguments.moved_on_no_decision:
         words.append("--moved-on-no-decision")
     if arguments.moved_on is not None:
-        words += ["--moved-on", arguments.moved_on]
+        words += flag_and_value_words("--moved-on", arguments.moved_on)
     if arguments.option is not None:
         words += ["--option", str(arguments.option)]
     if arguments.not_asked is not None:
@@ -2536,11 +2558,12 @@ def check_words(arguments):
     if arguments.now_over_later_already_decided:
         words.append(NOW_OVER_LATER_FLAG)
     elif ruled:
-        words += ["--already-decided", arguments.already_decided, *arguments.already_decided_answers]
+        words += [*flag_and_value_words("--already-decided", arguments.already_decided),
+                  *arguments.already_decided_answers]
     for number, letter in arguments.part_answer or []:
         words += ["--part-answer", f"{number}={letter}"]
     if (arguments.user_reply_as_typed or "").strip():
-        words += ["--user-reply-as-typed", arguments.user_reply_as_typed]
+        words += flag_and_value_words("--user-reply-as-typed", arguments.user_reply_as_typed)
     return words
 
 
@@ -3911,7 +3934,7 @@ def waiting_item_read(arguments, sub_step_of=None):
     if rechecked is not None and not rechecked.strip():
         raise Failure(SYSTEM_STATUS_CLAIMS_RECHECKED_EMPTY)
     # Repeated in every command the step prints, so a rerun it asks for is not refused again for the same claims.
-    rechecked_words = [SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG, rechecked] if rechecked else []
+    rechecked_words = flag_and_value_words(SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG, rechecked) if rechecked else []
     rerun = read_step_command_with_cwd(
         top, *([AFTER_FIXES_FLAG] if arguments.after_fixes_reread_only_when_facts_change else []), *rechecked_words)
     # Before walk_document_items, which can write: a missing copy refuses with nothing written.
@@ -4814,8 +4837,9 @@ def bump(arguments):
     top, minutes, value, parser = the_open_walk(walk_finder, arguments.cwd)
     pending = unclosed_last_answer(walk_finder, minutes, parser)
     if pending:
-        bump_command = check_command_with_cwd(top, "--bump", arguments.bump,
-                                              *(["--user-reply-as-typed", arguments.user_reply_as_typed]
+        bump_command = check_command_with_cwd(top, *flag_and_value_words("--bump", arguments.bump),
+                                              *(flag_and_value_words("--user-reply-as-typed",
+                                                                     arguments.user_reply_as_typed)
                                                 if arguments.user_reply_as_typed else []))
         raise Failure(BUMP_ANSWER_NOT_CLOSED.format(minutes=minutes, item=pending["item"],
                                                     close_command=step_command_with_cwd(top, "close"),
@@ -5075,6 +5099,7 @@ def main(argv=None):
     if len(arguments.already_decided or []) > 1:
         parser.error(ALREADY_DECIDED_REPEATED)
     arguments.already_decided, *arguments.already_decided_answers = (arguments.already_decided or [[None]])[0]
+    printed_command_path_override_words[:] = explicit_path_override_words(arguments)
     copy_problem = None if arguments.step == READ_AHEAD_WORKER_STEP else walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
     try:
         exit_code = {"check": check, "close": close, WAITING_ITEM_READ_STEP: waiting_item_read,
