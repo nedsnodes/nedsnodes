@@ -4758,7 +4758,7 @@ def gh_failure(command, top, gh_program, timeout):
     return result.stdout, None
 
 
-def line_with_leading_hashtag_closing_hash_removed(line):
+def line_with_leading_closed_form_hashtag_turned_into_open_form(line):
     """line with the closing `#` of its leading hashtag removed, so `#held_on_ruling# w item 3` reads as
     `#held_on_ruling w item 3`."""
     return re.sub(r"^(#[a-z][a-z0-9_]*)#(?=\s|$)", r"\1", line)
@@ -4774,7 +4774,7 @@ def pull_requests_held_on(lines, top, gh_program, timeout):
         pull_requests = json.loads(output)
         held = {line: [] for line in lines}
         for pull_request in pull_requests:
-            found = {line_with_leading_hashtag_closing_hash_removed(line.strip())
+            found = {line_with_leading_closed_form_hashtag_turned_into_open_form(line.strip())
                      for review in pull_request["reviews"] for line in (review["body"] or "").split("\n")}
             for line in lines:
                 if line in found:
