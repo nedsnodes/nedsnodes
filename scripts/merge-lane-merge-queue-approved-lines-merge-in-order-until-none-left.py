@@ -29,8 +29,9 @@ request's age is the place of its last line: the earlier, the older.
 
 Waiting pull requests merge in this order, chosen again before each merge:
   1. those labeled high-priority on GitHub, oldest first;
-  2. the oldest prose-only one, before any code one;
-  3. after three prose-only merges in a row, the oldest code one; then prose-only again.
+  2. while the count of prose-only merges in a row is under 3, the oldest prose-only one,
+     before any code one;
+  3. once that count is 3 or more, the oldest code one, before any prose-only one.
 When no line of the kind a rule wants is waiting, the oldest other line goes. A pull request
 is prose-only when every file it changes, from its merge base with main to its queued
 nn-head-commit, which is the commit about to be merged, is Markdown under docs/ that
@@ -38,7 +39,8 @@ scripts/pull-request-review-plan.py classes as prose, so no line it changes is i
 fenced code block; any other pull request is code, and so is one whose files could not be
 read, which the log says. The count of prose-only merges in a row is kept in
 merge-batch-prose-only-merges-in-a-row.txt, so it carries from one merge batch to the next;
-every merge this program makes counts by its kind, and a code merge sets the count to 0.
+each prose-only merge this program makes adds 1 to it, past 3 when no code line waits, and
+each code merge sets it to 0.
 
 merge-batch-run-in-queue-order takes merge-batch.lock without waiting, and exits 0 when
 another process holds it. It makes passes over the queue file until a pass neither merges
@@ -300,11 +302,11 @@ class MergeQueuePullRequestMergeBatchRunner:
         except FileNotFoundError:
             return 0
         if not text.isdigit():
-            raise Stop(f"{self.prose_only_merges_in_a_row_file}, which counts the prose-only merges "
-                       f"in a row, holds {text[:200]!r}, not a whole number, so the next pull "
-                       f"request cannot be chosen. Write into it the number of prose-only merges "
-                       f"since the last code merge, or remove it to count from 0, before you "
-                       f"resume")
+            raise Stop(f"{self.prose_only_merges_in_a_row_file} holds {text[:200]!r}, not a count "
+                       f"of 0 or more, so the next pull request cannot be chosen. The file holds "
+                       f"the number of prose-only merges since the last code merge, as this "
+                       f"program's docstring defines them. Remove the file, which counts from 0, "
+                       f"then run this program's merge-batch-resume")
         return int(text)
 
     def next_in_merge_order(self, waiting):

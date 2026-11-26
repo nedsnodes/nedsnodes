@@ -408,8 +408,8 @@ def merge_order_cases(scratch):
     case.batches.mkdir()
     (case.batches / "merge-batch-prose-only-merges-in-a-row.txt").write_text("three\n")
     case.run("merge-batch-run-in-queue-order")
-    check("a count file that holds no whole number stops the merge batch, naming the file",
-          case.merge_calls() == [] and "not a whole number" in (case.stop_text() or "")
+    check("a count file that holds no count stops the merge batch, naming the file",
+          case.merge_calls() == [] and "not a count of 0 or more" in (case.stop_text() or "")
           and "merge-batch-prose-only-merges-in-a-row.txt" in case.stop_text(),
           f"{case.merge_calls()}\n{case.stop_text()}")
 
