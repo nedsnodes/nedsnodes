@@ -1163,6 +1163,27 @@ with tempfile.TemporaryDirectory() as workspace_name:
         check(f"{torn_label} main-gatekeeper-check-in-request-holder.pid leaves the workspace intact",
               torn_workspace.is_dir(), payload)
 
+    # A refused worker leaves only its refusal record: the holder PID and the
+    # resolved request go, so nothing reads the workspace as a pending request.
+    with tempfile.TemporaryDirectory() as retained_name:
+        retained_workspace = Path(retained_name)
+        for entry in ("candidate", "declared"):
+            (retained_workspace / entry).mkdir()
+        (retained_workspace / gatekeeper.REQUEST_HOLDER_PID_FILE_NAME).write_text(
+            f"{os.getpid()} 0", encoding="utf-8")
+        (retained_workspace / gatekeeper.RESOLVED_REQUEST_RECORD_FILE_NAME).write_text(
+            "{}", encoding="utf-8")
+        retain_error = None
+        try:
+            gatekeeper.retain_refusal_record(retained_workspace, "f" * 64, gatekeeper.Refusal(
+                "fixture-refusal", "fixture facts", "fixture next action"))
+        except Exception as error:  # noqa: BLE001 - reported as the case's detail
+            retain_error = error
+        left = sorted(path.name for path in retained_workspace.iterdir())
+        check("a retained refusal leaves only the refusal record in its workspace",
+              retain_error is None and left == [gatekeeper.REFUSAL_RECORD_FILE_NAME],
+              f"error={retain_error!r} left={left}")
+
     # The retained refusal record survives a status that lands mid-write, and is
     # delivered once (ruled 2026-08-12): the record was written in place after
     # its siblings were unlinked, so a status arriving in either window either
