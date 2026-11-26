@@ -682,6 +682,57 @@ with tempfile.TemporaryDirectory() as scratch:
           names.record_directory_being_written_lock_pass_fds_for_child_writers(record_directory) == (),
           "")
 
+# A record written in the log-store itself: its folder on each machine, the check that it can be written,
+# its creation at the first free name, and the shipped line its callers already read.
+check("on ned-box the cold-read-records log-store folder is under ned-box's home",
+      names.cold_read_or_sanity_check_records_log_store_directory_on_this_machine(
+          "cold-read-records", environment={}, platform="linux")
+      == pathlib.Path("/home/nedlern/nedsnodes-logs/cold-read-records"), "")
+check("on the Mac the sanity-check-records log-store folder is under the Mac's mount of ned-box's home",
+      names.cold_read_or_sanity_check_records_log_store_directory_on_this_machine(
+          "sanity-check-records", environment={}, platform="darwin")
+      == pathlib.Path("/Volumes/nedhome/nedsnodes-logs/sanity-check-records"), "")
+check("the override names the log-store a test writes into",
+      names.cold_read_or_sanity_check_records_log_store_directory_on_this_machine(
+          "cold-read-records",
+          environment={names.COLD_READ_AND_SANITY_CHECK_RECORDS_LOG_STORE_OVERRIDE_VARIABLE: "/scratch/store"},
+          platform="linux")
+      == pathlib.Path("/scratch/store/cold-read-records"), "")
+with tempfile.TemporaryDirectory() as scratch:
+    records_directory = pathlib.Path(scratch) / "nedsnodes-logs" / "cold-read-records"
+    reason = names.cold_read_or_sanity_check_records_log_store_directory_not_writable_reason_or_none(records_directory)
+    check("a log-store folder that can be written gives no reason, and is made when missing",
+          reason is None and records_directory.is_dir(), f"reason {reason!r}")
+    check("the writable check leaves nothing behind", list(records_directory.iterdir()) == [],
+          f"left {list(records_directory.iterdir())}")
+    unwritable = pathlib.Path(scratch) / "read-only"
+    unwritable.mkdir()
+    unwritable.chmod(0o500)
+    try:
+        reason = names.cold_read_or_sanity_check_records_log_store_directory_not_writable_reason_or_none(
+            unwritable / "cold-read-records")
+        if os.geteuid() == 0:
+            check("(skipped: root can write a read-only folder)", True, "")
+        else:
+            check("a log-store folder that cannot be made gives one line naming it",
+                  reason is not None and str(unwritable / "cold-read-records") in reason and "\n" not in reason,
+                  f"reason {reason!r}")
+    finally:
+        unwritable.chmod(0o700)
+    first = names.cold_read_or_sanity_check_record_directory_created_atomically_in_log_store(
+        records_directory, "2026-11-26-SKILL")
+    second = names.cold_read_or_sanity_check_record_directory_created_atomically_in_log_store(
+        records_directory, "2026-11-26-SKILL")
+    check("a record is created in the log-store at its base name, and a second read of the same name gets -2",
+          first == records_directory / "2026-11-26-SKILL" and first.is_dir()
+          and second == records_directory / "2026-11-26-SKILL-2" and second.is_dir(),
+          f"first {first}, second {second}")
+    line = names.cold_read_or_sanity_check_record_written_in_log_store_shipped_line(second, "cold-read-records")
+    check("a record written in the log-store gets the shipped line its readers parse, citing its ned-box path",
+          line.startswith("shipped: 2026-11-26-SKILL-2 — ")
+          and line.endswith("; record at nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/2026-11-26-SKILL-2"),
+          line)
+
 print()
 if failures:
     print(f"{len(failures)} case(s) failed")

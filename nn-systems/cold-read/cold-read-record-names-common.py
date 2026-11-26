@@ -7,6 +7,8 @@ import json
 import os
 import pathlib
 import re
+import sys
+import tempfile
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 # Records are temporary checkout logs for shipping to ned-box; never commit them.
@@ -237,6 +239,66 @@ def record_directory_being_written_lock_pass_fds_for_child_writers(record_dir: p
             descriptors.append(int(name))
     return tuple(sorted(descriptors))
 
+
+
+LOG_STORE_DIRECTORY_NAME = "nedsnodes-logs"
+# The host every citation of a log-store record names, on either machine.
+LOG_STORE_CITATION_HOST = "nedlern@ned-box"
+# Names a directory used in place of the log-store, so a test writes records
+# into a scratch directory on either machine.
+COLD_READ_AND_SANITY_CHECK_RECORDS_LOG_STORE_OVERRIDE_VARIABLE = (
+    "COLD_READ_AND_SANITY_CHECK_RECORDS_LOG_STORE_OVERRIDE")
+
+
+def cold_read_or_sanity_check_records_log_store_directory_on_this_machine(
+        records_directory_name: str, environment=None, platform=None) -> pathlib.Path:
+    """The log-store directory that holds every record of one kind,
+    `cold-read-records` or `sanity-check-records`, as this machine reaches it:
+    under ned-box's home on ned-box, under the Mac's mount of that home on the Mac."""
+    environment = os.environ if environment is None else environment
+    platform = sys.platform if platform is None else platform
+    override = environment.get(COLD_READ_AND_SANITY_CHECK_RECORDS_LOG_STORE_OVERRIDE_VARIABLE)
+    if override:
+        return pathlib.Path(override) / records_directory_name
+    home = MAC_MOUNT_OF_NED_BOX_HOME_DIRECTORY if platform == "darwin" else _ned_box_home.NED_BOX_HOME
+    return pathlib.Path(home) / LOG_STORE_DIRECTORY_NAME / records_directory_name
+
+
+def cold_read_or_sanity_check_records_log_store_directory_not_writable_reason_or_none(
+        records_directory: pathlib.Path):
+    """None when a record can be written under records_directory, which is
+    made if missing; otherwise why not, in one line, for the caller to print
+    before it starts any reviewer and then exit nonzero."""
+    try:
+        records_directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=records_directory, prefix=".writable-check-"):
+            pass
+    except OSError as error:
+        return (f"the log-store directory {records_directory} cannot be written: {error}. "
+                f"On the Mac, check that ned-box's home is mounted at "
+                f"{MAC_MOUNT_OF_NED_BOX_HOME_DIRECTORY}; on ned-box, check the directory's "
+                f"owner and permissions; then run the same command again")
+    return None
+
+
+def cold_read_or_sanity_check_record_directory_created_atomically_in_log_store(
+        records_directory: pathlib.Path, base_name: str) -> pathlib.Path:
+    """Create and return the first free of records_directory/base_name,
+    base_name-2, base_name-3 ... in the log-store itself. The record is
+    written where it is kept, so it is never copied or shipped."""
+    return cold_read_record_directory_at_first_free_name_created_atomically(
+        records_directory / base_name, names_taken_in_log_store=set())
+
+
+def cold_read_or_sanity_check_record_written_in_log_store_shipped_line(
+        record_directory: pathlib.Path, records_directory_name: str) -> str:
+    """The line a record shipper prints for a shipped record, for a record
+    written in the log-store itself, so the programs that read `shipped:` and
+    its citation need no change."""
+    citation = (f"{LOG_STORE_CITATION_HOST}:{_ned_box_home.NED_BOX_HOME}/"
+                f"{LOG_STORE_DIRECTORY_NAME}/{records_directory_name}/{record_directory.name}")
+    return (f"shipped: {record_directory.name} — written in the log-store, nothing to copy; "
+            f"record at {citation}")
 
 # A fenced code block or a code span, matched first so its text is kept, or the start of an inline
 # link's target, "](" or "](<", followed by the file:///Volumes/nedhome/ prefix.
