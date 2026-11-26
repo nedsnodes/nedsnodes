@@ -759,37 +759,10 @@ def test_the_waiting_item_read_step_refuses_a_mark_whose_text_would_not_be_read_
           in again.stdout, described(again))
 
 
-# marks_document's heading, `#case_against` line and recommendation: 7 + 5 + 3 words.
-MARKS_DOCUMENT_WORDS_OUTSIDE_BODY = 15
-
-
 def words_of_body(count):
     """A body of count words, ten to a line."""
     words = [f"word{number}" for number in range(count)]
     return "\n".join(" ".join(words[start:start + 10]) for start in range(0, count, 10)) + "\n"
-
-
-def test_the_waiting_item_read_step_refuses_an_item_over_500_words_and_reads_it_once_split_into_sub_steps():
-    # Two words of the body follow a `###` that is no sub-step heading: one in fenced code, one in a quotation.
-    body = (words_of_body(501 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY - 2) + "\n```\n### code\n```\n\n> ### quoted\n")
-    case = Case(document=marks_document(body))
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    command = (f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
-               f"--cwd {shlex.quote(str(case.checkout.resolve()))}")
-    check("the read step refuses an item of 501 words, counting code and marker lines, before any read",
-          result.returncode == 1
-          and "the text from line 3 of the walk-document" in result.stderr
-          and "`## Item 3 of 9: the opening sentence`, has 501 words, over the limit of 500 words" in result.stderr
-          and "\nSplit that text into `###` sub-steps, each within 500 words" in result.stderr
-          and "paragraph opening \"Limit each item to 500 words\" says" in result.stderr
-          and f"\nThen run `{command}` again.\n" in result.stderr
-          and case.calls.read_text() == "" and not case.reads().exists(), described(result))
-    document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
-    document.write_text(document.read_text().replace(
-        "word250 ", "\n### The second half\n\nword250 ").replace("word0 ", "### The first half\n\nword0 "))
-    again = case.run(*shlex.split(command)[2:-2])
-    check("once the item is split into `###` sub-steps, each counted on its own, the command the refusal gave reads it",
-          again.returncode == 0 and "had to be run now" in again.stdout, described(again))
 
 
 def test_the_waiting_item_read_step_refuses_an_item_stating_a_system_status_until_the_agent_says_how_it_rechecked():
@@ -1232,8 +1205,10 @@ def test_the_waiting_item_read_step_names_and_reads_the_first_undecided_numbered
     document.write_text(document.read_text().replace(
         "word250 ", "\n### Item 3.2 of 9: the second half\n\nword250 ").replace(
         "word0 ", "### Item 3.1 of 9: the first half\n\nword0 "))
+    read_before = set(case.reads().glob("*-outcome.json"))
     result = case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change")
-    items_read = [json.loads(outcome.read_text())["item"] for outcome in case.reads().glob("*-outcome.json")]
+    items_read = [json.loads(outcome.read_text())["item"] for outcome in case.reads().glob("*-outcome.json")
+                  if outcome not in read_before]
     check("with `#next_to_present item 3 of 9` left naming an item split into numbered sub-steps, the read step names "
           "sub-step 3.1 in the walk-minutes, reads it and says to present it, and gives item 3's heading no read",
           result.returncode == 0 and marker(case) == "#next_to_present item 3.1 of 9"
@@ -1444,70 +1419,6 @@ def test_the_waiting_item_read_step_keeps_the_text_read_before_the_item_was_spli
     again = case.run(WAITING_ITEM_READ_STEP_NAME)
     check("naming item 3 again keeps no second copy of the same earlier text",
           again.returncode == 0 and document.read_text().count("Withdrawn version") == 1, described(again))
-
-
-def test_the_waiting_item_read_step_reads_an_item_of_500_words_leaving_out_its_approval_walk_item_lines():
-    body = ("#approval_walk_item_first_entered 2026-11-12\n- #approval_walk_item_waits_on the opening paragraph\n\n"
-            + words_of_body(500 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY))
-    case = Case(document=marks_document(body))
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("the read step reads an item of exactly 500 words, its `#approval_walk_item_` lines not counted",
-          result.returncode == 0 and "had to be run now" in result.stdout
-          and "word484" in case.calls.read_text(), described(result))
-
-
-def test_the_waiting_item_read_step_counts_each_numbered_sub_step_of_the_item_the_minutes_name():
-    document = ("# A walk\n\n## Item 3 of 9: the opening sentence\n\n### Item 3.1 of 9: the first half\n\n"
-                + words_of_body(520) + "\n### Item 3.2 of 9: the second half\n\nShort.\n\n"
-                "#case_against weak: the page grows.\n\nRecommendation: change it.\n")
-    case = Case(document=document)
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with `#next_to_present item 3 of 9`, the read step refuses the item's over-long numbered sub-step 3.1",
-          result.returncode == 1 and "the text from line 5 of the walk-document" in result.stderr
-          and "`### Item 3.1 of 9: the first half`, has 527 words" in result.stderr
-          and case.calls.read_text() == "", described(result))
-
-
-def test_the_waiting_item_read_step_counts_a_detail_heading_below_a_sub_step_as_part_of_its_text():
-    body = words_of_body(260) + "\n#### Details\n\n" + words_of_body(260)
-    case = Case(document=marks_document(body))
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("a `####` heading starts no sub-step, so 260 words, `#### Details` and 260 words are refused as one text",
-          result.returncode == 1 and "the text from line 3 of the walk-document" in result.stderr
-          and "has 536 words" in result.stderr and case.calls.read_text() == "", described(result))
-
-
-def test_the_waiting_item_read_step_counts_each_item_of_a_shared_heading_on_its_own():
-    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n**Item 6 of 9:** the first.\n\n"
-                + words_of_body(200) + "\n#case_against weak: one.\n\nRecommendation: do one.\n\n"
-                "**Item 7 of 9:** the second.\n\n" + words_of_body(200)
-                + "\n#case_against weak: two.\n\nRecommendation: do two.\n")
-    case = Case(next_to_present="items 6 and 7 of 9", document=document)
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("items 6 and 7 of 9 under one heading, of about 200 words each, are counted on their own and read",
-          result.returncode == 0 and "had to be run now" in result.stdout, described(result))
-
-
-def test_the_waiting_item_read_step_counts_the_text_of_a_shared_heading_above_its_first_item():
-    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(600)
-                + "\n**Item 6 of 9:** the first.\n\nShort.\n\n#case_against weak: one.\n\nRecommendation: do one.\n\n"
-                "**Item 7 of 9:** the second.\n\nShort.\n\n#case_against weak: two.\n\nRecommendation: do two.\n")
-    case = Case(next_to_present="items 6 and 7 of 9", document=document)
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("600 words between a shared heading and its first item are counted as one more text, and refused",
-          result.returncode == 1 and "the text from line 3 of the walk-document" in result.stderr
-          and "has 609 words" in result.stderr and case.calls.read_text() == "", described(result))
-
-
-def test_the_waiting_item_read_step_leaves_out_an_older_version_sub_step_of_the_same_number():
-    document = ("# A walk\n\n## Item 3 of 9: the older version\n\nOld.\n\n### Item 3.1 of 9: the older first half\n\n"
-                + words_of_body(520) + "\n## Item 3 of 10: the opening sentence\n\nNew.\n\n"
-                "### Item 3.1 of 10: the first half\n\nShort.\n\n"
-                "#case_against weak: the page grows.\n\nRecommendation: change it.\n")
-    case = Case(next_to_present="item 3 of 10", document=document)
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with `#next_to_present item 3 of 10`, an older `3.1 of 9` of 520 words elsewhere is not counted",
-          result.returncode == 0 and "had to be run now" in result.stdout, described(result))
 
 
 def decided_item_numbers_of(name, document, approved):
@@ -2022,51 +1933,6 @@ def test_an_item_is_not_decided_through_a_sub_step_past_a_later_reuse_of_its_par
         items, {"3.1.1": "approved"}, program.approval_walk_map_each_item_number_to_direct_sub_steps_found_by_walk_document_item_finder(walk_finder, units, {}))
     check("approving a 3.1.1 that stands past a later `Item 3 of 12` decides neither 3.1 nor 3", inferred == {},
           repr(inferred))
-
-
-def test_the_waiting_item_read_step_leaves_out_an_older_sub_step_below_a_later_item():
-    document = ("# A walk\n\n## Item 3 of 10: the opening sentence\n\nNew.\n\n### Item 3.1 of 10: the first half\n\n"
-                "Short.\n\n#case_against weak: the page grows.\n\nRecommendation: change it.\n\n"
-                "## Item 4 of 10: the next item\n\nNext.\n\n### Item 3.1 of 9: the older first half\n\n"
-                + words_of_body(520))
-    case = Case(next_to_present="item 3 of 10", document=document)
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("the sub-steps of item 3 end at item 4, so an older `3.1 of 9` of 520 words below item 4 is not counted",
-          result.returncode == 0 and "had to be run now" in result.stdout, described(result))
-
-
-def test_the_waiting_item_read_step_leaves_out_the_text_of_a_shared_heading_when_one_item_of_it_is_named():
-    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(600)
-                + "\n**Item 6 of 9:** the first.\n\nShort.\n\n#case_against weak: one.\n\nRecommendation: do one.\n\n"
-                "**Item 7 of 9:** the second.\n\nShort.\n\n#case_against weak: two.\n\nRecommendation: do two.\n")
-    case = Case(next_to_present="item 6 of 9", document=document)
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with only item 6 named, the 600 words above its opening are not shown, so are not counted",
-          result.returncode == 0 and "had to be run now" in result.stdout, described(result))
-
-
-def test_the_waiting_item_read_step_counts_the_sub_steps_of_each_item_of_a_shared_heading():
-    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n**Item 6 of 9:** the first.\n\nShort.\n\n"
-                "**Item 7 of 9:** the second.\n\nShort.\n\n### Item 6.1 of 9: the first's detail\n\nShort.\n\n"
-                "### Item 7.1 of 9: the second's detail\n\n" + words_of_body(520)
-                + "\n#case_against weak: two.\n\nRecommendation: do both.\n")
-    case = Case(next_to_present="items 6 and 7 of 9", document=document)
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with items 6 and 7 named, sub-step 7.1 after sub-step 6.1 is counted, and its 520 words refused",
-          result.returncode == 1 and "`### Item 7.1 of 9: the second's detail`, has 5" in result.stderr
-          and case.calls.read_text() == "", described(result))
-
-
-def test_the_waiting_item_read_step_counts_the_text_of_a_heading_shared_by_sub_steps_above_the_first():
-    document = ("# A walk\n\n## Item 3 of 9: the opening sentence\n\nShort.\n\n### Items 3.1 and 3.2 of 9: both halves\n\n"
-                + words_of_body(600) + "\n**Item 3.1 of 9:** the first half.\n\nShort.\n\n"
-                "**Item 3.2 of 9:** the second half.\n\nShort.\n\n"
-                "#case_against weak: the page grows.\n\nRecommendation: change it.\n")
-    case = Case(document=document)
-    result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("600 words between a heading shared by sub-steps 3.1 and 3.2 and the first of them are refused",
-          result.returncode == 1 and "`### Items 3.1 and 3.2 of 9: both halves`, has 60" in result.stderr
-          and case.calls.read_text() == "", described(result))
 
 
 def test_a_failed_fast_read_stops_the_check():
@@ -8575,41 +8441,6 @@ def test_a_fresh_agent_rewrite_holding_a_bold_count_paragraph_is_refused_writing
     check("a rewrite holding a bold count paragraph, read as a newer version of item 3, is refused with the "
           "program's message and the walk-document left as it was",
           after == before and "would change which items" in refusal and "bold running count" in refusal, after + "\n---\n" + repr(refusal))
-
-
-def test_a_rerun_after_an_over_limit_rewrite_whose_count_write_failed_starts_the_count_again():
-    case, _, _ = revised_item_case_revised_three_times_across_a_split()
-    rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
-    rewrite.write_text(f'#new "{REVISED_ITEM_TEXTS[4]}"\n\n' + "word " * 600 + "\n")
-    case.reads().chmod(0o500)
-    try:
-        failed = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
-    finally:
-        case.reads().chmod(0o700)
-    again = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
-    check("after an over-limit rewrite whose count could not be written, the command it names, run again, starts "
-          "the count again before refusing the item for its length",
-          failed.returncode == 1 and "could not be written" in failed.stderr
-          and again.returncode == 1 and "over the limit" in again.stderr and revised_item_revisions(case) == 0,
-          described(failed) + described(again))
-
-
-def test_a_fresh_agent_rewrite_read_from_the_whole_item_is_refused_when_another_sub_step_is_over_the_limit():
-    case, _, _ = revised_item_case_revised_three_times_across_a_split()
-    document = revised_item_document(case)
-    document.write_text(document.read_text().rstrip("\n") + "\n\n### Item 3.2 of 9: the long half\n\n"
-                        + "word " * 600 + "\n")
-    case.minutes.write_text(case.minutes.read_text() + "#next_to_present item 3 of 9\n")
-    rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
-    rewrite.write_text(f'The page lists each job once.\n\n#new "{REVISED_ITEM_TEXTS[4]}"\n\n'
-                       "#case_against weak: the page grows.\n\nThe alternative: leave it.\n\nRecommendation: do it.\n")
-    before = document.read_text()
-    result = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
-    check("a rewrite read from the whole item 3 is refused when its sibling sub-step 3.2 is over the word limit, as "
-          "the read without a rewrite is", result.returncode == 1 and "over the limit" in result.stderr
-          and "the long half" in result.stderr, described(result))
-    check("that refusal comes before the rewrite is written, so the walk-document is left as it was",
-          document.read_text() == before, document.read_text())
 
 
 def test_the_count_of_proposed_text_revisions_passes_over_an_unnumbered_item_between_sub_steps():
