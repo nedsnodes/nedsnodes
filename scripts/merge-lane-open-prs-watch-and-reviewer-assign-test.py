@@ -33,6 +33,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -2235,6 +2236,62 @@ def run_poll_once_cases(scratch_root, token_file):
           and "PR #1 REVIEW-ASSIGNED" in description and "PR #2" not in description
           and [line.split()[2] for line in assigned] == ["#1", "#2"],
           f"{(first, second)} {kept!r} {description!r} {assigned} {machine.errors}")
+
+    def append_stopping_inside_second_line(name, truncate=None):
+        machine = machine_for(name)
+        machine.assignments.write_text("", encoding="utf-8")
+        machine.poll = []
+        machine.run("--poll-once-write-baseline")
+        machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+
+        class CutInsideSecondLine(FirstLineOnly):
+            def write(self, payload):
+                second_start = payload.index(b"\n", payload.index(b" REVIEW-ASSIGNED ")) + 1
+                self.handle.write(payload[:payload.index(b"PR #", second_start) + len(b"PR #")])
+                self.handle.flush()
+                raise OSError("injected: no space left inside the second REVIEW-ASSIGNED line")
+
+        def open_cut(path, mode="r", *args, **kwargs):
+            handle = real_open(path, mode, *args, **kwargs)
+            if path == machine.events_path and mode == "ab":
+                return CutInsideSecondLine(handle)
+            return handle
+
+        real_truncate = watcher_module.os.truncate
+        watcher_module.Path.open = open_cut
+        if truncate is not None:
+            watcher_module.os.truncate = truncate
+        try:
+            first = machine.run()
+        finally:
+            watcher_module.Path.open = real_open
+            watcher_module.os.truncate = real_truncate
+        description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+        return machine, first, description
+
+    machine, first, description = append_stopping_inside_second_line("append-stops-inside-the-second-line")
+    machine.complete_tasks()
+    second = machine.run()
+    lines = machine.event_lines()
+    check("when the append stops inside the second REVIEW-ASSIGNED line, the run cuts the event "
+          "file back to its last whole line, so the next run writes a whole, readable line for the "
+          "put-back pull request",
+          (first, second) == (1, 0)
+          and [line.split()[2] for line in lines if " REVIEW-ASSIGNED " in line] == ["#1", "#2"]
+          and machine.events_path.read_bytes().endswith(b"\n")
+          and all(len(re.findall(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", line)) == 1 for line in lines),
+          f"{(first, second)} {lines} {machine.errors}")
+
+    def truncate_fails(path, length):
+        raise OSError("injected: the event file cannot be cut")
+
+    machine, first, description = append_stopping_inside_second_line(
+        "append-stops-inside-the-second-line-and-cannot-cut", truncate_fails)
+    check("when the cut line cannot be cut back, the failure task names its byte offset and says to "
+          "cut the file to that length",
+          first == 1 and "could not be cut back" in description and "cut the file to" in description
+          and "byte offset" in description,
+          f"{first} {description!r} {machine.errors}")
 
     machine = machine_for("append-fails-and-cannot-be-read-back")
     machine.assignments.write_text("", encoding="utf-8")

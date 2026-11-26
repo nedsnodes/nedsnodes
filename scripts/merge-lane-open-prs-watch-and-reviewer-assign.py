@@ -784,8 +784,7 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
                 # again could send the pull request to a second agent-seat.
                 kept = [(deal, line) for deal, line in zip(dealt, assigned_lines)
                         if line in written or not read_back]
-                put_back = [line for _, line in zip(dealt, assigned_lines)
-                            if line not in written and read_back]
+                put_back = [line for line in assigned_lines if read_back and line not in written]
                 message = str(error)
                 if kept:
                     message += (
@@ -1048,8 +1047,19 @@ def event_lines_append(path, lines, now):
             raise EventLinesAppendFailed(
                 f"{error}; the event file {path} could not be read back, so it may hold any of "
                 f"this append's {len(lines)} lines", [], read_back=False) from error
+        # The bytes after the last whole line are this append's own, and the caller's lock keeps
+        # other writers out, so cutting them keeps the next append from gluing onto a cut line.
+        whole_end = start + sum(len(line) for line in encoded[:held])
+        cut = ""
+        try:
+            if path.stat().st_size > whole_end:
+                os.truncate(path, whole_end)
+        except OSError as cut_error:
+            cut = (f"; and a cut line of this append is left at byte offset {whole_end} of the "
+                   f"event file, which could not be cut back ({cut_error}): cut the file to "
+                   f"{whole_end} bytes")
         raise EventLinesAppendFailed(
-            f"{error}; the event file {path} holds {held} of this append's {len(lines)} lines",
+            f"{error}; the event file {path} holds {held} of this append's {len(lines)} lines{cut}",
             lines[:held], read_back=True) from error
 
 
