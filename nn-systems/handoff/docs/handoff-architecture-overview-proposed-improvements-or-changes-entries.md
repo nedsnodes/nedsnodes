@@ -1257,3 +1257,28 @@ The claim check's evidence:
 > - The writer takes them from the supervisor, not from the module: handoff-write-and-check-supervisor.py:152-154.
 > - Ranked fix-later: renaming one of these fields still takes one edit, in handoff-supervisor.py, and a search finds it.
 State: open
+
+## E108 — possible problem: an assertion of the overview is contradicted
+
+Claim: The Components section lists the files that make up the handoff-system.
+Found by: the overview claim check of 2026-11-26 against commit e014e7dfc391cc90a7b97c855086f78bc88f530d; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4baa641aae8e09deefb03b6fe352f339c2828e76-2026-11-26T19-53-58-407435Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - It leaves out three files of the system that the handoff-supervisor loads or that the system schedules:
+>   - .claude/settings.json:38-43 registers `"MessageDisplay"` → `nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py`, which handoff-supervisor.py:245-252 loads and feeds through :1406 `def conversation_tail_last_lines_display_file_write(`;
+>   - nn-systems/handoff/agent-seat-terminal-captures-common.py, which handoff-supervisor.py:293-297 loads and :3205 calls as `agent_seat_terminal_captures.agent_seat_terminal_capture_start_in_this_tmux_pane(settings.agent)`;
+>   - nn-systems/handoff/agent-seat-terminal-captures-older-than-seven-days-delete.py, scheduled at scheduled-jobs-on-each-machine.json:225 `"name": "agent-seat-terminal-captures-older-than-seven-days-delete",`.
+> - Neither the Entry points nor the Shared state section names the MessageDisplay event, the display file or the terminal-captures directory.
+State: open
+
+## E109 — possible problem: an assertion of the overview is contradicted
+
+Claim: Before it runs the extractor, the handoff-supervisor stores as the Remote Control name a new claude.ai title that the transcript holds and the rename hook did not store, and then adds to the successor's initial-agent-instructions the instruction to tell the other agent-seats the new name.
+Found by: the overview claim check of 2026-11-26 against commit e014e7dfc391cc90a7b97c855086f78bc88f530d; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4baa641aae8e09deefb03b6fe352f339c2828e76-2026-11-26T19-53-58-407435Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The storing is right, but the instruction is added whenever the name changed during the agent-session, including when the rename hook already stored it. handoff-supervisor.py:2586-2587 `"""Store a rename the launched agent-session's last turn end did not, and, when the name changed during that agent-session, add the instruction to tell the other agent-seats."""`.
+> - :2621-2626 builds `heard_names` from the launched name and the names recorded since launch, and returns early only `if not old_names:`. So the instruction does not depend on the supervisor itself having stored the title.
+State: open
