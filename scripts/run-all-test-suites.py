@@ -127,6 +127,14 @@ Usage:
                 print a line opening with RUN_STOPPED_AT_RUN_TIME_LIMIT_NOT_COUNTING_ADMISSION_WAITS_LINE_PREFIX;
                 the run exits 1 when a suite had failed, otherwise 2. Each
                 suite killed is reported as stopped, not as failed
+  --merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight
+                passed only by the merge-lane's merge program, for the test
+                run of a merge commit that holds up the next merge: where
+                ADMISSION decides, the run's suites start without waiting
+                for the machine's CPU use to fall under its threshold, and
+                run in TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS
+                at CPU weight 100; every other ADMISSION rule still holds.
+                Without -j, it runs at most one suite per core at once
 
 WHY THIS EXISTS (user-ruled 2026-09-21, walk "redesigning how pull requests
 are processed", items 3 and 6). Until this program, every full run of the
@@ -412,7 +420,12 @@ server runs in system.slice, such as one cron started without systemd-run,
 competes with the suites at the weight of user.slice against system.slice,
 which only root can change; one in an ssh login's session scope, as
 scripts/launch-claude-ubuntu starts it, competes at the weight of that scope
-against all of user@1000.service.
+against all of user@1000.service. A run given
+--merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight
+skips only the CPU rule above, and its suites run in
+TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS at CPU weight 100,
+so together they get as much CPU as one agent-seat's scope, and ten times
+what every other run's suites get together.
 
 MEMORY CEILING, where suites run in cgroup scopes. A suite's scope may hold
 TEST_SUITE_MEMORY_CEILING_BYTES, 4 GB, or what
@@ -940,6 +953,10 @@ TEST_SUITE_MEMORY_CEILING_BYTES = 4 * 10**9
 # suites without stalling them into their timeouts.
 TEST_SUITE_CGROUP_SLICE = r"nn\x2dtest\x2dsuites.slice"
 TEST_SUITE_CGROUP_SLICE_CPU_WEIGHT = 10
+# The next merge waits on these runs, so they outweigh every other run's suites.
+TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS = (
+    r"nn\x2dtest\x2dsuites\x2dof\x2dmerge\x2dlane\x2dafter\x2dmerge\x2dtest\x2druns.slice")
+TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS_CPU_WEIGHT = 100
 TEST_SUITE_MEMORY_CEILING_BYTES_OF_SUITES_THAT_NEED_MORE = {
     "scripts/scheduled-full-test-run-of-main-test.py": 24 * 10**9,
 }
@@ -950,13 +967,14 @@ def test_suite_memory_ceiling_bytes(suite):
         suite, TEST_SUITE_MEMORY_CEILING_BYTES)
 
 
-def test_suite_cgroup_scope_command(memory_ceiling_bytes=TEST_SUITE_MEMORY_CEILING_BYTES):
+def test_suite_cgroup_scope_command(memory_ceiling_bytes=TEST_SUITE_MEMORY_CEILING_BYTES,
+                                    cgroup_slice=TEST_SUITE_CGROUP_SLICE):
     """systemd-run's command that starts a suite in a cgroup scope of its own under a memory ceiling.
 
     OOMPolicy=continue, because systemd's default stops the whole scope at the first kill,
     the counting shell included, so the suite's counters and the reason it failed are lost."""
     return ("systemd-run", "--user", "--scope", "--quiet", "--expand-environment=no",
-            f"--slice={TEST_SUITE_CGROUP_SLICE}",
+            f"--slice={cgroup_slice}",
             "-p", f"MemoryMax={memory_ceiling_bytes}", "-p", "MemorySwapMax=0",
             "-p", "OOMPolicy=continue", "--")
 
@@ -2351,11 +2369,13 @@ class MachineWideTestSuiteAdmission:
     the lock while it waits for room.
     A suite that cannot start waits; once a minute the run reports what the suites
     wait for. One that has waited TEST_SUITE_ADMISSION_WAIT_CEILING_SECONDS raises
-    MachineWideTestSuiteAdmissionWaitedPastCeiling."""
+    MachineWideTestSuiteAdmissionWaitedPastCeiling. With cpu_rule_skipped, as for a
+    merge-lane after-merge test run, the CPU rule alone does not hold a suite back."""
 
     def __init__(self, directory, readings, say, clock=time.monotonic, sleep=time.sleep,
-                 machine_clock=time.monotonic):
+                 machine_clock=time.monotonic, cpu_rule_skipped=False):
         self.directory = Path(directory)
+        self.cpu_rule_skipped = cpu_rule_skipped
         self.readings = readings
         self.say = say
         self.clock = clock
@@ -2406,7 +2426,7 @@ class MachineWideTestSuiteAdmission:
     def why_not_now(self):
         """What keeps a suite from starting now, or None when only a slot is needed."""
         cpu = self.readings.cpu_percent_average()
-        if cpu >= TEST_SUITE_ADMISSION_CPU_PERCENT_BELOW:
+        if not self.cpu_rule_skipped and cpu >= TEST_SUITE_ADMISSION_CPU_PERCENT_BELOW:
             return (f"the machine's CPU use, {cpu:.0f}% over the last "
                     f"{TEST_SUITE_ADMISSION_CPU_AVERAGE_SECONDS} s, is not under "
                     f"{TEST_SUITE_ADMISSION_CPU_PERCENT_BELOW}%")
@@ -2589,15 +2609,15 @@ def environment_with_user_runtime_directory_when_the_user_session_bus_exists(
     return environment
 
 
-def why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none(which=shutil.which,
-                                                                        runner=subprocess.run,
-                                                                        environment=None):
+def why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none(
+        which=shutil.which, runner=subprocess.run, environment=None,
+        cgroup_slice=TEST_SUITE_CGROUP_SLICE, cpu_weight=TEST_SUITE_CGROUP_SLICE_CPU_WEIGHT):
     """None when each suite can run in a cgroup scope of its own, or why it cannot.
 
     It first adds XDG_RUNTIME_DIR to environment, default this process's, as
     environment_with_user_runtime_directory_when_the_user_session_bus_exists adds it, so
     every suite started after it reaches the user manager whoever started this program.
-    Then it sets TEST_SUITE_CGROUP_SLICE's CPU weight, which lasts until the user's
+    Then it sets cgroup_slice's CPU weight, which lasts until the user's
     systemd restarts, so every run sets it again."""
     environment = os.environ if environment is None else environment
     environment.update(
@@ -2605,8 +2625,8 @@ def why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none(which=sh
     for program in ("systemd-run", "systemctl", "setpriv", "bash"):
         if which(program) is None:
             return f"{program} is not on PATH"
-    weight_command = ("systemctl", "--user", "set-property", "--runtime", TEST_SUITE_CGROUP_SLICE,
-                      f"CPUWeight={TEST_SUITE_CGROUP_SLICE_CPU_WEIGHT}")
+    weight_command = ("systemctl", "--user", "set-property", "--runtime", cgroup_slice,
+                      f"CPUWeight={cpu_weight}")
     try:
         weight = runner(list(weight_command), stdin=subprocess.DEVNULL, capture_output=True,
                         text=True, timeout=SIGNAL_SANDBOX_START_TIMEOUT_SECONDS, check=False)
@@ -2615,10 +2635,10 @@ def why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none(which=sh
     if weight.returncode != 0:
         return (f"{' '.join(weight_command)} exited {weight.returncode}: "
                 f"{(weight.stderr or weight.stdout).strip()}")
-    trial_line = " ".join((*test_suite_cgroup_scope_command(),
-                           *TEST_SUITE_COUNTER_SHELL_DIES_WITH_THIS_PROGRAM))
+    trial_scope = test_suite_cgroup_scope_command(cgroup_slice=cgroup_slice)
+    trial_line = " ".join((*trial_scope, *TEST_SUITE_COUNTER_SHELL_DIES_WITH_THIS_PROGRAM))
     try:
-        trial = runner([*test_suite_cgroup_scope_command(),
+        trial = runner([*trial_scope,
                         *TEST_SUITE_COUNTER_SHELL_DIES_WITH_THIS_PROGRAM, "true"],
                        stdin=subprocess.DEVNULL,
                        capture_output=True, text=True,
@@ -2632,14 +2652,15 @@ def why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none(which=sh
 
 
 def command_prefix_running_one_suite_in_its_cgroup_scope(statistics_descriptor, in_bwrap,
-                                                         memory_ceiling_bytes):
+                                                         memory_ceiling_bytes,
+                                                         cgroup_slice=TEST_SUITE_CGROUP_SLICE):
     """The command prefix that runs a suite in a cgroup scope of its own, under memory_ceiling_bytes,
     and keeps its counters.
 
     The counters are written to statistics_descriptor, an open file the caller passes on.
     A suite outside bwrap outlives a killed run, as before, and the shell, which waits
     for it, outlives the run with it, so the run's record still sees the suite running."""
-    return (*test_suite_cgroup_scope_command(memory_ceiling_bytes),
+    return (*test_suite_cgroup_scope_command(memory_ceiling_bytes, cgroup_slice),
             *(TEST_SUITE_COUNTER_SHELL_DIES_WITH_THIS_PROGRAM if in_bwrap else ()),
             "bash", "-c", TEST_SUITE_CGROUP_STATISTICS_WRAPPER, str(statistics_descriptor))
 
@@ -3466,7 +3487,7 @@ def suite_process_started(process, status_read, note_suite_process):
 
 def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefix=(),
                   note_suite_process=None, in_cgroup_scope=False, nice=False, platform=None,
-                  time_limit=None, run_stops=None):
+                  time_limit=None, run_stops=None, cgroup_slice=TEST_SUITE_CGROUP_SLICE):
     """Run one suite; return its result, on Linux with each case line it printed timed.
 
     time_limit is (limit seconds, recorded seconds or None) from
@@ -3482,7 +3503,7 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
     ended first; on another platform, where the kill cannot look below the process group,
     a killed suite's directory is kept and "output_note" says so.
 
-    With in_cgroup_scope, the suite runs in a cgroup scope of its own and its CPU seconds
+    With in_cgroup_scope, the suite runs in a cgroup scope of its own in cgroup_slice and its CPU seconds
     and peak memory are read from there; with nice, at low priority. Inside its
     nn-test-sandbox the suite may write only the checkout and its own recorded-input files: the
     run's log directory, where this program writes, stays out of its reach."""
@@ -3550,7 +3571,7 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
         resource_prefix += command_prefix_running_one_suite_in_its_cgroup_scope(
             statistics.fileno(),
             does_signal_sandbox_report_killed_suite_as_exit_code_128_plus_signal(sandbox_prefix),
-            memory_ceiling_bytes)
+            memory_ceiling_bytes, cgroup_slice)
     if nice:
         resource_prefix += ("nice", "-n", str(TEST_SUITE_NICE_INCREMENT))
     # bwrap, and the shell that keeps the cgroup counters, exit 128+N when the suite is
@@ -5076,6 +5097,7 @@ def parse_arguments(argv):
     parser.add_argument("--leave-out-suites-that-run-the-real-claude-cli", action="store_true")
     parser.add_argument("--run-time-limit-seconds-not-counting-admission-waits",
                         dest="run_time_limit_seconds", type=float, metavar="SECONDS")
+    parser.add_argument("--merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight", action="store_true")
     arguments = parser.parse_args(argv)
     if arguments.jobs is not None and arguments.jobs < 1:
         parser.error("-j takes a whole number of at least 1")
@@ -5250,8 +5272,13 @@ def main(argv=None, platform=None):
             files_only_strace_saw_by_suite=files_only_strace_saw_by_suite)
         chosen = suites_longest_recorded_first(
             [suite for suite, selected, _ in selection if selected], recordings)
-        jobs = suites_run_at_once(arguments.jobs, len(chosen), os.cpu_count(),
-                                  admission_decides=in_test_sandboxes)
+        # With the CPU rule skipped, nothing else keeps a flagged run from 64 suites on 16
+        # cores, which slows each about fourfold, as far as the time limit of 4 times its
+        # recorded seconds; so a flagged run starts one suite per core.
+        jobs = suites_run_at_once(
+            arguments.jobs, len(chosen), os.cpu_count(),
+            admission_decides=in_test_sandboxes and not
+            arguments.merge_lane_after_merge_test_run_suites_skip_admission_cpu_threshold_and_run_at_higher_cpu_weight)
         if arguments.leave_records_unchanged:
             strace = recorder = None
         else:
@@ -5296,6 +5323,11 @@ def main(argv=None, platform=None):
                 report.line(uncovered)
         admission = None
         cgroup_unavailable_because = None
+        cgroup_slice, cgroup_slice_cpu_weight = (
+            (TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS,
+             TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS_CPU_WEIGHT)
+            if arguments.merge_lane_after_merge_test_run_suites_skip_admission_cpu_threshold_and_run_at_higher_cpu_weight
+            else (TEST_SUITE_CGROUP_SLICE, TEST_SUITE_CGROUP_SLICE_CPU_WEIGHT))
         if in_test_sandboxes:
             try:
                 readings = TestSuiteAdmissionMachineCpuAndMemoryReadingsSampler(
@@ -5303,24 +5335,28 @@ def main(argv=None, platform=None):
                 readings.start()
                 admission = MachineWideTestSuiteAdmission(
                     test_suite_admission_directory_for_lock_file(arguments.lock_file), readings,
-                    report.line)
+                    report.line, cpu_rule_skipped=arguments.merge_lane_after_merge_test_run_suites_skip_admission_cpu_threshold_and_run_at_higher_cpu_weight)
             except MachineWideTestSuiteAdmissionCouldNotDecide as error:
                 report.line(f"{PROGRAM}: not run — admission could not start: {error}")
                 report.line("Fix what it names, then run this again.")
                 report.close()
                 return EXIT_COULD_NOT_RUN
+            cpu_rule = (
+                "whatever the machine's CPU use, as a merge-lane after-merge test run, while "
+                if arguments.merge_lane_after_merge_test_run_suites_skip_admission_cpu_threshold_and_run_at_higher_cpu_weight else
+                f"only while the machine's CPU use over {TEST_SUITE_ADMISSION_CPU_AVERAGE_SECONDS} s "
+                f"is under {TEST_SUITE_ADMISSION_CPU_PERCENT_BELOW}% and ")
             report.line(
-                f"each suite starts only while the machine's CPU use over "
-                f"{TEST_SUITE_ADMISSION_CPU_AVERAGE_SECONDS} s is under "
-                f"{TEST_SUITE_ADMISSION_CPU_PERCENT_BELOW}% and its available memory is above "
+                f"each suite starts {cpu_rule}its available memory is above "
                 f"{TEST_SUITE_ADMISSION_AVAILABLE_MEMORY_BYTES_ABOVE / 10**9:g} GB, at most "
                 f"{TEST_SUITE_ADMISSION_STARTS_PER_SECOND} starts a second and "
                 f"{TEST_SUITE_ADMISSION_SUITES_RUNNING_AT_ONCE_CEILING} suites at once on this "
-                f"machine, at nice {TEST_SUITE_NICE_INCREMENT} in {TEST_SUITE_CGROUP_SLICE} at CPU "
-                f"weight {TEST_SUITE_CGROUP_SLICE_CPU_WEIGHT}; readings every "
+                f"machine, at nice {TEST_SUITE_NICE_INCREMENT} in {cgroup_slice} at CPU "
+                f"weight {cgroup_slice_cpu_weight}; readings every "
                 f"{MACHINE_READINGS_INTERVAL_SECONDS} s in "
                 f"{log_dir / MACHINE_CPU_AND_MEMORY_READINGS_FILE_NAME}")
-            cgroup_unavailable_because = why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none()
+            cgroup_unavailable_because = why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none(
+                cgroup_slice=cgroup_slice, cpu_weight=cgroup_slice_cpu_weight)
             if cgroup_unavailable_because is not None:
                 report.line(f"suites run without a cgroup scope each, so their CPU seconds "
                             f"and peak memory are not recorded: {cgroup_unavailable_because}")
@@ -5373,6 +5409,7 @@ def main(argv=None, platform=None):
                                        sandbox_prefix=sandbox_prefix,
                                        note_suite_process=note_suite_process,
                                        in_cgroup_scope=cgroup_unavailable_because is None,
+                                       cgroup_slice=cgroup_slice,
                                        nice=True, platform=platform, **options)
             result.update(kind=kind, admission_wait=waited, admitted=True)
             if cgroup_unavailable_because is not None:

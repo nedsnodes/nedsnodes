@@ -2486,6 +2486,26 @@ def main():
                   scratch / "after-merge-passes" / "review-tools")),
               f"exit {exit_code}\n{output}")
 
+        name = "after-merge-runner-takes-the-merge-lane-flag"
+        exit_code, output, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+            origin_files={"scripts/run-all-test-suites.py":
+                          FAKE_RUNNER + "# takes --merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight\n"})
+        calls = runner_calls(scratch, name)
+        check("when the runner at the merge commit takes --merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight, the "
+              "after-merge test run is given it; the fake runner of the case above, which "
+              "predates the flag, is not",
+              exit_code == 0 and len(calls) == 1
+              and calls[0]["argv"][:3] == ["--only-suites-whose-recorded-inputs-changed-since",
+                                           HEAD, "--merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight"],
+              f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
+        check("a runner that cannot be read is given no --merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight, so the "
+              "test run that starts it reports why",
+              program.merge_lane_after_merge_test_run_flag_arguments_or_empty_if_merge_commit_run_all_test_suites_lacks_the_flag(
+                  scratch / name / "no-such-runner.py") == ()
+              and program.merge_lane_after_merge_test_run_flag_arguments_or_empty_if_merge_commit_run_all_test_suites_lacks_the_flag(
+                  scratch / name) == ())
+
         def head_test_run_recordings(directory):
             saved = directory / "outputs" / "hr" / "pr10" / "recorded-inputs"
             recording_in_store(saved, directory, RECORDED_SUITE,
