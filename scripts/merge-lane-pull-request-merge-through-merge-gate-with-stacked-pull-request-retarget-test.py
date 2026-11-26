@@ -1182,6 +1182,13 @@ def merge_program_lock_and_merge_queue_stop_file_cases(scratch):
           exit_code == 2 and "because " in output and "stopped by hand" in output
           and gate_calls == [] and index_of(argvs(gh_calls), ["pr", "merge"]) is None,
           f"exit {exit_code}\n{output}")
+    queue_program = Path(program.__file__).resolve().with_name(
+        "merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py")
+    check("a stop file no merge queue run wrote, so with no stopped notice, sends merge-lane-2 "
+          "to merge-batch-start, whose STOPPED line covers that case, and names no notice",
+          f"run: python3 {queue_program} merge-batch-start\n" in output
+          and queue_program.is_file() and "stopped notice says" not in output,
+          output)
 
 
 def failed_suites_kept_in_view_cases(scratch):

@@ -1422,13 +1422,15 @@ def main(argv=None, wait=time.sleep):
         except OSError as error:
             stop_reason = f"it exists but could not be read: {error}"
         if stop_reason is not None:
+            queue_program = Path(__file__).resolve().with_name(
+                "merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py")
             print(f"STOP: not merged: the merge queue is stopped, because {stop_file} says: "
                   f"{stop_reason}\n"
-                  f"No merge may start until main is handled. If you are merge-lane-2, handle "
-                  f"the stop as its stopped notice says, then resume the merge queue with its "
-                  f"merge-batch-resume subcommand, which removes {stop_file}; otherwise tell "
-                  f"merge-lane-2 this message, with Claude Code's SendMessage tool, naming pull "
-                  f"request {arguments.pull_request}.")
+                  f"No merge may start until main is handled. If you are merge-lane-2, run: "
+                  f"python3 {queue_program} merge-batch-start\n"
+                  f"and do what its STOPPED line says, which covers a stop with or without a "
+                  f"stopped notice. Otherwise tell merge-lane-2 this message, with Claude Code's "
+                  f"SendMessage tool, naming pull request {arguments.pull_request}.")
             return EXIT_COULD_NOT_RUN
         exit_code = merged_and_main_tested(arguments, wait)
         if exit_code in EXITS_THAT_STOP_THE_MERGE_QUEUE:
