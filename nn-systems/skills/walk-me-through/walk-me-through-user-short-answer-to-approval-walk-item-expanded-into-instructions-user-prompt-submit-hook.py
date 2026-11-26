@@ -1112,8 +1112,8 @@ def new_text_as_shown(line):
         return None
     part = re.match(rf"^{walk_finder.MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*(Part \d+)\.\s",
                     line.strip())
-    lead_in = LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f"`{mark[1]}` line"]
-    return f"{f'{part[1]}. ' if part else ''}{lead_in} {NEW_TEXT_LABEL.sub('', mark[2])}"
+    lead_in = LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f"`{mark['mark']}` line"]
+    return f"{f'{part[1]}. ' if part else ''}{lead_in} {NEW_TEXT_LABEL.sub('', mark['text'])}"
 
 
 def shown_text_parser(walk_finder):
