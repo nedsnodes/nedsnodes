@@ -38,7 +38,6 @@ import selectors
 import signal
 import socket
 import sys
-import tempfile
 import time
 import traceback
 import types
@@ -131,26 +130,25 @@ def _library_modules_preloaded():
     for name in PRELOADED_LIBRARY_MODULES:
         try:
             importlib.import_module(name)
-        except ImportError:
-            pass  # The shell reader installs tree-sitter-bash, or says it cannot, in each child that needs it.
+        except Exception:
+            # Only a speed-up: each guard that needs the module imports it, and handles its failure, itself.
+            pass
 
 
-def _guard_file_run_as_main_then_exit(guard_file, payload, output_descriptor, error_descriptor, descriptors_to_close):
-    """In a forked child: run guard_file as `python3 guard_file` would, with payload as its input, then exit."""
+def _guard_file_run_as_main_then_exit(guard_file, input_descriptor, output_descriptor, error_descriptor,
+                                     descriptors_to_close):
+    """In a forked child: run guard_file as `python3 guard_file` would, reading input_descriptor, then exit."""
     status = 1
     try:
+        # A group of its own, so that a timeout kills any process the guard started as well.
+        os.setpgid(0, 0)
         for descriptor in descriptors_to_close:
             os.close(descriptor)
+        os.dup2(input_descriptor, 0)
         os.dup2(output_descriptor, 1)
         os.dup2(error_descriptor, 2)
-        os.close(output_descriptor)
-        os.close(error_descriptor)
-        # A file, not a pipe: a payload larger than a pipe holds would block the writer.
-        with tempfile.TemporaryFile() as payload_file:
-            payload_file.write(payload)
-            payload_file.flush()
-            payload_file.seek(0)
-            os.dup2(payload_file.fileno(), 0)
+        for descriptor in (input_descriptor, output_descriptor, error_descriptor):
+            os.close(descriptor)
         sys.stdin = io.TextIOWrapper(io.BufferedReader(io.FileIO(0, "r", closefd=False)),
                                      encoding=sys.stdin.encoding, errors=sys.stdin.errors)
         main_module = types.ModuleType("__main__")
@@ -178,6 +176,8 @@ def _guard_file_run_as_main_then_exit(guard_file, payload, output_descriptor, er
         status = 1
     finally:
         for stream in (sys.stdout, sys.stderr):
+            if stream is None or stream.closed:
+                continue  # As Python's own shutdown skips a stream the program closed.
             try:
                 stream.flush()
             except Exception:
@@ -186,12 +186,22 @@ def _guard_file_run_as_main_then_exit(guard_file, payload, output_descriptor, er
 
 
 class _Child:
-    def __init__(self, path, timeout, pid, output_descriptor, error_descriptor, started):
+    def __init__(self, path, timeout, pid, input_descriptor, payload, output_descriptor, error_descriptor, started):
         self.path, self.timeout, self.pid = path, timeout, pid
+        self.input_descriptor, self.input_left = input_descriptor, memoryview(payload)
         self.descriptors = {output_descriptor: bytearray(), error_descriptor: bytearray()}
         self.output_descriptor, self.error_descriptor = output_descriptor, error_descriptor
         self.deadline = started + timeout
-        self.wait_status, self.timed_out, self.closed = None, False, set()
+        self.wait_status, self.timed_out, self.closed, self.done = None, False, set(), False
+
+    def output_closed(self):
+        return not self.descriptors.keys() - self.closed
+
+    def reaped_if_exited(self):
+        reaped, wait_status = os.waitpid(self.pid, os.WNOHANG)
+        if reaped:
+            self.wait_status, self.done = wait_status, True
+        return self.done
 
     def result(self):
         exit_status = signal_number = None
@@ -217,72 +227,125 @@ def bash_guard_hook_results_from_one_forked_child_each(guards, payload, reposito
     sys.stdout.flush()
     sys.stderr.flush()
     children, parent_descriptors = [], []
-    for path, timeout in guards:
-        output_read, output_write = os.pipe()
-        error_read, error_write = os.pipe()
-        pid = os.fork()
-        if pid == 0:
-            _guard_file_run_as_main_then_exit(os.path.join(repository_root, path), payload, output_write,
-                                              error_write, parent_descriptors + [output_read, error_read])
-        os.close(output_write)
-        os.close(error_write)
-        parent_descriptors += [output_read, error_read]
-        children.append(_Child(path, timeout, pid, output_read, error_read, clock()))
     selector = selectors.DefaultSelector()
-    for child in children:
-        for descriptor in child.descriptors:
-            os.set_blocking(descriptor, False)
-            selector.register(descriptor, selectors.EVENT_READ, child)
-    pending = list(children)
     try:
+        for path, timeout in guards:
+            input_read, input_write = os.pipe()
+            output_read, output_write = os.pipe()
+            error_read, error_write = os.pipe()
+            try:
+                pid = os.fork()
+            except BaseException:
+                for descriptor in (input_read, input_write, output_read, output_write, error_read, error_write):
+                    os.close(descriptor)
+                raise
+            if pid == 0:
+                _guard_file_run_as_main_then_exit(
+                    os.path.join(repository_root, path), input_read, output_write, error_write,
+                    parent_descriptors + [input_write, output_read, error_read])
+            try:
+                os.setpgid(pid, pid)
+            except OSError:
+                pass  # The child has set it already, or has exited.
+            for descriptor in (input_read, output_write, error_write):
+                os.close(descriptor)
+            parent_descriptors += [input_write, output_read, error_read]
+            children.append(_Child(path, timeout, pid, input_write, payload, output_read, error_read, clock()))
+        for child in children:
+            # Written here, a chunk at a time, so that a payload larger than a pipe holds blocks no one.
+            os.set_blocking(child.input_descriptor, False)
+            selector.register(child.input_descriptor, selectors.EVENT_WRITE, child)
+            for descriptor in child.descriptors:
+                os.set_blocking(descriptor, False)
+                selector.register(descriptor, selectors.EVENT_READ, child)
+        pending = list(children)
         while pending:
-            closed_but_running = [child for child in pending if not child.descriptors.keys() - child.closed]
             wait = min(child.deadline for child in pending) - clock()
-            if closed_but_running:
+            if any(child.output_closed() for child in pending):
                 wait = min(wait, EXIT_POLL_SECONDS)
             for key, _ in (selector.select(max(0.0, wait)) if selector.get_map() else _sleep(max(0.0, wait))):
-                _read_or_close(selector, key.fileobj, key.data)
+                _write_read_or_close(selector, key.fileobj, key.data)
             for child in list(pending):
-                if not child.descriptors.keys() - child.closed:
-                    reaped, wait_status = os.waitpid(child.pid, os.WNOHANG)
-                    if reaped:
-                        child.wait_status = wait_status
-                        pending.remove(child)
-                        continue
-                if clock() >= child.deadline:
-                    _kill_and_reap(selector, child)
+                if child.output_closed() and child.reaped_if_exited():
+                    _input_closed(selector, child)
+                    pending.remove(child)
+                elif clock() >= child.deadline:
+                    # Output that came, and an exit, since the last look still count: only a guard still
+                    # running is timed out.
+                    _ready_output_read(selector, child)
+                    if not (child.output_closed() and child.reaped_if_exited()):
+                        _kill_and_reap(selector, child)
+                    _input_closed(selector, child)
                     pending.remove(child)
     finally:
-        for child in pending:
-            _kill_and_reap(selector, child)
+        for child in children:
+            if not child.done:
+                _kill_and_reap(selector, child)
+                _input_closed(selector, child)
         selector.close()
     return [child.result() for child in children]
+
+
+def _write_read_or_close(selector, descriptor, child):
+    if descriptor == child.input_descriptor:
+        try:
+            child.input_left = child.input_left[os.write(descriptor, child.input_left):]
+        except BlockingIOError:
+            return
+        except BrokenPipeError:
+            child.input_left = child.input_left[:0]  # The guard exited, or closed its input, without reading it all.
+        if not child.input_left:
+            _input_closed(selector, child)
+        return
+    _read_or_close(selector, descriptor, child)
 
 
 def _read_or_close(selector, descriptor, child):
     try:
         data = os.read(descriptor, READ_CHUNK_BYTES)
     except BlockingIOError:
-        return
+        return False
     if data:
         child.descriptors[descriptor] += data
-        return
-    selector.unregister(descriptor)
-    os.close(descriptor)
+        return True
+    _unregistered_and_closed(selector, descriptor)
     child.closed.add(descriptor)
+    return False
+
+
+def _ready_output_read(selector, child):
+    for descriptor in list(child.descriptors.keys() - child.closed):
+        while _read_or_close(selector, descriptor, child):
+            pass
+
+
+def _input_closed(selector, child):
+    if child.input_descriptor is not None:
+        _unregistered_and_closed(selector, child.input_descriptor)
+        child.input_descriptor = None
+
+
+def _unregistered_and_closed(selector, descriptor):
+    try:
+        selector.unregister(descriptor)
+    except (KeyError, ValueError):
+        pass  # Not registered yet: the cleanup after a failed fork reaches here.
+    os.close(descriptor)
 
 
 def _kill_and_reap(selector, child):
     child.timed_out = True
-    try:
-        os.kill(child.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    for kill, target in ((os.killpg, child.pid), (os.kill, child.pid)):
+        try:
+            kill(target, signal.SIGKILL)
+            break
+        except (ProcessLookupError, PermissionError):
+            pass  # No group: the child had not yet made it, so kill the child alone.
     for descriptor in child.descriptors.keys() - child.closed:
-        selector.unregister(descriptor)
-        os.close(descriptor)
+        _unregistered_and_closed(selector, descriptor)
         child.closed.add(descriptor)
     os.waitpid(child.pid, 0)
+    child.done = True
 
 
 def _sleep(seconds):
