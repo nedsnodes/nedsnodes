@@ -407,6 +407,17 @@ if __name__ == "__main__":
         check("a checkout holding an agent worktree passes",
               not faults, faults)
 
+        # A directory git does not know: `git ls-files` fails for real there.
+        not_a_checkout = scratch / "not-a-git-checkout"
+        not_a_checkout.mkdir()
+        cases = project_glossary_promise_cases(not_a_checkout)
+        listing_fault = case_detail(cases, "git lists the checkout's tracked glossaries") or ""
+        check("a failing `git ls-files` is one failed case carrying git's error and the rerun step once",
+              len(cases) == 1 and not cases[0][1] and "git ls-files failed in" in listing_fault
+              and "not a git repository" in listing_fault
+              and listing_fault.count("fix what git reports, then run this suite again") == 1,
+              cases)
+
         # A tracked glossary the paragraph does not name.
         missing_one = build_scratch_checkout(
             scratch / "checkout-missing-one-from-the-paragraph",
