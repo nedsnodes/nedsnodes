@@ -57,7 +57,7 @@ WHAT IS PINNED HERE.
     report, and the launcher's recovery line is on the read's stderr.
 
   - The fast tier pin shows in the stamp of what the read produces:
-    runtime=agy, gemini-3.8-flash-medium, effort medium, tier fast.
+    runtime=agy, gemini-4-neon-low, effort low, tier fast.
 
   - The reviewer's instructions the model receives are the template embedded
     in the script -- not the skill's prompt file -- with both paths and
@@ -95,7 +95,7 @@ that compares the embedded template against the skill's prompt file: both of
 those files live in the real checkout, so it reads them there. A stub `agy`
 first on PATH stands in for the model, beside the fixture's pass-through
 stand-in for the sandbox program, so this suite runs inside the
-nc-test-sandbox, where the real bwrap cannot start. The stand-in confines
+nn-test-sandbox, where the real bwrap cannot start. The stand-in confines
 nothing; nn-systems/cold-read/tests/cold-read-agy-cell-test.py's
 real-sandbox case tests the confinement. The stub `agy` is driven by
 COLD_READ_AGY_CELL_TEST_STUB_PLAN the way nn-systems/cold-read/tests/cold-read-agy-cell-test.py
@@ -203,7 +203,10 @@ EMBEDDED_PROMPT_COPY_AND_SOURCE_PAIRS = (
 # the plan from the environment, and a counter file that counts launches so
 # "fail_first_attempts": N fails the first N and succeeds after; "hang"
 # sleeps past any deadline a case sets; "wait_for_file" fails unless that file
-# appears within 20 s; "started_file" is written first thing.
+# appears within 20 s; "started_file" is written first thing; "answers_by_prompt",
+# a list of [text, answer], writes the answer of the first text the prompt holds
+# and succeeds, which is how a case answers the new-word calls apart from the
+# fast-clarify cell, since all run on one model.
 STUB_AGY = """#!/usr/bin/env python3
 import json, os, pathlib, re, sys
 argv = sys.argv
@@ -239,6 +242,12 @@ if "edit_document" in step:
         handle.write("An edit made while the reviewer read.\\n")
 if "delete_document" in step:
     pathlib.Path(step["delete_document"]).unlink()
+for needle, answer in step.get("answers_by_prompt", []):
+    if needle in prompt:
+        answer_path = pathlib.Path(re.search(r"Write your report to (\\S+), once", prompt).group(1))
+        answer_path.parent.mkdir(parents=True, exist_ok=True)
+        answer_path.write_text(answer, encoding="utf-8")
+        sys.exit(0)
 if launches <= step.get("fail_first_attempts", 0):
     sys.stderr.write(step.get("fail_stderr", "stub agy: simulated failure on launch %d\\n" % launches))
     sys.exit(step.get("fail_exit", 1))
@@ -609,10 +618,16 @@ with tempfile.TemporaryDirectory() as scratch:
     check("an earlier suggestions file is replaced, not appended to",
           "LEFT BY AN EARLIER READ" not in suggestions_text
           and "of the walk item" in suggestions_text, repr(suggestions_text[:200]))
-    check("the fast tier pin shows in the stamp: runtime agy, gemini-3.8-flash-medium, medium, fast",
+    check("the fast tier pin shows in the stamp: runtime agy, gemini-4-neon-low, low, fast",
           provenance_stamp_of(suggestions).startswith(
-              "<!-- provenance: runtime=agy model=gemini-3.8-flash-medium "
-              "effort=medium cell=fast-clarify tier=fast "),
+              "<!-- provenance: runtime=agy model=gemini-4-neon-low "
+              "effort=low cell=fast-clarify tier=fast "),
+          repr(provenance_stamp_of(suggestions)))
+    check("a read given no --text-intended-reader-category stamps the default, "
+          "human-and-agent-readable, before target_sha256= so target= stays last",
+          " text_intended_reader_category=human-and-agent-readable target_sha256="
+          in provenance_stamp_of(suggestions)
+          and provenance_stamp_of(suggestions).count("text_intended_reader_category=") == 1,
           repr(provenance_stamp_of(suggestions)))
     check("the stamp names the embedded prompt file",
           "prompt_file=" in provenance_stamp_of(suggestions)
@@ -1117,7 +1132,7 @@ with tempfile.TemporaryDirectory() as scratch:
     copied_agy_cell = repository / "nn-systems" / "cold-read" / "cold-read-agy-cell.py"
     copied_agy_cell.write_text(
         copied_agy_cell.read_text(encoding="utf-8")
-        .replace("COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n",
+        .replace("COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 15 * 60\n",
                  "COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 1\n")
         .replace("COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS = 60\n",
                  "COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS = 1\n"),
@@ -1294,7 +1309,7 @@ with tempfile.TemporaryDirectory() as scratch:
     copied_fast_read = repository / "nn-systems" / "cold-read" / "cold-read-fast-read.py"
     copied_fast_read.write_text(
         copied_fast_read.read_text(encoding="utf-8").replace(
-            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n",
+            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 10 * 60\n",
             "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 5\n"),
         encoding="utf-8")
     suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
@@ -1348,7 +1363,7 @@ with tempfile.TemporaryDirectory() as scratch:
     copied_fast_read = repository / "nn-systems" / "cold-read" / "cold-read-fast-read.py"
     copied_fast_read.write_text(
         copied_fast_read.read_text(encoding="utf-8").replace(
-            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n",
+            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 10 * 60\n",
             "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 2\n"),
         encoding="utf-8")
     suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
@@ -1494,7 +1509,7 @@ with tempfile.TemporaryDirectory() as scratch:
     copied_fast_read = repository / "nn-systems" / "cold-read" / "cold-read-fast-read.py"
     copied_fast_read.write_text(
         copied_fast_read.read_text(encoding="utf-8").replace(
-            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n",
+            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 10 * 60\n",
             "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 2\n"),
         encoding="utf-8")
     suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
@@ -1633,8 +1648,10 @@ with tempfile.TemporaryDirectory() as scratch:
                        .replace("{TARGET_PATH}", "{TARGET_PATH}")
                        .replace("{REPORT_PATH}", str(cell_report_path))
                        .replace("{CHANGED_SENTENCE_IDS}", "none")
-                       .replace("{REMOVED_TEXT}", "none"))
-    check("the model receives the template embedded in the script",
+                       .replace("{REMOVED_TEXT}", "none")
+                       .replace("{TEXT_INTENDED_READER_CATEGORY}", "human-and-agent-readable"))
+    check("the model receives the template embedded in the script, naming the default "
+          "category, human-and-agent-readable, when no category is given",
           result.returncode == 0
           and received_prompt.strip().replace(
               target_line.split(" in full", 1)[0][len("Read "):], "{TARGET_PATH}")
@@ -1649,8 +1666,62 @@ with tempfile.TemporaryDirectory() as scratch:
           and "{TARGET_PATH}" not in received_prompt
           and "{REPORT_PATH}" not in received_prompt
           and "{CHANGED_SENTENCE_IDS}" not in received_prompt
-          and "{REMOVED_TEXT}" not in received_prompt,
+          and "{REMOVED_TEXT}" not in received_prompt
+          and "{TEXT_INTENDED_READER_CATEGORY}" not in received_prompt,
           repr(received_prompt[:300]))
+    check("the template names the reader the text is written for, not a fresh-reader",
+          "{TEXT_INTENDED_READER_CATEGORY}" in script_under_test_module().FAST_CLARIFY_PROMPT_TEMPLATE
+          and "fresh-reader" not in script_under_test_module().FAST_CLARIFY_PROMPT_TEMPLATE,
+          "")
+    check("the Question 4 prompt, which reuses the fast-clarify reading rules, holds no "
+          "text-intended-reader-category placeholder to leave unfilled",
+          "{TEXT_INTENDED_READER_CATEGORY}" not in
+          script_under_test_module().COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_PROMPT_TEMPLATE,
+          "")
+
+    # --- --text-intended-reader-category names the reader ----------------
+    for category in ("agent-readable", "human-readable", "human-and-agent-readable"):
+        repository = build_scratch_repository(scratch)
+        suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
+        prompt_dump.unlink(missing_ok=True)
+        result = run_fast_read(
+            repository, stubs,
+            {"*": {"report": "STUB FAST READ\n", "dump_prompt": str(prompt_dump)}},
+            suggestions, walk_draft_relative, counter,
+            options=("--text-intended-reader-category", category, "--without-question-4"),
+        )
+        received_prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else ""
+        check(f"with --text-intended-reader-category {category}, the prompt names {category} "
+              "as the text's category and no other category",
+              result.returncode == 0
+              and "The text-intended-reader-category of " in received_prompt
+              and f" is {category}: judge the text for the reader that the project glossary's "
+                  f"entry for {category} names" in received_prompt
+              and all(f" is {other}:" not in received_prompt
+                      for other in ("agent-readable", "human-readable", "human-and-agent-readable")
+                      if other != category),
+              f"exit {result.returncode}; stderr={result.stderr[-300:]!r}")
+        check(f"with --text-intended-reader-category {category}, the provenance stamp records "
+              f"{category}, with target= still last",
+              f" text_intended_reader_category={category} target_sha256=" in provenance_stamp_of(suggestions)
+              and provenance_stamp_of(suggestions).rsplit(" target=", 1)[-1].endswith(" -->"),
+              repr(provenance_stamp_of(suggestions)))
+
+    repository = build_scratch_repository(scratch)
+    suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
+    result = run_fast_read(
+        repository, stubs, {"*": {"report": "STUB FAST READ\n"}},
+        suggestions, walk_draft_relative, counter,
+        options=("--text-intended-reader-category", "self-readable"),
+    )
+    check("a category the fast read does not read for is refused by the option's parser, "
+          "exit 2, naming the three it takes, and no cell is launched",
+          result.returncode == 2 and launches_counted(counter) == 0
+          and "--text-intended-reader-category" in result.stderr
+          and "invalid choice: 'self-readable'" in result.stderr
+          and all(category in result.stderr.rpartition("choose from")[2]
+                  for category in ("human-readable", "human-and-agent-readable", "agent-readable")),
+          f"exit {result.returncode}; stderr={result.stderr!r}")
     # The scratch checkout has no .claude/skills/cold-read/prompts/ tree at
     # all, so the case above also proves the read did not need the skill's
     # prompt file to run.
@@ -2180,13 +2251,23 @@ def ssh_time_limit_seconds_with_agy_cell(agy_cell_text):
 
 check("the ssh time limit of a read on ned-box follows the agy cell's per-model limit, "
       "the length of the fast cold-read-tier's model chain, the Sonnet backup's allowance "
-      "and the Question 4 cell's time limit",
+      "the time limit for checking new words and the Question 4 cell's time limit",
       ssh_time_limit_seconds_with_agy_cell(
           "COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS = 45 * 60\n"
           "TIER_TO_AGY_MODEL_CHAIN = {'fast': ('model-a', 'model-b')}\n")
       == warning_module.FAST_READ_ATTEMPTS * 2 * 45 * 60
       + warning_module.COLD_READ_FAST_READ_SONNET_BACKUP_RUN_ALLOWANCE_SECONDS + 5 * 60
+      + warning_module.new_words.NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS
       + warning_module.COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS)
+check("the ssh time limit of a read on ned-box is built from the agy cell's 15-minute "
+      "default, killed a minute later, the Sonnet backup's 10 minutes, the new-words "
+      "meaning checks' 10 minutes and the Question 4 cell's 10 minutes",
+      warning_module.agy_cell.COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS == 16 * 60
+      and warning_module.COLD_READ_FAST_READ_RUN_ON_NED_BOX_OVER_SSH_TIMEOUT_SECONDS
+      == warning_module.FAST_READ_ATTEMPTS
+      * len(warning_module.agy_cell.TIER_TO_AGY_MODEL_CHAIN[warning_module.FAST_READ_TIER]) * 16 * 60
+      + 10 * 60 + 5 * 60 + 10 * 60 + 10 * 60,
+      repr(warning_module.COLD_READ_FAST_READ_RUN_ON_NED_BOX_OVER_SSH_TIMEOUT_SECONDS))
 check("the Question 4 prompt carries the fast-clarify prompt's reading rules whole, "
       "from their first sentence to their last",
       warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES.startswith(warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES_OPENING_WORDS)
@@ -2229,8 +2310,37 @@ check("CLAUDE.md is recognised by its name, wherever it sits",
       and class_of(root / "nn-systems/cold-read/CLAUDE.md") == "CLAUDE.md")
 check("step 2's own exception is not in the class: a walk file",
       class_of(root / "docs/walk/an-item-draft.md") is None)
-check("a seat's CLAUDE.local.md at the checkout's root is not in the class",
-      class_of(root / "CLAUDE.local.md") is None)
+check("a seat-brief, a seat's CLAUDE.local.md, is recognised by its name, wherever it sits",
+      class_of(root / "CLAUDE.local.md") == "a seat-brief"
+      and class_of(root / "nn-systems/cold-read/CLAUDE.local.md") == "a seat-brief")
+# The program's class tables are a copy of the list in step 2 of the
+# /cold-read skill; this ties the two, so a class added to either alone fails.
+STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS = {
+    "CLAUDE.md": "CLAUDE.md",
+    "wiki files": "a wiki file",
+    "skills and their prompts": "a skill or a skill's prompt",
+    "seat-briefs": "a seat-brief",
+    "the files under `docs/agents/`": "a file under docs/agents/",
+    "designs": "a design",
+    "including a GHI-MD that is a design": "a design",
+    "test-designs": "a test design",
+    "design-contracts": "a design-contract",
+}
+step_2_list_match = re.search(
+    r"also skip the cold-read-full-run\. (.+?) need a cold-read-full-run",
+    (root / ".claude/skills/cold-read/SKILL.md").read_text(encoding="utf-8"))
+step_2_list_phrases = (
+    {phrase.removeprefix("and ") for phrase in step_2_list_match.group(1).split(", ")}
+    if step_2_list_match else set())
+program_class_names = {class_name for _, class_name in (
+    *warning_module.FULL_RUN_NAMES, *warning_module.FULL_RUN_DIRECTORIES_RELATIVE,
+    *warning_module.FULL_RUN_NAME_SUFFIXES)}
+check("step 2's list of documents that need a cold-read-full-run is the list this test maps",
+      step_2_list_phrases == set(STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS),
+      repr(sorted(step_2_list_phrases ^ set(STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS))))
+check("the program's full-run classes are exactly the classes step 2's list maps to",
+      program_class_names == set(STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS.values()),
+      repr(sorted(program_class_names ^ set(STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS.values()))))
 check("an ordinary document is not in the class",
       class_of(root / "docs/issues/32-preservation-and-placement.md") is None)
 check("a file outside the checkout is not classified",
@@ -2807,6 +2917,16 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
               and remote.get("argv") == ["--target", str(ned_box_draft), "--without-question-4"],
               repr(remote))
 
+        exit_code, stdout, stderr = read_from_mac(
+            mac_draft, options=("--text-intended-reader-category", "agent-readable"))
+        remote = (json.loads(remote_record.read_text(encoding="utf-8"))
+                  if remote_record.exists() else {})
+        check("from the Mac, --text-intended-reader-category is passed on to the read on ned-box",
+              exit_code == 0
+              and remote.get("argv") == ["--target", str(ned_box_draft),
+                                         "--text-intended-reader-category", "agent-readable"],
+              repr(remote))
+
         exit_code, stdout, stderr = read_from_mac(mac_draft)
         remote = (json.loads(remote_record.read_text(encoding="utf-8"))
                   if remote_record.exists() else {})
@@ -3230,11 +3350,27 @@ for worded_document, worded_sentence in (("---\ndescription: |\n  Warning:\n---\
           "makes one unit",
           worded_found[1] == {"s1": worded_sentence}, repr(worded_found))
 
+stamped_with_category = _fast_read.with_text_intended_reader_category_in_provenance_stamp(
+    "<!-- provenance: runtime=agy cell=fast-clarify target_sha256=ab target=/a b.md -->\n\nbody\n",
+    "agent-readable")
+check("the category goes into an existing stamp before target_sha256=, the rest of the report unchanged",
+      stamped_with_category == "<!-- provenance: runtime=agy cell=fast-clarify "
+      "text_intended_reader_category=agent-readable target_sha256=ab target=/a b.md -->\n\nbody\n",
+      repr(stamped_with_category))
+try:
+    unstamped_with_category = _fast_read.with_text_intended_reader_category_in_provenance_stamp(
+        "body\n", "human-readable")
+except _fast_read.ColdReadCellReportHasNoProvenanceStamp as no_stamp:
+    unstamped_with_category = no_stamp
+check("a report with no provenance stamp is refused, not given a stamp with no model or target hash",
+      isinstance(unstamped_with_category, _fast_read.ColdReadCellReportHasNoProvenanceStamp),
+      repr(unstamped_with_category))
+
 with tempfile.TemporaryDirectory() as placeholder_scratch:
     placeholder_template = Path(placeholder_scratch) / "prompt.md"
     placeholder_template.write_text(
-        _fast_read.fast_clarify_prompt_with_edit_placeholders_filled(
-            [], ["Read {TARGET_PATH} and write {REPORT_PATH}."]), encoding="utf-8")
+        _fast_read.fast_clarify_prompt_template_changed_sentence_ids_removed_text_and_text_intended_reader_category_placeholders_fill(
+            [], ["Read {TARGET_PATH} and write {REPORT_PATH}."], "agent-readable"), encoding="utf-8")
     placeholder_prompt = cell_common.compose_prompt(
         placeholder_template, Path("/the/target.md"), Path("/the/report.md"))
     check("removed text that holds {TARGET_PATH} or {REPORT_PATH} reaches the reviewer as "
@@ -3364,6 +3500,48 @@ with tempfile.TemporaryDirectory() as edit_scratch:
           and "Give this whole message to the user" in result.stderr
           and launches_counted(edit_counter) == 0,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr[-400:]!r}")
+
+# --- Words with a meaning of their own: the cell's list is checked word by word, and the report says what became of each.
+with tempfile.TemporaryDirectory() as new_words_scratch_name:
+    new_words_scratch = Path(new_words_scratch_name).resolve()
+    repository = build_scratch_repository(new_words_scratch)
+    scratch_glossary = repository / "docs" / "nedsnodes-wiki" / "nedsnodes-glossary.md"
+    scratch_glossary.parent.mkdir(parents=True)
+    scratch_glossary.write_text("# glossary\n\n- **agent-seat** — a named agent.\n", encoding="utf-8")
+    scratch_repository_fixture.git(repository, "add", str(scratch_glossary))
+    scratch_repository_fixture.git(repository, "commit", "-q", "-m", "glossary")
+    new_words_suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
+    new_words_counter = new_words_scratch / "agy-launches"
+    new_words_module = script_under_test_module().new_words
+    cell_report_with_new_words = (
+        "STUB FAST READ: of the walk item\n\n## Words with a meaning of their own\n\n"
+        "- `rider`: the words the user types after the A or D that answers an approval-walk item\n"
+        "- `agent-seat`: an agent with a name of its own\n")
+    result = run_fast_read(
+        repository, new_words_scratch / "stubs",
+        {"*": {"report": cell_report_with_new_words,
+               "answers_by_prompt": [
+                   ["takes it to mean", "A person riding a horse."],
+                   ["Decide whether a reader who acted on the guessed meaning", new_words_module.NEW_WORD_MEANING_COMPARE_ANSWER_DIFFERS]]}},
+        new_words_suggestions, "docs/walk/a-walk-item-draft.md", new_words_counter)
+    new_words_text = (new_words_suggestions.read_text(encoding="utf-8")
+                      if new_words_suggestions.is_file() else "")
+    check("a listed word a fresh reader takes another way is named in the report's new words section, "
+          "with the text's meaning and the guess, and the cell's own section of those words is gone",
+          result.returncode == 0
+          and new_words_module.NEW_WORDS_REPORT_SECTION_HEADING in new_words_text
+          and "- `rider`: the text means: the words the user types after the A or D" in new_words_text
+          and "a model took it to mean: A person riding a horse." in new_words_text
+          and "\n## Words with a meaning of their own\n" not in new_words_text,
+          f"exit {result.returncode}; report={new_words_text[-1500:]!r}; stderr={result.stderr[-800:]!r}")
+    check("a listed word a glossary has is dropped, not checked, and the read launches the two calls "
+          "for the other word only",
+          "already has these words: `agent-seat`." in new_words_text
+          and launches_counted(new_words_counter) == 3,
+          f"launches={launches_counted(new_words_counter)}; report={new_words_text[-600:]!r}")
+    check("stderr counts what became of the listed words",
+          "cold-read-fast-read: words with a meaning of their own: 2 listed, 1 already in a glossary, 0 read as the text means, "
+          "1 read another way, 0 not checked" in result.stderr, result.stderr[-800:])
 
 print()
 if failures:

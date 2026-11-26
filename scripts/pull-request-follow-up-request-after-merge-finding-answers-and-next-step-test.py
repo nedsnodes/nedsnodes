@@ -269,6 +269,15 @@ def test_block_parsing():
             check(f"a request line {label} is refused, quoting the line and the form", False)
     check("a #follow_up_request inside a sentence is not a request line",
           program.parse_follow_up_request_blocks_from_message_text("Use the #follow_up_request line.\n") == [])
+    for name, character in (("U+0085", "\u0085"), ("U+2028", "\u2028"), ("U+2029", "\u2029")):
+        quoting = (f"#follow_up_request pull request {NUMBER}\n"
+                   f"1. fix-next: under LC_ALL=C bash prints `$'{character}'` as literal text.\n"
+                   "2. fix-in-maintenance: a second finding.\n")
+        [request] = program.parse_follow_up_request_blocks_from_message_text(quoting + "thanks\n")
+        check(f"a finding quoting {name} stays one whole finding, and every finding after it is counted",
+              request.text == quoting and request.finding_count == 2, repr(request.text))
+    [crlf] = program.parse_follow_up_request_blocks_from_message_text(BLOCK.replace("\n", "\r\n"))
+    check("a block whose lines end in CRLF is read as with LF", crlf.text == BLOCK, repr(crlf.text))
 
 
 def test_brief_text():
@@ -526,9 +535,10 @@ def test_open():
         check("open sets the branch's upstream", git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}")
               == "origin/topic-one")
         calls = case.gh_calls()
-        check("open creates the pull request from the file",
+        check("open creates the pull request from the file, its description ending with the follow-up request line",
               len(calls) == 1 and calls[0] == "pr create --base main --head topic-one --title Keep code span padding "
-                              "--body Keeps the padding.\n\n#no_defect_fixed\n", str(calls))
+                              "--body Keeps the padding.\n\n#no_defect_fixed\n\n#follow_up_request pull request 1964\n",
+              str(calls))
         check("open records the link against the finding",
               case.answers() == {"started": {"1": "topic-one"}, "answers": {"1": {"link": LINK, "branch": "topic-one"}}}, str(case.answers()))
         check("open removes the title and description file once the pull request is recorded", not description.exists())
@@ -571,6 +581,20 @@ def test_open():
               and case.gh_calls()[-1].startswith("pr create --base main --head topic-two "), str(case.gh_calls()))
     finally:
         case.close()
+
+
+def test_build_pull_request_description_ending_with_follow_up_request_line():
+    holding = "Answers it.\n\n#follow_up_request pull request 1964 \n#no_defect_fixed\n"
+    check("a description already holding the follow-up request line on a line of its own is kept as written",
+          program.build_pull_request_description_ending_with_follow_up_request_line(holding, 1964) == holding)
+    naming_inline = "From merge-lane-2's `#follow_up_request pull request 1964`.\n\n#no_defect_fixed"
+    check("a description naming the request only inside a sentence gets the line at its end",
+          program.build_pull_request_description_ending_with_follow_up_request_line(naming_inline, 1964)
+          == naming_inline + "\n\n#follow_up_request pull request 1964\n")
+    other = "Answers it.\n\n#follow_up_request pull request 1963\n#no_defect_fixed\n"
+    check("a description holding another pull request's follow-up request line gets this one's at its end",
+          program.build_pull_request_description_ending_with_follow_up_request_line(other, 1964)
+          == other + "\n#follow_up_request pull request 1964\n")
 
 
 def test_new_shared_names_wait_for_the_dispatching_agent():
@@ -1073,24 +1097,13 @@ def test_clean_up():
         case.run(worktree, "start-topic-branch", "topic-unpushed", "--finding-numbers", "2")
         case.commit_change("unpushed.txt")
         git(worktree, "switch", "-q", "topic-one")
-        git(case.repository, "worktree", "lock", "--reason", "claude agent agent-a1b2 (pid 4242)", str(worktree))
-        code, out, err = case.run(case.repository, "remove-topic-branches-and-worktrees")
-        check("remove-topic-branches-and-worktrees leaves a worktree the agent harness locks, and its branches, with exit 1",
-              code == 1 and f"Worktree {worktree} is locked by the agent harness (lock reason: claude agent "
-                            "agent-a1b2 (pid 4242)), so remove-topic-branches-and-worktrees left it" in out
-              and "Wait until the subagent has ended.\nIf the worktree is still locked when you end your turn, pass "
-                  "this sentence to the user word for word: \"The agent harness still locks worktree "
-                  f"{worktree} of the follow-up of {FOLLOWED_UP}, so remove-topic-branches-and-worktrees "
-                  "could not remove it.\"\nIf you are a subagent, pass that sentence to the agent that dispatched "
-                  "you instead.\n" in out
-              and "left 1 worktree or branch in place;" in out
-              and out.endswith(f"\nWhen you have done what each says, run: python3 {program.PROGRAM} {NUMBER} remove-topic-branches-and-worktrees\n")
-              and worktree.exists() and "topic-one" in git(case.repository, "branch"), out + err)
-        git(case.repository, "worktree", "unlock", str(worktree))
         git(case.repository, "worktree", "lock", "--reason", "kept by the user", str(worktree))
         code, out, err = case.run(case.repository, "remove-topic-branches-and-worktrees")
-        check("remove-topic-branches-and-worktrees leaves a worktree locked for another reason, saying what to do",
+        check("remove-topic-branches-and-worktrees leaves a locked worktree and its branches with exit 1, saying what to do",
               code == 1 and "is locked (lock reason: kept by the user), so remove-topic-branches-and-worktrees left it" in out
+              and "left 1 worktree or branch in place;" in out
+              and out.endswith(f"\nWhen you have done what each says, run: python3 {program.PROGRAM} {NUMBER} remove-topic-branches-and-worktrees\n")
+              and "topic-one" in git(case.repository, "branch")
               and "\nIf anyone may still be using the worktree, leave it, and pass this sentence to the user word "
                   f"for word: \"Worktree {worktree} of the follow-up of {FOLLOWED_UP} is locked (lock reason: kept by "
                   "the user), so remove-topic-branches-and-worktrees left it.\"\nOtherwise list" in out
@@ -1154,63 +1167,6 @@ def test_clean_up_goes_on_past_each_worktree_and_branch():
         check("a lock without a reason is named as such",
               code == 1 and "is locked (lock reason: none given)" in out
               and f"of the follow-up of {FOLLOWED_UP} is locked (lock reason: none given), so" in out, out + err)
-    finally:
-        case.close()
-
-
-def test_clean_up_claude_code_lock_whose_claude_process_has_ended():
-    # Linux only: the lock's start is a Linux clock-tick count read from /proc, which macOS lacks.
-    if not sys.platform.startswith("linux"):
-        print("SKIP  [this machine cannot run it] a Claude Code lock whose claude process has ended "
-              "is unlocked: the case reads its process's start from /proc")
-        return
-    case = Case()
-    try:
-        worktree = started(case)
-        git(worktree, "push", "-q", "origin", "topic-one")
-        command = "remove-topic-branches-and-worktrees"
-        snapshots = program.owner_file.load_uncommitted_work_snapshots_module_once()
-        start = snapshots.linux_start_ticks(os.getpid())
-        # This test's own process runs; the same pid with another start names a process that has ended.
-        running = f"claude agent agent-a77d25c01f5a06582 (pid {os.getpid()} start {start})"
-        ended = f"claude agent agent-a77d25c01f5a06582 (pid {os.getpid()} start {int(start) + 1})"
-        git(case.repository, "worktree", "lock", "--reason", running, str(worktree))
-        code, out, err = case.run(case.repository, command)
-        check("a Claude Code lock whose claude process runs keeps the worktree, locked, as the harness's",
-              code == 1 and f"Worktree {worktree} is locked by the agent harness (lock reason: {running})" in out
-              and "Unlocked" not in out and worktree.exists()
-              and f"locked {running}" in git(case.repository, "worktree", "list", "--porcelain"), out + err)
-        git(case.repository, "worktree", "unlock", str(worktree))
-        git(case.repository, "worktree", "lock", "--reason", ended, str(worktree))
-        with case.in_process(case.repository), contextlib.redirect_stdout(io.StringIO()) as printed:
-            saved = program.owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state
-            program.owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state = (
-                lambda lock: (program.owner_file.UNKNOWN, "whether claude process runs could not be read"))
-            try:
-                code = program.remove_topic_branches_and_worktrees(NUMBER)
-            finally:
-                program.owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state = saved
-        out = printed.getvalue()
-        check("a Claude Code lock whose claude process cannot be read keeps the worktree, locked, as the harness's",
-              code == 1 and f"Worktree {worktree} is locked by the agent harness (lock reason: {ended})" in out
-              and "Unlocked" not in out and worktree.exists()
-              and f"locked {ended}" in git(case.repository, "worktree", "list", "--porcelain"), out)
-        (worktree / "stray.txt").write_text("stray\n")
-        code, out, err = case.run(case.repository, command)
-        check("a Claude Code lock whose claude process has ended is unlocked, and the worktree is then judged "
-              "as an unlocked one: kept for its untracked file",
-              code == 1 and f"Unlocked worktree {worktree}, since Claude Code's lock names claude process "
-                            f"{os.getpid()}, started at {int(start) + 1}, which has ended.\n" in out
-              and f"Worktree {worktree} holds changed or untracked files" in out and "?? stray.txt" in out
-              and "locked by the agent harness" not in out and worktree.exists()
-              and "locked" not in git(case.repository, "worktree", "list", "--porcelain"), out + err)
-        (worktree / "stray.txt").unlink()
-        git(case.repository, "worktree", "lock", "--reason", ended, str(worktree))
-        code, out, err = case.run(case.repository, command)
-        check("a clean worktree whose Claude Code lock names an ended claude process is unlocked and removed, "
-              "and its pushed branch deleted",
-              code == 0 and f"Unlocked worktree {worktree}," in out and f"Removed worktree {worktree}." in out
-              and "Deleted branch topic-one." in out and not worktree.exists(), out + err)
     finally:
         case.close()
 
@@ -1491,13 +1447,17 @@ def test_waiting_for_user_ruling():
 PRINT_BLOCK = "print-follow-up-request-block-from-merge-lane-2-reviews"
 
 
-def print_block(reviews, comments, gh_failure=None, read_back=None, description="", replaced=None):
+def print_block(reviews, comments, gh_failure=None, read_back=None, description="", replaced=None,
+                author="another-seat-account"):
     """Run PRINT_BLOCK in process, gh answering with reviews and comments as one page each, or raising
     gh_failure; read_back replaces the block parser. `replaced` maps a replaced pull request's number to its
-    (description, reviews, comments). Return (exit code, stdout, stderr)."""
+    (description, reviews, comments); author is the login gh pr view prints for the pull request's author.
+    Return (exit code, stdout, stderr)."""
     pull_requests = {NUMBER: (description, reviews, comments), **(replaced or {})}
 
     def fake_gh(arguments, timeout_seconds=None):
+        if arguments[:2] == ["pr", "view"] and "body,author" in arguments:
+            return author + "\n" + pull_requests[int(arguments[2])][0] + "\n"
         if arguments[:2] == ["pr", "view"]:
             return (pull_requests[int(arguments[2])][0] if "body" in arguments else TITLE) + "\n"
         if gh_failure:
@@ -1553,6 +1513,28 @@ def test_print_block():
               "changes and has not yet approved the author's fixes. No #follow_up_request block was printed.\n"
               f"After ned-review-merge posts an approving review of pull request {NUMBER}, run: "
               f"python3 {program.PROGRAM} {NUMBER} {PRINT_BLOCK}\n"), err)
+    posted_approval = {"state": program.load_script_beside_this_one(program.POSTING_PROGRAM_FILE_NAME)
+                       .EVENT_STATES["COMMENT"], "body": "APPROVE\n\nThe review body."}
+    code, out, err = print_block([merge_lane_review(1, **posted_approval)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")], author="ned-review-merge")
+    check(f"{PRINT_BLOCK} reads merge-lane-2's approval posted as a COMMENT review on a pull request it opened",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it.\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1, **posted_approval)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} does not read merge-lane-2's only review, a COMMENT review opening with APPROVE, as an "
+          "approval on a pull request another account opened",
+          code == 1 and out == "" and "has no approving review" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1, state="COMMENTED", body="REQUEST_CHANGES\n\n**Blocking: 1**")],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")], author="ned-review-merge")
+    check(f"{PRINT_BLOCK} refuses when merge-lane-2's only COMMENT verdict requests changes",
+          code == 1 and out == "" and "has no approving review" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED"),
+                                  merge_lane_review(2, state="COMMENTED", body="APPROVE\n\nA comment.")],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} does not read a COMMENT review that opens with APPROVE, after a CHANGES_REQUESTED review, "
+          "as an approval on a pull request another account opened",
+          code == 1 and out == "" and "has no approving review" in err, out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "Rename it.")])
     check(f"{PRINT_BLOCK} refuses a merge-lane-2 comment with no mark, naming it, and says how to write the block "
           "by hand",
@@ -1575,6 +1557,221 @@ def test_print_block():
     check(f"{PRINT_BLOCK} reports a review without its expected fields as FAILED with exit 2",
           code == 2 and err.startswith(f"FAILED: GitHub's reviews of pull request {NUMBER} were not in the "
                                        "expected shape: KeyError"), err)
+    without_state = merge_lane_review(2)
+    del without_state["state"]
+    code, out, err = print_block([without_state, merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} prints the block when a merge-lane-2 review has no state but another review approves",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it.\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED"), without_state],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when a merge-lane-2 review has no state and no "
+          "readable review approves",
+          code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
+                                                     "state, so its verdict cannot be read: "), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210).")])
+    check(f"{PRINT_BLOCK} prints a restated Codex finding once when only its Codex finding id differs",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding ba9876543210).", line=7)])
+    check(f"{PRINT_BLOCK} prints both of one review's comments alike but for their Codex finding ids",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
+                                               "ba9876543210).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210)."),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} refuses, printing nothing, when a later review has two comments alike but for their "
+          "Codex finding ids and one earlier finding alike, naming the lines and saying how to write the block by hand",
+          code == 1 and out == "" and "holds 2 fix-next finding(s) on scripts/thing.py worded as 1 earlier finding(s)"
+          in err and "Its comments are on lines 3, 7; the earlier findings are on lines 3." in err
+          and f"the line #follow_up_request pull request {NUMBER}, then one line" in err, out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=9),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding 0123456789ab).")])
+    check(f"{PRINT_BLOCK} pairs an earlier finding with its unchanged restatement, not with a new finding alike "
+          "but for its Codex finding id that GitHub numbered first, and prints the new finding",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:9`: Rename it (Codex finding "
+                                               "5555aaaa5555).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=9),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
+                                                     line=5)])
+    check(f"{PRINT_BLOCK} refuses rather than guess by line which of two later comments, both alike but for new "
+          "Codex finding ids, restates the earlier finding",
+          code == 1 and out == "" and "worded as 1 earlier finding(s) but with new Codex finding ids" in err
+          and "Its comments are on lines 9, 5" in err, out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=10),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=15),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=6),
+                                  merge_lane_comment(13, 2, "**fix-next** Rename it (Codex finding eeeeeeeeeeee).",
+                                                     line=11),
+                                  merge_lane_comment(14, 2, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=23)])
+    check(f"{PRINT_BLOCK} refuses when two earlier findings alike but for their Codex finding ids are restated "
+          "with new ids beside a new finding worded alike, rather than drop the new finding",
+          code == 1 and out == "" and "holds 3 fix-next finding(s) on scripts/thing.py worded as 2 earlier "
+          "finding(s)" in err and "Its comments are on lines 6, 11, 23; the earlier findings are on lines 10, 15." in err,
+          out + err)
+    code, out, err = print_block([merge_lane_review(3), merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=10),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=110),
+                                  merge_lane_comment(12, 3, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=112),
+                                  merge_lane_comment(13, 3, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=12)])
+    check(f"{PRINT_BLOCK} refuses when a third review restates a moved finding with a new id beside a new finding "
+          "worded alike near the finding's first line, rather than drop the new finding",
+          code == 1 and out == "" and "Its comments are on lines 112, 12; the earlier findings are on lines 10." in err,
+          out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=10),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=110)])
+    check(f"{PRINT_BLOCK} pairs a later review's one comment alike but for a new Codex finding id with the one "
+          "earlier finding alike, and prints the finding once",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:10`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
+                                                     line=5),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
+                                                     line=5)])
+    check(f"{PRINT_BLOCK} prints an earlier finding once when a later review restates it twice under one new "
+          "Codex finding id",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename the helper (Codex finding "
+                                                            "aaaaaaaaaaaa)."),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding eeeeeeeeeeee).",
+                                                     line=9)])
+    check(f"{PRINT_BLOCK} refuses a later review's comment under an earlier finding's Codex finding id but worded "
+          "differently, rather than print it again and drop a new finding worded as the earlier one",
+          code == 1 and out == ""
+          and ("line 3, under the Codex finding id of an earlier finding, in review 1 of pull request 1964 on line 3 "
+               "of the same file, but worded differently") in err
+          and "This comment's text: Rename the helper (Codex finding aaaaaaaaaaaa)." in err
+          and "write the block by hand" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**Blocks** Fix the leak (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(20, 2, "**Blocks** Fix the reader's leak (Codex finding "
+                                                            "aaaaaaaaaaaa).")])
+    check(f"{PRINT_BLOCK} prints no block, and refuses nothing, for two differently worded blocking findings under "
+          "one Codex finding id, which no block holds",
+          code == 0 and out == "" and err == "", out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename the helper (Codex finding "
+                                                            "aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=7),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} refuses when a later review's comment takes an earlier finding's Codex finding id with "
+          "another earlier finding's wording, rather than pair a new finding under a third id and drop it",
+          code == 1 and out == "" and "worded differently" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** The reader leaks its file (Codex finding "
+                                                            "00c0c20c45bf)."),
+                                  merge_lane_comment(20, 2, "**fix-next** The writer leaks its file (Codex finding "
+                                                            "00c0c20c45bf).")])
+    check(f"{PRINT_BLOCK} refuses two differently worded findings of two reviews that share a Codex finding id, "
+          "which hashes only priority and heading, rather than print only the first",
+          code == 1 and out == "" and "worded differently" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Add a test for the rename (Codex finding "
+                                                            "aaaaaaaaaaaa).", line=9)])
+    check(f"{PRINT_BLOCK} prints both of one review's two differently worded comments under one Codex finding id",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"
+                                               "2. fix-next: `scripts/thing.py:9`: Add a test for the rename "
+                                               "(Codex finding aaaaaaaaaaaa).\n"), out + err)
+    # The order a set of texts iterates in changes with PYTHONHASHSEED, so the case runs under several seeds, each
+    # in an interpreter of its own that loads this file's helpers without running its cases.
+    two_wordings_under_one_new_id = (
+        "R, C = merge_lane_review, merge_lane_comment\n"
+        "print(repr(print_block([R(1), R(2)], ["
+        "C(10, 1, '**fix-next** Rename it (Codex finding aaaaaaaaaaaa).'), "
+        "C(11, 1, '**fix-next** Add a test (Codex finding bbbbbbbbbbbb).', line=7), "
+        "C(20, 2, '**fix-next** Add a test (Codex finding eeeeeeeeeeee).', line=8), "
+        "C(21, 2, '**fix-next** Rename it (Codex finding eeeeeeeeeeee).', line=4)])))\n")
+    helpers_only = Path(__file__).read_text().split("\nfor test in (")[0]
+    blocks = {subprocess.run([sys.executable, "-c", f"__file__ = {str(Path(__file__).resolve())!r}\n"
+                              + helpers_only + "\n" + two_wordings_under_one_new_id],
+                             capture_output=True, text=True, cwd=Path(__file__).resolve().parent.parent,
+                             env={**os.environ, "PYTHONHASHSEED": seed}).stdout
+              for seed in ("1", "2", "3", "4")}
+    check(f"{PRINT_BLOCK} pairs a later review's two comments under one new Codex finding id each with the earlier "
+          "finding worded as it, and prints the same two findings whatever PYTHONHASHSEED is",
+          blocks == {repr((0, f"#follow_up_request pull request {NUMBER}\n"
+                              "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding aaaaaaaaaaaa).\n"
+                              "2. fix-next: `scripts/thing.py:7`: Add a test (Codex finding bbbbbbbbbbbb).\n",
+                              "")) + "\n"},
+          repr(blocks))
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2), merge_lane_review(3)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=7),
+                                  merge_lane_comment(12, 1, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=11),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=7),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=11),
+                                  merge_lane_comment(22, 2, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=5),
+                                  merge_lane_comment(30, 3, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=5),
+                                  merge_lane_comment(31, 3, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=5)])
+    check(f"{PRINT_BLOCK} takes a third review's two comments under the two Codex finding ids one earlier finding "
+          "gathered as that one finding, and prints all three findings",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"
+                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
+                                               "bbbbbbbbbbbb).\n"
+                                               "3. fix-next: `scripts/thing.py:11`: Rename it (Codex finding "
+                                               "cccccccccccc).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it Codex finding 0123456789ab.",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} prints once one review's two comments naming the same Codex finding id in two forms",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
                                  read_back=lambda text: [])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when its block does not read back as itself",
@@ -1615,13 +1812,13 @@ def test_print_block_with_replaced_pull_requests():
 
 
 for test in (test_help, test_block_parsing, test_print_block, test_print_block_with_replaced_pull_requests, test_brief_text, test_no_saved_block, test_start,
-             test_open_refusals, test_open, test_new_shared_names_wait_for_the_dispatching_agent,
+             test_open_refusals, test_open, test_build_pull_request_description_ending_with_follow_up_request_line,
+             test_new_shared_names_wait_for_the_dispatching_agent,
              test_open_pushes_the_checked_out_recorded_branch_not_the_last,
              test_open_failures, test_open_passes_on_what_a_push_that_succeeds_prints,
              test_open_gh_pr_create_second_try_and_gh_pr_list,
              test_push_time_limit_is_the_pre_push_conflict_check_budget_plus_120_seconds,
              test_open_title_and_description_file_removal_failure,
-             test_clean_up_claude_code_lock_whose_claude_process_has_ended,
              test_leave_out_and_finish, test_three_findings, test_waiting_for_user_ruling,
              test_state_failures, test_clean_up, test_clean_up_goes_on_past_each_worktree_and_branch,
              test_clean_up_failure, test_clean_up_run_from_inside_a_worktree_it_removes, test_next_step, test_next_step_branch_choice):

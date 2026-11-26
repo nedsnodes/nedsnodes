@@ -123,7 +123,7 @@ a caller told it failed would ask for a second one.
 
 NEDSNODES_MAC_WINDOW_OPENER overrides the opener's path, NEDSNODES_MAC_OPEN_PROGRAM
 the program that opens Typora and the browser, NEDSNODES_NED_BOX_HOME ned-box's home and
-NEDSNODES_MAC_NED_BOX_HOME_MOUNT the Mac's mount of it: the seams the nc-test-suites
+NEDSNODES_MAC_NED_BOX_HOME_MOUNT the Mac's mount of it: the seams the nn-test-suites
 use, so no test opens a real window or a real file. sshd does not pass
 a client's environment to a forced command, so ned-box cannot set them.
 """
@@ -146,8 +146,14 @@ _ned_box_home_specification.loader.exec_module(ned_box_home_path_constants)
 PROGRAM = "mac-request-from-ned-box-forced-command"
 REQUEST_VERB = "open-window"
 AGENT_SEAT_WINDOW_VERB = "open-agent-seat-window"
-# launch-claude-ubuntu refuses any other seat name; its test checks the two rules agree.
-AGENT_SEAT_NAME_PATTERN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,63}")
+_agent_seat_name_specification = importlib.util.spec_from_file_location(
+    "agent_seat_name_regular_expression_constant_same_as_launch_claude_ubuntu_check_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py")
+_agent_seat_name = importlib.util.module_from_spec(_agent_seat_name_specification)
+_agent_seat_name_specification.loader.exec_module(_agent_seat_name)
+AGENT_SEAT_NAME_PATTERN = _agent_seat_name.AGENT_SEAT_NAME_PATTERN
+AGENT_SEAT_NAME_MAXIMUM_LENGTH = 64
 LAUNCH_CLAUDE_UBUNTU_PATH = Path(__file__).with_name("launch-claude-ubuntu")
 SAFE_WORD_PATTERN = re.compile(r"[A-Za-z0-9_./:=@%+,-]+")
 MAXIMUM_WORD_COUNT = 32
@@ -227,7 +233,7 @@ def agent_seat_window_seat_name(request):
     if len(words) != 2:
         raise RequestRefused(
             f"{AGENT_SEAT_WINDOW_VERB} takes exactly one agent-seat name, and the request has {len(words) - 1} words after the verb")
-    if not AGENT_SEAT_NAME_PATTERN.fullmatch(words[1]):
+    if not AGENT_SEAT_NAME_PATTERN.fullmatch(words[1]) or len(words[1]) > AGENT_SEAT_NAME_MAXIMUM_LENGTH:
         raise RequestRefused(
             "the agent-seat name is empty, over 64 characters, starts with '-', "
             "or holds a character other than letters, digits, _ and -")

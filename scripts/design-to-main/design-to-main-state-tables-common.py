@@ -254,9 +254,8 @@ COUNTER_TABLE = (
     CounterCeilingRule(
         "arbitrator-rulings",
         "`test-suite-arbitrating` is entered",
-        2, 2, "the third entry opens the investigation with the user, launching no "
-              "arbitrator here; the investigation's arbitrator rules, and its ruling rides "
-              "in the report and on its resume. A write the arbitrator orders is bounded by "
+        2, 2, "the third entry opens the investigation with the user, and the "
+              "arbitrator does not rule on that entry. A write the arbitrator orders is bounded by "
               "this counter, not the writer's, whose counter stops deciding once the "
               "arbitrator is in and is not reset"),
     CounterCeilingRule(
@@ -321,13 +320,7 @@ WRITING_STATE_ENTRY_REASON_TO_BUCKET = {
 TO_HOLD_READY_FOR_TEST_SUITE = "hold at ready-for-test-suite"
 TO_BOTH_WORK_STREAMS_RE_ENTER = "both work-streams re-enter their writing states"
 TO_RESUME_DESTINATION = "the resume destination (section 6.6)"
-# A resume without a destination applies the held ruling without re-entering the arbitrator.
-TO_APPLY_THE_HELD_RULING = "the ruling the arbitrator held in its report (section 6.6)"
 RESUME_MAY_NOT_NAME = (ENDED, INITIATE_DESIGN_TO_MAIN)
-# A held ruling cannot escalate: the arbitrator is already consulting the user.
-HELD_RULINGS_A_RESUME_MAY_CARRY = (
-    V_REJECT_IMPLEMENTATION, V_REJECT_TESTS, V_REJECT_IMPLEMENTATION_AND_TESTS,
-    V_FLAKY_TEST, V_REJECT_CONTRACT, V_ADVANCE)
 TO_RETRY_SAME_STATE = "the same state (retry)"
 TO_THE_NEXT_ACCEPTANCE_CHECK = "the state's next acceptance-check, in the order section 3.1 lists"
 TO_THE_WRITER_THE_VERDICT_NAMES = "that writer anyway, fresh"
@@ -698,9 +691,7 @@ TRANSITION_TABLE = (
     _row("65", TEST_SUITE_ARBITRATING, (),
          (G_ENTERED_FOR_THE_THIRD_TIME_IN_THE_DESIGN_VERSION,), INVESTIGATE_WORKFLOW,
          investigation_focus=FOCUS_UNKNOWN,
-         note="no arbitrator launched here; the investigation's arbitrator rules, and "
-              "the ruling it would have made rides in its report and on its resume "
-              "state-exit as held-ruling (section 6.6); applied on entry (sections 6.5, 7)",
+         note="the arbitrator does not rule on that entry; applied on entry (sections 6.5, 7)",
          view=DIAGRAM_VIEW_INVESTIGATION),
     _row("66", TEST_SUITE_ARBITRATING, V_REJECT_CONTRACT, (counter_below_ceiling("contract-revisions"),),
          CONTRACT_REVISING, "contract-revisions",
@@ -784,14 +775,49 @@ DESIGN_TRANSITION_ROWS = tuple(row.row for row in TRANSITION_TABLE if row.source
 
 
 
+# The file-naming page's endings; the instruction-file guard and the cold-read-fast-read know a design,
+# a test-design and a design-contract only by them.
+DESIGN_NAME_ENDING = ".design.md"
+TEST_DESIGN_NAME_ENDING = ".test-design.md"
+DESIGN_CONTRACT_NAME_ENDING = ".contract.md"
+DESIGN_KINDS = ("tool", "system")
+
+
+def design_kind_of_design_path(design_path):
+    """Return the kind in a design's name, `<name>.<kind>.design.md`; raise ValueError for any other name."""
+    # The refusal follows docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+    design_path = str(design_path)
+    name = design_path.rsplit("/", 1)[-1]
+    for kind in DESIGN_KINDS:
+        ending = "." + kind + DESIGN_NAME_ENDING
+        if name.endswith(ending) and len(name) > len(ending):
+            return kind
+    stem = design_path[:-len(".md")] if design_path.endswith(".md") else design_path
+    for old_ending in ("-design", ".design"):
+        if stem.endswith(old_ending):
+            stem = stem[:-len(old_ending)]
+    tool_path, system_path = ("%s.%s%s" % (stem, kind, DESIGN_NAME_ENDING) for kind in DESIGN_KINDS)
+    raise ValueError(
+        "design-to-main refuses the design path %r: a design's name must end .tool.design.md or "
+        ".system.design.md, as docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md says. "
+        "The instruction-file guard protects, and the cold-read-fast-read classes as a design, only a "
+        "file whose name ends .design.md, and design-to-main names the design-contract and the "
+        "test-design after the design's kind.\n"
+        "Rename the design's file with `git mv`, to %s when the design is of one program, or to %s "
+        "when it is of a system; then open the rename's pull request with `python3 scripts/ghi-issue-write.py edit "
+        "<new path>`, <new path> being the name you chose, as the /ghi-write skill says, doing what that command "
+        "prints.\n"
+        "When that command says it left the old path on main, remove the old path in a pull request of your own.\n"
+        "Once the rename, and that removal if any, have merged, start design-to-main again with the new path." % (
+            design_path, tool_path, system_path))
+
+
 # Before code exists, refine the design in its issue document with the contract beside it; move both when code starts.
 
 def contract_path_beside_design(design_path):
     """Return the contract path beside the design before the component has code."""
-    stem = design_path[:-len(".md")] if design_path.endswith(".md") else design_path
-    if stem.endswith("-design"):
-        stem = stem[:-len("-design")]
-    return stem + "-contract.md"
+    design_kind_of_design_path(design_path)
+    return design_path[:-len(DESIGN_NAME_ENDING)] + DESIGN_CONTRACT_NAME_ENDING
 
 
 RECORD_DIRECTORY_NAME = "design-to-main-record"
@@ -816,7 +842,6 @@ STATE_EXIT_JSON_FIELDS = {
     "investigation-focus": "investigation_focus",
     "coverage-type": "coverage_types",       # comma-separated coverage types
     "refusal-class": "refusal_class",
-    "held-ruling": "held_ruling",
     "named-files": "named_files",
     "rulings": "rulings",                    # the user's words verbatim
 }

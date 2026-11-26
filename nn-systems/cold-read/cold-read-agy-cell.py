@@ -18,7 +18,7 @@ The reviewer writes its findings to --report. This program prints progress
 to stderr and nothing to stdout.
 
 Exit codes: 0 a model produced a report; 1 every model in the cold-read-tier's
-chain failed to produce one, including the case where `agy` never started
+chain, TIER_TO_AGY_MODEL_CHAIN, failed to produce one, including the case where `agy` never started
 because the binary is not on PATH (the common module names that on stderr
 and lets the chain advance, so a 1 always means "no review was produced");
 64 this program refused the invocation and never launched agy, naming its
@@ -26,13 +26,10 @@ own fix -- including when this machine has no sandbox to run agy in. 64 rather t
 EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py, which every
 cold-read-cell shares.
 
-WHAT THIS LEG IS FOR (user-ruled 2026-09-07 at the cold-read-research seat,
-after measurements, superseding the earlier ruling that day for low): the
-cold-read-fast-read runs on Gemini 3.8 Flash at MEDIUM, replacing gpt-5.6-terra
-at low. The measurements: about 100-110 s per document (single runs on a
-658-word skill and a 1,967-word walk draft); on the ghi-write candidate defect
-list, medium found 42% of the rows against 19% at low, and medium and high hit
-the same rows. It is the one cold-read-tier this launcher pins. The `deep` and
+WHAT THIS LEG IS FOR: the cold-read-fast-read, on the models and effort that
+TIER_TO_AGY_MODEL_CHAIN and TIER_TO_REASONING_EFFORT, in this file, give the
+`fast` cold-read-tier; --effort's help below names that effort. It is the one
+cold-read-tier this launcher pins. The `deep` and
 `second-strongest-model` (the agent-binary's second-strongest model)
 cold-read-tiers stay on the Claude and Codex launchers, and this
 launcher refuses them (exit 64 from argparse) rather than running a Gemini
@@ -48,7 +45,7 @@ end of this paragraph says.
 `--print` takes the prompt as its value. `--add-dir` is required, or the
 repository's AGENTS.md does not load. `--dangerously-skip-permissions` is what
 lets the Write of the report happen headless. Antigravity's model ids carry the
-effort as a suffix (gemini-3.8-flash-{low,medium,high}); `--effort` is passed
+effort as a suffix (gemini-4-neon-{low,medium,high,xhigh}); `--effort` is passed
 as well, exactly as the campaign passed it. agy does not always stop at
 `--print-timeout`, so the cell runs agy in a process group of its own and kills
 that group 60 seconds after agy's own deadline; the attempt then fails with
@@ -90,7 +87,7 @@ the threshold with no file written fails, as on the other legs.
 
 AGY RUNS INSIDE THE OPERATING SYSTEM'S SANDBOX, because nothing inside agy
 keeps a reviewer from reading a credential file (user-ruled 2026-09-28; the
-rule and why are beside CREDENTIAL_DIRECTORIES in
+lists of credential files are CREDENTIAL_FILES_ON_NED_BOX and its neighbours in
 nn-systems/cold-read/cold-read-cell-common.py). Measured 2026-09-28 with
 canary files: unguarded, agy read all three canaries, on the Mac and on
 ned-box; its own `--sandbox` switch still let it read all three; inside the
@@ -99,11 +96,8 @@ both machines.
   - macOS: `sandbox-exec` with a profile that denies reading or writing the
     credential directories and any path whose name matches a credential
     file name.
-  - Linux: `bwrap` over the whole filesystem, with an empty tmpfs mounted
-    over each credential directory that exists. bwrap takes exact paths, not
-    patterns, so a file named like a credential outside those directories is
-    not covered on Linux; the directory list names every place such files
-    are known to sit.
+  - Linux: `bwrap` over the whole filesystem, with /dev/null mounted over
+    each of ned-box's credential files that exists, except agy's own login.
 Neither sandbox cuts the network, so agy's own web tool still fetches the
 pages a document links to, which the reviewer reads (user-ruled 2026-09-29,
 items 3 and 5 of the walk what-a-cold-read-reviewer-may-read-2026-09-28;
@@ -120,7 +114,11 @@ AGY USES THE USER'S GOOGLE LOGIN, NOT A GEMINI API KEY. A key is billed per
 call; the login draws on the user's subscription. agy's login lives under
 ~/.gemini/, which the sandbox leaves readable. This program removes
 GEMINI_API_KEY from agy's environment, so that a key the caller holds cannot
-move agy's calls onto per-call billing. When agy finds no login, it prints
+move agy's calls onto per-call billing. It also removes GH_TOKEN and
+GITHUB_TOKEN, so agy gets no GitHub token from its caller; an agent-seat's
+supervisor sets GH_TOKEN to the agent-seat's own GitHub token. How gh behaves
+inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py. When agy finds no login, it prints
 a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
 minute for a login that cannot come headless, and exits 1; the cell's cause
 line is then logged-out, saying how to log agy in.
@@ -149,16 +147,17 @@ PROGRAM = "cold-read-agy-cell"
 
 # Antigravity model IDs encode effort as a suffix.
 TIER_TO_AGY_MODEL_CHAIN = {
-    "fast": ("gemini-3.8-flash-medium",),
+    "fast": ("gemini-4-neon-low",),
 }
 
 # Pin effort explicitly so machine defaults cannot change the review.
 TIER_TO_REASONING_EFFORT = {
-    "fast": "medium",
+    "fast": "low",
 }
 
-COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60
-AGY_PRINT_TIMEOUT = f"{COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS // 60}m"
+# The fast read's limit; the cold-read-grid passes its own with
+# --per-model-run-timeout-seconds, since both run the fast cold-read-tier.
+COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 15 * 60
 # agy does not always honour --print-timeout, so the cell kills agy's process
 # group this long after agy's own deadline. The fast read on the Mac sizes its
 # ssh time limit from the sum.
@@ -202,16 +201,20 @@ def agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_respon
     return exit_code, str(result.get("response") or "")
 
 
-def agy_environment_copy_without_gemini_api_key(environment) -> dict:
-    """Return a copy of environment without GEMINI_API_KEY."""
-    return {name: value for name, value in environment.items() if name != "GEMINI_API_KEY"}
+AGY_ENVIRONMENT_REMOVED_VARIABLES = (
+    "GEMINI_API_KEY", *common.COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES)
 
 
-def logged_out_failure_texts(model: str) -> list:
-    """Return the recognised failure text for agy without a Google login."""
-    return [common.RecognisedFailureText(
-        "logged-out", AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX,
-        AGY_LOGGED_OUT_CAUSE_DETAIL)]
+def agy_environment_copy_without_gemini_api_key_or_github_token(environment) -> dict:
+    """Return a copy of environment without AGY_ENVIRONMENT_REMOVED_VARIABLES."""
+    return {name: value for name, value in environment.items()
+            if name not in AGY_ENVIRONMENT_REMOVED_VARIABLES}
+
+
+RECOGNISED_FAILURE_TEXTS = (
+    common.RecognisedFailureText(
+        "logged-out", AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, AGY_LOGGED_OUT_CAUSE_DETAIL),
+)
 
 
 def credential_sandbox_program(platform: str = sys.platform):
@@ -260,16 +263,35 @@ def credential_sandbox_prefix(platform: str = sys.platform, *,
             prefix += ["--bind", str(path), str(path)]
     if not network:
         prefix += ["--unshare-net"]
-    for directory in common.credential_directories_present():
-        prefix += ["--tmpfs", directory]
-    for path in common.reviewer_program_login_files(except_program="agy",
-                                                    only_present=True):
+    for path in common.ned_box_credential_and_login_files_present(except_program="agy"):
         prefix += ["--ro-bind", "/dev/null", path]
     return prefix
 
 
-def invocation_builder(effort: str):
+def cold_read_cell_launcher_own_command_line_options_adder(parser):
+    parser.add_argument(
+        "--per-model-run-timeout-seconds", type=int, metavar="SECONDS",
+        default=COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS,
+        help="agy's --print-timeout for each model of the chain, in seconds, "
+             "rounded down to whole minutes for agy; the cell kills agy "
+             f"{COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS} seconds "
+             "later. Default: "
+             f"{COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS}",
+    )
+
+
+def agy_print_timeout(per_model_run_timeout_seconds: int) -> str:
+    return f"{per_model_run_timeout_seconds // 60}m"
+
+
+def per_model_run_kill_after_seconds(parsed_arguments) -> int:
+    return (parsed_arguments.per_model_run_timeout_seconds
+            + COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS)
+
+
+def invocation_builder(effort: str, parsed_arguments):
     """Return a callback producing (agy argv, None) for the shared runner."""
+    print_timeout = agy_print_timeout(parsed_arguments.per_model_run_timeout_seconds)
     # agy takes the prompt through --print; None makes the runner close stdin.
     def build_invocation(model: str, prompt: str):
         command = [
@@ -279,7 +301,7 @@ def invocation_builder(effort: str):
             "--dangerously-skip-permissions",
             "--model", model,
             "--effort", effort,
-            "--print-timeout", AGY_PRINT_TIMEOUT,
+            "--print-timeout", print_timeout,
             "--output-format", "stream-json",
             "--print", prompt,
         ]
@@ -301,14 +323,15 @@ def main() -> int:
     return common.run_cell(
         program=PROGRAM, runtime="agy", description=__doc__,
         model_help="explicit Antigravity model id (effort suffix included, "
-                   "e.g. gemini-3.8-flash-high); overrides the tier mapping",
+                   "e.g. gemini-4-neon-high); overrides the tier mapping",
         tier_to_model_chain=TIER_TO_AGY_MODEL_CHAIN,
         tier_to_effort=TIER_TO_REASONING_EFFORT,
         invocation_builder=invocation_builder,
         recover_report_from_stdout=stdout_is_a_review,
-        recognised_failure_texts_for_model=logged_out_failure_texts,
-        child_environment=agy_environment_copy_without_gemini_api_key(os.environ),
-        per_model_run_timeout_seconds=COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS,
+        recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
+        child_environment=agy_environment_copy_without_gemini_api_key_or_github_token(os.environ),
+        per_model_run_timeout_seconds_from_parsed_arguments_getter=per_model_run_kill_after_seconds,
+        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
         parse_agent_binary_final_result_from_stdout_line=agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none,
         report_wait_after_result_line_seconds=COLD_READ_AGY_CELL_WAIT_FOR_REPORT_FILE_AFTER_AGY_STDOUT_RESULT_LINE_BEFORE_PROCESS_GROUP_KILL_SECONDS,
     )
