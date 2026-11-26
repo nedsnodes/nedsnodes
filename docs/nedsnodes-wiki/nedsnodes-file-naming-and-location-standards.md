@@ -7,7 +7,7 @@ The naming and location standards for this project's files. Where a tool this pr
 `docs/nedsnodes-wiki/nedsnodes-glossary.md` defines the project-terms. `.claude/skills/skills-glossary.md`, `docs/design-to-main/design-to-main-glossary.md` and `nn-systems/main-gatekeeper/main-gatekeeper-glossary.md` define the system-terms of the skills, of design-to-main and of the main-gatekeeper. We avoid spaces in directory and file names, using a hyphen, `-`, instead.
 
 - **stem**: a filename without its extension.
-- **suffix**: the closing part of a filename stem that marks the file's kind, written with its leading hyphen or dot and without the extension, such as `-draft` or `-hack`; a design's `.<kind>.design`, a test-design's `.<kind>.test-design` and a design-contract's `.<kind>.contract` take dots; a stem need not have one.
+- **suffix**: the closing part of a filename stem that marks the file's kind, written with its leading dot and without the extension, such as `.instructions` in `pr-reviewer.instructions.md` or `.tool.design` in a design's name; a program keeps the hyphen of `-test` and `-hack`, as in `scripts/dangling-path-citation-check-test.py`; a hyphenated suffix this page still lists, such as `-draft` or `-log`, takes its dot in the pull request that renames its files and the programs that read them; a stem need not have one.
 
 ## Desired locations or file names for various components
 
@@ -17,7 +17,7 @@ A file in a queue directory is named as it will be in its final location, apart 
 
 - **Skill prompt, the agent-instructions a skill's program gives an agent it launches**
   - **Location:** `nn-systems/skills/<skill name>/`, where `<skill name>` is the skill's name without its slash, such as `cold-read`
-  - **Naming:** `<skill name>-<prompt name>-prompt.md`, where <prompt name> says what the prompt asks for, such as `cold-read-defect-hunt-prompt.md`.
+  - **Naming:** `<skill name>-<prompt name>.prompt.md`, where <prompt name> says what the prompt asks for, such as `cold-read-defect-hunt.prompt.md`.
 - **Hook**
   - **Location:** `.claude/guard-hooks/` for a guard, a hook that refuses a tool call before it runs; every other hook in its system's directory, `nn-systems/<system-name>/`, or in `nn-systems/general-tools/` when it belongs to no system
   - **Naming:** `<what it does>.py`, such as `instruction-file-guard.py` or `ghi-issue-write-hand-typed-gh-command-refusal.py`
@@ -29,7 +29,7 @@ A file in a queue directory is named as it will be in its final location, apart 
   - **Design-contract Name:** its design's name with `.design.md` replaced by `.contract.md`, beside its design
 - **agent-instructions: instructions, initial-agent-instructions and prompts a program appends**
   - **Location:** `docs/agents/` when more than one system uses them, otherwise their system's directory; pending approval, `docs/agents/queue/`
-  - **Naming:** `<subject>-instructions.md`; for initial-agent-instructions, `<subject>-first-prompt.md`; for a prompt a program appends, `<subject>-prompt.md`.
+  - **Naming:** `<subject>.instructions.md`; for initial-agent-instructions, `<subject>-first.prompt.md`; for a prompt a program appends, `<subject>.prompt.md`.
 - **Wiki page**
   - **Location:** pending approval, `docs/nedsnodes-wiki/queue/`; approved, `docs/nedsnodes-wiki/`
   - **Naming:** `nedsnodes-<subject>.md`, which every page on main follows
@@ -60,7 +60,7 @@ The user reviews each change to these files that `docs/nedsnodes-wiki/nedsnodes-
 - every MD file in `docs/agents/` and `docs/nedsnodes-wiki/`;
 - every MD file under `nn-systems/skills/`;
 - every design, a file whose name ends `.design.md`;
-- every file of standing instructions, whose name ends `-prompt.md` or `-instructions.md`;
+- every file of standing instructions, whose name ends `.prompt.md` or `.instructions.md`;
 - `CLAUDE.md`, any `CLAUDE.local.md`, and everything under `.claude/` except its working space: `worktrees/`, `jobs/` and `handoffs/`.
 
 The list does not reach the places for documents pending approval, where agents write them freely: any `queue/` directory, such as `docs/agents/queue/`, `docs/issues/queue/` or `docs/nedsnodes-wiki/queue/`, and `docs/drafts/`. Test-designs and design-contracts are not on the list, wherever they sit, `nn-systems/skills/` included: design-to-main brings them to the user. Nor are the frozen copies inside `cold-read-records/`, `md-review-records/` and `sanity-check-records/`. `.claude/guard-hooks/instruction-file-guard.py` enforces the list for an agent's file-editing tools; a shell command, `git mv` or a program is not checked.

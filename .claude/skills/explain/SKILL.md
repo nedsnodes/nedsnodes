@@ -94,7 +94,7 @@ on check 12's closing line.
    as a pronoun, unless the noun is in the same sentence and no other noun there
    could be meant. When "or" could mean one-or-the-other or one-or-both, write
    which. Write each identifier in full, in the form the file
-   `nn-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md` gives. After a
+   `nn-systems/skills/explain/explain-how-to-write-an-identifier.instructions.md` gives. After a
    session-handoff, restate the whole point, not the point's label or its last
    sentence.
 8. **Call each thing by one name, and say who acts at each step.** Use the
