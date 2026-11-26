@@ -738,12 +738,61 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
         Path.read_text = real_read_text
     merged = merged_commit(scratch, "no-test-failing-at-parent-and-runner-unreadable")
     check("when the test runner at the merge commit cannot be read, the after-merge test run "
-          "leaves it to the run, comparing with both commits, instead of stopping in a traceback",
+          "compares with the first commit alone and says why, since an older runner would keep "
+          "only the last commit given, instead of stopping in a traceback",
           exit_code == 0 and len(calls) == 1
-          and calls[0]["argv"][:4] == ["--only-suites-whose-recorded-inputs-changed-since", parent,
-                                       "--only-suites-whose-recorded-inputs-changed-since", merged]
-          and "alone after all" not in output,
+          and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since", parent]
+          and calls[0]["argv"].count("--only-suites-whose-recorded-inputs-changed-since") == 1
+          and f"comparing with {parent[:12]} alone after all: the test runner at the merge "
+              f"commit, " in output
+          and "could not be read to see whether it compares with several commits" in output
+          and "Permission denied" in output
+          and f"keep only the last one given, {merged[:12]}" in output,
           f"exit {exit_code}\n{output}\n{calls}")
+
+    # The merge commit's runner is not a regular file, such as a path resolving to a pipe, whose
+    # read would block; is_file is the check, so the injection makes it say no and makes any read
+    # fail loudly.
+    real_is_file = Path.is_file
+    runner_reads = []
+
+    def runner_not_a_regular_file(path):
+        if path.name == "run-all-test-suites.py" and "merge-commit-on-main-worktree" in str(path):
+            return False
+        return real_is_file(path)
+
+    def runner_read_recorded(path, *args, **kwargs):
+        if path.name == "run-all-test-suites.py" and "merge-commit-on-main-worktree" in str(path):
+            runner_reads.append(str(path))
+        return real_read_text(path, *args, **kwargs)
+
+    Path.is_file = runner_not_a_regular_file
+    Path.read_text = runner_read_recorded
+    try:
+        exit_code, output, calls, parent, merge_commit, recorded = case(
+            "no-test-failing-at-parent-and-runner-not-a-regular-file", "PARENT\n",
+            head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
+    finally:
+        Path.is_file = real_is_file
+        Path.read_text = real_read_text
+    check("when the test runner at the merge commit is not a regular file, the after-merge test "
+          "run never reads it, so a pipe cannot block the merge program, and leaves it to the run",
+          exit_code == 0 and len(calls) == 1 and runner_reads == [],
+          f"exit {exit_code}\n{output}\n{calls}\n{runner_reads}")
+
+    Path.read_text = runner_read_recorded
+    try:
+        exit_code, output, calls, parent, merge_commit, recorded = case(
+            "no-test-failing-at-parent-and-one-comparison-commit-runner-not-read", "PARENT\n",
+            head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 1))])
+    finally:
+        Path.read_text = real_read_text
+    check("with one comparison commit, the after-merge test run never reads the test runner at "
+          "the merge commit, since only several commits need it to compare with every one",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"].count("--only-suites-whose-recorded-inputs-changed-since") == 1
+          and runner_reads == [],
+          f"exit {exit_code}\n{output}\n{calls}\n{runner_reads}")
 
     exit_code, output, calls, parent, merge_commit, recorded = case(
         "no-test-failing-at-parent-and-head-test-run-failed", "PARENT\n",
@@ -3215,17 +3264,18 @@ def main():
             head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
         merged = merged_commit(scratch, name)
         check("a fetch that fails after the merge, with a recorded commit and a passing head "
-              "test run: the recovery command compares with the same commits the after-merge "
-              "test run would, the head test run's commit second in either case",
+              "test run: the recovery command compares with the first commit alone, since "
+              "before the merge commit is fetched the program cannot tell whether git can read "
+              "the head test run's commit or whether the runner there compares with several "
+              "commits",
               exit_code_both == 3
               and f"run: if git merge-base --is-ancestor {recorded_commit} " in output_both
               and f"; then python3 scripts/run-all-test-suites.py "
-                  f"--only-suites-whose-recorded-inputs-changed-since {recorded_commit} "
-                  f"--only-suites-whose-recorded-inputs-changed-since {merged}; else "
+                  f"--only-suites-whose-recorded-inputs-changed-since {recorded_commit}; else "
                   f"python3 scripts/run-all-test-suites.py "
-                  f"--only-suites-whose-recorded-inputs-changed-since {HEAD} "
-                  f"--only-suites-whose-recorded-inputs-changed-since {merged}; fi\n"
-                  in output_both,
+                  f"--only-suites-whose-recorded-inputs-changed-since {HEAD}; fi\n"
+                  in output_both
+              and merged not in output_both,
               f"exit {exit_code_both}\n{output_both}")
         check("a fetch that fails after the merge exits 3 without a test run",
               exit_code == 3 and runner_calls(scratch, "fetch-fails-after-merge") == []

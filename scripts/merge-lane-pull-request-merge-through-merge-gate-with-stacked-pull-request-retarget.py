@@ -1324,13 +1324,15 @@ def after_merge_test_run_command_build(compared_with):
         f"--only-suites-whose-recorded-inputs-changed-since {commit}" for commit in compared_with)
 
 
-def after_merge_test_run_by_hand_command(head_tested, head_commit, merge_commit_text):
+def after_merge_test_run_by_hand_command(head_commit, merge_commit_text):
     """Return the command that tests main by hand as the after-merge test run would, before the
     program could check whether the recorded newest main commit whose after-merge test run
     left no test failing is an ancestor of the merge commit: the command makes that check,
-    because a recovery printed before the merge commit is fetched cannot."""
+    because a recovery printed before the merge commit is fetched cannot. It never adds the
+    commit a head test run passed on, since only the merge-commit worktree shows whether git
+    can still read that commit and whether its test runner compares with several commits."""
     without_it = after_merge_test_run_command_build(
-        after_merge_test_run_suite_selection_commits_choose(None, head_tested, head_commit))
+        after_merge_test_run_suite_selection_commits_choose(None, None, head_commit))
     path = newest_main_commit_whose_after_merge_test_run_left_no_test_failing_file()
     try:
         commit = path.read_text(encoding="utf-8").strip()
@@ -1339,7 +1341,7 @@ def after_merge_test_run_by_hand_command(head_tested, head_commit, merge_commit_
     if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
         return without_it
     with_it = after_merge_test_run_command_build(
-        after_merge_test_run_suite_selection_commits_choose(commit, head_tested, head_commit))
+        after_merge_test_run_suite_selection_commits_choose(commit, None, head_commit))
     return (f"if git merge-base --is-ancestor {commit} {merge_commit_text}; then "
             f"{with_it}; else {without_it}; fi")
 
@@ -1349,7 +1351,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
     return an exit code."""
     checkout = arguments.review_tools_worktree_at_main
     head_tested, why_no_head_test_run = head_test_run_passed_merged_commit(arguments)
-    by_hand = after_merge_test_run_by_hand_command(head_tested, arguments.head_commit,
+    by_hand = after_merge_test_run_by_hand_command(arguments.head_commit,
                                                    merge_commit or "<the merge commit>")
     if not merge_commit:
         print(f"STOP: merged, but the merge commit could not be read, so main was not "
@@ -1427,18 +1429,24 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
               f"run left no test failing, and since {head_tested[:12]}, the commit the head test "
               f"run passed on, so a suite runs only when both comparisons select it")
     worktree_runner = worktree / "scripts" / "run-all-test-suites.py"
-    # A runner that is missing or cannot be read is left to the run below, which reports it.
-    try:
-        worktree_runner_text = worktree_runner.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        worktree_runner_text = None
-    if (len(compared_with) > 1 and worktree_runner_text is not None
-            and TEST_RUNNER_SOURCE_LINE_WHOSE_PRESENCE_SHOWS_THE_RUNNER_SELECTS_SUITES_SINCE_EVERY_COMMIT_GIVEN
-            not in worktree_runner_text):
-        print(f"comparing with {compared_with[0][:12]} alone after all: the test runner at the "
-              f"merge commit predates comparing with several commits, and would keep only the "
-              f"last one given, {compared_with[-1][:12]}")
-        compared_with = compared_with[:1]
+    # Only a regular file is read: reading a pipe or a device can block the merge program before
+    # the run, and a runner that is missing is left to the run below, which reports it.
+    if len(compared_with) > 1 and worktree_runner.is_file():
+        try:
+            worktree_runner_text = worktree_runner.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            print(f"comparing with {compared_with[0][:12]} alone after all: the test runner at "
+                  f"the merge commit, {worktree_runner}, could not be read to see whether it "
+                  f"compares with several commits ({error}), and an older one would keep only "
+                  f"the last one given, {compared_with[-1][:12]}")
+            compared_with = compared_with[:1]
+        else:
+            if (TEST_RUNNER_SOURCE_LINE_WHOSE_PRESENCE_SHOWS_THE_RUNNER_SELECTS_SUITES_SINCE_EVERY_COMMIT_GIVEN
+                    not in worktree_runner_text):
+                print(f"comparing with {compared_with[0][:12]} alone after all: the test runner "
+                      f"at the merge commit predates comparing with several commits, and would "
+                      f"keep only the last one given, {compared_with[-1][:12]}")
+                compared_with = compared_with[:1]
     by_hand = after_merge_test_run_command_build(compared_with)
 
     runner = common.run_all_test_suites
