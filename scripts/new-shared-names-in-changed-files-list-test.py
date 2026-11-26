@@ -583,6 +583,20 @@ def case_reminder_is_capped():
     check("a reminder of exactly 30 names has no more-names line", " more," not in exactly_at_cap, exactly_at_cap)
 
 
+def case_refusal_names_the_file_of_every_name_but_a_file_path():
+    lister = load_module("lister_for_refusal_case", LISTER_PATH)
+    text = lister.unchecked_new_shared_names_refusal_text(
+        [("scripts/zeta.py", lister.KIND_PYTHON_FUNCTION, "alpha_helper"),
+         ("a.md", lister.KIND_MARKDOWN_BACKQUOTED_NAME, "zeta-name"),
+         ("scripts/beta.py", lister.KIND_FILE_PATH, "scripts/beta.py")],
+        "Nothing was pushed", "Rename here.", "rerun")
+    check("the refusal names the file a name is in, whether the path sorts after the name or before it",
+          "  alpha_helper (python-function, in scripts/zeta.py)\n" in text
+          and "  zeta-name (markdown-backquoted-name, in a.md)\n" in text, text)
+    check("the refusal does not repeat a file path as the file it is in",
+          "  scripts/beta.py (file-path)\n" in text, text)
+
+
 def case_timeout_failure_text_is_stable(root):
     lister = load_module("lister_for_timeout_case", LISTER_PATH)
 
@@ -1239,6 +1253,7 @@ def main() -> int:
         with tempfile.TemporaryDirectory() as directory:
             case(Path(directory).resolve())
     case_reminder_is_capped()
+    case_refusal_names_the_file_of_every_name_but_a_file_path()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} case(s) failed")
