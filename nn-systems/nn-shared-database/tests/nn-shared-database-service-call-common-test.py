@@ -4,12 +4,14 @@
 The cases call a fake service on a loopback port that answers each request with
 the status the case sets, a listening socket that never answers, and a port
 nothing listens on: success, the 400, 401 and 422 refusals, a 422 whose answer
-is cut short or still being read at the time limit, a 404, a 500 and a 200 cut
+is cut short or still being read at the time limit, a 300, a 404, a 500 and a 200 cut
 short counted as no answer, no answer within the time limit to a read and to an
 event, a name lookup that ends after the limit or fails, a refused connection,
 an unreadable token file, and the handoff-supervisor's variant, which calls
 again with the same event ID, logs once when its wait starts and once when it
-stops, and does not call again after a refusal or an unreadable token file. One
+stops, and does not call again after a refusal or an unreadable token file. Two
+cases load the module as on the Mac and as on ned-box and check the machine it
+names. One
 case records an event in the real service, nn-shared-database-service.py, to show the event the module
 builds is one the service stores.
 
@@ -20,6 +22,7 @@ Prints one line per case and exits non-zero if any case fails.
 import importlib.util
 import json
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -144,7 +147,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and caller.NN_SHARED_DATABASE_SERVICE_ON_NED_BOX_AND_JOBS_ON_BOTH_MACHINES_INSTALL_FROM_THE_MAC_COMMAND in str(failure),
           failure and str(failure))
 
-    for status in (404, 500):
+    for status in (300, 404, 500):
         fake.statuses = [status]
         failure = failure_of(lambda: caller.nn_shared_database_event_send_single_attempt(
             "agent-seat-paused", "seat-1", {}, **options))
@@ -422,5 +425,16 @@ with tempfile.TemporaryDirectory() as scratch:
           answer == {"sequence": 1}
           and [seat["seat_name"] for seat in listed["agent_seats"]] == ["merge-lane-2"],
           (answer, listed))
+
+for platform, machine in (("darwin", "mac"), ("linux", "ned-box")):
+    real_platform = sys.platform
+    sys.platform = platform
+    try:
+        loaded = load(f"nn_shared_database_service_call_common_on_{platform}",
+                      "nn-shared-database-service-call-common.py")
+    finally:
+        sys.platform = real_platform
+    check(f"on {platform} the module names this machine {machine}",
+          loaded.THIS_MACHINE == machine, loaded.THIS_MACHINE)
 
 raise SystemExit(1 if failures else 0)
