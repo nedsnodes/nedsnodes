@@ -600,17 +600,19 @@ def repair_task_opened(arguments, merge_commit, seat, failed_tests):
         f"after-merge test run then takes each passing test off the record that "
         f"scripts/merge-gate.sh shows.")
     subject = f"Main fails after pull request {arguments.pull_request}: fix {count} failed test(s)"
+    there_before = set(repair_task_written_ids(task_list, subject, description))
     try:
         task_id = task_write.agent_seat_task_list_new_pending_task_write(
             task_list, subject, description)
     except OSError as error:
         # The writer can raise after it has linked the task file, as when its .highwatermark
-        # write fails, so the STOP must say whether a task stands on the list.
-        written = repair_task_written_ids(task_list, subject, description)
+        # write fails; a task it linked stands on the list, so the record names it.
+        written = [found for found in repair_task_written_ids(task_list, subject, description)
+                   if found not in there_before]
         if written:
-            return None, None, (f"task #{written[-1]} was written to {task_list}, but the "
-                                f"writer then failed, so the failed suites record does not "
-                                f"name it: {error}")
+            print(f"Repair task #{written[-1]} was written to {task_list}, but the task writer "
+                  f"then failed: {error}. The failed suites record names that task.")
+            return seat, written[-1], None
         return None, None, f"the repair task could not be written to {task_list}: {error}"
     return seat, task_id, None
 

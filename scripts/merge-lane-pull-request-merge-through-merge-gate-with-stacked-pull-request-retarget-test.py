@@ -1469,9 +1469,9 @@ def failed_suites_kept_in_view_cases(scratch):
               f"exit {exit_code}\n{output}\n{record}")
 
         def mark_unwritable_after_the_task_is_linked(directory):
-            # A directory at the writer's .highwatermark.partial path makes it raise after it
-            # has linked the task file, as a second writer replacing that path at once does.
-            (author_seat_made(directory) / ".highwatermark.partial").mkdir()
+            # A directory at .highwatermark makes the writer's rename onto it raise after it has
+            # linked the task file, however the writer names its partial file.
+            (author_seat_made(directory) / ".highwatermark").mkdir()
 
         exit_code, output, _, _, _ = run_case(
             scratch, "failed-suite-task-written-then-writer-raised", [(GATE_PASSED, 0)],
@@ -1479,14 +1479,13 @@ def failed_suites_kept_in_view_cases(scratch):
             before_the_program_runs=mark_unwritable_after_the_task_is_linked)
         directory = scratch / "failed-suite-task-written-then-writer-raised"
         record = failed_suites_record_of(directory)
-        check("a task writer that raises after linking the task names that task in the STOP, and "
-              "the record names none",
-              exit_code == 3 and "task #1 was written to" in output
+        check("a task writer that raises after linking the task: the record names that task, and "
+              "the output says the writer failed after writing it",
+              "Repair task #1 was written to" in output
               and "the repair task could not be written" not in output
-              and "Ask the user:" in output
               and [path.name for path in tasks_of_author(directory)] == ["1.json"]
               and record["scripts/broken-test.py"]["failed_tests"]["scripts/broken-test.py"][
-                  "repair_task_id"] is None,
+                  "repair_task_id"] == 1,
               f"exit {exit_code}\n{output}\n{record}\n{tasks_of_author(directory)}")
 
         known_failure_runs_that_are_not_only_known_failures = (
