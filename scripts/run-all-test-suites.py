@@ -902,6 +902,10 @@ SUITE_THAT_RUNS_THE_REAL_CLAUDE_CLI_LEFT_OUT_OF_TEST_RUN_LINE_PREFIX = "SUITE TH
 SUITE_LINE_LOG_MARK = " — log "
 SUMMARY_LINE_PREFIX = "SUMMARY:"
 FIRST_REPORT_LINE_LOG_DIRECTORY_MARK = "; logs in "
+# The tracked-file state the first report line gives in parentheses; callers import these.
+TRACKED_FILES_STATE_UNKNOWN = "tracked-file state unknown"
+TRACKED_FILES_DIFFER_FROM_THE_COMMIT = "tracked files differ from that commit"
+TRACKED_FILES_MATCH_THE_COMMIT = "tracked files match that commit"
 # The suites print one line per case opening PASS, FAIL or ok.
 TEST_CASE_LINE = re.compile(r"^\s*(?P<verdict>PASS|FAIL|ok)\b:?\s*(?P<text>.*)$")
 # A process a suite run without any sandbox leaves running can hold its output open.
@@ -1830,11 +1834,11 @@ def commit_and_state(top):
     commit = commit or why_none
     changed = git(top, "status", "--porcelain", "--untracked-files=no")
     if changed.returncode != 0:
-        state = "tracked-file state unknown"
+        state = TRACKED_FILES_STATE_UNKNOWN
     elif changed.stdout.strip():
-        state = "tracked files differ from that commit"
+        state = TRACKED_FILES_DIFFER_FROM_THE_COMMIT
     else:
-        state = "tracked files match that commit"
+        state = TRACKED_FILES_MATCH_THE_COMMIT
     return commit, state
 
 

@@ -282,7 +282,7 @@ def wait_for_judge_runs(running: dict) -> dict:
 def provenance_fields(report_text: str) -> dict:
     """Return provenance fields, or an empty mapping when no stamp is present."""
     first_line = report_text.split("\n", 1)[0]
-    if not first_line.startswith("<!-- provenance:"):
+    if not first_line.startswith(cell_common.PROVENANCE_COMMENT_PREFIX):
         return {}
     fields = {}
     for token in first_line.split():

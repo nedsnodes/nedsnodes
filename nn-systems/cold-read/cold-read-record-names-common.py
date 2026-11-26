@@ -21,6 +21,8 @@ RECORD_DATE_PATTERN = r"\d{4}-\d{2}-\d{2}"
 COLD_READ_FAST_READ_REPORT_FILE_NAME = "cold-read-fast-read.md"
 COLD_READ_TRIAGE_FILE_NAME = "cold-read-triage.md"
 COLD_READ_REFERENCE_CHECK_REPORT_FILE_NAME = "cold-read-reference-check.md"
+# How every report in a record opens; the cells write the stamp, the readers find it by this.
+PROVENANCE_COMMENT_PREFIX = "<!-- provenance:"
 COLD_READ_RECORD_FILE_NAME_TO_ITS_NAME_BEFORE_COLD_READ_PREFIX = {
     COLD_READ_FAST_READ_REPORT_FILE_NAME: "fast-read.md",
     COLD_READ_TRIAGE_FILE_NAME: "triage.md",

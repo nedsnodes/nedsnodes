@@ -365,6 +365,10 @@ def citations_of_removed_paths(removed: list, repository_root: pathlib.Path, lin
     return findings
 
 
+# Opens the git-failure line; the next steps tell the agent to look for it.
+GIT_FAILURE_LINE_OPENING = "could not check, because a git command failed"
+
+
 def git_failure_next_steps(argv, failure) -> str:
     """The lines telling an agent what to do after a git command failed."""
     # The rerun must start in this directory: FILE arguments are relative to it.
@@ -373,14 +377,14 @@ def git_failure_next_steps(argv, failure) -> str:
                            *(sys.argv[1:] if argv is None else argv)]))
     return next_step_lines.git_failure_next_step_lines(
         rerun, PROGRAM, git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=str(failure),
-        text_the_failure_line_contains="could not check, because a git command failed")
+        text_the_failure_line_contains=GIT_FAILURE_LINE_OPENING)
 
 
 def main(argv=None) -> int:
     try:
         return run_check(argv)
     except git_output.GitCommandFailed as failure:
-        fail_bad_invocation(f"could not check, because a git command failed, so "
+        fail_bad_invocation(f"{GIT_FAILURE_LINE_OPENING}, so "
                             f"no result is reported: {failure}\n"
                             f"{git_failure_next_steps(argv, failure)}")
 

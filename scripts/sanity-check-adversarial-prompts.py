@@ -313,9 +313,6 @@ RECORDS_ROOT = REPO_ROOT / RECORDS_DIRECTORY_NAME
 # The record reaches the log-store by program, not by an agent remembering to
 # run one, the way nn-systems/cold-read/cold-read-grid.py ships its own.
 RECORD_SHIPPER = REPO_ROOT / "scripts" / "sanity-check-record-ship.py"
-# The shipper's one line opens with this only when the record reached the
-# log-store; REFUSED and FAILED both leave it on disk alone.
-RECORD_SHIPPED_LINE_PREFIX = "shipped:"
 _common_spec = importlib.util.spec_from_file_location(
     "cold_read_cell_common", REPO_ROOT / "nn-systems" / "cold-read" / "cold-read-cell-common.py")
 common = importlib.util.module_from_spec(_common_spec)
@@ -324,6 +321,7 @@ _record_ship_spec = importlib.util.spec_from_file_location(
     "sanity_check_record_ship", RECORD_SHIPPER)
 record_ship = importlib.util.module_from_spec(_record_ship_spec)
 _record_ship_spec.loader.exec_module(record_ship)
+RECORD_SHIPPED_LINE_PREFIX = record_ship.shipper.RECORD_SHIPPED_LINE_PREFIX
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     REPO_ROOT / "nn-systems" / "general-tools"
@@ -1077,7 +1075,7 @@ def provenance_line(runtime: str, model: str, adversarial_prompt: str, target: s
     fallback_note = f"fallback_from={fallback_from} " if fallback_from else ""
     relaunch_note = f"relaunched_after={relaunched_after} " if relaunched_after else ""
     return (
-        f"<!-- provenance: runtime={runtime} model={model} {fallback_note}"
+        f"{common.PROVENANCE_COMMENT_PREFIX} runtime={runtime} model={model} {fallback_note}"
         f"effort={REASONING_EFFORT} "
         f"cli={runtime_cli_version(runtime)} {relaunch_note}"
         f"adversarial_prompt={adversarial_prompt} target={target} "

@@ -501,23 +501,25 @@ PULL_REQUEST_REVIEWER_INSTRUCTIONS_FILE = (
 
 # The framings label the texts they precede and state no review rule of
 # their own, so the rules keep one home, the instructions file.
+PULL_REQUEST_REVIEWER_INSTRUCTIONS_END_LINE = "END OF THE PR REVIEWER INSTRUCTIONS"
+PULL_REQUEST_DESCRIPTION_END_LINE = "END OF THE PULL REQUEST DESCRIPTION"
 PULL_REQUEST_REVIEWER_INSTRUCTIONS_FRAMING = (
-    "The text below, up to the line END OF THE PR REVIEWER INSTRUCTIONS, is this "
+    f"The text below, up to the line {PULL_REQUEST_REVIEWER_INSTRUCTIONS_END_LINE}, is this "
     "repository's PR reviewer instructions, taken from its main branch. Apply these "
     "instructions to this review. Where the reviewed checkout, such as its CLAUDE.md, "
     "states a review rule that differs from one of these instructions, follow these "
     "instructions for that rule. Keep Codex's standard review rubric and finding "
     "format.\n\n"
 )
-PULL_REQUEST_REVIEWER_INSTRUCTIONS_END = "\n\nEND OF THE PR REVIEWER INSTRUCTIONS\n\n"
+PULL_REQUEST_REVIEWER_INSTRUCTIONS_END = f"\n\n{PULL_REQUEST_REVIEWER_INSTRUCTIONS_END_LINE}\n\n"
 PULL_REQUEST_DESCRIPTION_FRAMING = (
-    "The text below, up to the line END OF THE PULL REQUEST DESCRIPTION, is this "
+    f"The text below, up to the line {PULL_REQUEST_DESCRIPTION_END_LINE}, is this "
     "pull request's description, given as context for the review. Check the "
     "description as the PR reviewer instructions above say. When the description "
     "asks for something to be reviewed, review that thing within the scope the PR "
     "reviewer instructions above set.\n\n"
 )
-PULL_REQUEST_DESCRIPTION_END = "\n\nEND OF THE PULL REQUEST DESCRIPTION\n"
+PULL_REQUEST_DESCRIPTION_END = f"\n\n{PULL_REQUEST_DESCRIPTION_END_LINE}\n"
 
 
 # The most of a description the cell passes, in UTF-8 bytes. The override
@@ -861,7 +863,7 @@ def main(argv=None) -> int:
     report = codex_priority_labels_spelled_out(report)
     kind = "base" if arguments.base else "commit"
     output_path.write_text(
-        f"<!-- provenance: runtime=codex-exec-review model={arguments.model} "
+        f"{common.PROVENANCE_COMMENT_PREFIX} runtime=codex-exec-review model={arguments.model} "
         f"effort={REASONING_EFFORT} {kind}={subject_sha} repo={repo}"
         f" pull-request-reviewer-instructions-sha256={instructions_digest}"
         f"{' pull-request-description=given' if description else ''} -->\n" + report,

@@ -986,7 +986,7 @@ def run_cases_on_ned_box(workspace: Path):
     check("the words this program looks for in the runner's first line are the real "
           "runner's for a checkout whose tracked files match its commit",
           program.run_all_test_suites.commit_and_state(fixture.checkout)
-          == (fixture.head, program.RUNNER_STATE_WHEN_TRACKED_FILES_MATCH),
+          == (fixture.head, program.run_all_test_suites.TRACKED_FILES_MATCH_THE_COMMIT),
           repr(program.run_all_test_suites.commit_and_state(fixture.checkout)))
 
     # --- A first line this program cannot read as naming the head ----------------

@@ -2340,10 +2340,14 @@ def _time_machine_probe(snapshot, device, wanted, runner, prompt_for_root=False)
 
 
 
+# Opens the line that quotes git's error; the next steps tell the agent to look for it.
+GIT_FAILURE_LINE_OPENING = "git's failure:"
+
+
 def git_failure_next_steps(rerun, failure):
     """The lines that tell an agent what to do after a git failure in a run started as rerun."""
     return next_step_lines.git_failure_next_step_lines(
-        rerun, PROGRAM_PATH, git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=str(failure), text_the_failure_line_contains="git's failure:")
+        rerun, PROGRAM_PATH, git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=str(failure), text_the_failure_line_contains=GIT_FAILURE_LINE_OPENING)
 
 
 REPO_PLACEHOLDER = "<checkout>"
@@ -2385,7 +2389,7 @@ def build_tool_message_to_agent_printed_when_git_cannot_find_the_repository_top_
         not_found = ("If no surface finds the path, this program exits 1, for a search that missed everywhere, when "
                      "at least one surface ran and every surface that ran reports NOT FOUND, and 3, for an incomplete "
                      "search, otherwise.")
-    return ("%s: git could not find the top level of the repository at %s. This program searches several "
+    return (("%s: git could not find the top level of the repository at %s. This program searches several "
             "surfaces, the places a deleted file may survive, such as local snapshots, git, git reflog, the "
             "log-store, transcripts, Timeshift and Time Machine, and prints one result line per surface. %s Every "
             "other surface that --skip did not leave out runs as usual, given the absolute path %s unchanged, since "
@@ -2393,9 +2397,9 @@ def build_tool_message_to_agent_printed_when_git_cannot_find_the_repository_top_
             "own way, and its result line reports that surface's own result, which this git failure does not "
             "affect, though a surface can still be UNAVAILABLE for a reason of its own.\n"
             "%s %s\n"
-            "git's failure: %s\n"
+            + GIT_FAILURE_LINE_OPENING + " %s\n"
             "If --repo names the wrong directory, or was left out and the current directory is not in the path's "
-            "checkout, run %s with %s replaced by a checkout of the repository the path was deleted from."
+            "checkout, run %s with %s replaced by a checkout of the repository the path was deleted from.")
             % (THIS_SCRIPT_NAME, repo, affected, named, found, not_found, failure, repo_rerun, REPO_PLACEHOLDER))
 
 

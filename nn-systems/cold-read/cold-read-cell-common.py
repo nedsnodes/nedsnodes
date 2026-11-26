@@ -36,6 +36,7 @@ git_machine_readable_output = importlib.util.module_from_spec(_git_machine_reada
 _git_machine_readable_output_spec.loader.exec_module(git_machine_readable_output)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+PROVENANCE_COMMENT_PREFIX = record_names.PROVENANCE_COMMENT_PREFIX
 PROMPTS_DIR = REPO_ROOT / ".claude" / "skills" / "cold-read" / "prompts"
 
 
@@ -634,7 +635,7 @@ def stamp_provenance(
     except OSError:
         target_sha256 = "unreadable"
     stamp = (
-        f"<!-- provenance: runtime={runtime} model={model} {fallback_note}"
+        f"{PROVENANCE_COMMENT_PREFIX} runtime={runtime} model={model} {fallback_note}"
         f"effort={effort} cell={cell} tier={tier} duration_s={duration_s} "
         f"{checkout_note}{tokens_note}{prompt_file_note}"
         f"target_sha256={target_sha256} target={target_argument} -->\n\n"

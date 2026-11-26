@@ -145,7 +145,11 @@ REPOSITORY = common.REPOSITORY
 CHECKOUT = Path(__file__).resolve().parents[1]
 MERGE_PROGRAM = Path(__file__).resolve().with_name(
     "merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py")
-TITLE_PREFIX = "GHI-MD edit for issue"
+_ghi_issue_write_spec = importlib.util.spec_from_file_location(
+    "ghi_issue_write", Path(__file__).resolve().with_name("ghi-issue-write.py"))
+ghi_issue_write = importlib.util.module_from_spec(_ghi_issue_write_spec)
+_ghi_issue_write_spec.loader.exec_module(ghi_issue_write)
+TITLE_PREFIX = ghi_issue_write.GHI_MD_EDIT_PULL_REQUEST_TITLE_OPENING
 PROVISIONAL_HEADING = "## Provisional additions (not yet vetted by the user)"
 MARKDOWN_PARSER_MODULE = (CHECKOUT / "nn-systems" / "general-tools"
                           / "markdown-commonmark-parser-with-tables-common.py")

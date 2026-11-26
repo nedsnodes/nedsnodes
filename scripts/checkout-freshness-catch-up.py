@@ -309,7 +309,8 @@ GIT_UNTRACKED_FILE_WOULD_BE_OVERWRITTEN_TEXT = "untracked working tree files wou
 # lines depend on the reader and on when the hook runs again: the Stop
 # hook's message reaches only the user, the notes delivery's only the agent,
 # and the other modes' reader ran the command and can run it again.
-GIT_FAILED_CAUSE_LINE = "{prefix}: {what}, because a git command failed: {error}\n"
+GIT_FAILED_CAUSE_WORDS = "because a git command failed"
+GIT_FAILED_CAUSE_LINE = "{prefix}: {what}, " + GIT_FAILED_CAUSE_WORDS + ": {error}\n"
 GIT_FAILED_STOP_HOOK_USER_NEXT_STEP_LINES = (
     "This check runs again at the end of the agent's next turn.\n"
     "If that run also reports a git failure, whether this error or another, paste both "
@@ -327,7 +328,7 @@ def git_failed_rerun_next_step_lines(error, *arguments: str) -> str:
     rerun = shlex.join(['python3', str(Path(__file__).resolve()), *arguments])
     return next_step_lines.git_failure_next_step_lines(
         rerun, git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=str(error),
-        text_the_failure_line_contains="because a git command failed")
+        text_the_failure_line_contains=GIT_FAILED_CAUSE_WORDS)
 
 
 def git_failed_text(prefix: str, what: str, error, next_steps: str) -> str:

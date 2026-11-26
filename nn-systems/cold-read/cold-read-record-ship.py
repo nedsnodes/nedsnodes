@@ -245,7 +245,11 @@ _record_names_spec = importlib.util.spec_from_file_location(
 record_names = importlib.util.module_from_spec(_record_names_spec)
 _record_names_spec.loader.exec_module(record_names)
 RECORDS_DIR = record_names.RECORDS_DIR
+PROVENANCE_COMMENT_PREFIX = record_names.PROVENANCE_COMMENT_PREFIX
 PROGRAM = "cold-read-record-ship"
+# Opens the one line printed for a record that reached the log-store;
+# REFUSED and FAILED both leave it on disk alone. Callers import it.
+RECORD_SHIPPED_LINE_PREFIX = "shipped:"
 
 # The one constant. Host and path in scp form; the path's parent is the
 # store's root, where the README lives.
@@ -268,7 +272,6 @@ COLD_READ_RECORD_LOG_STORE_FILE_HASH_LISTING_SSH_CALL_TIMEOUT_SECONDS = 60
 RSYNC_IO_TIMEOUT_SECONDS = "120"
 # ssh's exit code when it could not connect, which rsync passes through.
 RSYNC_EXIT_CONNECTION_FAILED = 255
-PROVENANCE_COMMENT_PREFIX = "<!-- provenance:"
 
 # The new files of one shipment are copied into a directory of this name
 # beside the record's own, then hard-linked into place; see ONE STEP, JUDGED
@@ -1412,7 +1415,7 @@ def ship_one(host, records_path: pathlib.PurePosixPath, record_dir: pathlib.Path
         return EXIT_REFUSED
 
     def nothing_new():
-        print(f"shipped: {name} — nothing new, all files already there; "
+        print(f"{RECORD_SHIPPED_LINE_PREFIX} {name} — nothing new, all files already there; "
               f"record at {citation}")
         return EXIT_SHIPPED
 
@@ -1524,7 +1527,7 @@ def ship_one(host, records_path: pathlib.PurePosixPath, record_dir: pathlib.Path
         summary.append(f"{len(added)} file(s) added")
     if displaced_triage_digest is not None:
         summary.append(f"{triage_name} replaced")
-    print(f"shipped: {name} — {'; '.join(summary)}; record at {citation}")
+    print(f"{RECORD_SHIPPED_LINE_PREFIX} {name} — {'; '.join(summary)}; record at {citation}")
     return EXIT_SHIPPED
 
 

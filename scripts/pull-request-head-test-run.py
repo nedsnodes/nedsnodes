@@ -100,9 +100,6 @@ OUTPUT_COPY_FAILED_SUMMARY_SUFFIX = "output copy failed, verdict not given"
 
 MAIN_AS_THE_CLONE_HAS_IT = "refs/remotes/origin/main"
 
-# Must match the runner's commit_and_state wording.
-RUNNER_STATE_WHEN_TRACKED_FILES_MATCH = "tracked files match that commit"
-
 # The caller sees only the first line of the append's error, so this phrase in it is what
 # tells a partial record left in the test log from a record not written at all.
 TEST_LOG_TOOK_PART_OF_THE_RECORD = "the test log took only part of the record"
@@ -214,7 +211,7 @@ def why_the_run_is_no_verdict_on_the_head(checkout: Path, head: str, completed) 
     reasons = []
     first_line = (completed.stdout.splitlines() or [""])[0]
     if not (first_line.startswith(f"{run_all_test_suites.PROGRAM}: ")
-            and f" at {head} ({RUNNER_STATE_WHEN_TRACKED_FILES_MATCH}); " in first_line):
+            and f" at {head} ({run_all_test_suites.TRACKED_FILES_MATCH_THE_COMMIT}); " in first_line):
         reasons.append(f"the runner's first line does not say it tested {head} with "
                        f"tracked files matching that commit")
     resolved = scheduled_full_test_run_of_main.git(
