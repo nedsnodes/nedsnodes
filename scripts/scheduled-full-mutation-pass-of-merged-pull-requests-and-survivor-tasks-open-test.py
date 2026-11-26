@@ -353,6 +353,11 @@ def run_untestable_merge_cases():
                    f"unmutated head, so no mutant can be judged:\n"
                    f"{job.mutation_testing.SUITE_FAILS_ON_UNMUTATED_HEAD_LINE_PREFIX}"
                    f"{failing_suite}\nMake the suite pass at the head, then run this again.")}
+    check("an untestable merge's job failure task subject names the merge by its first 12 "
+          "characters",
+          job.untestable_merge_job_failure_task_subject("0123456789abcdef" * 2)
+          == "Nightly full mutation pass skipped merge 0123456789ab, untestable: a suite fails "
+             "on its unchanged code")
 
     # The untestable merge is recorded, its task opened, and the merge after it tested in the
     # same run, from a state file an earlier version wrote without untestable_merges.
@@ -897,6 +902,9 @@ def run_errored_mutants_cases():
               and "already open, so none opened, and the ERRORED mutants no earlier run "
                   "reported are added to the end of its description: task #" in record,
               (completed.returncode, completed.stderr, description, record))
+        check("the text added to the open job failure task names the merge by its first 12 "
+              "characters",
+              f"A later run of merge {merge[:12]}, with its record at " in added, added)
         task_file.write_text(json.dumps({**tasks[0], "status": "completed"}))
         completed = fixture.run({f"{merge} second pass": {
             "json": verdict(errored=[timed_out, disk_full, not_judgeable]), "exit": 1}},
@@ -1110,6 +1118,22 @@ def run_first_pass_and_second_pass_cases():
               not carried_on
               and [option_value(call, "--head") for call in fixture.calls()] == [newer, older],
               f"record={record} calls={fixture.calls()}")
+        carried_on, record = second_pass_called_directly({}, [500, 500], 500)
+        stopped_lines = [line for line in record.splitlines() if "second pass stopped" in line]
+        check("a second pass whose stop time has come before its first merge runs no merge and "
+              "records one stopped line, naming that merge by its first 12 characters",
+              not carried_on and fixture.calls() == []
+              and stopped_lines == [f"second pass stopped for the next scheduled run, before "
+                                    f"merge {newer[:12]}"],
+              f"record={record} calls={fixture.calls()}")
+        carried_on, record = second_pass_called_directly(
+            {f"{newer} second pass": {"sleep": 30}}, [1], 2.5,
+            "--second-pass-stops-starting-mutants-seconds-before-next-scheduled-run", "3")
+        check("a second pass merge's limit is the time left until the stop time plus half the "
+              "margin, exactly, when sooner than the per-merge limit",
+              carried_on and f"CARRIED ON: merge {newer[:12]} (change scripts/other.py) ran "
+                             f"past the limit of 3 s" in record,
+              f"carried_on={carried_on} record={record}")
         for case_name, flags, wanted_limit in [
                 ("half the margin after the stop time, when sooner than the per-merge limit",
                  ["--second-pass-stops-starting-mutants-seconds-before-next-scheduled-run", "2"],
@@ -1193,9 +1217,14 @@ def run_first_pass_and_second_pass_cases():
 
         for case_name, schedule_file_text in [
                 ("names no such job", json.dumps({"jobs": []})),
+                ("names the job twice", json.dumps({"jobs": [
+                    {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "5 13 * * *"}}},
+                    {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * * *"}}}]})),
                 ("is not JSON", "not JSON"),
                 ("gives a schedule that is not daily", json.dumps({"jobs": [{
                     "name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * * 1"}}}]})),
+                ("gives a schedule of four fields", json.dumps({"jobs": [{
+                    "name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * *"}}}]})),
                 ("gives a schedule with a step", json.dumps({"jobs": [{
                     "name": job.PROGRAM, "on": {"ned-box": {"schedule": "*/5 0 * * *"}}}]})),
                 ("gives a schedule of one field", json.dumps({"jobs": [{
@@ -1264,6 +1293,22 @@ def run_first_pass_and_second_pass_cases():
             scheduled_jobs_file_with_schedule(fixture, "5 13 * * *"), local(11, 11, 12, 0))
         check("cron's next start of the job reads the hour and the minute from the schedule",
               due == local(11, 11, 13, 5), (due, local(11, 11, 13, 5)))
+        # The zone is set here so that the case does not depend on the zone the suites run in.
+        zone_before = os.environ.get("TZ")
+        os.environ["TZ"] = "America/Los_Angeles"
+        time.tzset()
+        try:
+            due = job.unix_time_cron_next_starts_this_program_on_ned_box(
+                scheduled_jobs_file_with_schedule(fixture, "30 0 * * *"), local(7, 15, 12, 0))
+            wanted = local(7, 16, 0, 30)
+        finally:
+            if zone_before is None:
+                del os.environ["TZ"]
+            else:
+                os.environ["TZ"] = zone_before
+            time.tzset()
+        check("cron's next start of the job in summer time is read in summer time",
+              due == wanted, (due, wanted))
 
     try:
         job.unix_time_cron_next_starts_this_program_on_ned_box(
@@ -1289,6 +1334,10 @@ def run_first_pass_and_second_pass_cases():
         "a" * 40: {"merged_at_unix_seconds": 86400, "mutants_not_run_count": 4}}}, 2 * 86400)
     check("of two merges made in the same second the record's line names one, the same each "
           "time", "the oldest such merge is aaaaaaaaaaaa, " in line, line)
+    line = job.run_record_line_counting_mutants_not_run_and_naming_oldest_merge_with_one({NOT_RUN_KEY: {
+        "a" * 40: {"merged_at_unix_seconds": 0, "mutants_not_run_count": 1}}}, 86400 * 86400)
+    check("the record's line gives a merge's age as its seconds over 86400, to the tenth of a "
+          "day", line.endswith(", 86400.0 days ago"), line)
 
 
 def run_last_line_said_cases():
@@ -1306,8 +1355,29 @@ def run_last_line_said_cases():
           job.last_line_said("", f"{kept}\n") == "nothing")
 
 
+def run_lost_tasks_reported_cases():
+    with tempfile.TemporaryDirectory() as scratch:
+        arguments = job.parse_arguments(["--task-lists-directory", scratch,
+                                         "--log-store-root", scratch])
+        list_directory = Path(scratch) / "nedsnodes-alpha-tasks"
+        list_directory.mkdir()
+        (list_directory / "1.json").write_text(json.dumps(
+            {"id": "1", "subject": "s", "status": "pending", "description": "rewritten"}))
+        kept, lost = "a" * 64, "b" * 64
+        state = {"tasks_opened": {kept: {"agent_seat": "alpha", "task_id": 1},
+                                  lost: {"agent_seat": "alpha", "task_id": 2}}}
+        record = []
+        reported = job.lost_tasks_reported(state, arguments, record)
+        check("lost_tasks_reported goes on past an open task that no longer names its mutant: "
+              "that task keeps it, and a later task whose file is gone is reported lost",
+              list(state["tasks_opened"]) == [kept] and len(reported) == 1
+              and "task #2 on alpha's task list" in reported[0],
+              (state, reported, record))
+
+
 def run_cases():
     run_last_line_said_cases()
+    run_lost_tasks_reported_cases()
     # The first run writes the state file and tests nothing.
     with tempfile.TemporaryDirectory() as scratch:
         fixture = Fixture(scratch)
