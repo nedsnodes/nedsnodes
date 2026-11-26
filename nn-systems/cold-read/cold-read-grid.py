@@ -1055,10 +1055,10 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 else STRAY_WRITE_UNDO_TRACKED)
         codes = status_codes_by_path.get(name, set())
         absolute_path = cell_common.shell_quoted_on_one_line(str(cell_common.REPO_ROOT / name))
-        unmerged_read = (STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ
+        what_to_read = ((STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ
                          if os.path.lexists(cell_common.REPO_ROOT / name)
                          else STRAY_WRITE_ALREADY_CHANGED_UNMERGED_GONE_READ)
-        what_to_read = (unmerged_read if codes & GIT_STATUS_UNMERGED_CODES
+                        if codes & GIT_STATUS_UNMERGED_CODES
                         else STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
                         else STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ if "??" in codes
                         else STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ).format(
