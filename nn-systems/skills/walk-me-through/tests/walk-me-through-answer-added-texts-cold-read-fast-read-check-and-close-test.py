@@ -8005,10 +8005,12 @@ def test_an_expired_copy_another_run_removed_first_counts_as_pruned():
     for number in range(1, 20):
         (root / WALK_NAME / f"2000-01-02T00-00-{number:02}.000000Z.md").write_bytes(b"old")
     real_unlink = Path.unlink
+    removals_by_another_run = []
 
     def unlink_after_another_run_removed_the_first_expired_copy(self, *args, **kwargs):
         if self == expired[0]:
             os.remove(self)
+            removals_by_another_run.append(self)
         return real_unlink(self, *args, **kwargs)
 
     Path.unlink = unlink_after_another_run_removed_the_first_expired_copy
@@ -8016,6 +8018,8 @@ def test_an_expired_copy_another_run_removed_first_counts_as_pruned():
         problem = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
     finally:
         Path.unlink = real_unlink
+    check("the prune met the copy another run had removed", removals_by_another_run == [expired[0]],
+          str(removals_by_another_run))
     check("the save succeeds although another run removed an expired copy first", problem is None, str(problem))
     check("the other expired copies are pruned", not any(path.exists() for path in expired))
     check("the newest 20 copies are kept", len(walk_copies(root)) == 20, str(len(walk_copies(root))))
