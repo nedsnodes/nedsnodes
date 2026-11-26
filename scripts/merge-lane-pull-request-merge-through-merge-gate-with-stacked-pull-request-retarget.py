@@ -599,13 +599,34 @@ def repair_task_opened(arguments, merge_commit, seat, failed_tests):
         f"Open a pull request that fixes the cause. Complete this task once it merges; the next "
         f"after-merge test run then takes each passing test off the record that "
         f"scripts/merge-gate.sh shows.")
+    subject = f"Main fails after pull request {arguments.pull_request}: fix {count} failed test(s)"
     try:
         task_id = task_write.agent_seat_task_list_new_pending_task_write(
-            task_list, f"Main fails after pull request {arguments.pull_request}: fix "
-                       f"{count} failed test(s)", description)
+            task_list, subject, description)
     except OSError as error:
+        # The writer can raise after it has linked the task file, as when its .highwatermark
+        # write fails, so the STOP must say whether a task stands on the list.
+        written = repair_task_written_ids(task_list, subject, description)
+        if written:
+            return None, None, (f"task #{written[-1]} was written to {task_list}, but the "
+                                f"writer then failed, so the failed suites record does not "
+                                f"name it: {error}")
         return None, None, f"the repair task could not be written to {task_list}: {error}"
     return seat, task_id, None
+
+
+def repair_task_written_ids(task_list, subject, description):
+    """The ids, lowest first, of the tasks on task_list holding this subject and description."""
+    ids = []
+    for path in task_list.glob("*.json"):
+        try:
+            task = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (isinstance(task, dict) and task.get("subject") == subject
+                and task.get("description") == description and path.stem.isdigit()):
+            ids.append(int(path.stem))
+    return sorted(ids)
 
 
 def repair_task_no_longer_open(seat, task_id):
