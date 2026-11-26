@@ -1460,9 +1460,12 @@ def fetch_failure_note(stamp: dict, what_may_be_stale: str = "this list") -> str
 def catch_up_session_checkout(checkout: Path, interval_seconds: int) -> None:
     """The Stop-hook body for the session's own checkout:
 
-      1. Misbehaviour detectors run EVERY turn, before and independent of the
-         drift path — a branch that merged main into itself is 0 behind, which
-         is exactly where a drift-first design would return early. What they
+      1. Misbehaviour detectors run every turn whose wait for the branch lock
+         succeeds, before and independent of the drift path — a branch that
+         merged main into itself is 0 behind, which is exactly where a
+         drift-first design would return early. A turn whose wait runs out,
+         because the turn-end push hook holds the lock, runs neither the
+         detectors nor the rest; the next turn runs them. What they
          find is told to the AGENT, with what to do about it. Routine drift is
          not reported to the user at all.
       2. Drift is counted. If none, every "already said" key is cleared.

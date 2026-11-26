@@ -35,6 +35,14 @@ agent leaves unfixed is reported again at its next turn end. A failure that stop
 A draft that fails to open after its push succeeded is not tried again at the next turn end,
 because the branch then has no commit origin lacks; its failure line gives the command to run.
 
+A push that succeeds gets a line too when the pre-push hook printed something before git's own
+output, which it does only when it could not check the branch, and when it was made while an
+emergency stop, as nn-systems/skills/emergency-stop/emergency-stop-file-in-force-read-common.py
+reads it, is in force and names another agent-seat as its coordinating one.
+
+The git-redirecting variables, such as GIT_DIR, are removed from the hook's own environment
+before any git command, so each worktree's git reads that worktree.
+
 TIME. Claude Code kills the hook at the timeout .claude/settings.json gives it, and a killed hook
 prints nothing, which would lose the failures already found. So every command is bounded by the time
 left before PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS, and a command that runs out of it ends the pushing: the hook reports
@@ -98,6 +106,12 @@ branch_lock = load_module(
 attendance = load_module(
     "agent_session_unattended_by_user_check_common",
     REPO_ROOT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py")
+git_redirecting_environment = load_module(
+    "git_redirecting_environment_variables_removal_common",
+    REPO_ROOT / "nn-systems" / "general-tools" / "git-redirecting-environment-variables-removal-common.py")
+emergency_stop = load_module(
+    "emergency_stop_file_in_force_read_common",
+    REPO_ROOT / "nn-systems" / "skills" / "emergency-stop" / "emergency-stop-file-in-force-read-common.py")
 
 
 class HookFailure(Exception):
@@ -130,6 +144,28 @@ def single_line(text):
 
 def command_error(result):
     return single_line(result.stderr or result.stdout) or f"exit status {result.returncode}, no output"
+
+
+def pre_push_hook_words(push_stderr):
+    """What the pre-push hook printed: git's own output of a push starts with "remote:" or "To "."""
+    words = []
+    for line in push_stderr.splitlines():
+        if line.startswith(("remote:", "To ")):
+            break
+        words.append(line)
+    return single_line("\n".join(words))
+
+
+def stop_in_force_naming_another_coordinator(agent_seat):
+    """The in-force emergency-stop file's path when it does not name agent_seat as its
+    coordinating agent-seat, else None. An unreadable stop file counts as in force."""
+    state = emergency_stop.read_state(emergency_stop.emergency_stop_folder())
+    if isinstance(state, emergency_stop.Unreadable):
+        return state.path
+    if isinstance(state, emergency_stop.InForce) and \
+            emergency_stop.coordinating_agent_seat(state.text) != agent_seat:
+        return state.path
+    return None
 
 
 def worktrees_with_branches(clone_directory, deadline):
@@ -174,7 +210,7 @@ def agent_seat_owned_nn_topic_branches_with_commits_origin_lacks(clone_directory
     return owned
 
 
-def branch_push_and_draft_open(worktree, branch, failures, deadline):
+def branch_push_and_draft_open(worktree, branch, failures, deadline, stop_file):
     asked = run_command(["gh", "pr", "list", "--head", branch, "--state", "open",
                          "--json", "number,isDraft"], worktree, deadline)
     try:
@@ -192,6 +228,12 @@ def branch_push_and_draft_open(worktree, branch, failures, deadline):
         failures.append(f"branch {branch}: `git rev-parse --absolute-git-dir` failed in {worktree}, so "
                         f"the branch was not pushed: {command_error(git_directory)}")
         return
+    # Asked before the push, so that running out of time here leaves the branch unpushed and
+    # tried again, rather than pushed with no draft and a line saying it will be tried again.
+    title = None
+    if not open_pull_requests:
+        title = run_command(["git", "log", "-1", "--format=%s", f"refs/heads/{branch}"], worktree,
+                            deadline).stdout.strip() or branch
     with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(
             git_directory.stdout.strip(), seconds_left(deadline)) as held:
         if not held:
@@ -202,11 +244,16 @@ def branch_push_and_draft_open(worktree, branch, failures, deadline):
         failures.append(f"branch {branch}: `git push origin {branch}` from {worktree} failed, so it was "
                         f"not pushed: {command_error(pushed)}")
         return
+    unchecked = pre_push_hook_words(pushed.stderr)
+    if unchecked:
+        failures.append(f"branch {branch}: pushed from {worktree}, but the pre-push hook did not "
+                        f"fully check it, as it said: {unchecked}")
+    if stop_file is not None:
+        failures.append(f"branch {branch}: pushed from {worktree} while the emergency stop in "
+                        f"{stop_file} is in force, and this agent-seat is not its coordinating "
+                        f"agent-seat")
     if open_pull_requests:
         return
-    title = run_command(["git", "log", "-1", "--format=%s", f"refs/heads/{branch}"], worktree,
-                        deadline).stdout.strip()
-    title = title or branch
     create = ["gh", "pr", "create", "--draft", "--base", MAIN_BRANCH, "--head", branch,
               "--title", title, "--body", DRAFT_PULL_REQUEST_DESCRIPTION]
     try:
@@ -227,19 +274,19 @@ def branch_push_and_draft_open(worktree, branch, failures, deadline):
 
 
 def run(stdin_text, environment, default_directory, started=None):
-    """(stdout text, stderr text, exit status)."""
+    """The hook's stdout text."""
     deadline = (time.monotonic() if started is None else started) + PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS
     try:
         payload = json.loads(stdin_text)
     except json.JSONDecodeError as error:
         raise HookFailure(f"the Stop payload is not JSON, so no branch was pushed: {error}") from None
     if stop_hooks_stay_silent_rule.stop_hook_stays_silent_while_agent_answers_a_stop_hook(payload):
-        return "", "", 0
+        return ""
     if not isinstance(payload, dict):
         raise HookFailure("the Stop payload is not a JSON object, so no branch was pushed")
     agent_seat = environment.get("GIT_AUTHOR_NAME", "")
     if not agent_seat or attendance.agent_session_unattended_by_user(environment):
-        return "", "", 0
+        return ""
     # Not the payload's cwd first: it follows the agent's `cd`, which can leave the clone.
     clone_directory = environment.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or default_directory
     failures = []
@@ -247,11 +294,13 @@ def run(stdin_text, environment, default_directory, started=None):
         to_push = agent_seat_owned_nn_topic_branches_with_commits_origin_lacks(
             clone_directory, agent_seat, failures, deadline)
     except OutOfTime as error:
-        raise HookFailure(f"`{error}` did not finish within {PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS} seconds, "
-                          f"so no branch was pushed") from None
+        failures.append(f"`{error}` did not finish within {PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS} "
+                        f"seconds, so no branch was pushed; the next turn end tries again.")
+        to_push = []
+    stop_file = stop_in_force_naming_another_coordinator(agent_seat) if to_push else None
     for index, (worktree, branch) in enumerate(to_push):
         try:
-            branch_push_and_draft_open(worktree, branch, failures, deadline)
+            branch_push_and_draft_open(worktree, branch, failures, deadline, stop_file)
         except OutOfTime as error:
             not_tried = [later_branch for _, later_branch in to_push[index + 1:]]
             if not error.reported:
@@ -264,23 +313,23 @@ def run(stdin_text, environment, default_directory, started=None):
                                 f"{', '.join(not_tried)}; the next turn end tries them.")
             break
     if not failures:
-        return "", "", 0
+        return ""
     lines = [BRANCHES_NOT_FULLY_ON_GITHUB_OPENING_MESSAGE, *(f"- {failure}" for failure in failures),
              BRANCHES_NOT_FULLY_ON_GITHUB_NEXT_STEP_MESSAGE]
     output = {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "\n".join(lines)}}
-    return json.dumps(output) + "\n", "", 0
+    return json.dumps(output) + "\n"
 
 
 def main():
+    for name in git_redirecting_environment.GIT_REDIRECTING_ENVIRONMENT_VARIABLES:
+        os.environ.pop(name, None)
     try:
-        stdout_text, stderr_text, status = run(
-            sys.stdin.read(), os.environ, os.getcwd())
+        stdout_text = run(sys.stdin.read(), os.environ, os.getcwd())
     except HookFailure as error:
         print(f"{HOOK_NAME}: {error}", file=sys.stderr)
         return 1
     sys.stdout.write(stdout_text)
-    sys.stderr.write(stderr_text)
-    return status
+    return 0
 
 
 if __name__ == "__main__":

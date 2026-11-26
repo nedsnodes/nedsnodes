@@ -20,7 +20,6 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "nn-systems" / "general-tools" / "agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py"
-CATCH_UP = REPO_ROOT / "scripts" / "checkout-freshness-catch-up.py"
 SEAT = "test-seat"
 
 _specification = importlib.util.spec_from_file_location(
@@ -92,7 +91,8 @@ class StopHookTest(unittest.TestCase):
         environment.update({
             "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
             "FAKE_GH_CALLS": str(self.calls),
-            "FAKE_GH_LIST_STDOUT": "[]", "CLAUDE_PROJECT_DIR": str(self.clone), **GIT_ENVIRONMENT})
+            "FAKE_GH_LIST_STDOUT": "[]", "CLAUDE_PROJECT_DIR": str(self.clone),
+            "NEDSNODES_EMERGENCY_STOP_FOLDER": str(self.root / "emergency-stop"), **GIT_ENVIRONMENT})
 
     def worktree(self, branch, owner_seat=SEAT, commit=True):
         path = self.root / branch
@@ -241,10 +241,9 @@ class StopHookTest(unittest.TestCase):
         self.worktree("topic-a")
         self.worktree("topic-b")
         self.worktree("topic-c")
-        stdout, _, status = self.run_hook_in_process_with_seconds_left(
+        stdout = self.run_hook_in_process_with_seconds_left(
             6, FAKE_GH_CREATE_STATUS="1", FAKE_GH_CREATE_STDERR="rate limited",
             FAKE_GH_SLOW_FOR_HEAD="topic-b", FAKE_GH_SLOW_SECONDS="30")
-        self.assertEqual(status, 0)
         context = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
         self.assertIn("branch topic-a: pushed, but its draft pull request could not be opened", context)
         self.assertIn("rate limited", context)
@@ -256,9 +255,8 @@ class StopHookTest(unittest.TestCase):
     def test_draft_command_that_runs_out_of_time_says_to_check_and_names_the_command(self):
         self.worktree("topic-a")
         self.worktree("topic-b")
-        stdout, _, status = self.run_hook_in_process_with_seconds_left(
+        stdout = self.run_hook_in_process_with_seconds_left(
             6, FAKE_GH_SLOW_FOR_HEAD="--draft", FAKE_GH_SLOW_SECONDS="30")
-        self.assertEqual(status, 0)
         context = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
         self.assertIn("pushed, but `gh pr create` did not finish before the hook's time ran out", context)
         self.assertIn("gh pr create --draft --base main --head topic-a", context)
@@ -275,6 +273,7 @@ class StopHookTest(unittest.TestCase):
                 stderr=subprocess.PIPE, text=True, env=self.environment, cwd=self.clone)
             running.stdin.write(json.dumps({"cwd": str(self.root), "stop_hook_active": False}))
             running.stdin.close()
+            running.stdin = None
             deadline = time.monotonic() + 30
             while not [call for call in self.gh_calls() if call[:2] == ["pr", "list"]]:
                 self.assertLess(time.monotonic(), deadline, "the hook never asked GitHub")
@@ -286,27 +285,96 @@ class StopHookTest(unittest.TestCase):
         self.assertEqual(running.returncode, 0, stderr_text)
         self.assertEqual(git(self.origin, "rev-parse", "topic-a"), git(path, "rev-parse", "HEAD"))
 
-    def test_catch_up_and_this_hook_run_together_leave_the_branch_one_head_on_origin_and_here(self):
-        for attempt in range(3):
-            with self.subTest(attempt=attempt):
-                git(self.clone, "commit", "--quiet", "--allow-empty", "-m", f"main moves {attempt}")
-                git(self.clone, "push", "--quiet", "origin", "HEAD:main")
-                branch = f"never-pushed-{attempt}"
-                path = self.root / branch
-                git(self.clone, "worktree", "add", "--quiet", "-b", branch, str(path), "HEAD~1")
-                git(path, "commit", "--quiet", "--allow-empty", "-m", f"work on {branch}")
-                worktree_owner_file.worktree_owner_file_write(path, "agent-seat", SEAT)
-                git(path, "fetch", "--quiet", "origin")
-                payload = json.dumps({"cwd": str(path), "stop_hook_active": False})
-                both = [subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE, text=True, cwd=path,
-                                         env={**self.environment, "CLAUDE_PROJECT_DIR": str(path)})
-                        for command in ([sys.executable, str(CATCH_UP), "--interval-seconds", "0",
-                                         "--cwd", str(path)],
-                                        [sys.executable, str(HOOK)])]
-                for running in both:
-                    running.communicate(payload, timeout=120)
-                self.assertEqual(git(self.origin, "rev-parse", branch), git(path, "rev-parse", "HEAD"))
+    def test_push_whose_lock_wait_runs_out_is_reported_and_later_branches_are_not_tried(self):
+        path = self.worktree("topic-a")
+        self.worktree("topic-b")
+        git_directory = git(path, "rev-parse", "--absolute-git-dir")
+        with hook.branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(git_directory, 0) as held:
+            self.assertTrue(held)
+            stdout = self.run_hook_in_process_with_seconds_left(2)
+        context = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("branch topic-a: `waiting for scripts/checkout-freshness-catch-up.py to finish with", context)
+        self.assertIn("not tried this turn end, because the hook's time ran out: topic-b", context)
+        self.assertFalse(self.on_origin("topic-a"))
+        self.assertFalse(self.on_origin("topic-b"))
+
+    def test_time_running_out_on_the_draft_title_leaves_the_branch_unpushed_for_the_next_turn_end(self):
+        self.worktree("topic-a")
+        real_run_command = hook.run_command
+
+        def title_runs_out(arguments, directory, deadline):
+            if arguments[:2] == ["git", "log"]:
+                raise hook.OutOfTime(" ".join(arguments))
+            return real_run_command(arguments, directory, deadline)
+
+        with mock.patch.object(hook, "run_command", title_runs_out):
+            stdout = self.run_hook_in_process_with_seconds_left(60)
+        context = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("The next turn end tries again each branch that still has commits origin lacks", context)
+        self.assertFalse(self.on_origin("topic-a"))
+
+    def test_listing_that_runs_out_of_time_still_reports_the_failures_found_before_it(self):
+        path = self.worktree("topic-a", owner_seat=None)
+        worktree_owner_file.worktree_owner_file_path_find(path).write_text("not json")
+        self.worktree("topic-b")
+        real_run_command = hook.run_command
+
+        def rev_list_runs_out(arguments, directory, deadline):
+            if arguments[:2] == ["git", "rev-list"]:
+                raise hook.OutOfTime(" ".join(arguments))
+            return real_run_command(arguments, directory, deadline)
+
+        with mock.patch.object(hook, "run_command", rev_list_runs_out):
+            stdout = self.run_hook_in_process_with_seconds_left(60)
+        context = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("branch topic-a: the owner file of worktree", context)
+        self.assertIn("`git rev-list", context)
+        self.assertIn("so no branch was pushed; the next turn end tries again", context)
+        self.assertFalse(self.on_origin("topic-b"))
+
+    def test_inherited_git_directory_variable_does_not_redirect_the_hook_from_each_worktree(self):
+        self.worktree("topic-a")
+        result = self.run_hook(GIT_DIR=str(self.clone / ".git"))
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+        self.assertTrue(self.on_origin("topic-a"))
+
+    def test_push_the_pre_push_hook_could_not_check_is_reported_with_its_words(self):
+        self.worktree("topic-a")
+        self.worktree("topic-b")
+        hooks = self.root / "hooks"
+        hooks.mkdir()
+        (hooks / "pre-push").write_text(
+            "#!/bin/sh\nif grep -q topic-a; then\n"
+            "  echo 'pre-push: branch topic-a was not checked for conflicts with origin/main.' >&2\n"
+            "  echo 'Check it by hand.' >&2\nfi\nexit 0\n")
+        (hooks / "pre-push").chmod(0o755)
+        git(self.clone, "config", "core.hooksPath", str(hooks))
+        context = self.context(self.run_hook())
+        self.assertIn("branch topic-a: pushed from", context)
+        self.assertIn("pre-push hook did not fully check it, as it said: pre-push: branch topic-a was "
+                      "not checked for conflicts with origin/main. Check it by hand.", context)
+        self.assertNotIn("To ", context)
+        self.assertNotIn("branch topic-b", context)
+        self.assertTrue(self.on_origin("topic-a"))
+        self.assertTrue(self.on_origin("topic-b"))
+
+    def test_push_made_during_an_emergency_stop_another_agent_seat_coordinates_is_reported(self):
+        self.worktree("topic-a")
+        folder = self.root / "emergency-stop"
+        folder.mkdir()
+        stop_file = folder / "2026-11-26T12-00-00Z.md"
+        for coordinator, reported in (("other-seat", True), (SEAT, False)):
+            with self.subTest(coordinator=coordinator):
+                git(self.root / "topic-a", "commit", "--quiet", "--allow-empty", "-m", f"more for {coordinator}")
+                stop_file.write_text(f"stop\ncoordinating agent-seat: {coordinator}\n")
+                result = self.run_hook()
+                line = f"while the emergency stop in {stop_file} is in force"
+                if reported:
+                    self.assertIn(line, self.context(result))
+                else:
+                    self.assertEqual(result.stdout, "")
+                self.assertEqual(git(self.origin, "rev-parse", "topic-a"),
+                                 git(self.root / "topic-a", "rev-parse", "HEAD"))
 
     def test_unreadable_owner_file_is_reported_and_its_branch_not_pushed(self):
         path = self.worktree("topic-a", owner_seat=None)
