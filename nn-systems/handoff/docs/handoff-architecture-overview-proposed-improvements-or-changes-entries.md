@@ -1223,3 +1223,37 @@ Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > - The supervisor is one consumer among several. A search for the module's file name in *.py found it loaded by scripts/pull-request-review-plan.py, scripts/md-drift-lint.py and nn-systems/skills/overview-write/overview-write-architecture-overview-claim-check-by-fresh-agent.py as well as nn-systems/handoff/handoff-supervisor.py:222-227. An editor relying on the sentence would think only the supervisor depends on it.
 State: open
+
+## E105 — possible problem: an assertion of the overview is contradicted
+
+Claim: These leftovers go between the opening of the initial-agent-instructions and their next step, under instructions to hand them to a background subagent; each entry opens with a count of first prompts; the branches the first-prompt list deleted go above those instructions.
+Found by: the overview claim check of 2026-11-20 against commit def45b1a956380a8c5e036ae1920c81476f65e0b; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/9e1363ae17500ef1e89a5b5cfdef8335e67872af-2026-11-20T20-39-55-747649Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The instructions, the counts and the placement of deleted branches are borne out by handoff-supervisor.py:1823-1829 `LEFTOVERS_BEFORE_THE_NEXT_STEP_SENTENCE` and :1893-1897.
+> - The placement claim fails for a launch whose prompt has no next step, such as every resume or a first-prompt launch. handoff-supervisor.py:1879-1880 `"""The prompt with the leftovers between its opening and its next step, or after it when it has no next step.` and :1904-1905 `if not next_step_heading: return f"{prompt}\n\n{inserted}"`. Such prompts are RESUME_PROMPT_WHEN_A_SESSION_ENDED_WITHOUT_A_HANDOFF (:280-284), which carries no NEXT_STEP_HEADING.
+State: open
+
+## E106 — possible problem: an assertion of the overview is contradicted
+
+Claim: The task list is written by Claude Code, by the crash watcher, by the `restore` command, and by `clean-worktrees.py`, "which marks such a task completed once its branch's work is done"; the writer removes completed tasks after comparing log-store copies written by the mirror and by itself.
+Found by: the overview claim check of 2026-11-20 against commit def45b1a956380a8c5e036ae1920c81476f65e0b; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/9e1363ae17500ef1e89a5b5cfdef8335e67872af-2026-11-20T20-39-55-747649Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - Most of this is borne out: handoff-agent-crash-watcher.py:1118-1123; uncommitted-work-snapshots.py:35-37; handoff-write-and-check-supervisor.py:830-861; transcript-mirror-to-log-store.py:191.
+> - But clean-worktrees.py:249-252 also completes the task when no ref holds the restore commit at all, with no merge: `marks the task completed ... when that commit is reachable from origin/main, or when git for-each-ref --contains names no ref holding it`. So a deleted, unmerged restored branch also closes it, which is not "work done".
+State: open
+
+## E107 — possible problem: an assertion of the overview is contradicted
+
+Claim: `nn-systems/handoff/session-handoff-field-names-common.py`: the session-handoff's field names, which the writer script and the handoff-supervisor load, so that renaming a field is one edit; every other reader takes them through the handoff-supervisor.
+Found by: the overview claim check of 2026-11-20 against commit def45b1a956380a8c5e036ae1920c81476f65e0b; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/e58308bc81b6568017a777f497c826a5fd6ed400-2026-11-20T20-50-48-342979Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - Two session-handoff field names are defined in handoff-supervisor.py, not in this module: handoff-supervisor.py:410-411 `COLD_READ_FULL_RUN_COMMAND_REFUSED_DURING_HANDOFF_DEFERRAL_FIELD_PREFIX = ("cold-read-full-run-command-refused-during-handoff-deferral-")` and :412 `BACKGROUND_TASK_PAST_WAIT_LIMIT_FIELD_PREFIX = "background-task-past-wait-limit-"`.
+> - The writer takes them from the supervisor, not from the module: handoff-write-and-check-supervisor.py:152-154.
+> - Ranked fix-later: renaming one of these fields still takes one edit, in handoff-supervisor.py, and a search finds it.
+State: open
