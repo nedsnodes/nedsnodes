@@ -3108,10 +3108,26 @@ reports = finder.build_report("md-review-records/x/dispositions.md", "/repo", "/
                               "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
                               skip={"localsnapshots", "timemachine"}, runner=FakeRunner(completed_table),
                               log_store_root=NO_LOG_STORE_ON_THIS_MACHINE)
-check("a run that completes prints exactly the report it printed before streaming, summary last",
+check("a run that completes prints exactly the report it printed before streaming, summary next to last, "
+      "and ends with #search_incomplete# when a surface could not be searched",
       text == finder.render("md-review-records/x/dispositions.md", reports) + "\n"
-      and text.rstrip().splitlines()[-1].startswith("Could NOT search:"),
+      + finder.render_ending_hashtag_line(reports) + "\n"
+      and text.rstrip().splitlines()[-2].startswith("Could NOT search:")
+      and text.rstrip().splitlines()[-1].startswith(
+          "find-deleted-path-across-backups: #search_incomplete# Could NOT search: "),
       "--- streamed ---\n%s--- render() ---\n%s" % (text, finder.render("md-review-records/x/dispositions.md", reports)))
+
+ending_lines = [finder.render_ending_hashtag_line(reports) for reports in (
+    [finder.SurfaceReport("git", finder.NOT_FOUND, ["a"])],
+    [finder.SurfaceReport("git", finder.FOUND, ["a"], ["b"]),
+     finder.SurfaceReport("time machine", finder.UNAVAILABLE, ["a"])],
+    [])]
+check("the ending line is #search_complete# when every surface was searched, and #search_incomplete# "
+      "naming the UNAVAILABLE surfaces, or that none was searched, otherwise",
+      ending_lines == ["find-deleted-path-across-backups: #search_complete#",
+                       "find-deleted-path-across-backups: #search_incomplete# Could NOT search: time machine",
+                       "find-deleted-path-across-backups: #search_incomplete# no surface was searched"],
+      ending_lines)
 
 # The real thing: the program as a child process with its stdout a pipe, as an
 # agent's shell runs it, and a stand-in ssh that hangs, as a sleeping box does.

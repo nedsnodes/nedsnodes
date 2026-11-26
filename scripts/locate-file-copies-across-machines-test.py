@@ -94,7 +94,7 @@ sys.exit(subprocess.run(["sh", "-c", command]).returncode)
 
 # The backup search's stand-in. It records its arguments, its current
 # directory and every GIT_ variable it was given, then answers in the shape
-# the real one prints -- a header, a surface, a summary line -- with the exit
+# the real one prints -- a header, a surface, a summary line, its ending hashtag line -- with the exit
 # code FAKE_BACKUP_SEARCH_MODE asks for, or dies before its summary.
 STAND_IN_BACKUP_SEARCH = """import argparse, json, os, signal, sys
 with open(os.environ["FAKE_BACKUP_SEARCH_LOG"], "a") as log:
@@ -109,6 +109,10 @@ arguments = parser.parse_args()
 mode = os.environ.get("FAKE_BACKUP_SEARCH_MODE", "not-found")
 with open(os.environ["FAKE_BACKUP_SEARCH_LOG"]) as log:
     runs_so_far = len(log.readlines())
+def ending(some_place_unsearched):
+    print("find-deleted-path-across-backups: "
+          + ("#search_incomplete# Could NOT search: local snapshots" if some_place_unsearched
+             else "#search_complete#"))
 if mode == "killed-on-second-run" and runs_so_far >= 2:
     mode = "killed"
 print("Searching every history the Mac and ned-box keep for: " + arguments.path)
@@ -122,34 +126,34 @@ if mode in ("found", "found-some-unsearched"):
     print("    copied to /scratch/found/logstore-x")
     print()
     print("Recoverable from: log-store.")
-    if mode == "found-some-unsearched":
-        print("Could NOT search: local snapshots -- see each one's line above.")
+    ending(mode == "found-some-unsearched")
     sys.exit(0)
 if mode in ("copy-command-printed", "copy-command-printed-some-unsearched"):
     print("time machine    FOUND")
     print("    $ mkdir -p /scratch/found && cp -n a /scratch/found/timemachine-x")
     print()
     print("Recoverable from: time machine.")
-    if mode == "copy-command-printed-some-unsearched":
-        print("Could NOT search: local snapshots -- see each one's line above.")
+    ending(mode == "copy-command-printed-some-unsearched")
     sys.exit(5)
 if mode in ("not-copied", "not-copied-some-unsearched"):
     print("log-store       FOUND")
     print("    could NOT copy x — ssh exited 255: refused")
     print()
     print("Recoverable from: log-store.")
-    if mode == "not-copied-some-unsearched":
-        print("Could NOT search: local snapshots -- see each one's line above.")
+    ending(mode == "not-copied-some-unsearched")
     sys.exit(4)
 if mode == "incomplete":
     print("time machine    UNAVAILABLE")
     print()
     print("No surface that could be searched has it.")
     print("Could NOT search: time machine -- see each one's line above.")
+    ending(True)
     sys.exit(3)
 print("local snapshots NOT FOUND")
 print()
 print("No surface that could be searched has it.")
+if mode != "summary-without-ending-line":
+    ending(False)
 sys.exit(1)
 """
 BACKUP_SEARCH_VARIABLE = "LOCATE_FILE_COPIES_ACROSS_MACHINES_BACKUP_SEARCH_PROGRAM"
@@ -164,6 +168,15 @@ BACKUP_SEARCH_HEADER_AFTER_INCOMPLETE_ANSWER = (
     f"\n{BACKUP_SEARCH_HEADER}, without its git surfaces:\n")
 
 failures = []
+
+
+LOCATOR_ENDING_COMPLETE = "locate-file-copies-across-machines: #search_complete#"
+LOCATOR_ENDING_INCOMPLETE_OPENING = "locate-file-copies-across-machines: #search_incomplete# "
+
+
+def line_before_ending(output):
+    """The last line before the program's ending hashtag line."""
+    return output.rstrip().splitlines()[-3]
 
 
 def check(case_name, condition, detail=""):
@@ -641,8 +654,11 @@ with scratch() as directory:
     check("the backup search's output follows this program's whole answer, "
           "closing lines included, and ends with its summary line",
           -1 not in order and order == sorted(order), stdout)
-    check("a backup search that searched everywhere adds no closing line",
-          stdout.rstrip().endswith("No surface that could be searched has it."),
+    check("a backup search that searched everywhere adds no closing line, and "
+          "the run ends with its ending line and then this program's #search_complete# line",
+          stdout.rstrip().endswith("No surface that could be searched has it.\n"
+                                   "find-deleted-path-across-backups: #search_complete#\n\n"
+                                   + LOCATOR_ENDING_COMPLETE),
           stdout)
     check("after an answer that searched everything, the header says the git "
           "search above covered the skipped git surfaces",
@@ -724,31 +740,31 @@ with scratch() as directory:
     check("when the backup search finds it, the exit code stays this "
           "program's own, and the last line says to open the copies it made and "
           "check their content before calling it recoverable",
-          code == 1 and output.rstrip().splitlines()[-1].startswith(
+          code == 1 and line_before_ending(output).startswith(
               "The backup search found it: open the copies its \"copied to\" "
               "lines name, and check that one holds the file's content")
-          and "transcript" not in output.rstrip().splitlines()[-1], output)
+          and "transcript" not in line_before_ending(output), output)
     code, output, runs = handed("never-anywhere.md", backup_mode="not-copied")
     check("when the backup search found it but copied no version, the last "
           "line says to tell the user what its FOUND lines say, and does not "
           "send the agent to copies that do not exist",
-          code == 1 and output.rstrip().splitlines()[-1].startswith(
+          code == 1 and line_before_ending(output).startswith(
               "The backup search found it but copied no version: tell the user "
               "what its FOUND lines say")
-          and "open the copies" not in output.rstrip().splitlines()[-1], output)
+          and "open the copies" not in line_before_ending(output), output)
     code, output, runs = handed("never-anywhere.md", backup_mode="copy-command-printed")
     check("when the backup search copied nothing but printed a copy command, "
           "the last line sends the agent to the summary that says who runs "
           "each command, not to the user for every one",
-          code == 1 and output.rstrip().splitlines()[-1].startswith(
+          code == 1 and line_before_ending(output).startswith(
               "The backup search found it but copied nothing yet: the "
               "commands it printed under each FOUND surface copy a version")
-          and "which commands you run yourself" in output.rstrip().splitlines()[-1], output)
+          and "which commands you run yourself" in line_before_ending(output), output)
     code, output, runs = handed("never-anywhere.md",
                                 backup_mode="copy-command-printed-some-unsearched")
     check("when the backup search found it but could not search some places, "
           "the last line also says to tell the user which",
-          code == 1 and output.rstrip().splitlines()[-1].startswith(
+          code == 1 and line_before_ending(output).startswith(
               "It also could NOT search some places: tell the user which")
           and "The backup search found it but copied nothing yet" in output, output)
     for unsearched_mode, exit_line in (
@@ -757,15 +773,33 @@ with scratch() as directory:
         code, output, runs = handed("never-anywhere.md", backup_mode=unsearched_mode)
         check("when the backup search exits %s and could not search some "
               "places, the last line also says to tell the user which" % unsearched_mode,
-              code == 1 and output.rstrip().splitlines()[-1].startswith(
+              code == 1 and line_before_ending(output).startswith(
                   "It also could NOT search some places: tell the user which")
               and exit_line in output, output)
     code, output, runs = handed("never-anywhere.md", backup_mode="incomplete")
     check("when the backup search could not search a place, the last line "
           "says to tell the user which, and why",
-          code == 1 and output.rstrip().splitlines()[-1].startswith(
+          code == 1 and line_before_ending(output).startswith(
               "Tell the user which places the backup search could NOT "
               "search, and why"), output)
+    check("when the backup search could not search a place, this program's "
+          "ending line is #search_incomplete# and names it",
+          output.rstrip().splitlines()[-1] == LOCATOR_ENDING_INCOMPLETE_OPENING
+          + "NOT searched, or searched only in part: the places the backup "
+            "search's Could NOT search line names", output)
+    code, output, runs = handed("never-anywhere.md", backup_mode="found")
+    check("when every place was searched, this program's ending line is "
+          "#search_complete#",
+          output.rstrip().splitlines()[-1] == LOCATOR_ENDING_COMPLETE, output)
+    code, output, runs = handed("never-anywhere.md",
+                                backup_mode="summary-without-ending-line")
+    check("a backup search that prints its summary but not its ending line did "
+          "not finish, and this program's ending line is #search_incomplete#",
+          "The backup search did not finish (it exited 1 before its summary "
+          "line)" in output
+          and output.rstrip().splitlines()[-1] == LOCATOR_ENDING_INCOMPLETE_OPENING
+          + "NOT searched, or searched only in part: the backup search did not "
+            "finish", output)
     code, output, runs = handed("never-anywhere.md", backup_mode="raises")
     check("a backup search that raises before its summary line did not "
           "finish, and its error is shown",
@@ -784,12 +818,17 @@ with scratch() as directory:
           code == 1 and "The backup search did not finish (it exited 2 before "
                         "its summary line)" in output
           and "do not say the file does not exist"
-          in output.rstrip().splitlines()[-1], output)
+          in line_before_ending(output), output)
     code, output, runs = handed("never-anywhere.md", mode="unreachable")
     check("with ned-box unreachable the answer is exit 3, and the backup "
           "search still runs",
           code == 3 and len(runs) == 1 and BACKUP_SEARCH_HEADER in output,
           output)
+    check("with ned-box unreachable, this program's ending line is "
+          "#search_incomplete# and names ned-box",
+          output.rstrip().splitlines()[-1].startswith(
+              LOCATOR_ENDING_INCOMPLETE_OPENING
+              + "NOT searched, or searched only in part: ned-box: "), output)
     check("with ned-box unreachable, the header does not say the git search "
           "above covered the skipped git surfaces",
           BACKUP_SEARCH_HEADER_AFTER_INCOMPLETE_ANSWER in output, output)
@@ -800,8 +839,8 @@ backup_search_spec = importlib.util.spec_from_file_location(
     SCRIPTS_DIR / "find-deleted-path-across-backups.py")
 backup_search = importlib.util.module_from_spec(backup_search_spec)
 backup_search_spec.loader.exec_module(backup_search)
-summaries = [backup_search.render_summary(reports).splitlines()[0]
-             for reports in (
+endings = [backup_search.render_ending_hashtag_line(reports)
+           for reports in (
                  [backup_search.SurfaceReport("git", backup_search.FOUND,
                                               ["a"], ["b"])],
                  [backup_search.SurfaceReport("git", backup_search.NOT_FOUND,
@@ -810,10 +849,12 @@ summaries = [backup_search.render_summary(reports).splitlines()[0]
                                               backup_search.UNAVAILABLE,
                                               ["a"])],
                  [])]
-check("every summary the backup search prints begins as this program "
-      "expects it to",
-      all(line.startswith(program.BACKUP_SEARCH_SUMMARY_OPENINGS)
-          for line in summaries), summaries)
+search_ending = program.search_ending_module()
+check("every ending line the backup search prints is read by this program as "
+      "complete, or as incomplete when a surface was UNAVAILABLE or none was searched",
+      [search_ending.search_was_complete_by_ending_hashtag_line(
+          program.BACKUP_SEARCH_PROGRAM, line) for line in endings]
+      == [True, True, False, False], endings)
 check("the backup search's found, could-not-search-everywhere and "
       "found-but-not-copied exit codes are the ones this program reads",
       (backup_search.EXIT_FOUND, backup_search.EXIT_INCOMPLETE,
@@ -1140,7 +1181,7 @@ with scratch() as directory:
           "finished",
           [one["argv"][-1] for one in runs] == ["rerun-failure-probe", full_name]
           and "did not finish" not in first
-          and second.rstrip().splitlines()[-1].startswith(
+          and line_before_ending(second).startswith(
               "The backup search did not finish (it was stopped by signal 9 "
               "before its summary line)"), (runs, stdout))
 

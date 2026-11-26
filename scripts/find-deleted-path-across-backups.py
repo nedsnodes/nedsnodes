@@ -382,6 +382,13 @@ _next_step_lines_spec = importlib.util.spec_from_file_location(
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
+_search_ending_spec = importlib.util.spec_from_file_location(
+    "search_program_ending_search_complete_or_search_incomplete_hashtag_line_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "search-program-ending-search-complete-or-search-incomplete-hashtag-line-common.py")
+search_ending = importlib.util.module_from_spec(_search_ending_spec)
+_search_ending_spec.loader.exec_module(search_ending)
+
 _transcript_mirror_spec = importlib.util.spec_from_file_location(
     "transcript_mirror_to_log_store", Path(__file__).with_name("transcript-mirror-to-log-store.py"))
 transcript_mirror = importlib.util.module_from_spec(_transcript_mirror_spec)
@@ -2515,6 +2522,16 @@ def render(wanted, reports):
     return "\n".join(out)
 
 
+def render_ending_hashtag_line(reports):
+    """The last line of a search: complete only when some surface was searched and none was UNAVAILABLE."""
+    blocked = [r.surface for r in reports if r.status == UNAVAILABLE]
+    if not reports:
+        return search_ending.search_ending_hashtag_line(THIS_SCRIPT_NAME, "no surface was searched")
+    if blocked:
+        return search_ending.search_ending_hashtag_line(THIS_SCRIPT_NAME, "Could NOT search: %s" % ", ".join(blocked))
+    return search_ending.search_ending_hashtag_line(THIS_SCRIPT_NAME)
+
+
 def print_surface_as_it_finishes(report):
     # Flush pipe buffers so a timeout cannot erase results from completed surfaces.
     print(report.render() + "\n", flush=True)
@@ -2610,6 +2627,7 @@ def main(argv=None, runner=run_command):
                                     log_store_root=args.log_store_root,
                                     on_surface_done=print_surface_as_it_finishes)
         print(render_summary(reports), flush=True)
+        print(render_ending_hashtag_line(reports), flush=True)
         return exit_status(reports)
 
     try:
@@ -2642,6 +2660,7 @@ def main(argv=None, runner=run_command):
         on_surface_done=print_surface_as_it_finishes,
     )
     print(render_summary(reports), flush=True)
+    print(render_ending_hashtag_line(reports), flush=True)
     return exit_status(reports)
 
 

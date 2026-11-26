@@ -194,6 +194,9 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a shipment's leftover staging copy of a cold-read-record gives no hit of its own",
           result.returncode == 0 and len(hit_headers(result.stdout)) == 1
           and ".ship-staging-" not in result.stdout, result.stdout + result.stderr)
+    check("a search that finishes ends with #search_complete#",
+          result.stdout.rstrip().splitlines()[-1]
+          == "log-store-past-discussions-regex-search-newest-first: #search_complete#", result.stdout)
 
     walk_staging = root / "walk" / ".ship-staging-egret-walk-2026-09-21-p2q7"
     write(root / "walk" / "egret-walk-2026-09-21-minutes.md", "the egret walk is open\n")
@@ -1058,6 +1061,9 @@ print(json.dumps([hit.get("occurrence") for hit in kept]))
     result = run(Path(scratch) / "absent", "heron")
     check("a missing log-store on ned-box is a failure, not an empty result",
           result.returncode == 2 and "FAILED: there is no log-store" in result.stderr, result.stderr)
+    check("a search with a FAILED line ends with #search_incomplete#",
+          result.stdout.rstrip().splitlines()[-1].startswith(
+              "log-store-past-discussions-regex-search-newest-first: #search_incomplete# "), result.stdout)
 
     partial = Path(scratch) / "partial"
     build_store(partial)
