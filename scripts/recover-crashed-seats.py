@@ -169,7 +169,6 @@ open, whose report line says WINDOW NOT OPENED and how to open it by hand.
 import argparse
 import importlib.util
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -219,6 +218,11 @@ _claude_json_presets_spec.loader.exec_module(claude_json_presets)
 
 # A shared module avoids circular loading between recovery and the supervisor.
 # Re-export the names for callers that reach them through this module.
+_launch_prompt_recognize_spec = importlib.util.spec_from_file_location(
+    "launch_prompt_wordings_and_user_turn_is_compaction_summary_or_launch_prompt_recognizer_common",
+    Path(__file__).with_name("launch-prompt-wordings-and-user-turn-is-compaction-summary-or-launch-prompt-recognizer-common.py"))
+launch_prompt_recognize = importlib.util.module_from_spec(_launch_prompt_recognize_spec)
+_launch_prompt_recognize_spec.loader.exec_module(launch_prompt_recognize)
 _worth_resuming_spec = importlib.util.spec_from_file_location(
     "seat_transcript_worth_resuming",
     Path(__file__).with_name("agent-seat-transcript-worth-resuming-common.py"))
@@ -235,14 +239,11 @@ newest_real_transcript = worth_resuming.newest_real_transcript
 # Without it the supervisor resumes the crashed transcript and drops the ignition prompt.
 IGNITION_FROM_CONVERSATION_TAIL_SUPERVISOR_ARGUMENTS = "--first-prompt-file-wins-over-crashed-transcript"
 # Do not skip a handoff successor: its parent is already retired.
-# Keep the marker short enough to match both timestamp forms stored in transcripts.
-REINCARNATION_OPENER_MARKER = "the dialog from the session you are continuing"
-# Anchor the opener to avoid matching its text quoted in a hand-written brief.
-REINCARNATION_OPENER_PATTERN = re.compile(
-    r"Read .+? — (?:it is )?" + re.escape(REINCARNATION_OPENER_MARKER))
+REINCARNATION_OPENER_MARKER = launch_prompt_recognize.REINCARNATION_OPENER_MARKER
+REINCARNATION_OPENER_PATTERN = launch_prompt_recognize.REINCARNATION_OPENER_PATTERN
 # An ignition without a conversation-tail, at boot or at a handoff, also consumes the handoff and retires the parent.
-IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER = "the previous session's conversation-tail is unavailable"
-FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PHRASE = "it is the dialog from this seat's last recorded session"
+IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER = launch_prompt_recognize.IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER
+FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PHRASE = launch_prompt_recognize.FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PHRASE
 
 
 def default_agents_root() -> Path:
@@ -607,9 +608,7 @@ def write_first_prompt_after_recorded_exit(handoff_directory: Path, name: str,
     # The supervisor’s default resume prompt describes a crash; a recorded exit proves no such thing.
     handoff_directory.mkdir(parents=True, exist_ok=True)
     prompt_path = first_prompt_after_recorded_exit_path(handoff_directory, name, by_hand)
-    recorded = (f"This seat's supervisor recorded the exit of its last session, "
-                f"{FIRST_PROMPT_AFTER_RECORDED_EXIT_MARKER}, so recovery did not bring the "
-                "seat back on its own.")
+    recorded = launch_prompt_recognize.CRASH_RECOVERY_FIRST_PROMPT_SENTENCE_SAYING_SUPERVISOR_RECORDED_LAST_SESSION_EXIT
     re_verify = "Re-verify any in-flight state before trusting it, then continue."
     if by_hand:
         prompt = (f"{recorded} It has now been restarted by hand, resuming this "

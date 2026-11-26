@@ -12,8 +12,9 @@ notices. Neither is a turn of a `claude -p` agent-session, whose entrypoint is
 sdk-cli and whose prompts a program wrote, nor the summary Claude Code writes
 when it compacts a conversation, nor a prompt that the handoff-supervisor or
 crash recovery (scripts/recover-crashed-seats.py) starts or resumes an
-agent-session with, which this reader recognizes by those programs' own
-constants. That includes a prompt passed to the handoff-supervisor with
+agent-session with, which this reader recognizes, where those programs put
+them, by the constants they build them from in
+scripts/launch-prompt-wordings-and-user-turn-is-compaction-summary-or-launch-prompt-recognizer-common.py. That includes a prompt passed to the handoff-supervisor with
 --first-prompt-file or --first-prompt, such as a new agent-seat's founding
 prompt, which the handoff-supervisor ends with a line of its own; such a prompt
 written before it did so has no such line and is read as his. Turns written
@@ -35,14 +36,6 @@ _claude_code_session_transcript_lookup_and_text_search_common_spec = importlib.u
 claude_code_session_transcript_lookup_and_text_search_common = importlib.util.module_from_spec(_claude_code_session_transcript_lookup_and_text_search_common_spec)
 _claude_code_session_transcript_lookup_and_text_search_common_spec.loader.exec_module(claude_code_session_transcript_lookup_and_text_search_common)
 
-# The programs that write the prompts a supervised agent-session starts or resumes with. Their own
-# constants recognize those prompts, so a prompt they add or reword cannot slip past this reader.
-_crash_recovery_spec = importlib.util.spec_from_file_location(
-    "recover_crashed_seats", Path(__file__).resolve().parent / "recover-crashed-seats.py")
-crash_recovery = importlib.util.module_from_spec(_crash_recovery_spec)
-_crash_recovery_spec.loader.exec_module(crash_recovery)
-handoff_supervisor = crash_recovery.supervisor
-
 _handoff_extract_conversation_spec = importlib.util.spec_from_file_location(
     "handoff_extract_conversation", Path(__file__).resolve().parent / "handoff-extract-conversation.py")
 handoff_extract_conversation = importlib.util.module_from_spec(_handoff_extract_conversation_spec)
@@ -51,28 +44,17 @@ _handoff_extract_conversation_spec.loader.exec_module(handoff_extract_conversati
 DEFAULT_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 WRAPPED_BLOCK = re.compile(r"\A\s*<[a-z-]+>.*</[a-z-]+>\s*\Z", re.DOTALL)
 PROGRAM_PROMPT_ENTRYPOINT = "sdk-cli"
-COMPACTION_SUMMARY_OPENING = "This session is being continued from a previous conversation"
-FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_PATTERN = re.compile(
-    re.escape(handoff_supervisor.FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE).replace(re.escape("{agent}"), ".+?"))
-FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PATTERN = re.compile(
-    r"Read .+? — " + re.escape(crash_recovery.FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PHRASE))
-# Each phrase is inside every prompt of one kind, wherever it falls in that prompt.
-LAUNCH_PROMPT_PHRASES = (
-    crash_recovery.IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER,
-    crash_recovery.FIRST_PROMPT_AFTER_RECORDED_EXIT_MARKER,
-    handoff_supervisor.FIRST_PROMPT_FROM_LAUNCH_COMMAND_NOT_TYPED_BY_THE_USER_LINE,
-    *handoff_supervisor.FIRST_PROMPT_FROM_LAUNCH_COMMAND_NOT_TYPED_BY_THE_USER_LINE_EARLIER_WORDINGS,
-)
+_launch_prompt_recognize_spec = importlib.util.spec_from_file_location(
+    "launch_prompt_wordings_and_user_turn_is_compaction_summary_or_launch_prompt_recognizer_common",
+    Path(__file__).resolve().parent / "launch-prompt-wordings-and-user-turn-is-compaction-summary-or-launch-prompt-recognizer-common.py")
+launch_prompt_recognize = importlib.util.module_from_spec(_launch_prompt_recognize_spec)
+_launch_prompt_recognize_spec.loader.exec_module(launch_prompt_recognize)
+COMPACTION_SUMMARY_OPENING = launch_prompt_recognize.COMPACTION_SUMMARY_OPENING
 
 
 def user_turn_text_is_compaction_summary_or_launch_prompt(text):
     """Whether a user turn's text is a compaction summary or a prompt the handoff-supervisor or crash recovery wrote."""
-    return (text.startswith(COMPACTION_SUMMARY_OPENING)
-            or text.startswith(handoff_supervisor.CRASH_RECOVERY_RESUME_PROMPT_OPENING)
-            or FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_PATTERN.match(text) is not None
-            or crash_recovery.REINCARNATION_OPENER_PATTERN.match(text) is not None
-            or FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PATTERN.match(text) is not None
-            or any(phrase in text for phrase in LAUNCH_PROMPT_PHRASES))
+    return launch_prompt_recognize.user_turn_text_is_compaction_summary_or_launch_prompt(text)
 
 
 def written_by_a_program(record, text,
