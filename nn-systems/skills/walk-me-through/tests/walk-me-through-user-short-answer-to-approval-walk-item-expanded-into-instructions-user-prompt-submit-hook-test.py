@@ -2582,6 +2582,30 @@ def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_
           result.returncode == 0 and result.stdout == "", f"exit {result.returncode}, stdout {result.stdout!r}")
 
 
+def test_bump_of_a_title_opening_with_a_dash_prints_a_check_command_that_runs_and_bumps_it():
+    document = (WALK_DOCUMENT + "\n## --dry-run before the push\n\n#approval_walk_item_in_category_fix_next\n\n"
+                "Recommendation: add the flag.\n")
+    case = Case(next_to_present="item 4 of 9", document=document)
+    result = case.run("bump --dry-run before the push")
+    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if result.stdout else ""
+    printed = re.search(r"Run `(python3 [^`]*? check [^`]*)` and do what it prints", context)
+    check("bump of a title opening with a dash names it as --bump='<title>', one word argparse reads as its value",
+          printed is not None and "check '--bump=--dry-run before the push' --user-reply-as-typed" in printed[1],
+          f"context {context!r}")
+    if printed is None:
+        return
+    retry = subprocess.run(printed[1], shell=True, capture_output=True, text=True, cwd=case.checkout)
+    minutes = (case.walk / f"{WALK_NAME}-minutes.md").read_text()
+    check("the printed check --bump command for a dash-opening title runs, exits 0 and makes that item the "
+          "waiting item",
+          retry.returncode == 0 and "is now the waiting item, and item 4 of 9 comes right after it" in retry.stdout
+          and re.search(r"^## Item \d+ of \d+: --dry-run before the push$",
+                        (case.walk / f"{WALK_NAME}.md").read_text(), re.M) is not None
+          and [line for line in minutes.splitlines() if line.startswith("#next_to_present")][-1]
+          != "#next_to_present item 4 of 9",
+          f"exit {retry.returncode}, stdout {retry.stdout!r}, stderr {retry.stderr!r}, minutes {minutes!r}")
+
+
 OWN_WORDS_RULE_OPENING = "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
 APPROVED_SENTENCE = (
     "When the discussion of an item settles on any option but its recommendation, even its alternative, rewrite the "

@@ -500,7 +500,7 @@ BUMP = re.compile(r"^bump\s+(?P<title>\S.*?)\s*$", re.I | re.S)
 BUMP_LINES = (
     "[rule walk-me-through-user-bump-request-moves-named-approval-walk-item-to-next-shown] The user said bump: he wants the item titled \"{title}\" shown next, before {item} of approval-walk {walk}, "
     "which waits for his answer and is shown again after it.",
-    "Run `python3 {program} check --bump {quoted_title} --user-reply-as-typed {reply}` and do what it prints; "
+    "Run `python3 {program} check {bump_words} --user-reply-as-typed {reply}` and do what it prints; "
     "it numbers that item, moves it and writes the minutes' `#next_to_present` line, so write nothing in the "
     "minutes by hand.",
 )
@@ -1224,7 +1224,8 @@ def bump_output(payload, bump):
     if walk is None:
         return None
     context = "\n".join(line.format(title=bump["title"], item=walk.item, walk=walk.name, program=CHECK_PROGRAM,
-                                     quoted_title=shlex.quote(bump["title"]),
+                                     bump_words=shlex.join(load_check_program().flag_and_value_words(
+                                         "--bump", bump["title"])),
                                      reply=shlex.quote(" ".join(payload["prompt"].split())))
                          for line in BUMP_LINES)
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
@@ -1275,6 +1276,11 @@ def load_module_by_path(name, path):
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
+
+
+@functools.cache
+def load_check_program():
+    return load_module_by_path("walk_me_through_answer_added_texts_cold_read_fast_read_check_and_close", CHECK_PROGRAM)
 
 
 def agent_session_unattended():
