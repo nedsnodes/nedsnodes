@@ -93,19 +93,33 @@ MAXIMUM_RECORD_BYTES = 4 * 1024 * 1024
 MINIMUM_DIALOG_WORDS = 1000
 
 
-# Do not include <bash-input>: those commands are user-typed.
-# Typed slash commands with arguments must be recovered before checking these injected prefixes.
-INJECTED_TEXT_PREFIXES = (
-    "<task-notification>",
-    "<command-message>",
-    "<command-name>",
+# Openings of records Claude Code writes as context around a delivery rather than as one. Not <bash-input>, a
+# command the user typed, nor a slash command's or task notification's record, each of which delivers a queued text.
+CONTEXT_RECORD_TEXT_OPENINGS = (
+    "Base directory for this skill:",
+    "<local-command-caveat>",
     "<local-command-stdout>",
     "<local-command-stderr>",
     "<bash-stdout>",
     "<bash-stderr>",
     "<system-reminder>",
-    "[Request interrupted",
 )
+
+# Typed slash commands with arguments must be recovered before checking these injected prefixes.
+INJECTED_TEXT_PREFIXES = CONTEXT_RECORD_TEXT_OPENINGS + (
+    "<task-notification>",
+    "<command-message>",
+    "<command-name>",
+)
+
+# The two notices Claude Code writes when the user presses Escape. Only a message that is wholly one is a
+# notice: a prompt the user typed that opens with one, pasted, is his.
+INTERRUPT_NOTICE_PATTERN = re.compile(r"\[Request interrupted by user( for tool use)?\]")
+
+
+def text_is_whole_interrupt_notice(text):
+    """Whether the text, stripped, is exactly one of Claude Code's interrupt notices."""
+    return bool(INTERRUPT_NOTICE_PATTERN.fullmatch(text.strip()))
 
 # Short post-notification replies are acknowledgements; longer reactions may contain substantive analysis.
 MAXIMUM_ACKNOWLEDGEMENT_WORDS = 60
@@ -221,10 +235,11 @@ def read_dialog_turns(transcript_path: Path, drop_acknowledgements=True,
         elif turn["voice"] == "user":
             turn["timestamp"] = record.get("timestamp") or ""
             turn["line_index"] = index
-            if turn["text"].startswith(INJECTED_TEXT_PREFIXES):
+            interrupt_notice = text_is_whole_interrupt_notice(turn["text"])
+            if interrupt_notice or turn["text"].startswith(INJECTED_TEXT_PREFIXES):
                 skip_counts["injected"] += 1
                 following_injected_record = True
-                if turn["text"].startswith("[Request interrupted"):
+                if interrupt_notice:
                     interrupted_since_queued = True
             elif interrupted_since_queued and turn["text"] == carried_queued_text:
                 skip_counts["resent_after_interrupt"] += 1
@@ -469,6 +484,46 @@ def claim_delivery_record(events: list, operation_index: int, claimed: set, queu
     return None
 
 
+def queued_text_sender_kind(text: str) -> str:
+    """Return who sent a queued text, or the record delivering one: a peer, a background task, or the user."""
+    peer_first_line = f"{DELIVERED_PEER_MESSAGE_FIRST_LINE}\n"
+    if text.startswith(peer_first_line):
+        text = text[len(peer_first_line):]
+    if text.startswith(PEER_MESSAGE_TAG_OPENINGS):
+        return "peer"
+    if text.startswith(QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS):
+        return "task-notification"
+    return "user"
+
+
+def oldest_position_from_sender_of_first_delivery_record(events: list, operation_index: int, claimed: set, pending: list):
+    """For a dequeue whose delivery shows no queued text, claim the first unclaimed user record before the next agent record
+    that delivers a message, and return the oldest pending position from its sender; with no such record, the oldest position.
+
+    Claude Code delivers some messages in another form than it queued them, such as a peer message without its hop-chain
+    attribute or a slash command without arguments, but never from another sender, so a stale message from another sender
+    is not taken in their place. A record of context Claude Code adds, such as a skill's base directory, delivers nothing,
+    and a record showing a message enqueued after this dequeue delivers that later message, so neither is claimed.
+    """
+    enqueued_later = []
+    for index in range(operation_index + 1, len(events)):
+        event = events[index]
+        if event is None:
+            break
+        if isinstance(event, dict):
+            if event["operation"] == "enqueue" and isinstance(event["content"], str):
+                enqueued_later.append(event["content"].strip())
+            continue
+        if type(event) is not list or index in claimed:
+            continue
+        if event[0].startswith(CONTEXT_RECORD_TEXT_OPENINGS) or first_pending_position_shown(enqueued_later, event) is not None:
+            continue
+        claimed.add(index)
+        sender = queued_text_sender_kind(event[0])
+        return next((position for position, queued in enumerate(pending) if queued_text_sender_kind(queued) == sender), None)
+    return 0
+
+
 def claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path: Path) -> list:
     """Return, in the order typed, the text of each message unread_queued_user_messages_with_enqueue_lines returns."""
     return [message["text"] for message in unread_queued_user_messages_with_enqueue_lines(transcript_path)]
@@ -479,7 +534,8 @@ def unread_queued_user_messages_with_enqueue_lines(transcript_path: Path) -> lis
 
     A queue-operation "enqueue" adds a message; "remove" takes the first with its content away; "popAll"
     returns every message to the input box; "dequeue", which names no content, takes the message that a
-    user record before the next agent record shows, or else the oldest. A queued_command attachment delivers
+    user record before the next agent record shows, or else the oldest from that record's sender, or, when no
+    record follows before the next agent record, the oldest. A queued_command attachment delivers
     an absorbed remove. The record that delivers either removes no second copy; any other record showing a
     message removes one copy.
     Messages from another sender's known tag are left out. Each is a dict of its text and its enqueue's
@@ -511,8 +567,11 @@ def unread_queued_user_messages_with_enqueue_lines(transcript_path: Path) -> lis
         elif operation == "popAll":
             pending, enqueue_lines = [], []
         elif operation == "dequeue" and pending:
-            position = claim_delivery_record(events, index, claimed, pending) or 0
-            del pending[position], enqueue_lines[position]
+            position = claim_delivery_record(events, index, claimed, pending)
+            if position is None:
+                position = oldest_position_from_sender_of_first_delivery_record(events, index, claimed, pending)
+            if position is not None:
+                del pending[position], enqueue_lines[position]
     return [{"text": text, "enqueue_line": line} for text, line in zip(pending, enqueue_lines)
             if not text.startswith(QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS)]
 

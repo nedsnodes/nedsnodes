@@ -12,11 +12,11 @@ Run: python3 scripts/agent-reply-possibly-stale-system-status-claim-recheck-remi
 
 import json
 import os
+import resource
 import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 HOOK_NAME = "agent-reply-possibly-stale-system-status-claim-recheck-reminder-hook"
@@ -42,10 +42,17 @@ REMINDER_LINES = [
     "you checked it.",
 ]
 # The hook runs at every Stop, so it must not add a noticeable delay; a Python start-up takes about a tenth of this.
-MOST_SECONDS_A_STOP_MAY_TAKE = 1.0
+# Measured as the hook's CPU time, because wall-clock time on a loaded machine measures the machine, not the hook;
+# the hook reads one local transcript and waits on nothing, so its CPU time is nearly all of its delay.
+MOST_CPU_SECONDS_A_STOP_MAY_TAKE = 1.0
 
 failures = []
 SUITE_ROOT = Path(tempfile.mkdtemp(prefix="system-status-claim-recheck-reminder-test-"))
+
+
+def child_cpu_seconds():
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
 
 
 def check(case_name, condition, detail=""):
@@ -130,14 +137,14 @@ def fault_reported(result, fault_words):
 try:
     # A claim with no check in the turn: the reminder, which never blocks.
     case = Case().user("where are we?").tool_use("Read", {"file_path": "/x/handoff.md"}).assistant_text(CLAIM).write()
-    started = time.monotonic()
+    cpu_seconds_before = child_cpu_seconds()
     result = case.run()
-    elapsed = time.monotonic() - started
+    hook_cpu_seconds = child_cpu_seconds() - cpu_seconds_before
     text = reminder(result)
     check("an unchecked claim: a non-blocking reminder holding each line the agent acts on",
           text is not None and all(line in text for line in REMINDER_LINES), (result.stdout, result.stderr))
-    check(f"an unchecked claim: the hook ends within {MOST_SECONDS_A_STOP_MAY_TAKE} s",
-          elapsed < MOST_SECONDS_A_STOP_MAY_TAKE, elapsed)
+    check(f"an unchecked claim: the hook uses under {MOST_CPU_SECONDS_A_STOP_MAY_TAKE} s of CPU time",
+          hook_cpu_seconds < MOST_CPU_SECONDS_A_STOP_MAY_TAKE, f"{hook_cpu_seconds:.3f} CPU seconds")
 
     # A check ran in the same turn: silent, for each tool that can look at a status.
     for tool, tool_input in (("Bash", {"command": "tmux -L cold-read-research ls"}),
