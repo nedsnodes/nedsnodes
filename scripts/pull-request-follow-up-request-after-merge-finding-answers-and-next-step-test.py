@@ -1865,9 +1865,10 @@ def test_print_block_leaves_fix_in_maintenance_findings_to_the_maintenance_fix_a
               "An old finding."), out + err)
     code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED")], comments,
                                  subcommand=maintenance_block)
-    check(f"{maintenance_block} refuses when merge-lane-2 has no approving review, naming itself as the command to "
-          "run again",
-          code == 1 and out == "" and err.rstrip().endswith(f"python3 {program.PROGRAM} {NUMBER} {maintenance_block}"),
+    check(f"{maintenance_block} refuses when merge-lane-2 has no approving review, naming its own block and itself "
+          "as the command to run again",
+          code == 1 and out == "" and "No fix-in-maintenance findings block was printed." in err
+          and err.rstrip().endswith(f"python3 {program.PROGRAM} {NUMBER} {maintenance_block}"),
           err)
     code, out, err = print_block(reviews, [merge_lane_comment(10, 1, "Rename it.")], subcommand=maintenance_block)
     check(f"{maintenance_block} refuses an unmarked comment, saying how to write both blocks by hand",

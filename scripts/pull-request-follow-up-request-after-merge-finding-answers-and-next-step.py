@@ -1039,7 +1039,8 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number, for_maintena
         raise Refused(f"{account}, merge-lane-2's GitHub account, has no approving review of pull request {number}: "
                       f"merge-lane-2's review of pull request {number} is still running, or merge-lane-2 requested "
                       f"changes and has not yet approved the author's fixes. No "
-                      f"{FOLLOW_UP_REQUEST_LINE_START} block was printed.\n"
+                      + ("fix-in-maintenance findings block" if for_maintenance_fix_agent
+                         else f"{FOLLOW_UP_REQUEST_LINE_START} block") + " was printed.\n"
                       f"After {account} posts an approving review of pull request {number}, run: "
                       + command(number, PRINT_FIX_IN_MAINTENANCE_FINDINGS_BLOCK_SUBCOMMAND if for_maintenance_fix_agent
                                 else PRINT_FOLLOW_UP_REQUEST_BLOCK_SUBCOMMAND))
