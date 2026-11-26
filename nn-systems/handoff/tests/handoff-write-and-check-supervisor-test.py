@@ -1851,7 +1851,8 @@ def run_completed_task_prune_cases(workspace: Path):
     check("when the high-water mark cannot be written, nothing is removed and the line says why",
           fixture.present("9.json") and "high-water mark" in line and "removed nothing" in line, line)
     check("a high-water mark that could not be written leaves no partial file behind",
-          not (fixture.list_directory / ".highwatermark.partial").exists(), line)
+          not [path.name for path in fixture.list_directory.iterdir() if path.name.endswith(".partial")],
+          sorted(path.name for path in fixture.list_directory.iterdir()))
 
     fixture = PruneFixture(workspace, "read-only")
     (fixture.list_directory / ".highwatermark").write_text("30", encoding="utf-8")

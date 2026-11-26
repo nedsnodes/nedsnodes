@@ -120,20 +120,19 @@ worktree a still-running runner from a killed run of this program uses is
 removed under it, which can make that runner's suites fail.
 """
 
-import argparse
-import contextlib
-import datetime
 import fcntl
 import importlib.util
 import json
 import os
 import re
 import shutil
-import signal
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
+
+# merge-gate.sh runs this with --print-merge-gate-notice-of-last-failed-or-stopped-run on every
+# gate run, and its test suite runs the gate hundreds of times, so the modules only the other modes
+# need are imported in the functions that use them: argparse alone costs Python 3.14 about 30 ms
+# to set up, and subprocess and tempfile together about 15 ms.
 
 PROGRAM = "no-sandbox-test-suites-run-on-main-in-a-quiet-gap"
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -190,6 +189,8 @@ def runner_module():
 
 
 def utc_now():
+    import datetime
+
     return datetime.datetime.now(datetime.timezone.utc)
 
 
@@ -198,6 +199,8 @@ def stamp(moment):
 
 
 def parsed_stamp(text):
+    import datetime
+
     return datetime.datetime.strptime(text, TIME_FORMAT).replace(tzinfo=datetime.timezone.utc)
 
 
@@ -223,6 +226,8 @@ def read_state(state_file):
 
 
 def write_state(state_file, state):
+    import tempfile
+
     state_file = Path(state_file)
     state_file.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=state_file.parent, prefix=f".{state_file.name}.")
@@ -250,6 +255,8 @@ def take_lock_without_waiting(path):
 
 def git(clone, *arguments, time_limit=None):
     """git's completed process; a run past its time limit reads as exit 124 with the reason."""
+    import subprocess
+
     limit = GIT_READ_TIMEOUT_SECONDS if time_limit is None else time_limit
     environment = git_redirecting_environment.environment_without_git_redirecting_variables()
     try:
@@ -297,6 +304,10 @@ def remove_worktree(clone, worktree):
 
 def run_runner_with_time_limit(command, worktree):
     """(exit code or None when stopped at the time limit, stdout, stderr)."""
+    import contextlib
+    import signal
+    import subprocess
+
     process = subprocess.Popen(command, cwd=str(worktree),
                                stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -406,6 +417,8 @@ def run(arguments):
 
 
 def run_under_lock(arguments, state_file):
+    import tempfile
+
     started = utc_now()
     try:
         state = read_state(state_file)
@@ -439,7 +452,7 @@ def run_under_lock(arguments, state_file):
     quiet.close()
     print(f"{PROGRAM}: running, because {why_due}")
     passing = state.get("passing_commit")
-    base = Path(arguments.temporary_directory) / PROGRAM
+    base = Path(arguments.temporary_directory or tempfile.gettempdir()) / PROGRAM
     worktree, log_dir = base / "worktree-of-main", base / "logs"
     base.mkdir(parents=True, exist_ok=True)
     if worktree.exists():
@@ -641,11 +654,14 @@ def merge_gate_notice(state_file, clone):
 
 
 def parse_arguments(argv):
+    import argparse
+
     parser = argparse.ArgumentParser(prog=PROGRAM, description=__doc__.split("\n")[0])
     parser.add_argument("--clone", default=str(REPOSITORY_ROOT))
     parser.add_argument("--state-file", default=str(DEFAULT_STATE_FILE))
     parser.add_argument("--log-store-root", default=DEFAULT_LOG_STORE_ROOT)
-    parser.add_argument("--temporary-directory", default=tempfile.gettempdir())
+    # Read only when a run makes its worktree: gettempdir() raises when no temporary directory is writable.
+    parser.add_argument("--temporary-directory")
     parser.add_argument("--runner-lock-file",
                         default=str(Path.home() / ".claude" / ".run-all-test-suites.lock"))
     parser.add_argument("--test-suite-runner-program")
@@ -656,16 +672,24 @@ def parse_arguments(argv):
 
 
 def main(argv=None):
-    arguments = parse_arguments(argv)
-    # Absolute, so every message names the file wherever the reader's directory is.
-    arguments.state_file = Path(arguments.state_file).expanduser().absolute()
-    if arguments.record_follow_up_request_sent:
-        return record_follow_up_request_sent(arguments)
-    if arguments.print_merge_gate_notice_of_last_failed_or_stopped_run:
-        for line in merge_gate_notice(arguments.state_file, Path(arguments.clone)):
-            print(line)
-        return EXIT_DONE
-    return run(arguments)
+    argv = sys.argv[1:] if argv is None else list(argv)
+    # merge-gate.sh's own call, read without argparse; any other form goes to parse_arguments.
+    if (len(argv) == 3 and argv[:2] == ["--print-merge-gate-notice-of-last-failed-or-stopped-run",
+                                         "--clone"]
+            and not argv[2].startswith("-")):
+        state_file, clone = DEFAULT_STATE_FILE, argv[2]
+    else:
+        arguments = parse_arguments(argv)
+        # Absolute, so every message names the file wherever the reader's directory is.
+        arguments.state_file = Path(arguments.state_file).expanduser().absolute()
+        if arguments.record_follow_up_request_sent:
+            return record_follow_up_request_sent(arguments)
+        if not arguments.print_merge_gate_notice_of_last_failed_or_stopped_run:
+            return run(arguments)
+        state_file, clone = arguments.state_file, arguments.clone
+    for line in merge_gate_notice(Path(state_file).expanduser().absolute(), Path(clone)):
+        print(line)
+    return EXIT_DONE
 
 
 if __name__ == "__main__":

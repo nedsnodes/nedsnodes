@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -167,6 +168,7 @@ class BadInvocationArgumentParser(argparse.ArgumentParser):
 def build_argument_parser(
     description: str, model_help: str, tier_choices=tuple(TIER_CHOICES),
     cold_read_cell_launcher_own_command_line_options_adder=None,
+    tier_to_effort=None,
 ) -> argparse.ArgumentParser:
     parser = BadInvocationArgumentParser(
         description=description, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -204,9 +206,11 @@ def build_argument_parser(
              "with no fallback, the way --model is: a caller who names an "
              "effort is answering the question the tier map exists to answer, "
              "and quietly running the mapped level instead would defeat the "
-             "request. The fast tier's own launcher "
-             "(nn-systems/cold-read/cold-read-agy-cell.py) pins medium; on the Claude and "
-             "Codex launchers a low-effort run goes through this flag.",
+             "request."
+             + (" This launcher's tier mapping: "
+                + ", ".join(f"{tier} runs at {effort}"
+                            for tier, effort in tier_to_effort.items())
+                + "." if tier_to_effort else ""),
     )
     parser.add_argument(
         "--prompt-file", metavar="PATH",
@@ -1036,14 +1040,15 @@ def run_cell(
     cell_started_at = time.time()
     parser = build_argument_parser(
         description, model_help, tier_choices=tuple(tier_to_model_chain),
-        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder)
+        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
+        tier_to_effort=tier_to_effort)
     args = parser.parse_args()
 
     # Snapshot before execution so pre-existing edits are not reported as changes from this run.
     try:
         baseline = working_tree_state()
     except WriteDetectorUnavailable as error:
-        baseline = None
+        baseline = error
         print(f"{program}: could not snapshot the working tree ({error}); "
               "stray writes will not be checked for this run.", file=sys.stderr)
 
@@ -1127,25 +1132,90 @@ def move_staged_report(program: str, staged: pathlib.Path, report: pathlib.Path)
     return 0
 
 
+def splits_a_line(character: str) -> bool:
+    """A character str.splitlines splits a line at, such as a newline or U+2028."""
+    return len(f"a{character}a".splitlines()) > 1
+
+
+def breaks_a_line(character: str) -> bool:
+    """A control character, or a character str.splitlines splits a line at, such as U+2028."""
+    return ord(character) < 32 or ord(character) == 127 or splits_a_line(character)
+
+
+def holds_a_line_breaking_character(text: str) -> bool:
+    return any(breaks_a_line(character) for character in text)
+
+
+def shell_quoted_on_one_line(text: str) -> str:
+    """`text` as one shell argument on one line: git's `-z` output keeps a newline in a
+    path, and shlex.quote would carry it into the command, splitting the printed line."""
+    if not holds_a_line_breaking_character(text):
+        return shlex.quote(text)
+    escaped = "".join(
+        "\\\\" if character == "\\" else "\\'" if character == "'"
+        # \xHH bytes, not \u: bash 3.2 and bash under LC_ALL=C leave $'\u2028' unexpanded.
+        else "".join(f"\\x{byte:02x}" for byte in character.encode("utf-8"))
+        if breaks_a_line(character) else character for character in text)
+    return f"$'{escaped}'"
+
+
+def path_shown_on_one_line(path: str) -> str:
+    """`path` as written, or, when it holds a line-breaking character such as a newline,
+    its one-line shell-quoted form, so the line it is printed in stays one line."""
+    return shell_quoted_on_one_line(path) if holds_a_line_breaking_character(path) else path
+
+
+# When git's safe.directory remedy comes out wrong in a new way, fix it by building the remedy from the repository path, not by patching this copying again.
+def join_error_text_lines_with_one_space(text) -> str:
+    """`text`'s lines joined by one space, each line's own spaces kept: a path in a git
+    message may hold two spaces in a row. Only a newline or carriage return ends a line
+    here; any other character str.splitlines splits at, such as a U+2028 inside a path in
+    the message, is escaped, so the printed line stays one line for the grid, which reads
+    the cell log with str.splitlines. In a line that is a git command, such as git's
+    `git config --global --add safe.directory '<path>'` remedy, each argument holding such a
+    character becomes its `$'...'` form, so a copied command still names the same path;
+    elsewhere the character is written as `\\u2028`."""
+    lines = [line.strip() for line in re.split(r"\r\n|\r|\n", str(text)) if line.strip()]
+    return " ".join(map(git_command_requoted_on_one_line, lines))
+
+
+def escaped_where_it_splits_a_line(text: str) -> str:
+    return "".join(character.encode("unicode_escape").decode("ascii")
+                   if splits_a_line(character) else character for character in text)
+
+
+def git_command_requoted_on_one_line(line: str) -> str:
+    # Parsed one line at a time: git's prose prints a path's apostrophe bare, while its
+    # remedy command escapes it as '\'', so quotes paired across lines would mismatch.
+    if not line.startswith("git ") or not any(splits_a_line(character) for character in line):
+        return escaped_where_it_splits_a_line(line)
+    try:
+        arguments = shlex.split(line)
+    except ValueError:
+        return escaped_where_it_splits_a_line(line)
+    return " ".join(map(shell_quoted_on_one_line, arguments))
+
+
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:
     """Report changes outside the requested report without raising."""
     # Check every agent-binary and every exit path: a failed reviewer may still have edited the target.
-    if baseline is None:
+    if isinstance(baseline, WriteDetectorUnavailable):
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — no pre-run "
-              f"snapshot of the working tree was taken. This is "
+              f"snapshot of the working tree was taken (git status failed: "
+              f"{join_error_text_lines_with_one_space(baseline)}). This is "
               f"{COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.", file=sys.stderr)
         return
     try:
         stray = stray_writes_since(baseline, own_report_path)
     except WriteDetectorUnavailable as error:
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — git status "
-              f"failed ({error}). This is {COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
+              f"failed ({join_error_text_lines_with_one_space(error)}). This is {COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
               file=sys.stderr)
         return
     if stray:
         # Snapshots detect changed content, not authorship; another worker may have made the edit.
         print(
-            f"{program}: {STRAY_WRITE_PHRASE} — {', '.join(stray)}. This cell "
+            f"{program}: {STRAY_WRITE_PHRASE} — {', '.join(map(path_shown_on_one_line, stray))}. This cell "
             "cannot tell whether the reviewer wrote them or someone else working "
             "in the checkout did. Inspect before triage and revert only what is "
             "the reviewer's; any report still stands on its own.",

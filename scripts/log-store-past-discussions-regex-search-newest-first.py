@@ -280,10 +280,11 @@ def this_machine():
     return os.environ.get(THIS_MACHINE_OVERRIDE) or socket.gethostname().split(".")[0]
 
 
-def run_on_ned_box_over_ssh(arguments):
-    """Run ned-box's copy of this program with the same arguments; return its exit code."""
+def run_on_ned_box_over_ssh(arguments, program_path=NED_BOX_PROGRAM_PATH):
+    """Run ned-box's copy of the program at program_path, this one by default, with these arguments; return its
+    exit code."""
     ssh = os.environ.get(SSH_OVERRIDE) or "ssh"
-    remote = "python3 " + shlex.join([NED_BOX_PROGRAM_PATH] + arguments)
+    remote = "python3 " + shlex.join([program_path] + arguments)
     try:
         completed = subprocess.run([ssh, *SSH_OPTIONS, NED_BOX_SSH_TARGET, remote],
                                    stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
