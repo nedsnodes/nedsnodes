@@ -249,23 +249,24 @@ _WATCHER = (r"(?:bash[ \t]+|python3(?:[ \t]+-u)?[ \t]+)?(?:" + _WORD + r"/)?"
             + r"""(?:[ \t]*\|[ \t]*(?:grep[ \t]+-v[ \t]+(?:'[^']*'|"[^"`$\\]*")|tail[ \t]+-n?[ \t]*\d+))*""")
 _LOOP_CONDITION_CHECK = r"(?:![ \t]+)?(?:grep|pgrep|kill[ \t]+-0|test|\[|true|:)" + _ARGUMENTS + _REDIRECTIONS
 _DEADLINE = r"\$\(date[ \t]+\+%s\)"
-COLD_READ_GRID_PATH = Path(__file__).resolve().parents[1] / "nn-systems" / "cold-read" / "cold-read-grid.py"
+COLD_READ_GRID_PROGRAM_PATH = Path(__file__).resolve().parents[1] / "nn-systems" / "cold-read" / "cold-read-grid.py"
 
 
-def cold_read_grid_cell_attempt_time_limit_seconds() -> int:
-    """The grid's own per-attempt limit, read from its source: importing the grid loads its whole
+def cold_read_grid_py_cell_attempt_timeout_default_seconds_parse() -> int:
+    """The grid's default per-attempt limit, read from its source; the tests' override variable,
+    COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS, is not read. Importing the grid loads its whole
     toolchain, too slow for a hook that runs on every prompt."""
-    for node in ast.parse(COLD_READ_GRID_PATH.read_text(encoding="utf-8")).body:
+    for node in ast.parse(COLD_READ_GRID_PROGRAM_PATH.read_text(encoding="utf-8")).body:
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and getattr(node.targets[0], "id", None) == "CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS"):
-            return int(eval(compile(ast.Expression(node.value), str(COLD_READ_GRID_PATH), "eval"),
+            return int(eval(compile(ast.Expression(node.value), str(COLD_READ_GRID_PROGRAM_PATH), "eval"),
                             {"__builtins__": {}}))
-    raise RuntimeError(f"CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS is not assigned in {COLD_READ_GRID_PATH}")
+    raise RuntimeError(f"CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS is not assigned in {COLD_READ_GRID_PROGRAM_PATH}")
 
 
 # The grid retries a failed cell once, so a run can last two attempts; 15 minutes covers its
 # start, triage and shipping.
-COLD_READ_FULL_RUN_WAIT_LIMIT_MINUTES = 2 * cold_read_grid_cell_attempt_time_limit_seconds() / 60 + 15.0
+COLD_READ_FULL_RUN_WAIT_LIMIT_MINUTES = 2 * cold_read_grid_py_cell_attempt_timeout_default_seconds_parse() / 60 + 15.0
 WAIT_LIMIT_TABLE_WAITING_TASK_KIND_NAME = "waiting-task"
 BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND = (
     ("nn-mutation-testing", (r".*(?:mutation|mutmut|mutant).*",), 105.0),

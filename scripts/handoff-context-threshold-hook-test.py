@@ -944,25 +944,25 @@ with tempfile.TemporaryDirectory() as workspace:
     # The cold-read-full-run's wait-limit follows the grid's own per-attempt limit, read from its source.
     grid_stand_in = Path(workspace) / "cold-read-grid-stand-in.py"
     grid_stand_in.write_text("import os\nCELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS = 3 * 60 * 60\n", encoding="utf-8")
-    real_grid_path = hook.COLD_READ_GRID_PATH
-    hook.COLD_READ_GRID_PATH = grid_stand_in
+    real_grid_path = hook.COLD_READ_GRID_PROGRAM_PATH
+    hook.COLD_READ_GRID_PROGRAM_PATH = grid_stand_in
     try:
         check("the cold-read-full-run's wait-limit is read from the grid's CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS",
-              hook.cold_read_grid_cell_attempt_time_limit_seconds() == 3 * 60 * 60,
-              hook.cold_read_grid_cell_attempt_time_limit_seconds())
+              hook.cold_read_grid_py_cell_attempt_timeout_default_seconds_parse() == 3 * 60 * 60,
+              hook.cold_read_grid_py_cell_attempt_timeout_default_seconds_parse())
         grid_stand_in.write_text("CELL_ATTEMPT_TIMEOUT = 60\n", encoding="utf-8")
         try:
-            hook.cold_read_grid_cell_attempt_time_limit_seconds()
+            hook.cold_read_grid_py_cell_attempt_timeout_default_seconds_parse()
             raised = None
         except RuntimeError as error:
             raised = str(error)
         check("a grid that no longer assigns CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS is reported, not guessed",
               raised is not None and "CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS" in raised, raised)
     finally:
-        hook.COLD_READ_GRID_PATH = real_grid_path
+        hook.COLD_READ_GRID_PROGRAM_PATH = real_grid_path
     check("the cold-read-full-run's wait-limit is two of the real grid's attempts plus 15 minutes",
           hook.COLD_READ_FULL_RUN_WAIT_LIMIT_MINUTES
-          == 2 * hook.cold_read_grid_cell_attempt_time_limit_seconds() / 60 + 15,
+          == 2 * hook.cold_read_grid_py_cell_attempt_timeout_default_seconds_parse() / 60 + 15,
           hook.COLD_READ_FULL_RUN_WAIT_LIMIT_MINUTES)
 
     # Each waiting-task shape, as recorded background launches wrote it, gets 0 alone; with work
