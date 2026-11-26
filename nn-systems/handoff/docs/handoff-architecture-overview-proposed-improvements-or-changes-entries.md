@@ -1120,3 +1120,70 @@ The claim check's evidence:
 > - scripts/save-uncommitted-scratch-worktrees-before-reboot.py:40 `whose ~/.claude/handoffs/<seat>-supervisor-state.json is still on this`
 > - The reader list leaves out these three programs. The writer half ("written only by handoff-supervisor.py") is supported by handoff-supervisor.py:705-714. The list is incomplete, and no agent would open a wrong file on it.
 State: open
+
+## E96 — possible problem: an assertion of the overview is contradicted
+
+Claim: "Transcripts under `~/.claude/projects/`: written by Claude Code; read by the extractor, the threshold hook, the post-compaction hook, the writer script, the handoff-supervisor, `agent-seat-transcript-worth-resuming-common.py`, `recover-crashed-seats.py`, the restart program, the agent-crash-watcher and the Remote Control reconnect watcher."
+Found by: the overview claim check of 2026-11-24 against commit 1f42f397daf844a568843b2a79dbfbc9e22735dd; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/40b7e8debb1bd81ee40f7db58e6252af5fc4ab96-2026-11-24T10-55-19-144212Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The list leaves out nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py, which reads the agent-session's transcript for its title: :10-13 `The line names the new agent-session by this agent-session's current title, the customTitle of the last custom-title record in its transcript`.
+> - The agent-crash-watcher reads no transcript itself. It only builds the folder path (nn-systems/handoff/handoff-agent-crash-watcher.py:1195) and reads transcripts only through recovery's `assess_seat` (:1187).
+State: open
+
+## E97 — possible problem: an assertion of the overview is contradicted
+
+Claim: Stop-typing hook (line 37): "naming the new agent-session by the title the user gave the current agent-session in claude.ai, which the new one keeps, or else by the agent-seat's name"
+Found by: the overview claim check of 2026-11-25 against commit d284cb2683fa3800b4600bf974fa22a8ab7fe053; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/b164e854de15dc9f1b625ec979346500d49b13e6-2026-11-25T23-03-34-128213Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - When there is no title, the hook falls back to the agent-seat's stored Remote Control name, and only then to the agent-seat's name. nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:94-96 "# The handoff-supervisor launches the successor under the stored name ..." then `return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`
+> - The rest of the sentence is supported: UserPromptSubmit at .claude/settings.json:87-88; "once per marker file" at :17; "The message itself always goes through unchanged" at :8.
+State: open
+
+## E98 — possible problem: an assertion of the overview is contradicted
+
+Claim: Shared state `<seat>-remote-control-name` (line 91): "read through the same module by the handoff-supervisor at each launch and by the Remote Control reconnect watcher"
+Found by: the overview claim check of 2026-11-25 against commit d284cb2683fa3800b4600bf974fa22a8ab7fe053; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/b164e854de15dc9f1b625ec979346500d49b13e6-2026-11-25T23-03-34-128213Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The stop-typing hook also reads the file through that module: nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:96 `return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`
+> - The handoff-supervisor also reads it at the session-handoff, not only at launch: handoff-supervisor.py:2591. The list of readers is incomplete.
+State: open
+
+## E99 — possible problem: an assertion of the overview is contradicted
+
+Claim: Hooks inside the agent-session ask for the session-handoff, keep work-snapshots, tell the user to stop typing once a session-handoff is asked for, and store the title the user gives the agent-session in claude.ai, which Claude Code records in the transcript, and reach the handoff-supervisor only through files on the machine.
+Found by: the overview claim check of 2026-11-25 against commit d284cb2683fa3800b4600bf974fa22a8ab7fe053; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4f24f2854d9d2ae9f5c84459183522eab1b103ee-2026-11-25T23-15-13-997309Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The list of what the system's hooks do is incomplete. A MessageDisplay hook of this system shows the user the last lines of the conversation-tail above the successor's first message. Neither this sentence nor the rest of the overview names it, and Shared state leaves out the file it reads.
+> - `.claude/settings.json:38-43` `"MessageDisplay": [ ... nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py"`
+> - `nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py:2` `"""Show the user the end of the last session's dialog above a session-handoff successor's first message.`
+> - `nn-systems/handoff/handoff-supervisor.py:2932-2933` `conversation_tail_last_lines_display_file_write(settings.handoff_directory, session_id, conversation_tail_path_for_next_launch)`. This file is `<session id>-conversation-tail-last-lines-for-first-message-display.md` in `~/.claude/handoffs/` (hook docstring, line 7).
+> - The post-compaction hook, which the Components section does list, is also missing from this sentence.
+State: open
+
+## E100 — possible problem: an assertion of the overview is contradicted
+
+Claim: For agent-instructions-editor alone, they carry an overview refresh reminder for each system whose code has moved past the commit its nn-architecture-overview names, except one an open pull request changes.
+Found by: the overview claim check of 2026-11-26 against commit a657b0fb67c1d98c7b6bda494dfd5e2713b141b2; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/d8edd79c57e872b74173b911f371eeb28b01990c-2026-11-26T00-21-29-490925Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> "Whose code has moved" is wider than what the check counts. handoff-supervisor.py:1758 `pathspecs = [f"nn-systems/{system}/", f":(exclude)nn-systems/{system}/*.md"]` counts only commits under `nn-systems/<system>/`. A system's code outside that directory triggers no reminder, and most of this system's code is outside it: `scripts/recover-crashed-seats.py`, `scripts/handoff-extract-conversation.py`, `scripts/clean-worktrees.py`, the launchers. The agent-seat restriction and the pull-request exception are supported: :534 `AGENT_SEAT_GIVEN_OVERVIEW_REFRESH_LINES = "agent-instructions-editor"`, :1813-1819.
+State: open
+
+## E101 — possible problem: an assertion of the overview is contradicted
+
+Claim: `<seat>-dialog-NNNN.md` and `-complete.md` are written by the extractor and read by the successor, and by recovery when no transcript is worth resuming.
+Found by: the overview claim check of 2026-11-26 against commit a657b0fb67c1d98c7b6bda494dfd5e2713b141b2; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/d8edd79c57e872b74173b911f371eeb28b01990c-2026-11-26T00-21-29-490925Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> The handoff-supervisor also reads the conversation-tail: handoff-supervisor.py:1410-1411 `with conversation_tail_path.open(encoding="utf-8", newline="") as conversation_tail: text = conversation_tail.read()`. It writes its last lines to a display file in the handoff directory (:1405-1406) for the MessageDisplay hook (.claude/settings.json:43). That display file appears in no Shared state row.
+State: open
