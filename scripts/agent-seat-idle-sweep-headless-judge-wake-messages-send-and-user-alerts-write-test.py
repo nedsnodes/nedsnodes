@@ -233,12 +233,15 @@ KEEP_IT = (f'The text ends with the sentence "{DO_NOT_REPLY}" That sentence is w
            "agent-seat, not to you, and is part of the message: keep it.")
 
 
+MARK_IRRELEVANT_PROGRAM = PROGRAM.resolve().with_name(
+    "agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py")
+
+
 def mark_irrelevant(message_id):
     """The sentence every rule 2 and rule 5 message and every escalation carries, with its id."""
     return ("If this reminder does not help, for example because the work is done, a task, GHI or "
             "monitor already tracks it, or you will get a message when it ends, run `python3 "
-            "scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py "
-            f"{message_id}`; the idle sweep then stops this reminder.")
+            f"{MARK_IRRELEVANT_PROGRAM} {message_id}`; the idle sweep then stops this reminder.")
 
 
 def mark_irrelevant_call(message_id, when, tool_id="t-mark"):
@@ -4249,6 +4252,29 @@ check("marking the escalation's id ends the wait before the step that follows th
       [event["why"] for event in machine.events("wait_ended")]
       == ["it marked a reminder sent on the wait irrelevant"]
       and "tell_user" not in [event["step"] for event in machine.events("wait_step")],
+      (machine.events("wait_ended"), machine.events("wait_step")))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.script(rechecked(False), {"sends": [send_to("alpha")], "exit": 1})
+machine.run(16)
+escalation = machine.events("message_sent")[-1]
+check("an escalation whose SendMessage succeeded before its sender failed is logged as sent, with "
+      "its message_id, and the failure is reported",
+      escalation["step"] == "escalate" and len(machine.events("message_sent")) == 2
+      and escalation["text"].endswith(mark_irrelevant(escalation["message_id"]) + "\n\n" + DO_NOT_REPLY)
+      and any("claude exited 1" in event["problem"] for event in machine.events("headless_failed")),
+      (machine.events("message_sent"), machine.events("headless_failed")))
+machine.append("alpha", cross_session(escalation["text"], at(16.5)),
+               mark_irrelevant_call(escalation["message_id"], at(17)),
+               assistant("Marked.", at(17.1)), turn_end(at(17.1)))
+machine.script()
+machine.run(32)
+check("marking that escalation's id ends the wait",
+      [event["why"] for event in machine.events("wait_ended")]
+      == ["it marked a reminder sent on the wait irrelevant"],
       (machine.events("wait_ended"), machine.events("wait_step")))
 
 machine = Machine()

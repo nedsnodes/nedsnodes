@@ -251,11 +251,13 @@ ACCOUNT_NOTICE_TEXT = (
     "text](https://github.com/nedsnodes/nedsnodes/issues/2175) covers serving such pages from "
     "ned-box.")
 # Added, with the message's own id, to every rule 2 and rule 5 message and every escalation, before
-# DO_NOT_REPLY_SENTENCE.
+# DO_NOT_REPLY_SENTENCE. The program's absolute path, in the checkout the sweep runs from, so that
+# the line runs from any directory, including a checkout older than the program.
 MARK_IRRELEVANT_TEXT = (
     "If this reminder does not help, for example because the work is done, a task, GHI or monitor "
     "already tracks it, or you will get a message when it ends, run `python3 "
-    + verdicts_print.AGENT_SEAT_IDLE_SWEEP_RECEIVED_WAKE_MESSAGE_MARK_IRRELEVANT_PROGRAM_PATH
+    + str(_SCRIPTS / Path(
+        verdicts_print.AGENT_SEAT_IDLE_SWEEP_RECEIVED_WAKE_MESSAGE_MARK_IRRELEVANT_PROGRAM_PATH).name)
     + " {message_id}`; the idle sweep then stops this reminder.")
 # Added after a rule 5 message that names running work.
 RUNNING_WORK_TRACKED_AUTOMATICALLY_TEXT = (
@@ -1152,6 +1154,12 @@ class Sweep:
             text = f"{text}\n\n{MARK_IRRELEVANT_TEXT.format(message_id=message_id)}"
         text, outcome, started_at = self.send_wake_message(refs, text)
         if outcome.error:
+            # A sender can fail after its SendMessage reached the agent-seat, whose mark of this id
+            # must then find it on the wait.
+            if any(send["succeeded"] and entry_seat(send["to"], refs) == seat
+                   for send in outcome.sends):
+                self.message_sent(seat, verdict, text_sent_to(outcome, refs, seat, text), step,
+                                  started_at, message_id)
             self.headless_failed(seat, f"send its {step} message", outcome.error,
                                  outcome.error_kind, outcome)
             return False

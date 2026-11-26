@@ -72,10 +72,16 @@ code, out, err = run(home_with_log(), MESSAGE_ID)
 check("no log yet: exit 1, as for a log that holds no such message",
       code == 1 and "holds no message with the id" in err and not out, (code, out, err))
 
+code, out, err = run(home_with_log(['{"event": "message_se', SENT, OTHER]), MESSAGE_ID)
+check("a log with a line not UTF-8 JSON before its last, which stops the idle sweep: exit 2, the "
+      "reminder cannot be checked, naming the line",
+      code == 2 and "cannot be checked" in err and "line 1 is not UTF-8 JSON" in err
+      and "Nothing more is needed from you" in err and not out, (code, out, err))
+
 code, out, err = run(home_with_log(log_is_directory=True), MESSAGE_ID)
-check("a log that cannot be read: exit 1, the reminder cannot be checked, and nothing more is "
+check("a log that cannot be read: exit 2, the reminder cannot be checked, and nothing more is "
       "needed, since the idle sweep reports its own log",
-      code == 1 and "could not be read" in err and "cannot be checked" in err
+      code == 2 and "could not be read" in err and "cannot be checked" in err
       and "Nothing more is needed from you" in err, (code, out, err))
 
 if failures:

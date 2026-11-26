@@ -120,6 +120,8 @@ TASK_TOOL_SUCCESS_RESULT_PATTERN = re.compile(
 # irrelevant; the sweep's reminders name it, and this program reads its Bash calls.
 AGENT_SEAT_IDLE_SWEEP_RECEIVED_WAKE_MESSAGE_MARK_IRRELEVANT_PROGRAM_PATH = (
     "scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py")
+# Not handled: a call that only quotes the line, as printf or grep does, and an id followed by more
+# characters, such as "-extra", which the program refuses; each counts as a mark.
 MARK_IRRELEVANT_CALL_PATTERN = re.compile(
     re.escape(Path(AGENT_SEAT_IDLE_SWEEP_RECEIVED_WAKE_MESSAGE_MARK_IRRELEVANT_PROGRAM_PATH).name)
     + r"['\"]?\s+['\"]?(?P<message_id>[0-9a-f]{32})\b")
