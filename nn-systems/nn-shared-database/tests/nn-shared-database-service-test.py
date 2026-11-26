@@ -223,6 +223,8 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the event row holds the machine, operation, the event's own time and its body",
           row[:4] == (created["event_id"], "mac", "agent-seat-created", created["occurred_at"])
           and json.loads(row[4]) == created, row)
+    check("the event's body is stored as JSON with its keys sorted",
+          row[4] == json.dumps(created, sort_keys=True), row[4])
 
     status, answer = request("/events", event(
         "agent-seat-created", dict(SEAT_FIELDS, seat_directory="/elsewhere"),
