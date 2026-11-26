@@ -1056,11 +1056,13 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number, for_maintena
         f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}, then one line for each such finding, numbered "
         "from 1, such as: 1. fix-next: `<path>:<line>`: <the finding on one line>\n"
         "If they hold a fix-in-maintenance finding, a nit included, leave it out of that block, and send "
-        "maintenance-fix-agent with SendMessage the line "
-        f"\"{FIX_IN_MAINTENANCE_BLOCK_FIRST_LINE_FORMAT.format(number=number)}\", then one line for each such "
+        "maintenance-fix-agent, whose ListAgents name is pr-review-maintenance-findings-batch-fix-agent, a "
+        "SendMessage message of the line "
+        f"{FIX_IN_MAINTENANCE_BLOCK_FIRST_LINE_FORMAT.format(number=number)} then one line for each such "
         "finding, numbered from 1, such as: 1. Pull request <link>, review comment <link>, `<path>:<line>`: "
         "<the finding on one line>\n"
-        "If they hold no finding of either kind, write neither.")
+        "If they hold no fix-next or file-for-later finding, add no block to the message to the author; if they "
+        "hold no fix-in-maintenance finding, send maintenance-fix-agent nothing.")
     findings = []
     for review, review_comments in itertools.groupby(replaced_comments + comments,
                                                      key=lambda comment: (comment["pull_request"], comment["review"])):
