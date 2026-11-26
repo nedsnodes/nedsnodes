@@ -11,7 +11,7 @@ Usage, from the agent-session's checkout:
       [--obvious | --after-advisor | --disapproved | --deferred | --option N
        | --part-answer N=ANSWER ... | --moved-on-no-decision
        | --not-asked KIND|adds-nothing|none|weak-cost-only|weak-alters-earlier-approved-text-only
-       | --already-decided USER_RULING | --now-over-later-already-decided
+       | --already-decided USER_RULING [A|D] | --now-over-later-already-decided
        | --moved-on REASON]
       --user-reply-as-typed REPLY    (every answer but --not-asked, --already-decided,
                                       --now-over-later-already-decided and --moved-on)
@@ -33,10 +33,21 @@ in `--part-answer 1=A --part-answer 2=D`, gives that part its own answer, A, AO
 or D. Z is not taken for a part, and a part number given twice is refused,
 writing nothing. Three flags record an item the user does not answer, so that no
 agent writes a deciding line by hand: --already-decided for an item an earlier
-user-ruling decides as the item recommends, USER_RULING citing that ruling,
-which adds the `#new` texts as A does; --now-over-later-already-decided, the
+user-ruling decides, USER_RULING citing that ruling, followed by the answer the
+ruling gives: nothing or A when it decides the item as the item recommends,
+which adds the `#new` texts as A does; D when it decides the item against its
+recommendation, for its alternative, which adds the `#new_if_d` texts as D does
+and is recorded as disapproved; any other value after USER_RULING is refused,
+writing nothing, and so is --already-decided given twice; --now-over-later-already-decided, the
 same with the now-over-later ruling as its citation; and --moved-on for an item the walk
-leaves with no decision, REASON saying why, which changes nothing. When the
+leaves with no decision, REASON saying why, which changes nothing. While the
+walk-minutes' last answer, for any item and of any kind, has no close after it,
+as when the advisor objected to a settling and the item is shown after all,
+check refuses, writing nothing, every --not-asked, --already-decided and
+--now-over-later-already-decided, and the read step offers neither a no-answer
+row nor the now-over-later settling, since a settling then could record an item
+twice and reverse what that answer recorded; the user's own answer is still
+taken. When the
 walk-minutes hold an `#item_page` line for the item, a link or a failed
 publish, the user was shown it, so --moved-on writes its answer line opening
 `shown to the user,` in place of `settled without asking the user,`, and CLOSE
@@ -250,7 +261,8 @@ whose heading's point opens with "summary"; an item deferred a second time
 leaves the walk and stays open, and so does an item deferred for the first
 time when the next item the minutes do not record after it in the walk is the
 summary item and no unshown item is still to come; for --already-decided or --moved-on, that the
-walk does not come back to the item, with the ruling or the reason. For a
+walk does not come back to the item, with the ruling or the reason, an already-decided
+item recorded `<rejected>` when its ruling's answer is D. For a
 deferral it also puts `(deferred: moved to just before the summary item)` right
 after the running count of the item's walk-document heading, before it writes
 the minutes, so the heading says why the item comes late; in a walk with no
@@ -298,7 +310,7 @@ differ.
 The walk name is the walk-minutes' file name without `-minutes.md`; a
 review line matches only when, whitespace at its ends aside, it is that line
 exactly. The word is `approved` for an answer recorded `<accepted>`, an
-option, an already-decided item and an item settled without asking included;
+option, an item already decided as it recommends and an item settled without asking included;
 `disapproved` for one recorded `<rejected>`; `deferred` for a deferral, a
 second one included; `moved_on` for either move on; and `part_answers` for
 answers to parts. merge-lane-2's pull request intake reads the comment. Each gh
@@ -968,6 +980,12 @@ PART_ARGUMENT_PROBLEM = ("`{value}` is not a part's answer: give the part's numb
                          "`1=A`; a part takes no Z, so a deferral is given to the whole item with --deferred")
 PART_REPEATED = ("nothing written: --part-answer gives {parts} more than one answer.\n"
                  "Run check again giving each part's number once, with the letter the user gave that part.")
+ALREADY_DECIDED_WHOLE_ANSWERS = ("A", "D")
+ALREADY_DECIDED_ANSWERS_PROBLEM = (
+    "nothing written: --already-decided was given {answers} after USER_RULING, which is not an answer a ruling "
+    "gives: after USER_RULING it takes nothing or A, for a ruling that decides the item as it recommends, or D, "
+    "for one that decides it against its recommendation, for its alternative.\n"
+    "Run check again with the answer the ruling gives.")
 
 NO_PROPOSED_TEXT = "no proposed text marked"
 STATUS_ALREADY_DONE = "`{mark}` text {number}, \"{excerpt}\": fast read already done ({record})."
@@ -1116,6 +1134,11 @@ CLOSE_ALREADY_RECORDED = (
     "Run `{command}` first, with the flag for the user's answer as `--help` lists it, then close.\n"
     "If check failed, fix what it printed before running close.")
 CLOSE_HELD_MINUTES = "{item}: answer held: {new_item}, raised by a fast-read finding, waits for the user's answer. <open>"
+# Every line close writes to record an answer; only these mark the answer closed.
+CLOSE_RECORD_TEMPLATES = (CLOSE_TOOK_EFFECT_MINUTES, CLOSE_PARTS_TOOK_EFFECT_MINUTES, CLOSE_DEFERRED_MINUTES,
+                          CLOSE_ALREADY_DECIDED_MINUTES, CLOSE_MOVED_ON_MINUTES, CLOSE_MOVED_ON_NO_DECISION_MINUTES,
+                          CLOSE_DEFERRED_AGAIN_MINUTES, CLOSE_DEFERRED_JUST_BEFORE_SUMMARY_MINUTES,
+                          CLOSE_HELD_MINUTES)
 HELD_ANSWER_LINE = re.compile(r"^(items?\s[^:]*): answer held: (items?\s.+?), raised by a fast-read finding", re.I)
 CLOSE_TOOK_EFFECT_LINES = (
     "{item}'s answer is recorded in the minutes, and its change may now be made.",
@@ -1492,6 +1515,8 @@ CLOSE_NOT_SHOWN_LINES = (
     "{item} is recorded in the minutes as settled without being shown to the user.",
 )
 CLOSE_ALREADY_DECIDED_CHANGE = "Its change may now be made."
+CLOSE_ALREADY_DECIDED_AGAINST_CHANGE = ("It is recorded as disapproved: the change its alternative describes may now "
+                                        "be made, and the change its recommendation describes may not.")
 # Both line formats are agreed with merge-lane-2, whose hold command writes the first into its review and whose
 # pull request intake reads the second; change neither without changing those programs.
 HELD_ON_RULING_LINE = "#held_on_ruling {walk} item {number}"
@@ -1588,6 +1613,15 @@ NOW_OVER_LATER_REFUSED = (
     "always for building now when the agents recommend now over later, because that user-ruling settles only an "
     "item whose one choice is now or later, and {item} holds other choices:\n{problems}\n"
     "Present {item} to the user, then run check with the flag for his answer, as `--help` lists it.")
+ALREADY_DECIDED_REPEATED = ("--already-decided was given more than once; give it once, with the one ruling that "
+                            "decides the item and the answer that ruling gives")
+SETTLING_FLAGS = ("--not-asked", NOW_OVER_LATER_FLAG, "--already-decided")
+SECOND_SETTLING_REFUSED = (
+    "nothing written: {item} was not settled with `{flag}`, because the last answer in {minutes}, to {pending}, has "
+    "no close after it, so a settling now could record an item twice, and could reverse what that answer recorded.\n"
+    "If that answer settled {pending} without asking the user and {pending} was then shown to him, record his own "
+    "answer with one of these, as `--help` lists them:\n{commands}\n"
+    "Otherwise run `{close}` and do what it prints.")
 NOW_OVER_LATER_PARTS = "- a `Part N.` paragraph, each part answered on its own, on line {lines}"
 NOW_OVER_LATER_OPTIONS = "- a line opening `Option N`, another option he can pick, on line {lines}"
 NOW_OVER_LATER_NEW_IF_D = "- a `#new_if_d` text, what his disapproval would do instead, on line {lines}"
@@ -1602,9 +1636,9 @@ ITEM_READ_LINES = (
     "section says.",
     "If you change {item} after this, run `{command}` and do what it prints; it reads {item} again only when your "
     "changes touch a fact.",
-    "Then present {item}" + PRESENT_UNLESS_NOW_OVER_LATER_CLAUSE,
+    "Then present {item}{now_over_later_clause}",
 )
-ITEM_READ_NOT_RUN_NEXT = "Present {item}" + PRESENT_UNLESS_NOW_OVER_LATER_CLAUSE
+ITEM_READ_NOT_RUN_NEXT = "Present {item}{now_over_later_clause}"
 # The form scripts/agent-seat-due-task-raise-hook.py's parse_prerequisites reads.
 WAITING_ON_ITEM_PREREQUISITE_LINE = ("If a task waits on the user's decision on {item}, append this entry to the "
                                      "task's metadata.prerequisites list and give TaskUpdate the whole list, every "
@@ -2407,7 +2441,12 @@ def guarded_paths(top, paths):
 
 def answered_word(arguments, walk_finder):
     """The answer as the walk-minutes write it: approved, disapproved, approved option N, or each part's word,
-    as in `part 1 approved #approved_obvious, part 2 disapproved`."""
+    as in `part 1 approved #approved_obvious, part 2 disapproved`; for --already-decided, the answer its ruling gives
+    before the citation, as in `disapproved, already decided by ...`, an approval left out."""
+    if arguments.already_decided is not None:
+        ruled = ALREADY_DECIDED_PREFIX + walk_finder.text_wrapped_as_markdown_code_span(arguments.already_decided)
+        word = answered_word(argparse.Namespace(**dict(vars(arguments), already_decided=None)), walk_finder)
+        return ruled if word == APPROVED else f"{word}, {ruled}"
     if arguments.part_answer:
         return ", ".join(f"part {number} {PART_WORDS[letter]}" for number, letter in sorted(arguments.part_answer))
     if arguments.disapproved:
@@ -2420,8 +2459,6 @@ def answered_word(arguments, walk_finder):
         return f"{APPROVED} option {arguments.option}"
     if arguments.not_asked is not None:
         return f"not asked, {not_asked_label(arguments.not_asked)}"
-    if arguments.already_decided is not None:
-        return ALREADY_DECIDED_PREFIX + walk_finder.text_wrapped_as_markdown_code_span(arguments.already_decided)
     if arguments.moved_on is not None:
         return MOVED_ON_PREFIX + walk_finder.text_wrapped_as_markdown_code_span(arguments.moved_on)
     return APPROVED
@@ -2482,7 +2519,9 @@ def check_words(arguments):
         words.append("--obvious")
     if arguments.after_advisor:
         words.append("--after-advisor")
-    if arguments.disapproved:
+    # --already-decided carries its own D, which it set on these arguments.
+    ruled = arguments.already_decided is not None
+    if arguments.disapproved and not ruled:
         words.append("--disapproved")
     if arguments.deferred:
         words.append("--deferred")
@@ -2496,8 +2535,8 @@ def check_words(arguments):
         words += ["--not-asked", str(arguments.not_asked)]
     if arguments.now_over_later_already_decided:
         words.append(NOW_OVER_LATER_FLAG)
-    elif arguments.already_decided is not None:
-        words += ["--already-decided", arguments.already_decided]
+    elif ruled:
+        words += ["--already-decided", arguments.already_decided, *arguments.already_decided_answers]
     for number, letter in arguments.part_answer or []:
         words += ["--part-answer", f"{number}={letter}"]
     if (arguments.user_reply_as_typed or "").strip():
@@ -2680,6 +2719,15 @@ def now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
                       for problem, numbers in found.items() if numbers]
 
 
+def already_decided_answer_set(arguments):
+    """Set the answer --already-decided gives after USER_RULING on the arguments, D as --disapproved does; raise
+    Failure, writing nothing, for any other than nothing, A or D."""
+    answers = arguments.already_decided_answers
+    if len(answers) > 1 or any(answer.upper() not in ALREADY_DECIDED_WHOLE_ANSWERS for answer in answers):
+        raise Failure(ALREADY_DECIDED_ANSWERS_PROBLEM.format(answers=" ".join(f"`{answer}`" for answer in answers)))
+    arguments.disapproved = [answer.upper() for answer in answers] == ["D"]
+
+
 def refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(citation, item, walk_finder):
     """Raise Failure for an --already-decided citation that cites no place in a standing document and whose ruling
     is older than RULING_DAYS_APPLIED days, or has no date this function can read."""
@@ -2704,6 +2752,8 @@ def check(arguments):
         return bump(arguments)
     if arguments.now_over_later_already_decided:
         arguments.already_decided = NOW_OVER_LATER_USER_RULING_CITATION
+    if arguments.already_decided is not None:
+        already_decided_answer_set(arguments)
     part_numbers = [number for number, _ in arguments.part_answer or []]
     repeated = sorted({number for number in part_numbers if part_numbers.count(number) > 1})
     if repeated:
@@ -2729,6 +2779,12 @@ def check(arguments):
         raise Failure(NAVIGATION_WORD_REFUSED.format(words=words, item=item,
                                                      answered=answered_word(arguments, walk_finder),
                                                      command=moved_on_no_decision_command))
+    pending = unclosed_last_answer(walk_finder, minutes, parser) if not_shown_flag in SETTLING_FLAGS else None
+    if pending:
+        raise Failure(SECOND_SETTLING_REFUSED.format(item=item, flag=not_shown_flag, minutes=minutes,
+                                                     pending=pending["item"],
+                                                     close=step_command_with_cwd(top, "close"),
+                                                     commands=answer_check_commands(top)))
     if arguments.already_decided is not None and not arguments.now_over_later_already_decided:
         refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(arguments.already_decided, item,
                                                                                     walk_finder)
@@ -3040,13 +3096,14 @@ def waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, par
         for unit in walk_finder.item_unit_spans(text, parser) if set(unit[0]) & set(numbers)]
 
 
-def latest_read(reads, item):
-    """Return (key, outcome) of the latest read of the item that wrote its report, or None; a read ahead that no read
-    step has used is no item's read."""
+def latest_read(walk_finder, reads, numbers):
+    """Return (key, outcome) of the latest read of the item numbered numbers that wrote its report, or None; a read
+    ahead that no read step has used is no item's read. Matched by number, since a re-plan changes M in the label."""
     done = []
     for path in reads.glob("*-outcome.json") if reads.is_dir() else []:
         outcome = json.loads(path.read_text(encoding="utf-8"))
-        if outcome["item"] == item and outcome["status"] == READ_DONE and not outcome.get(NUMBER_PREDICTED):
+        if (walk_finder.parse_items(outcome["item"])[0] == numbers and outcome["status"] == READ_DONE
+                and not outcome.get(NUMBER_PREDICTED)):
             done.append((outcome["finished"], path.name[:-len("-outcome.json")], outcome))
     return max(done)[1:] if done else None
 
@@ -3537,15 +3594,12 @@ def rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, t
     if TOUCHES in evidence(lines) and not_asked_problems(NOT_ASKED_RATED_NONE, NOT_ASKED_RATED_NONE, lines, marks,
                                                          top, named):
         return None
-    return None if settling_left_unclosed(walk_finder, minutes, parser, named) else document
+    return None if unclosed_last_answer(walk_finder, minutes, parser) else document
 
 
-def settling_left_unclosed(walk_finder, minutes, parser, named):
-    """True when the walk-minutes' last answer settles the named item without asking the user and no close follows
-    it, as when the advisor objected: the item is then shown, and rerunning the settling would record it twice."""
-    match = unclosed_last_answer(walk_finder, minutes, parser)
-    settled = {f"not asked, {not_asked_label(kind)}" for kind in NOT_ASKED_KINDS + NOT_ASKED_NO_KIND_VALUES}
-    return bool(match and match["item"].lower() == named.lower() and match["answered"] in settled)
+def answer_is_already_decided(answered):
+    """True when the walk-minutes answer was recorded by --already-decided, whatever answer its ruling gives."""
+    return answered.startswith((ALREADY_DECIDED_PREFIX, f"{DISAPPROVED}, {ALREADY_DECIDED_PREFIX}"))
 
 
 NO_ANSWER_ROWS_HEADING = ("Rows of the no-answer table {item} could settle by; if a row's meaning fits {item}, do "
@@ -3562,7 +3616,7 @@ NO_ANSWER_ROW_NOT_CHECKED = ("- {label}: its evidence could not be checked, so i
 
 def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numbers, total, parser, named, item):
     """The no-answer table's rows the waiting item could settle by, as the docstring's read-step paragraph says."""
-    if numbers[1:] or settling_left_unclosed(walk_finder, minutes, parser, named):
+    if numbers[1:] or unclosed_last_answer(walk_finder, minutes, parser):
         return []
     document, lines, marks, _, _ = item_lines(walk_finder, minutes, value, numbers, total, parser)
     ratings = [CASE_AGAINST_RATING.match(match[1]) for match in map(CASE_AGAINST_LINE.match, lines) if match]
@@ -3604,14 +3658,32 @@ def no_answer_table_row_text_or_none_from_evidence_check_problems(case, problems
     return None
 
 
-def unclosed_last_answer(walk_finder, minutes, parser):
-    """Return the ANSWER_LINE match of the walk-minutes' last answer line when no close line follows it, else None."""
+def close_record_line(item, line):
+    """Whether line is one close writes to record item's answer, read from close's own templates: an agent's note
+    that only opens with item's label, as in `item 25 of 39: the user's words, not an answer yet`, is not one."""
+    return any(re.fullmatch(re.sub(r"\\\{[a-z_]+\\\}", ".*?",
+                                   re.escape(template.rstrip()).replace(re.escape("{item}"), re.escape(item))),
+                            line.rstrip())
+               for template in CLOSE_RECORD_TEMPLATES)
+
+
+def last_answer_line(walk_finder, minutes, parser):
+    """Return (match, the lines after it, closed) for the walk-minutes' last answer line, or None when there is none.
+    closed holds when a line close writes for that answer's label follows it."""
     lines = walk_finder.prose_lines(minutes.read_text(encoding="utf-8"), parser)
     for index in range(len(lines) - 1, -1, -1):
         match = ANSWER_LINE.match(lines[index])
         if match:
-            return None if any(line.startswith(match["item"] + ": ") for line in lines[index + 1:]) else match
+            after = lines[index + 1:]
+            return match, after, any(close_record_line(match["item"], line) for line in after)
     return None
+
+
+def unclosed_last_answer(walk_finder, minutes, parser):
+    """Return the ANSWER_LINE match of the walk-minutes' last answer line when no close line follows it, else None:
+    while it returns one, nothing may settle any item."""
+    found = last_answer_line(walk_finder, minutes, parser)
+    return found[0] if found and not found[2] else None
 
 
 def item_read_findings_without_outcomes_lines(item, report, outcome_file, fast_read_program, command,
@@ -3922,6 +3994,9 @@ def waiting_item_read(arguments, sub_step_of=None):
                                     read_command=command_reading_again)
                         for line in [*RATED_NONE_NOT_SHOWN_LINES, *no_answer_rows]))
         return 0
+    now_over_later_clause = ("." if unclosed_last_answer(walk_finder, minutes, parser)
+                             else PRESENT_UNLESS_NOW_OVER_LATER_CLAUSE.format(
+                                 now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG)))
     key = text_key(text)
     while read_outcome(reads, key) is None and worker_alive(reads, key):
         time.sleep(READ_POLL_SECONDS)
@@ -3935,7 +4010,8 @@ def waiting_item_read(arguments, sub_step_of=None):
         if ahead:
             why = (ITEM_READ_RUN_AHEAD_FAILED.format(line=outcome["failed"]) if outcome
                    else ITEM_READ_RUN_AHEAD_ENDED.format(log=reads / f"{key}.log"))
-        latest = latest_read(reads, item) if arguments.after_fixes_reread_only_when_facts_change else None
+        latest = (latest_read(walk_finder, reads, numbers) if arguments.after_fixes_reread_only_when_facts_change
+                  else None)
         if latest is not None:
             last_text = (reads / f"{latest[0]}.md").read_text(encoding="utf-8").rstrip("\n")
             facts = approval_walk_item_before_and_after_fixes_compare_for_changed_fact_words_needing_another_cold_read_fast_read(last_text, text, top)
@@ -3946,7 +4022,7 @@ def waiting_item_read(arguments, sub_step_of=None):
                     item, latest[1]["report"], reads / f"{latest[0]}-outcome.json", arguments.fast_read_program,
                     command, command_reading_again)
                 rest = no_answer_rows + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
-                    item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
+                    item=item, now_over_later_clause=now_over_later_clause)]
                     + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))
                 lines_printed_with_title_search_saved_after(
                     ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"]), past_words, rest)
@@ -3973,7 +4049,7 @@ def waiting_item_read(arguments, sub_step_of=None):
                                                          command_reading_again)
     rest = (no_answer_rows
             + [line.format(item=item, document=document, command=command,
-                           now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
+                           now_over_later_clause=now_over_later_clause)
                for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
             + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser)))
     lines_printed_with_title_search_saved_after(
@@ -3991,21 +4067,20 @@ def items_shown_to_user(walk_finder, minutes, numbers, parser):
 def last_answer(walk_finder, minutes, parser, top):
     """Return (item, answered, status lines, how the line opens after the item, as in `shown to the user,`) of the
     walk-minutes' last answer line, or raise Failure when there is none or a close already recorded it."""
-    lines = walk_finder.prose_lines(minutes.read_text(encoding="utf-8"), parser)
-    for index in range(len(lines) - 1, -1, -1):
-        match = ANSWER_LINE.match(lines[index])
-        if match:
-            statuses = []
-            for line in lines[index + 1:]:
-                if not line.startswith(STATUS_LINE_PREFIX):
-                    break
-                statuses.append(line[len(STATUS_LINE_PREFIX):])
-            # Every line close writes for an answer opens with its item; without this, a close after a
-            # check that failed reads the earlier, already closed answer as one held for a new item.
-            if any(line.startswith(match["item"] + ": ") for line in lines[index + 1:]):
-                raise Failure(CLOSE_ALREADY_RECORDED.format(minutes=minutes, item=match["item"],
-                                                            command=check_command_with_cwd(top)))
-            return match["item"], match["answered"], statuses, match["settled"]
+    found = last_answer_line(walk_finder, minutes, parser)
+    if found:
+        match, after, closed = found
+        # Without this, a close after a check that failed reads the earlier, already closed answer as one held for
+        # a new item.
+        if closed:
+            raise Failure(CLOSE_ALREADY_RECORDED.format(minutes=minutes, item=match["item"],
+                                                        command=check_command_with_cwd(top)))
+        statuses = []
+        for line in after:
+            if not line.startswith(STATUS_LINE_PREFIX):
+                break
+            statuses.append(line[len(STATUS_LINE_PREFIX):])
+        return match["item"], match["answered"], statuses, match["settled"]
     raise Failure(f"{minutes} has no line recording the user's answer; run "
                   f"`{check_command_with_cwd(top)}` first, with the flag for the user's answer as "
                   f"`--help` lists it.")
@@ -4821,11 +4896,14 @@ def close(arguments):
         output = [line.format(item=item) for line in (CLOSE_MOVED_ON_SHOWN_LINES
                                                       if settled == CHECK_MOVED_ON_SHOWN_PREFIX
                                                       else CLOSE_NOT_SHOWN_LINES)]
-    elif answered.startswith(ALREADY_DECIDED_PREFIX):
-        held_outcome = OUTCOMES[APPROVED]
-        recorded = CLOSE_ALREADY_DECIDED_MINUTES.format(item=item, ruling=answered[len(ALREADY_DECIDED_PREFIX):],
-                                                      outcome=held_outcome)
-        output = ([line.format(item=item) for line in CLOSE_NOT_SHOWN_LINES] + [CLOSE_ALREADY_DECIDED_CHANGE]
+    elif answer_is_already_decided(answered):
+        # The ruling comes last and may hold any words, so the answer is read only from before it.
+        ruled_answer, _, ruling = answered.partition(ALREADY_DECIDED_PREFIX)
+        against = ruled_answer.startswith(DISAPPROVED)
+        held_outcome = OUTCOMES[DISAPPROVED if against else APPROVED]
+        recorded = CLOSE_ALREADY_DECIDED_MINUTES.format(item=item, ruling=ruling, outcome=held_outcome)
+        change = CLOSE_ALREADY_DECIDED_AGAINST_CHANGE if against else CLOSE_ALREADY_DECIDED_CHANGE
+        output = ([line.format(item=item) for line in CLOSE_NOT_SHOWN_LINES] + [change]
                   + list(CLOSE_TOOK_EFFECT_NEXT))
     else:
         parts = PART_IN_ANSWER.findall(answered)
@@ -4922,11 +5000,12 @@ def main(argv=None):
                              "summary item; records no decision")
     answer.add_argument("--option", type=int, choices=OPTION_NUMBERS,
                         help="check: the answer was O2 or O3, approving the item's \"Option N\" paragraph")
-    answer.add_argument("--already-decided", metavar="USER_RULING",
-                        help="check: not shown, since an earlier user-ruling decides the item as it recommends; "
-                             "USER_RULING cites it; refused when it cites no line or section of a standing document, such "
-                             "as a GHI-MD, and its earliest YYYY-MM-DD date is missing or more than 90 days before "
-                             "today")
+    answer.add_argument("--already-decided", nargs="+", action="append", metavar=("USER_RULING", "ANSWER"),
+                        help="check: not shown, since an earlier user-ruling decides the item; USER_RULING cites "
+                             "it, and ANSWER is the answer the ruling gives: none or A as the item recommends, or D "
+                             "against its recommendation, for its alternative; refused when USER_RULING cites no "
+                             "line or section of a standing document, such as a GHI-MD, and its earliest YYYY-MM-DD "
+                             "date is missing or more than 90 days before today")
     answer.add_argument(NOW_OVER_LATER_FLAG, action="store_true",
                         help="check: not shown, since its only choice is whether to build something now or later "
                              "and it recommends now; records it as already decided by the user's answer to item 42 "
@@ -4974,6 +5053,9 @@ def main(argv=None):
     parser.add_argument("--gh-program", default=GH_PROGRAM, help=argparse.SUPPRESS)
     parser.add_argument("--gh-timeout", type=float, default=GH_TIMEOUT_SECONDS, help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
+    if len(arguments.already_decided or []) > 1:
+        parser.error(ALREADY_DECIDED_REPEATED)
+    arguments.already_decided, *arguments.already_decided_answers = (arguments.already_decided or [[None]])[0]
     copy_problem = None if arguments.step == READ_AHEAD_WORKER_STEP else walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
     try:
         exit_code = {"check": check, "close": close, WAITING_ITEM_READ_STEP: waiting_item_read,
