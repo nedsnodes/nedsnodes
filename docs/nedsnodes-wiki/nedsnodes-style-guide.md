@@ -1,6 +1,6 @@
 # Style guide
 
-This page lists words to avoid in this project and what to write instead. Most of the words below each name several different things here, so a reader cannot tell which one the writer meant; "land" has a project word that replaces it; the pronouns leave a reader who lacks the writer's context guessing what each stands for. A listed word stays when it is used in its ordinary English meaning, sits inside code or a quotation, or is talked about rather than used. Write a word you talk about in backquotes, as the table's first column does.
+This page lists words to avoid in this project and what to write instead, and its last section, "How to lay out text", says how to lay out files and messages to other agents. Most of the words below each name several different things here, so a reader cannot tell which one the writer meant; "land" has a project word that replaces it; the pronouns leave a reader who lacks the writer's context guessing what each stands for. A listed word stays when it is used in its ordinary English meaning, sits inside code or a quotation, or is talked about rather than used. Write a word you talk about in backquotes, as the table's first column does.
 
 `scripts/style-guide-word-checker-hack.py` reads the table below. After an agent's Edit or Write of a markdown file, `scripts/style-guide-word-checker-markdown-edit-hook-hack.py` reports each listed word in the text just written, and the writer decides whether each hit needs changing. Changing a row changes what the hook reports. A form is also reported with a capital first letter, such as "Seat" at the start of a sentence; besides the forms in the third column, the checker skips code, link targets, paths and text in double quotes.
 
@@ -46,3 +46,17 @@ This page lists words to avoid in this project and what to write instead. Most o
 | `or` | `or` | | "one or the other" or "one or both", wherever a reader could take "or" either way | messages to other agents, messages to the user |
 
 "Applies to" names where the word is avoided: files, messages to other agents, and messages to the user. The pronoun rows and the `or` row apply to messages only; no program checks them.
+
+## How to lay out text
+
+These rules apply to files and messages to other agents.
+
+- Write steps done in order as numbered steps, in the order they are done.
+- Write branches, conditions, counters and limits as pseudocode, and write "one or the other" or "one or both" wherever a reader could take "or" either way, as the page's `or` row already says.
+- Keep one subject in one place, and give each paragraph one subject.
+- State a rule together with its exceptions.
+- Say each rule once.
+- Show hierarchy with Markdown headings and nested lists.
+- Put several cases with the same kinds of facts in a table.
+- Use plain words where they explain more clearly, keeping the glossary's terms.
+- When you change a text, rewrite the passage around your change so it still reads as one whole, rather than adding a sentence to it.
