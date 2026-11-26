@@ -1120,3 +1120,23 @@ The claim check's evidence:
 > - scripts/save-uncommitted-scratch-worktrees-before-reboot.py:40 `whose ~/.claude/handoffs/<seat>-supervisor-state.json is still on this`
 > - The reader list leaves out these three programs. The writer half ("written only by handoff-supervisor.py") is supported by handoff-supervisor.py:705-714. The list is incomplete, and no agent would open a wrong file on it.
 State: open
+
+## E96 — possible problem: an assertion of the overview is contradicted
+
+Claim: The stop-typing hook names the new agent-session by the title the user gave the current agent-session in claude.ai, "or else by the agent-seat's name".
+Found by: the overview claim check of 2026-11-26 against commit e671774eb45981133392e9f92d2f6cb01df0fd2e; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/86988df973796cc9aa269d22fea67f3a2c568efb-2026-11-26T05-05-45-417838Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:96 `return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`. With no title in the transcript, the hook uses the stored Remote Control name and falls back to the agent-seat's name only when none is stored. The rest is supported: :114 `marker = threshold.handoff_asked_marker_path(session_id)`, :121 once per marker file, :127 `print(json.dumps({"systemMessage": notice}...`.
+State: open
+
+## E97 — possible problem: an assertion of the overview is contradicted
+
+Claim: `<seat>-remote-control-name` is written by the rename hook and the supervisor through the common module, replaced whole; "read through the same module by the handoff-supervisor at each launch and by the Remote Control reconnect watcher".
+Found by: the overview claim check of 2026-11-26 against commit e671774eb45981133392e9f92d2f6cb01df0fd2e; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/86988df973796cc9aa269d22fea67f3a2c568efb-2026-11-26T05-05-45-417838Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:96 `return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`. The stop-typing hook reads this file too and is left off the list of readers. The writers and the whole-file replace are supported (common module :123-125 `os.replace(temporary_path, path)`).
+State: open
