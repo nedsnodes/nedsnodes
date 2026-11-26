@@ -543,6 +543,9 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           and "`git pull --rebase origin a-pushed-topic-branch`" in warning
           and "This branch is pushed, so its review may be running" not in warning
           and "\n" not in warning, warning)
+    repeated = run_hook(hook_payload(pushed_checkout, edited_on_main))
+    check("behind its remote: the same warning is not given twice, because the advice "
+          "reports no git failure", silent(repeated), repr(repeated.stdout))
     commit_file(pushed_checkout, "scripts/local-work.py", "local\n", "new work made here")
     warning = agent_text(run_hook(hook_payload(pushed_checkout, edited_on_main)))
     check("diverged from its remote: told not to push, how to see both sides, and what "
@@ -829,6 +832,10 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     shared_lines = [f"line {number}\n" for number in range(1, 11)]
     commit_file(detached_origin, "lib/shared.py", "".join(shared_lines), "shared file")
     commit_file(detached_origin, "lib/gone.py", "main will delete this\n", "a file main deletes")
+    commit_file(detached_origin, "lib/bystander.py", "a file of its own, unlike any other here\n",
+                "a file main moves in the commit that deletes gone.py")
+    commit_file(detached_origin, "lib/later-bystander.py", "another file of its own\n",
+                "a file, sorting after gone.py, that main moves in the same commit")
     latin1_lines = [f"ligne {number} \xe9t\xe9\n".encode("latin-1") for number in range(1, 11)]
     (detached_origin / "lib" / "latin1.txt").write_bytes(b"".join(latin1_lines))
     git(["add", "lib/latin1.txt"], detached_origin)
@@ -850,8 +857,12 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     (detached_origin / "lib" / "latin1.txt").write_bytes(b"".join(latin1_on_main))
     git(["add", "lib/latin1.txt"], detached_origin)
     git(["commit", "-q", "-m", "main rewrites line 2 of the file that is not UTF-8"], detached_origin)
+    # The deleting commit also moves two other files, one sorting before gone.py and one
+    # after, so none of its renames is gone.py's.
     git(["rm", "-q", "lib/gone.py"], detached_origin)
-    git(["commit", "-q", "-m", "main deletes gone.py"], detached_origin)
+    git(["mv", "lib/bystander.py", "lib/bystander-moved.py"], detached_origin)
+    git(["mv", "lib/later-bystander.py", "lib/later-bystander-moved.py"], detached_origin)
+    git(["commit", "-q", "-m", "main deletes gone.py and moves two other files"], detached_origin)
     git(["mv", "lib/moved.py", "lib/renamed.py"], detached_origin)
     git(["commit", "-q", "-m", "main moves moved.py"], detached_origin)
     # Moved, then rewritten: the merge-base-to-main diff no longer pairs the two
