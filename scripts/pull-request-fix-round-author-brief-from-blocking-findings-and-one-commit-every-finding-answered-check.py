@@ -174,9 +174,9 @@ _git_output_spec = importlib.util.spec_from_file_location(
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 _frozen_heads_record_spec = importlib.util.spec_from_file_location(
-    "pull_request_fix_round_frozen_heads_record_in_topic_worktree_git_directory_common",
+    "pr_fix_round_briefed_frozen_heads_record_write_and_read_in_topic_worktree_own_git_directory_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "pull-request-fix-round-frozen-heads-record-in-topic-worktree-git-directory-common.py")
+    / "pr-fix-round-briefed-frozen-heads-record-write-and-read-in-topic-worktree-own-git-directory-common.py")
 frozen_heads_record = importlib.util.module_from_spec(_frozen_heads_record_spec)
 _frozen_heads_record_spec.loader.exec_module(frozen_heads_record)
 _ready_command_spec = importlib.util.spec_from_file_location(

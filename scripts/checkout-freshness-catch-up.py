@@ -169,9 +169,9 @@ branch_lock = importlib.util.module_from_spec(_branch_lock_spec)
 _branch_lock_spec.loader.exec_module(branch_lock)
 
 _frozen_heads_record_spec = importlib.util.spec_from_file_location(
-    "pull_request_fix_round_frozen_heads_record_in_topic_worktree_git_directory_common",
+    "pr_fix_round_briefed_frozen_heads_record_write_and_read_in_topic_worktree_own_git_directory_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "pull-request-fix-round-frozen-heads-record-in-topic-worktree-git-directory-common.py")
+    / "pr-fix-round-briefed-frozen-heads-record-write-and-read-in-topic-worktree-own-git-directory-common.py")
 frozen_heads_record = importlib.util.module_from_spec(_frozen_heads_record_spec)
 _frozen_heads_record_spec.loader.exec_module(frozen_heads_record)
 
@@ -1276,7 +1276,7 @@ def merges_from_main(checkout: Path):
     git_directory = run_git_or_raise(["rev-parse", "--absolute-git-dir"], checkout, timeout=15).stdout.strip()
     # A fix-round's clean merge of origin/main into its frozen-head is allowed, and the fix-round check confirms
     # it; the fix-round brief records the frozen-head in this checkout's git directory.
-    fix_round_frozen_heads = frozen_heads_record.pull_request_fix_round_frozen_heads_recorded(Path(git_directory))
+    fix_round_frozen_heads = frozen_heads_record.pull_request_fix_round_frozen_head_record_read_all(Path(git_directory))
     flagged = []
     for sha in merges.stdout.split():
         second = run_git_or_raise(["rev-parse", "--verify", "--quiet", f"{sha}^2"], checkout,

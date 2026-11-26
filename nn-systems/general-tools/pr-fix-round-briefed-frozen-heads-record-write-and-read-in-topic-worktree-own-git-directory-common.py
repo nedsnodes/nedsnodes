@@ -14,25 +14,25 @@ removed. It holds one frozen-head SHA per line.
 Load it by path, under the snake_case form of its file name:
 
     spec = importlib.util.spec_from_file_location(
-        "pull_request_fix_round_frozen_heads_record_in_topic_worktree_git_directory_common", <path>)
+        "pr_fix_round_briefed_frozen_heads_record_write_and_read_in_topic_worktree_own_git_directory_common", <path>)
 """
 
 from pathlib import Path
 
-PULL_REQUEST_FIX_ROUND_FROZEN_HEADS_RECORD_FILE_NAME = "pull-request-fix-round-frozen-heads-record.txt"
+PR_FIX_ROUND_BRIEFED_FROZEN_HEADS_RECORD_FILE_NAME = "pull-request-fix-round-frozen-heads-record.txt"
 
 
 def pull_request_fix_round_frozen_head_record_add(worktree_git_directory: Path, frozen_head: str) -> None:
-    path = Path(worktree_git_directory) / PULL_REQUEST_FIX_ROUND_FROZEN_HEADS_RECORD_FILE_NAME
-    if frozen_head in pull_request_fix_round_frozen_heads_recorded(worktree_git_directory):
+    path = Path(worktree_git_directory) / PR_FIX_ROUND_BRIEFED_FROZEN_HEADS_RECORD_FILE_NAME
+    if frozen_head in pull_request_fix_round_frozen_head_record_read_all(worktree_git_directory):
         return
     with path.open("a", encoding="utf-8") as record:
         record.write(frozen_head + "\n")
 
 
-def pull_request_fix_round_frozen_heads_recorded(worktree_git_directory: Path) -> set:
+def pull_request_fix_round_frozen_head_record_read_all(worktree_git_directory: Path) -> set:
     """The full SHAs recorded; an empty set when the worktree has no record."""
-    path = Path(worktree_git_directory) / PULL_REQUEST_FIX_ROUND_FROZEN_HEADS_RECORD_FILE_NAME
+    path = Path(worktree_git_directory) / PR_FIX_ROUND_BRIEFED_FROZEN_HEADS_RECORD_FILE_NAME
     try:
         return {line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()}
     except FileNotFoundError:

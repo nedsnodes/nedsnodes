@@ -401,7 +401,7 @@ def brief_cases(root, repository, base, frozen_head):
     topic_git_directory = Path(git(repository, "rev-parse", "--absolute-git-dir"))
     check("brief: records the frozen-head in the topic-worktree's git directory, so the checkout-freshness check "
           "leaves the round's merge of origin/main out",
-          frozen_head in load_program().frozen_heads_record.pull_request_fix_round_frozen_heads_recorded(
+          frozen_head in load_program().frozen_heads_record.pull_request_fix_round_frozen_head_record_read_all(
               topic_git_directory), str(topic_git_directory))
     check("brief: the first changes-requested review's brief does not ask for the advisor",
           ADVISOR_SENTENCE not in out and "advisor" not in out, out)
