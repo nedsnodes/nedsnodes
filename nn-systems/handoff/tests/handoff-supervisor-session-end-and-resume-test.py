@@ -441,7 +441,10 @@ def run_failed_extraction_at_a_handoff_case(workspace: Path):
     writer's transcript is in another seat's project folder, which the
     transcript search still finds. A second handoff, whose writer has no
     transcript, and a third, whose writer's transcript is in two project
-    folders, give successors told what the search reported."""
+    folders, give successors told what the search reported. The first two handoffs
+    each record one entry of every list of unfinished work, which their successors
+    are told, with the subagents' transcripts in the found transcript's session
+    folder, or, when no folder holds the transcript, in a placeholder folder."""
     handoff_directory = workspace / "failedextraction"
     handoff_directory.mkdir(parents=True)
     keyed_project_directory = supervisor.project_directory_for_working_directory(workspace)
@@ -461,10 +464,21 @@ def run_failed_extraction_at_a_handoff_case(workspace: Path):
     for project_directory in (other_project_directory, another_project_directory):
         (project_directory / f"{writer_in_two_project_folders}.jsonl").write_text(
             "{}\n", encoding="utf-8")
+    subagent = 'a309071aa3681d280 "Fix ignored-path write blind spot"'
+    still_running_task = 'b27dndn4c "Run the grid" started at 2026-09-14T22:41:47Z command: "sleep 9"'
+    past_wait_limit_task = 'b31pastlim "Run the suites" started at 2026-09-14T21:00:00Z command: "sleep 99"'
+    refused_command = '"python3 nn-systems/cold-read/cold-read-grid.py --target docs/x.md" in /tmp'
+    unfinished_work_fields = (
+        f"{supervisor.SPAWNED_SUBAGENT_FIELD_PREFIX}1: {subagent}\n"
+        f"{supervisor.SESSION_HANDOFF_BACKGROUND_TASK_STILL_RUNNING_FIELD_PREFIX}1: {still_running_task}\n"
+        f"{supervisor.BACKGROUND_TASK_PAST_WAIT_LIMIT_FIELD_PREFIX}1: {past_wait_limit_task}\n"
+        f"{supervisor.COLD_READ_FULL_RUN_COMMAND_REFUSED_DURING_HANDOFF_DEFERRAL_FIELD_PREFIX}1: "
+        f"{refused_command}\n")
     handoffs_to_write = [
-        f"session-handoff-sequence-number: 1\nwritten-by-session: {writer_session_id}\nnext-step: carry on\n",
+        f"session-handoff-sequence-number: 1\nwritten-by-session: {writer_session_id}\n"
+        + unfinished_work_fields + "next-step: carry on\n",
         f"session-handoff-sequence-number: 2\nwritten-by-session: {writer_without_a_transcript}\n"
-        "next-step: carry on further\n",
+        + unfinished_work_fields + "next-step: carry on further\n",
         f"session-handoff-sequence-number: 3\nwritten-by-session: {writer_in_two_project_folders}\n"
         "next-step: carry on still\n",
     ]
@@ -556,6 +570,32 @@ def run_failed_extraction_at_a_handoff_case(workspace: Path):
           two_folders_prompt[:900])
     check("FAILED EXTRACTION: each handoff is consumed",
           state.get("consumed_counter") == 3, str(state))
+
+    def unfinished_work_sentences(transcript_directory):
+        return [
+            supervisor.ORPHANED_SUBAGENT_ROSTER_SENTENCE_TEMPLATE.format(
+                subagent_count=1, joined_roster=subagent, transcript_directory=transcript_directory),
+            supervisor.BACKGROUND_TASKS_STOPPED_AT_SESSION_HANDOFF_SUCCESSOR_RESTART_SENTENCE_TEMPLATE.format(
+                task_count=1, joined_tasks=still_running_task),
+            supervisor.BACKGROUND_TASKS_PAST_WAIT_LIMIT_SENTENCE_TEMPLATE.format(
+                task_count=1, joined_tasks=past_wait_limit_task),
+            supervisor.COLD_READ_FULL_RUN_COMMANDS_REFUSED_DURING_HANDOFF_DEFERRAL_SENTENCE_TEMPLATE.format(
+                command_count=1, joined_commands=refused_command),
+        ]
+
+    found_transcript_sentences = unfinished_work_sentences(other_project_directory / writer_session_id)
+    check("FAILED EXTRACTION: the successor is told every list of unfinished work the handoff "
+          "records, with the subagents' transcripts in the session folder beside the transcript "
+          "found, before the next step",
+          all(sentence in successor_prompt.split(supervisor.NEXT_STEP_HEADING)[0]
+              for sentence in found_transcript_sentences),
+          successor_prompt)
+    check("FAILED EXTRACTION: when no project folder holds the writer's transcript, the "
+          "successor is told every list of unfinished work, with the subagents' transcripts in "
+          "the placeholder folder",
+          all(sentence in no_transcript_prompt.split(supervisor.NEXT_STEP_HEADING)[0]
+              for sentence in unfinished_work_sentences("<predecessor-session-dir>")),
+          no_transcript_prompt)
 
 
 def run_claude_ai_rename_carried_to_successor_case(workspace: Path):

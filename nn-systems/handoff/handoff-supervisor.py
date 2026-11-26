@@ -43,7 +43,8 @@ The cycle, per reincarnation:
      transcript is, or that it was not found, then the instruction to put
      items needing the user in one approval-walk, then the lines step 5 says
      the initial agent instructions carry, such as the launch-time-git-sync's
-     line and the leftovers, and last the handoff's next step.
+     line, the session-handoff's lists of unfinished work and the leftovers,
+     and last the handoff's next step.
   4. Each generation opens the same launcher-pinned task list.
   5. Launch the successor with the initial agent instructions. Beside the
      launch-time-git-sync's line they carry, for agent-instructions-editor alone, one
@@ -149,7 +150,7 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -1342,27 +1343,12 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
     return (WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE.format(link=link, **values) + document_problem,)
 
 
-def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
-                          predecessor_session_directory: Optional[Path] = None,
-                          launch_time_git_sync_report: str = "",
-                          overview_refresh_due: tuple = (),
-                          memory_review_due: tuple = (),
-                          branch_state_instruction: str = "",
-                          waiting_approval_walk_item: tuple = ()) -> str:
-    next_step = next_step_from(handoff_fields)
-    lines = [
-        f"Read {extract_path} — the dialog from the session you are continuing, "
-        + written_at_wariness_sentence(handoff_fields.get(session_handoff_field_names.WRITTEN_AT_FIELD, "")),
-        ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION,
-        *waiting_approval_walk_item,
-    ]
-    git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
-                                                           branch_state_instruction)
-                     if launch_time_git_sync_report else "")
-    if git_sync_text:
-        lines.append(git_sync_text)
-    lines.extend(overview_refresh_due)
-    lines.extend(memory_review_due)
+def successor_initial_agent_instructions_lines_naming_unfinished_work_in_session_handoff(
+        handoff_fields: dict, predecessor_session_directory: Optional[Path] = None) -> list:
+    """Return one sentence for each non-empty list of unfinished work the session-handoff records:
+    subagents, background tasks still running, background tasks stopped past their wait-limit,
+    and cold-read-full-runs refused during the handoff-deferral."""
+    lines = []
     roster = spawned_subagent_roster_from(handoff_fields)
     if roster:
         transcript_directory = (predecessor_session_directory
@@ -1388,6 +1374,32 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
     if refused_commands:
         lines.append(COLD_READ_FULL_RUN_COMMANDS_REFUSED_DURING_HANDOFF_DEFERRAL_SENTENCE_TEMPLATE.format(
             command_count=len(refused_commands), joined_commands="; ".join(refused_commands)))
+    return lines
+
+
+def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
+                          predecessor_session_directory: Optional[Path] = None,
+                          launch_time_git_sync_report: str = "",
+                          overview_refresh_due: tuple = (),
+                          memory_review_due: tuple = (),
+                          branch_state_instruction: str = "",
+                          waiting_approval_walk_item: tuple = ()) -> str:
+    next_step = next_step_from(handoff_fields)
+    lines = [
+        f"Read {extract_path} — the dialog from the session you are continuing, "
+        + written_at_wariness_sentence(handoff_fields.get(session_handoff_field_names.WRITTEN_AT_FIELD, "")),
+        ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION,
+        *waiting_approval_walk_item,
+    ]
+    git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
+                                                           branch_state_instruction)
+                     if launch_time_git_sync_report else "")
+    if git_sync_text:
+        lines.append(git_sync_text)
+    lines.extend(overview_refresh_due)
+    lines.extend(memory_review_due)
+    lines.extend(successor_initial_agent_instructions_lines_naming_unfinished_work_in_session_handoff(
+        handoff_fields, predecessor_session_directory))
     preamble = " ".join(lines)
     if handoff_fields.get(NEXT_STEP_BLOCK_UNTERMINATED_FIELD):
         preamble += UNTERMINATED_NEXT_STEP_BLOCK_NOTE
@@ -1481,6 +1493,8 @@ class IgnitionPlanWithoutConversationTail:
     unextracted_transcript_expected_path: Optional[Path] = None
     # Set instead of the path when two or more project folders hold the transcript.
     unextracted_transcript_paths_in_several_folders: tuple = ()
+    handoff_fields: dict = field(default_factory=dict)
+    predecessor_session_directory: Optional[Path] = None
 
     def compose(self, launch_time_git_sync_report: str,
                 overview_refresh_due: tuple = (),
@@ -1525,6 +1539,9 @@ class IgnitionPlanWithoutConversationTail:
         for line in overview_refresh_due:
             prompt += " " + line
         for line in memory_review_due:
+            prompt += " " + line
+        for line in successor_initial_agent_instructions_lines_naming_unfinished_work_in_session_handoff(
+                self.handoff_fields, self.predecessor_session_directory):
             prompt += " " + line
         # The next step goes last, after NEXT_STEP_HEADING, as in build_ignition_prompt, so that
         # launch_prompt_with_leftovers_before_the_next_step puts the leftovers before it.
@@ -2718,8 +2735,9 @@ def successor_session_id_and_ignition_plan_without_conversation_tail(
         settings: SupervisorSettings, retiring_session_id: Optional[str],
         handoff_fields: dict, occasion: str):
     """Return (successor_session_id, ignition_plan) for a successor whose prompt is a
-    recovery note and the launch's other lines followed by the handoff's next step,
-    printing why there is no conversation-tail.
+    recovery note and the launch's other lines, the handoff's lists of unfinished work
+    among them, followed by the handoff's next step, printing why there is no
+    conversation-tail.
 
     retiring_session_id is the session whose extraction failed, or None when no
     earlier session was recorded; occasion names when the supervisor started it.
@@ -2729,10 +2747,14 @@ def successor_session_id_and_ignition_plan_without_conversation_tail(
     expected_path = (
         project_directory_for_working_directory(settings.working_directory)
         / f"{retiring_session_id}.jsonl" if retiring_session_id and not transcript_paths else None)
+    transcript_path = transcript_paths[0] if len(transcript_paths) == 1 else None
     plan = IgnitionPlanWithoutConversationTail(
         next_step_from(handoff_fields), occasion, retiring_session_id or "",
-        transcript_paths[0] if len(transcript_paths) == 1 else None, expected_path,
-        tuple(transcript_paths) if len(transcript_paths) > 1 else ())
+        transcript_path, expected_path,
+        tuple(transcript_paths) if len(transcript_paths) > 1 else (),
+        handoff_fields=handoff_fields,
+        # Claude Code keeps a session's subagent transcripts in a folder named for the session, beside its transcript.
+        predecessor_session_directory=transcript_path.with_suffix("") if transcript_path else None)
     why_no_conversation_tail = (
         f"session {retiring_session_id}'s dialog could not be extracted"
         if retiring_session_id else "no earlier session was recorded")
