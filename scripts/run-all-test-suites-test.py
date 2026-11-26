@@ -963,7 +963,7 @@ with tempfile.TemporaryDirectory() as scratch:
           in out, out)
 
     # Given twice, as the after-merge test run gives it the pull request's head test run's
-    # commit and the newest main commit whose after-merge test run passed.
+    # commit and the suite selection main commit.
     changed = git(repo, "rev-parse", "HEAD").stdout.strip()
     result = selective_run(root, base, changed)
     out = lines(result.stdout)
