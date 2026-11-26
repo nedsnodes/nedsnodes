@@ -30,7 +30,7 @@ The user approved merging them on 2026-10-11, as item 2 of the approval-walk `co
 
 ## The design
 
-§ Approval binding, below, records what the user decided from 2026-11-10 to 2026-11-12 about the approval line in `.walk-approved`, `--approve`, the store's layout and way 1 of § The approved set. Each entry there names the sentences of this section it replaces; until the build rewrites them, read those sentences as replaced.
+§ Approval binding, below, records what an approval-walk decided from 2026-11-10 to 2026-11-12 about the approval line in `.walk-approved`, `--approve`, the store's layout and way 1 of § The approved set. Each entry there names the sentences of this section it replaces; until the build rewrites them, read those sentences as replaced.
 
 ### When it runs, and how fast
 
