@@ -700,7 +700,7 @@ def run_agent_text_cases(fixture):
     f_string_entry = next((entry for entry in entries if entry["label"] == "print in show_message()"), {})
     check("changed print f-strings retain placeholders and old/new text", "{name}" in f_string_entry.get("old_text", "") and "{name}" in f_string_entry.get("new_text", "") and "Old message" in f_string_entry["old_text"] and "New message" in f_string_entry["new_text"], entries)
     f_string_command = f_string_entry.get("fast_read_command")
-    f_string_target = Path(shlex.split(f_string_command)[-1]) if f_string_command else Path()
+    f_string_target = Path(shlex.split(f_string_command)[3]) if f_string_command else Path()
     check("an f-string message's target holds the text the agent reads, each field a <filled in: source> stand-in, "
           "not the f-string's Python source",
           f_string_entry.get("new_text") == "f'New message for {name}'"
@@ -861,8 +861,10 @@ def run_fast_read_command_cases(fixture):
         command_words = shlex.split(whole_entry["fast_read_command"])
     except ValueError:
         command_words = []  # An unquoted target can leave a quote unclosed; the case below then fails by name.
-    target = Path(command_words[-1]) if len(command_words) == 4 else Path()
-    check("each listed message gets a fast-read command whose target holds its new text",
+    target = (Path(command_words[3]) if len(command_words) == 6
+              and command_words[4:] == ["--text-intended-reader-category", "agent-readable"] else Path())
+    check("each listed message gets a fast-read command whose target holds its new text, "
+          "read as agent-readable",
           whole_entry["fast_read_command"].startswith(command_prefix) and whole_entry["fast_read_target_error"] is None
           and target.is_relative_to(fixture.message_target_temporary_directory)
           and target.read_text(encoding="utf-8") == "New failure\n", whole_entry)
@@ -896,7 +898,8 @@ def run_fast_read_command_cases(fixture):
           json_result.returncode == 3 and bool(blocked_entries)
           and all(entry["fast_read_command"] is None and entry["fast_read_target_error"] for entry in blocked_entries)
           and "1 listed tool-message-to-agent has no cold-read-fast-read command, because its text" in json_result.stderr
-          and "--target <that file's full path>" in json_result.stderr, json_result)
+          and "--target <that file's full path> --text-intended-reader-category agent-readable"
+          in json_result.stderr, json_result)
     blocked_entry = blocked_entries[0] if blocked_entries else {
         "path": "", "line": 0, "new_text_as_agent_reads_it_with_placeholder_stand_ins": ""}
     file_name = review_plan_module._message_reminder_hook.fast_read_target_path(

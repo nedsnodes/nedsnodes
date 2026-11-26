@@ -126,7 +126,7 @@ def main() -> int:
             pass
         notice = user_notice(new_session_name(payload.get("transcript_path"), session_id))
         shown_record.write_text(marker_modified + "\n", encoding="utf-8")
-        print(json.dumps({"systemMessage": notice}, ensure_ascii=False))
+        print(json.dumps({"systemMessage": notice}))
     except Exception as error:
         print(HOOK_FAILED_MESSAGE.format(error=f"{type(error).__name__}: {error}"), file=sys.stderr)
         return 1

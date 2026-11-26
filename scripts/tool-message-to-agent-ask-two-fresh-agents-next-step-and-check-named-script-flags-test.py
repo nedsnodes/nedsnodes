@@ -128,7 +128,7 @@ def test_one_follower_fails(scratch):
           "FAILED: the fresh-agent on cold-read-tier deep wrote no answer" in stdout
           and "cause: logged-out: Not logged in" in stdout, stdout)
     check("one follower fails: says when to rerun and when to tell the user",
-          "If that line names logged-out, account-limit or model-limit: tell the user" in stdout
+          "If that line names logged-out: tell the user" in stdout
           and f"Otherwise, or when there is no such line: rerun scripts/{SCRIPT_PATH.name} once" in stdout,
           stdout)
     check("one follower fails: the other answer is still printed",

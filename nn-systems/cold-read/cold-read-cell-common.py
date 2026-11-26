@@ -344,26 +344,21 @@ class WriteDetectorUnavailable(Exception):
 CAUSE_PHRASE = "cause:"
 CAUSE_SEPARATOR = " — "
 # Match line starts to avoid quoted document text, allowing the Codex tracing timestamp.
-AGENT_BINARY_WIDE_CAUSE_CLASSES = frozenset(
-    {"account-limit", "logged-out", "agent-binary-missing"})
-USER_CLEARABLE_CAUSE_CLASSES = frozenset(
-    {"logged-out", "agent-binary-missing", "account-limit", "model-limit"})
+# A cause the user can clear also fails every cold-read-cell of its agent-binary.
+USER_CLEARABLE_CAUSE_CLASSES = frozenset({"logged-out", "agent-binary-missing"})
 CAUSE_DETAIL_MAX_CHARACTERS = 120
 # Drop per-attempt timestamps from details that the grid reports for an entire agent-binary.
-DETAIL_IS_REST_OF_LINE = "rest-of-line"
 DETAIL_IS_WHOLE_LINE = "whole-line"
 LEADING_TRACING_LOGGER_TIMESTAMP = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\s+")
 
 
 class RecognisedFailureText(typing.NamedTuple):
-    """An agent-binary failure prefix, cause class, rule for extracting the detail, and an
-    optional pattern the rest of the line after the prefix must start with."""
+    """An agent-binary failure prefix, cause class, and rule for extracting the detail."""
 
     cause_class: str
     line_prefix: str
     detail: str
-    rest_of_line_pattern: typing.Optional[re.Pattern] = None
 
 
 def classify_failed_attempt(
@@ -375,15 +370,8 @@ def classify_failed_attempt(
         timestamp = LEADING_TRACING_LOGGER_TIMESTAMP.match(stripped)
         untimestamped = stripped[timestamp.end():] if timestamp else stripped
         for text in recognised_texts or ():
-            if untimestamped.startswith(text.line_prefix) and (
-                    text.rest_of_line_pattern is None
-                    or text.rest_of_line_pattern.match(untimestamped[len(text.line_prefix):])):
-                if text.detail == DETAIL_IS_REST_OF_LINE:
-                    detail = untimestamped[len(text.line_prefix):].lstrip(" \t·")
-                elif text.detail == DETAIL_IS_WHOLE_LINE:
-                    detail = untimestamped
-                else:
-                    detail = text.detail
+            if untimestamped.startswith(text.line_prefix):
+                detail = untimestamped if text.detail == DETAIL_IS_WHOLE_LINE else text.detail
                 return text.cause_class, detail
     if start_error:
         return "agent-binary-missing", start_error
@@ -866,7 +854,7 @@ def run_model_chain(
     prompt: str, report: pathlib.Path, cell: str, tier: str, target_argument: str,
     baseline, cell_started_at: float, prompt_file_argument: str = "",
     recover_report_from_stdout=None, model_to_effort=None,
-    recognised_failure_texts_for_model=None, child_environment=None,
+    recognised_failure_texts=(), child_environment=None,
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
 ) -> int:
@@ -916,8 +904,6 @@ def run_model_chain(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
                 start_error=str(error))), file=sys.stderr)
             continue
-        recognised_texts = (recognised_failure_texts_for_model(model)
-                            if recognised_failure_texts_for_model else ())
         if completed.stderr:
             print(completed.stderr, file=sys.stderr, end="")
         if isinstance(completed, ReviewerRunEndedByResultLine):
@@ -942,7 +928,7 @@ def run_model_chain(
             print(f"{program}: {model} failed (exit {completed.returncode})", file=sys.stderr)
             print(cause_line(program, *classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
-                exit_code=completed.returncode, recognised_texts=recognised_texts)),
+                exit_code=completed.returncode, recognised_texts=recognised_failure_texts)),
                 file=sys.stderr)
             continue
         # Recover only after exit 0; a failed model's leftover file is not an accepted review.
@@ -962,7 +948,7 @@ def run_model_chain(
             print(str(refusal), file=sys.stderr)
             print(cause_line(program, *classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
-                exit_code=0, recognised_texts=recognised_texts)), file=sys.stderr)
+                exit_code=0, recognised_texts=recognised_failure_texts)), file=sys.stderr)
             continue
         produced_by = model
         # Use only this attempt's stderr: stdout may quote token counts, and earlier attempts cost other models.
@@ -1024,18 +1010,21 @@ def record_directory_being_written_lock_hold_shared_until_exit_unless_parent_pas
 def run_cell(
     *, program: str, runtime: str, description: str, model_help: str,
     tier_to_model_chain: dict, tier_to_effort: dict, invocation_builder,
-    recover_report_from_stdout=None, recognised_failure_texts_for_model=None,
+    recover_report_from_stdout=None, recognised_failure_texts=(),
     stage_report_outside_checkout: bool = False, child_environment=None,
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
     cold_read_cell_launcher_own_command_line_options_adder=None,
     pass_cold_read_tier_to_invocation_builder: bool = False,
+    per_model_run_timeout_seconds_from_parsed_arguments_getter=None,
 ) -> int:
     """cold_read_cell_launcher_own_command_line_options_adder, when given, adds
     one launcher's own options to the parser, and invocation_builder then also
     gets the parsed arguments as parsed_arguments=. With
     pass_cold_read_tier_to_invocation_builder, invocation_builder also gets the
-    cold-read-tier as tier=."""
+    cold-read-tier as tier=. per_model_run_timeout_seconds_from_parsed_arguments_getter,
+    when given, takes the parsed arguments and returns the value used in place
+    of per_model_run_timeout_seconds."""
     # Include failed attempts in the cell's total cost.
     cell_started_at = time.time()
     parser = build_argument_parser(
@@ -1043,6 +1032,8 @@ def run_cell(
         cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
         tier_to_effort=tier_to_effort)
     args = parser.parse_args()
+    if per_model_run_timeout_seconds_from_parsed_arguments_getter is not None:
+        per_model_run_timeout_seconds = per_model_run_timeout_seconds_from_parsed_arguments_getter(args)
 
     # Snapshot before execution so pre-existing edits are not reported as changes from this run.
     try:
@@ -1105,7 +1096,7 @@ def run_cell(
             cell_started_at=cell_started_at,
             prompt_file_argument=args.prompt_file or "",
             recover_report_from_stdout=recover_report_from_stdout,
-            recognised_failure_texts_for_model=recognised_failure_texts_for_model,
+            recognised_failure_texts=recognised_failure_texts,
             child_environment=child_environment,
             per_model_run_timeout_seconds=per_model_run_timeout_seconds,
             parse_agent_binary_final_result_from_stdout_line=parse_agent_binary_final_result_from_stdout_line,

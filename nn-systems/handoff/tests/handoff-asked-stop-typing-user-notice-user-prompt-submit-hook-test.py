@@ -53,8 +53,11 @@ def check(case_name, condition, detail=""):
         failures.append(case_name)
 
 
-def run_hook(payload, home, agent_seat_name=None, raw_input_text=None, launched_session_id=None):
+def run_hook(payload, home, agent_seat_name=None, raw_input_text=None, launched_session_id=None,
+             stdout_encoding=None):
     environment = {**os.environ, "HOME": str(home)}
+    if stdout_encoding is not None:
+        environment["PYTHONIOENCODING"] = stdout_encoding
     environment.pop(AGENT_NAME_VARIABLE, None)
     environment.pop(LAUNCHED_SESSION_ID_VARIABLE, None)
     if agent_seat_name is not None:
@@ -182,6 +185,15 @@ with tempfile.TemporaryDirectory() as workspace:
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     (handoffs / "seat-a-remote-control-name").rmdir()
 
+    accented = workspace / "accented.jsonl"
+    accented.write_text(custom_title_record("café") + "\n", encoding="utf-8")
+    marker("s-ascii-stdout").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-ascii-stdout", "transcript_path": str(accented)}, home,
+                      stdout_encoding="ascii")
+    check("a title with é and an ASCII stdout: the line, exit 0",
+          result.returncode == 0 and shown_notice(result) == expected_named("café"),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
     marker("s-unnamed").write_text("40.0\n", encoding="utf-8")
     result = run_hook({"session_id": "s-unnamed", "transcript_path": str(untitled)}, home)
     check("no title record and no agent-seat name: the line says this agent-seat's new session",
@@ -228,7 +240,25 @@ with tempfile.TemporaryDirectory() as workspace:
     (handoffs / "s-record-unwritable-handoff-asked-user-notice-shown").mkdir()
     result = run_hook({"session_id": "s-record-unwritable", "transcript_path": str(titled)},
                       home, agent_seat_name="seat-a")
-    check("the file recording a shown notice cannot be read or written: exit 1, nothing on stdout, one stderr line",
+    check("the file recording a shown notice cannot be read: exit 1, nothing on stdout, one stderr line",
+          result.returncode == 1 and result.stdout == ""
+          and len(result.stderr.splitlines()) == 1
+          and result.stderr.startswith(hook.PROGRAM + ": "),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+    # A home of its own, so that making its handoffs directory read-only touches no other case.
+    unwritable_home = workspace / "unwritable-home"
+    unwritable_handoffs = unwritable_home / ".claude" / "handoffs"
+    unwritable_handoffs.mkdir(parents=True)
+    (unwritable_handoffs / "s-record-absent-handoff-asked").write_text("40.0\n", encoding="utf-8")
+    unwritable_handoffs.chmod(0o555)
+    try:
+        result = run_hook({"session_id": "s-record-absent", "transcript_path": str(titled)},
+                          unwritable_home, agent_seat_name="seat-a")
+    finally:
+        unwritable_handoffs.chmod(0o755)
+    check("no file recording a shown notice, and its directory refuses writes: exit 1, nothing on"
+          " stdout, one stderr line",
           result.returncode == 1 and result.stdout == ""
           and len(result.stderr.splitlines()) == 1
           and result.stderr.startswith(hook.PROGRAM + ": "),

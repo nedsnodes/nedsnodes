@@ -9,7 +9,8 @@ Usage:
       --pull-request N --head-commit SHA
       [--github-account mac-claude|ned-review-merge]
       [--merge-lane-worktrees-and-outputs-directory DIR]
-      [--pull-request-review-plan-program PATH] <review file>
+      [--pull-request-review-plan-program PATH]
+      [--findings-record-codex-finding-match-program PATH] <review file>
 
 The review file is one JSON object with exactly "verdict", APPROVE or
 REQUEST_CHANGES; "body", the review's text; and "comments", a list of inline
@@ -90,6 +91,18 @@ object is refused too; the agent then asks merge-lane-2. Then:
   after-merge follow-up program read findings only from comments. It adds the grades to
   the posted body under a heading. Two findings of one report with the same priority and
   heading text get one id, and one grade answers both;
+- before the grades are checked, each Codex finding whose text answers `#defect_already_on_main` yes
+  goes to
+  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py match, which
+  answers SAME with the findings record row already holding the finding, or NEW. A SAME
+  finding whose text answers `#pull_request_triggers_the_defect` no needs no grade; one
+  that answers yes is graded like any other. For a SAME finding with no grade, the posted body quotes its row's state, grade and decision
+  under a heading, and calls it a possible regression when the row is fixed. Once every
+  grade is accepted, the same program's add adds each NEW finding, with its grade, to the
+  findings record, before the review is posted. The success line counts the findings held
+  and added, and names each possible regression and possible miss. When either
+  subcommand exits nonzero or prints an answer this program cannot read, nothing is
+  posted;
 - a run that found nothing, or exited nonzero, needs no grade, and the review posts as
   it would without this check;
 - when no run record names the commit, the program reads the commit's review tier from
@@ -198,6 +211,9 @@ CODEX_FINDING_WORKTREE_PATH = re.compile(r"\S*/pr\d+-head/")
 CODEX_REPORT_PROVENANCE_COMMENT = re.compile(r"\A<!--.*?-->\n?", re.DOTALL)
 CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX = re.compile(r'"findings"\s*:\s*\[\s*\{')
 CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
+FINDINGS_RECORD_BODY_HEADING = "**Codex findings the findings record already holds:**"
+FINDINGS_RECORD_CODEX_FINDING_MATCH_PROGRAM = Path(__file__).resolve().with_name(
+    "findings-record-codex-finding-match-and-row-add-or-decide.py")
 # docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these hashtag lines.
 FINDING_FACT_LINE_HASHTAGS = ("#defect_already_on_main", "#pull_request_triggers_the_defect",
                               "#false_report_of_success_on_failure", "#defect_evidence")
@@ -462,22 +478,24 @@ def finding_fact_lines_lacking(text):
 
 
 def codex_findings_in_report(report):
-    """{finding id: (priority, heading text, [the fact-line hashtags each entry lacks])} for each finding heading
-    of a Codex report; a finding's text runs from its heading to the next one. Entries with the same priority
-    and heading share an id, so the list holds one item per entry."""
+    """{finding id: (priority, heading text, [the fact-line hashtags each entry lacks], [each entry's text])} for
+    each finding heading of a Codex report; a finding's text runs from its heading line to the next heading.
+    Entries with the same priority and heading share an id, so each list holds one item per entry."""
     findings, finding_id, finding_lines = {}, None, []
 
     def close_finding():
         if finding_id is not None:
             findings[finding_id][2].append(finding_fact_lines_lacking("\n".join(finding_lines)))
+            findings[finding_id][3].append("\n".join(finding_lines).strip())
     for line in report.splitlines():
         heading = CODEX_FINDING_HEADING.match(line)
         if heading:
             close_finding()
             text = CODEX_FINDING_WORKTREE_PATH.sub("", heading[2])
             identity = f"{heading[1]}\0{text}".encode("utf-8")
-            finding_id, finding_lines = hashlib.sha256(identity).hexdigest()[:12], []
-            findings.setdefault(finding_id, (heading[1], text, []))
+            finding_id = hashlib.sha256(identity).hexdigest()[:12]
+            finding_lines = [CODEX_FINDING_WORKTREE_PATH.sub("", line)]
+            findings.setdefault(finding_id, (heading[1], text, [], []))
         elif finding_id is not None:
             finding_lines.append(line)
     close_finding()
@@ -568,8 +586,10 @@ def codex_findings_on_commit(outputs_directory, number, head):
                 "review as a JSON object, written in a form neither the Codex cell nor this program "
                 "recognizes, such as with text before its ```json fence")
         # Runs on one commit share ids; each run's entries are kept, so the fact-line count sees them all.
-        for finding_id, (priority, text, entries) in report_findings.items():
-            findings.setdefault(finding_id, (priority, text, []))[2].extend(entries)
+        for finding_id, (priority, text, entries, texts) in report_findings.items():
+            kept = findings.setdefault(finding_id, (priority, text, [], []))
+            kept[2].extend(entries)
+            kept[3].extend(texts)
     return findings if recorded else None
 
 
@@ -611,10 +631,14 @@ def review_tier_of_commit(plan_program, number, head):
     return tier, base, base_reason
 
 
-def body_with_codex_answers(body, comments, answers, findings, plan, number, head, review_file, outputs_directory):
-    """Return the body with the Codex grades, or raise CodexRunRecordUnusable with the whole refusal when
-    an answer is missing or does not fit the run records. plan, review_tier_of_commit()'s answer, is None
-    unless findings is None."""
+def body_with_codex_answers(body, comments, answers, findings, plan, number, head, review_file, outputs_directory,
+                            recorded=None):
+    """Return the body with the Codex grades, and with the findings record rows of the findings in recorded,
+    or raise CodexRunRecordUnusable with the whole refusal when an answer is missing or does not fit the run
+    records. plan, review_tier_of_commit()'s answer, is None unless findings is None. recorded holds, by
+    finding id, the match program's SAME answer for each finding the findings record already holds, which
+    needs no grade."""
+    recorded = recorded or {}
     grades = {entry["finding"]: entry for entry in answers.get(CODEX_FINDING_GRADES_KEY, [])}
     if findings is None:
         tier, base, base_reason = plan
@@ -633,15 +657,18 @@ def body_with_codex_answers(body, comments, answers, findings, plan, number, hea
         raise CodexRunRecordUnusable(
             f"review not posted: the review file {review_file} grades {', '.join(unknown)}, which no Codex "
             f"report on commit {head} holds.\nRemove or correct each, then run the same command again.")
-    missing = [finding for finding in findings if finding not in grades]
+    missing = [finding for finding in findings if finding not in grades and finding not in recorded]
     if missing:
         raise CodexRunRecordUnusable(CODEX_FINDINGS_NOT_GRADED.format(
             count=len(missing), head=head, path=review_file,
             findings="\n".join(f"- {finding}: {findings[finding][0]} {findings[finding][1]}" for finding in missing),
-            grades=", ".join((*FINDING_CATEGORIES, DOES_NOT_HOLD_GRADE))))
+            grades=", ".join((*FINDING_CATEGORIES, DOES_NOT_HOLD_GRADE)))
+            + findings_record_rows_already_holding_lines(recorded, "\nThese Codex findings need no grade, since "
+                                                                  "the findings record already holds each:"))
     if not findings:
         return body
-    uncommented = [finding for finding in findings if grades[finding]["grade"] in FINDING_CATEGORIES
+    graded = [finding for finding in findings if finding in grades]
+    uncommented = [finding for finding in graded if grades[finding]["grade"] in FINDING_CATEGORIES
                    and not any(comment["finding_category"] == grades[finding]["grade"]
                                and finding in CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.findall(comment["body"])
                                for comment in comments)]
@@ -652,8 +679,113 @@ def body_with_codex_answers(body, comments, answers, findings, plan, number, hea
                                for finding in uncommented)))
     lines = [f"- {finding} ({findings[finding][0]}): {grades[finding]['grade']}"
              + (f", {grades[finding]['reason']}" if "reason" in grades[finding] else "")
-             + f": {findings[finding][1]}" for finding in findings]
-    return "\n".join((f"{body}\n\n{CODEX_GRADES_BODY_HEADING}", *lines))
+             + f": {findings[finding][1]}" for finding in graded]
+    if lines:
+        body = "\n".join((f"{body}\n\n{CODEX_GRADES_BODY_HEADING}", *lines))
+    return body + findings_record_rows_already_holding_lines(recorded, f"\n\n{FINDINGS_RECORD_BODY_HEADING}")
+
+
+def findings_record_rows_already_holding_lines(recorded, heading):
+    """The heading and one line per Codex finding the findings record already holds, quoting its row's state,
+    grade and decision; empty when it holds none of them."""
+    if not recorded:
+        return ""
+    lines = []
+    for finding, answer in recorded.items():
+        row = answer["record"]
+        lines.append(f"- {finding}: the same defect as findings record row {row['record_id']}, state {row['state']}, "
+                     f"grade {row['grade']}" + (f", decision: {row['decision']}" if row["decision"] else "")
+                     + ("; a possible regression, since the row is fixed" if answer["possible_regression"] else ""))
+    return "\n".join((heading, *lines))
+
+
+def findings_record_summary(matched, added):
+    """The success line's account of the findings record match and add, empty when no finding was matched."""
+    if not matched:
+        return ""
+    same = [finding for finding, answer in matched.items() if answer["answer"] == "SAME"]
+    notes = [f"possible regression: {finding} matches fixed row {answer['record']['record_id']}"
+             for finding, answer in matched.items() if answer["answer"] == "SAME" and answer["possible_regression"]]
+    notes += [f"possible miss: {finding} cites the same line as row(s) "
+              f"{', '.join(map(str, answer['possible_miss_of']))}, logged for review"
+              for finding, answer in added.items() if answer["possible_miss_of"]]
+    rows = ", ".join(f"{finding} as row {answer['record_id']}" for finding, answer in added.items())
+    return (f"; findings record: {len(same)} already held, {len(added)} added" + (f" ({rows})" if rows else "")
+            + "".join(f"; {note}" for note in notes))
+
+
+def codex_finding_fact_line_answers(texts, hashtag_wanted):
+    """Every answer the entries of a Codex finding give its hashtag_wanted line, or the older label's, lowercased with
+    marks and spaces removed, so that "not checked" reads as "notchecked", never as "no"."""
+    return [FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer).lower()
+            for text in texts for hashtag, label, answer in FINDING_FACT_LINE.findall(text)
+            if (hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]) == hashtag_wanted]
+
+
+def codex_finding_says_main_has_it(texts):
+    """Whether any entry of a Codex finding answers its `#defect_already_on_main` line yes."""
+    return "yes" in codex_finding_fact_line_answers(texts, "#defect_already_on_main")
+
+
+def findings_record_rows_needing_no_grade(matched, findings):
+    """The SAME answers, by finding id, of the matched findings that need no grade: those whose every entry answers
+    `#pull_request_triggers_the_defect` no. One that answers yes, not checked, or yes in one entry and no in another
+    is still graded, since this pull request may bring the defect back, and the earlier row's grade is for main."""
+    def every_entry_answers_no(texts):
+        answers = codex_finding_fact_line_answers(texts, "#pull_request_triggers_the_defect")
+        return bool(answers) and all(answer == "no" for answer in answers)
+    return {finding: answer for finding, answer in matched.items() if answer["answer"] == "SAME"
+            and every_entry_answers_no(findings[finding][3])}
+
+
+def findings_record_program_answers(program, subcommand, number, head, request, answer_is_readable):
+    """Run the findings record program's subcommand on the request; return its answer by finding id, or raise
+    CodexRunRecordUnusable when it exits nonzero or answers other than answer_is_readable accepts for each
+    finding sent."""
+    completed = subprocess.run(
+        [sys.executable, str(program), subcommand, "--pull-request", str(number), "--head-commit", head],
+        input=json.dumps(request), capture_output=True, text=True)
+    if completed.returncode != 0:
+        raise CodexRunRecordUnusable(
+            f"the findings record program {program} {subcommand} exited {completed.returncode}, so the review cannot "
+            f"say which Codex findings the findings record holds; it printed:\n{completed.stderr.strip()}")
+    try:
+        answers = json.loads(completed.stdout)
+        if set(answers) != {entry["finding_id"] for entry in request} or not all(
+                answer_is_readable(answer) for answer in answers.values()):
+            raise ValueError("it does not give a readable answer for exactly the findings sent")
+    except (ValueError, TypeError, KeyError) as error:
+        raise CodexRunRecordUnusable(f"the findings record program {program} {subcommand} printed an answer this "
+                                     f"program cannot read ({error}): {completed.stdout.strip()[:300]}")
+    return answers
+
+
+def findings_record_match(program, number, head, findings):
+    """The findings record program's match answer for each Codex finding that says main has it, by finding id."""
+    request = [{"finding_id": finding, "priority": priority, "heading": heading, "text": texts[0]}
+               for finding, (priority, heading, _, texts) in findings.items() if codex_finding_says_main_has_it(texts)]
+    if not request:
+        return {}
+    return findings_record_program_answers(
+        program, "match", number, head, request,
+        lambda answer: answer["answer"] == "NEW" and "record_id" in answer
+        or answer["answer"] == "SAME" and isinstance(answer["possible_regression"], bool)
+        and {"record_id", "state", "grade", "decision"} <= set(answer["record"]))
+
+
+def findings_record_add(program, number, head, findings, matched, answers):
+    """Add each matched NEW Codex finding, with its accepted grade, to the findings record; return the program's
+    add answer by finding id."""
+    grades = {entry["finding"]: entry for entry in answers.get(CODEX_FINDING_GRADES_KEY, [])}
+    request = [{"finding_id": finding, "priority": findings[finding][0], "heading": findings[finding][1],
+                "text": findings[finding][3][0], "grade": grades[finding]["grade"],
+                **({"reason": grades[finding]["reason"]} if "reason" in grades[finding] else {})}
+               for finding, answer in matched.items() if answer["answer"] == "NEW"]
+    if not request:
+        return {}
+    return findings_record_program_answers(
+        program, "add", number, head, request,
+        lambda answer: isinstance(answer["record_id"], int) and isinstance(answer["possible_miss_of"], list))
 
 
 def review_comment_opening_mark_for_finding_category(category, nit=False):
@@ -831,6 +963,10 @@ def parse_arguments(argv):
     parser.add_argument("--pull-request-review-plan-program", type=Path, default=REVIEW_PLAN_PROGRAM,
                         help="the program that gives the review tier when no Codex run record names the "
                              "commit (default: this checkout's pull-request-review-plan.py)")
+    parser.add_argument("--findings-record-codex-finding-match-program", type=Path, default=FINDINGS_RECORD_CODEX_FINDING_MATCH_PROGRAM,
+                        help="the program that matches each Codex finding on main's code against the findings "
+                             "record (default: this checkout's "
+                             "findings-record-codex-finding-match-and-row-add-or-decide.py)")
     parser.add_argument("review_file", type=Path,
                         help="the review: a JSON object with verdict, body and comments")
     return parser.parse_args(argv)
@@ -858,6 +994,7 @@ def main(argv=None):
     # The reviewer's findings are its comments, or for merge-lane-2's verdict review, Codex's findings.
     fact_line_lacks = [(f"{comment['path']}:{comment['line']}", finding_fact_lines_lacking(comment["body"]))
                        for comment in comments]
+    matched, added = {}, {}
     if verdict is not None and account == MERGE_LANE_ACCOUNT:  # pragma: no mutate, --github-account allows only mac-claude and ned-review-merge, and mac-claude sorts before ned-review-merge, so >= gives what == gives
         outputs_directory = arguments.merge_lane_worktrees_and_outputs_directory
         try:
@@ -866,8 +1003,13 @@ def main(argv=None):
                                for lacking in finding[2]]
             plan = (review_tier_of_commit(arguments.pull_request_review_plan_program, number, head)
                     if findings is None else None)
-            body = body_with_codex_answers(body, comments, codex_answers, findings, plan, number, head,
-                                           arguments.review_file, outputs_directory)
+            program = arguments.findings_record_codex_finding_match_program
+            matched = findings_record_match(program, number, head, findings) if findings else {}
+            body = body_with_codex_answers(
+                body, comments, codex_answers, findings, plan, number, head, arguments.review_file,
+                outputs_directory, findings_record_rows_needing_no_grade(matched, findings))
+            # Added only once the grades are accepted, since a row keeps the grade it was added with.
+            added = findings_record_add(program, number, head, findings, matched, codex_answers)
         except CodexRunRecordUnusable as error:
             refusal = str(error)
             print(refusal if refusal.startswith("review not posted:") else NOT_POSTED.format(reason=refusal),
@@ -958,7 +1100,7 @@ def main(argv=None):
                    f"{': ' + ' | '.join(lacks) if lacks else ''}" if fact_line_lacks and verdict else "")
         print(f"review {review_id} posted on pull request {number} by {account} as {event}, "
               f"{f'verdict {verdict}' if verdict else 'no verdict'}, on commit {head}; GitHub's copy reads back as {EVENT_STATES[event]}"
-              f"{lacking}{moved}")
+              f"{lacking}{moved}{findings_record_summary(matched, added)}")
         return EXIT_POSTED
     except (KeyboardInterrupt, SystemExit):
         # gh_json's subprocess.run has killed gh before this runs, so nothing more is sent.
