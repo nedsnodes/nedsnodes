@@ -669,6 +669,12 @@ def cases(scratch):
           and f"git hash-object -- <copy>` prints {approved_key}" in result.stderr
           and f"cp -- <copy> {claude}\n" in result.stderr
           and "If no copy is the approved version" in result.stderr, result.stderr)
+    check("and says which hits the search leaves unchecked, older Timeshift snapshots and Time "
+          "Machine's printed command, instead of claiming it saves every copy",
+          "saves every copy" not in result.stderr
+          and "older Timeshift snapshot it lists, or a Time Machine hit whose command you have not run, "
+              "is unchecked" in result.stderr.replace("\n", " ")
+          and f"before you count {approved_key} as found nowhere" in result.stderr, result.stderr)
     found_copy = world.scratch / "found-copy"
     found_copy.write_text("project v2, approved edit\n")
     run_found = subprocess.run(["/bin/sh", "-c", f"cp -- {found_copy} {claude}"], check=False)
@@ -1247,6 +1253,10 @@ def cases(scratch):
           and f"git hash-object -- <copy>` prints {rebased_away}" in message
           and f"put that copy back with: cp -- <copy> {claude}\n" in message
           and "If no copy is the version" in message, message)
+    check("and says which hits the search leaves unchecked, instead of claiming it saves every copy",
+          "saves every copy" not in message
+          and "or a Time Machine hit whose command you have not run, is unchecked" in message
+          and f"before you count {rebased_away} as found nowhere" in message, message)
     check("and stays recorded, so the next change reports it again",
           state.get("first_run_versions") == {str(claude): rebased_away}, state)
     found_copy = world.scratch / "found-copy"
@@ -2289,9 +2299,9 @@ def cases(scratch):
 
     hook.os = StoreCountingOs()
     for name in ("read", "append", "copy"):
-        def counted(self, *arguments, _method=getattr(hook.Store, name)):
+        def counted(self, *arguments, _method=getattr(hook.Store, name), **keywords):
             store["access"] += 1
-            return _method(self, *arguments)
+            return _method(self, *arguments, **keywords)
         setattr(hook.Store, name, counted)
 
     def counted_run(directory):
