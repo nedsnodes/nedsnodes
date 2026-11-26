@@ -4,7 +4,7 @@ issue: "[Shell command forms that pull request reviewers constructed and the Bas
 
 # Shell command forms that pull request reviewers constructed and the Bash guards' shared shell reader misreads
 
-The Bash guards, the PreToolUse hooks in `.claude/settings.json` that check a Bash command before it runs, all read the command through one shared shell reader, `nn-systems/general-tools/shell-command-tree-sitter-bash-reader-common.py`. Reviewers of pull requests that change that reader keep constructing commands it reads differently from bash, such as a force push the force-push guard, `.claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py`, lets through. No agent has run any of these commands. This GHI is the one place those constructed forms are collected, so that each does not become its own follow-up pull request.
+The Bash guards, the PreToolUse hooks in `.claude/settings.json` that check a Bash command before it runs, all read the command through one shared shell reader, `nn-systems/general-tools/shell-command-tree-sitter-bash-reader-common.py`. Reviewers of pull requests that change that reader keep constructing commands it reads differently from bash, such as a force push the force-push guard, deleted in commit c7a32e113, let through. No agent has run any of these commands. This GHI is the one place those constructed forms are collected, so that each does not become its own follow-up pull request.
 
 ## How this GHI is used
 
@@ -112,6 +112,8 @@ Forms a guard refuses, where its right verdict is to let the command run:
 |---|---|---|---|
 | `ssh -G ned-box 'echo ok' <<'EOF'<LF>codex exec task<LF>EOF` (also `ssh -V`) | prints ssh's configuration (or its version), connects to nothing and runs nothing | `ssh_remote_command` returns None for `-G` and `-V`, the same answer it gives for an ssh with no remote command, and the codex exec guard reads that as a remote shell running the here-document; it refuses | the same Codex review of PR 1815, item 3 |
 | `cp -n /tmp/new.md docs/issues/46-ghi-guide-agent.system.design.md`, and `mv --no-clobber /tmp/new.md docs/issues/46-ghi-guide-agent.system.design.md` | leaves the existing GHI-MD as it is | the soft-block ignores the no-clobber option, counts the GHI-MD as replaced, and refuses until a reason is written into its marker file | the same Codex review of PR 2196, fourth P2 |
+
+- reboot-test, 2026-11-21: commit c7a32e113 deleted the Bash force-push guard and the pre-push refusal of a forced rewrite or a deletion of an open pull request's head branch, which PR 1557 had added, because GitHub's ruleset "Block force pushes" refuses every force push to every branch, with no bypass; the user approved this in walk items 71.3 and 71.4 on 2026-11-20. Text in this GHI-MD that says either of them refuses or lets through a force push describes main before that commit; a force push is now refused by GitHub, whatever the shell reader reads.
 
 ## Forms found and since fixed
 

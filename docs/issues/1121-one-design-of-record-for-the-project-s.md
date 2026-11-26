@@ -11,7 +11,7 @@ How this project keeps its git checkouts current with main, and what an agent ma
 - `CLAUDE.md` holds the rules on topic branches, atomic pull requests, frozen heads, commits on top and hand-merges.
 - `scripts/checkout-freshness-catch-up.py`, a Stop hook, rebases a never-pushed branch, moves a detached checkout with no work of its own forward, fast-forwards the machine's reference checkout (the clone's main worktree, kept on the main branch, such as `/Users/el/Projects/nedsnodes` on the Mac), and tells the agent what changed; its rules live in its docstring.
 - `launch_time_git_sync` in `nn-systems/handoff/handoff-supervisor.py`, formerly `sync_working_branch_with_main`, fast-forwards a seat's checkout at launch; no document describes it.
-- The git hooks, `scripts/branch-conflict-check.py`, `.claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py`, `scripts/obsolete-file-edit-warning-hook.py`, `.claude/guard-hooks/session-location-write-guard.py`, `scripts/clean-worktrees.py` and `scripts/merge-gate.sh` each enforce one piece.
+- The git hooks, `scripts/branch-conflict-check.py`, `scripts/obsolete-file-edit-warning-hook.py`, `.claude/guard-hooks/session-location-write-guard.py`, `scripts/clean-worktrees.py` and `scripts/merge-gate.sh` each enforce one piece, and GitHub's ruleset "Block force pushes" refuses every force push.
 - Closed GHIs record past rulings: [checkout-freshness catch-up merges main into a branch whose head is frozen under review](https://github.com/nedsnodes/nedsnodes/issues/324) and [The checkout-freshness hook treats a new branch cut at a pull request's pushed head as never pushed, and rebases it](https://github.com/nedsnodes/nedsnodes/issues/913).
 
 Because nothing states the whole, the pieces disagree, and agents act on the disagreement. On 2026-10-08 the Mac's MD-skills seat checkout sat 86 commits behind main on a detached HEAD, a shape `docs/agents/seat-first-prompt.md` says should never occur, and the agent ran a skill whose text predated a rule the user had approved. A reading of every place on 2026-10-09 found sixteen further disagreements, which the design lists in full; among them:
@@ -19,7 +19,7 @@ Because nothing states the whole, the pieces disagree, and agents act on the dis
 - the documents place every agent-home on its own seat-branch, while live seat checkouts sit detached and nothing creates or describes that shape;
 - `CLAUDE.md` says merge-lane-2 tests a pull request's head commit merged onto main, while merge-lane-2 tests the head as it stands;
 - the first prompt the supervisor built for a seat told an agent to rebase a never-pushed branch, which the Stop hook already does; `nn-systems/handoff/handoff-supervisor.py` now gives no branch-state instruction for a never-pushed branch, and `BRANCH_STATE_PUSHED_TO_ORIGIN_INSTRUCTION` only for a pushed one;
-- "frozen" means "has an open pull request" to `.claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py` and "pushed" to the freshness hook;
+- "frozen" meant "has an open pull request" to the force-push guard, deleted in commit c7a32e113, and "pushed" to the freshness hook;
 - worktrees under agent-homes and in scratchpads are never removed, while `docs/nedsnodes-wiki/nedsnodes-fleet-git-worktree-working-model.md` (R21) and `docs/nedsnodes-wiki/nedsnodes-mac-and-ned-box-machine-setup.md` describe every session worktree as removed once merged;
 - a subagent's worktree gets no freshness check, because no hook runs when a subagent stops;
 - several documents describe behaviour the code no longer has.
