@@ -856,7 +856,10 @@ def run_fast_read_command_cases(fixture):
     plan = fixture.read_review_plan()
     whole_entry = next(entry for entry in plan["tool_message_to_agent_text_whole_pull_request"] if entry["label"] == "raise in show_message()")
     delta_entry = next(entry for entry in plan["tool_message_to_agent_text_delta"] if entry["label"] == "raise in show_message()")
-    command_prefix = "python3 nn-systems/cold-read/cold-read-fast-read.py --target "
+    # The reader is named in the checkout of the hook the plan takes its command from.
+    command_prefix = ("python3 " + shlex.quote(str(
+        Path(__file__).resolve().parent.parent / "nn-systems" / "cold-read" / "cold-read-fast-read.py"))
+        + " --target ")
     try:
         command_words = shlex.split(whole_entry["fast_read_command"])
     except ValueError:

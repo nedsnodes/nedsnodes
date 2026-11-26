@@ -648,11 +648,30 @@ def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str, options: tu
     checkout_entry = (
         f"top=$(git -C {shlex.quote(directory)} rev-parse --show-toplevel) && "
         f"cd -- \"$top\" && ")
+    script = shlex.quote(str(pathlib.Path(__file__).resolve().relative_to(REPO_ROOT)))
     fast_read_invocation = (
-        f"python3 {shlex.quote(str(pathlib.Path(__file__).resolve().relative_to(REPO_ROOT)))} "
-        f"--target {shlex.quote(ned_box_target)}"
+        f"python3 {script} --target {shlex.quote(ned_box_target)}"
         + "".join(f" {shlex.quote(option)}" for option in options))
-    remote_command = f"{checkout_entry}{session_assignment}exec {fast_read_invocation}"
+    # The read runs the reader of the ned-box checkout holding the target, which
+    # may predate an option this reader passes or defaults: it would then refuse
+    # the option, or run its older prompt without saying so.
+    reader_too_old = (
+        f"{PROGRAM}: no fast read ran: the cold-read-fast-read.py of the ned-box "
+        f"checkout holding {ned_box_target} does not know the option {{option}}, "
+        f"so it predates this reader on the Mac.\n"
+        f"If that checkout is yours, bring it up to date with origin/main on ned-box, "
+        f"for example by rebasing its branch onto origin/main, then run the same "
+        f"cold-read-fast-read command again.\n"
+        f"If it is not yours, give this whole message to the user, or, if you are a "
+        f"subagent, to the agent that dispatched you.")
+    reader_version_check = "".join(
+        f"{{ grep -qF -e {shlex.quote(option)} {script} || "
+        f"{{ printf '%s\\n' {shlex.quote(reader_too_old.format(option=option))} >&2; "
+        f"printf '%s\\n' {shlex.quote(f'FAILED (no fast read ran: the ned-box checkout reader predates {option})')}; "
+        f"exit 1; }}; }} && "
+        for option in (WITHOUT_QUESTION_4_OPTION, TEXT_INTENDED_READER_CATEGORY_OPTION))
+    remote_command = (f"{checkout_entry}{reader_version_check}"
+                      f"{session_assignment}exec {fast_read_invocation}")
     command_for_a_person = f"{checkout_entry}{fast_read_invocation}"
     rerun_command = cold_read_fast_read_script_rerun_shell_command_line_for_mac(ned_box_target, options)
     print(f"{PROGRAM}: git on this machine cannot read the ned-box worktree "
@@ -1745,11 +1764,19 @@ def fast_read_report_finish_and_print_path(
     # Before anything reads or ships it: put each original sentence under
     # the restatement claiming its id, and say which sentences no
     # restatement claimed.
-    attached = with_text_intended_reader_category_in_provenance_stamp(
-        attach_sentences_and_coverage(
-            cell_report.read_text(encoding="utf-8"), sentences, target,
-            marked_copy_kept, full_run_class_name, question_4_section),
-        text_intended_reader_category)
+    try:
+        attached = with_text_intended_reader_category_in_provenance_stamp(
+            attach_sentences_and_coverage(
+                cell_report.read_text(encoding="utf-8"), sentences, target,
+                marked_copy_kept, full_run_class_name, question_4_section),
+            text_intended_reader_category)
+    except ColdReadCellReportHasNoProvenanceStamp as error:
+        print(f"{PROGRAM}: no fast read report was written at {report}: {error}.\n"
+              f"Give this whole message to the user, or, if you are a subagent, to the "
+              f"agent that dispatched you.", file=sys.stderr)
+        print("FAILED (no fast read report was written: the cell's report has no "
+              "provenance stamp)")
+        return 1
     if edit_changed_ids or edit_removed_units:
         attached += (f"- The reviewer was told what the edit did: sentences added or "
                      f"changed, {len(edit_changed_ids)}; text removed or replaced, "
