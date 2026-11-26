@@ -24,6 +24,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 from pathlib import Path
@@ -1082,6 +1083,31 @@ def run_recorded_mutant_killed_check_cases():
     check("hunks at places that touch but do not overlap are not refused",
           not survivors.recorded_mutant_hunk_places_overlap([(0, ["a"], ["A"]), (1, ["b"], ["B"])]),
           "refused")
+    # (places, whether they overlap): a place's lines end at its line plus its old lines' count.
+    overlap_cases = [
+        ([(10, ["a", "b", "c"], ["A"]), (12, ["d"], ["D"])], True),
+        ([(10, ["a", "b", "c"], ["A"]), (13, ["d"], ["D"])], False),
+        ([(0, ["a"], ["A"]), (5, ["b"], ["B"])], False),
+    ]
+    got = [survivors.recorded_mutant_hunk_places_overlap(places) for places, _ in overlap_cases]
+    check("hunks overlap only when the next place starts before the last line of the one before "
+          "it ends; places apart do not",
+          got == [wanted for _, wanted in overlap_cases], got)
+    head_of_overlap = "0123456789abcdef" * 2
+    overlap_verdict, _ = survivors.recorded_mutant_verdict_without_a_suite_run(
+        None, "scripts/thing.py", overlap_hunks, head_of_overlap, overlap_source, None, {})
+    check("the could-not-be-judged verdict for overlapping hunks names the head commit by its "
+          "first 12 characters",
+          overlap_verdict is not None
+          and f"at head {head_of_overlap[:12]}, two hunks" in overlap_verdict[1], overlap_verdict)
+    # Past 256, where CPython stops sharing one object for each small int: the hunk only adds a
+    # line after 300 context lines, the last of which carries the pragma.
+    context = [f"line {number}" for number in range(300)]
+    with_pragma = context[:-1] + [context[-1] + "  # pragma: no mutate"]
+    check("a hunk that replaces no line does not end with a pragma, even when its last context "
+          "line before the added line has one",
+          not survivors.recorded_mutant_place_ends_with_pragma(
+              with_pragma, (0, list(context), list(context) + ["added"])), "ends with a pragma")
 
     verdict = survivors.recorded_mutant_run_verdict
     check("a run with the mutant applied that exits 0 is a survivor",
@@ -1387,6 +1413,11 @@ def run_quick_mutation_pass_cases():
           survivors.failure_handling_line_ranges(source)
           == [(4, 5), (7, 7), (9, 10), (12, 13), (14, 15), (27, 27)],
           survivors.failure_handling_line_ranges(source))
+    # "write" sorts after "wait", so only an exact match tells the two apart.
+    source = "def f(process):\n    if process.write():\n        g()\n"
+    check("failure-handling code: an if on a method call other than wait() is not",
+          survivors.failure_handling_line_ranges(source) == [],
+          survivors.failure_handling_line_ranges(source))
     # cosmic-ray 8.7.0's cr-filter-pragma skips a mutation when its LAST line carries the
     # pragma, or the line before when the mutation ends at a line's start; the survivor
     # task names "line", so "line" must be that line.
@@ -1452,6 +1483,10 @@ def run_quick_mutation_pass_cases():
                   "diff": SURVIVOR_DIFF, "reason": ""}]
               and written.get("errored") == [] and written.get("files_with_no_suite") == [],
               written)
+        written_text = json_file.read_text() if json_file.exists() else ""
+        check("the JSON file is indented by one space a level",
+              written_text.startswith('{\n "head": ') and '\n  {\n   "module_path": '
+              in written_text, written_text)
 
     # A JSON file that cannot be written: exit 2, after the summary.
     with tempfile.TemporaryDirectory() as scratch_name:
@@ -1647,11 +1682,9 @@ def mutate_and_test(mutations, test_command, timeout):
 }
 
 
-def run_parallel_mutant_workers_with_fake_cosmic_ray_package(
-        scratch_name, operators, worktree_names, job_ids_to_run="all",
-        no_mutant_started_after="never"):
-    """Run the parallel workers on a fake session whose work items have these operators; return
-    (the run, the session as it was left, the worktrees)."""
+def fake_cosmic_ray_package_config_session_and_worktrees(scratch_name, operators, worktree_names):
+    """Write the fake cosmic_ray package under <scratch>/site, a config, a fake session whose work
+    items have these operators, and the worktrees; return (config, session, worktrees)."""
     scratch = Path(scratch_name)
     package = scratch / "site" / "cosmic_ray"
     package.mkdir(parents=True)
@@ -1669,6 +1702,17 @@ def run_parallel_mutant_workers_with_fake_cosmic_ray_package(
             work_item("scripts/thing.py", 2, operator, "")["mutations"][0],
             definition_name=None)]}
         for number, operator in enumerate(operators)]}))
+    return config, session, worktrees
+
+
+def run_parallel_mutant_workers_with_fake_cosmic_ray_package(
+        scratch_name, operators, worktree_names, job_ids_to_run="all",
+        no_mutant_started_after="never"):
+    """Run the parallel workers on a fake session whose work items have these operators; return
+    (the run, the session as it was left, the worktrees)."""
+    scratch = Path(scratch_name)
+    config, session, worktrees = fake_cosmic_ray_package_config_session_and_worktrees(
+        scratch_name, operators, worktree_names)
     completed = subprocess.run(
         [sys.executable, str(SCRIPT),
          load_script_module().COSMIC_RAY_SESSION_PENDING_MUTANTS_RUN_BY_PARALLEL_WORKERS_FLAG,
@@ -1679,7 +1723,75 @@ def run_parallel_mutant_workers_with_fake_cosmic_ray_package(
     return completed, json.loads(session.read_text()), worktrees
 
 
+def run_parallel_mutant_workers_in_this_process_with_clock_readings(
+        scratch_name, operators, clock_readings, not_started_after_unix_time):
+    """Run the parallel workers, with one worktree, in this process on a fake session whose work
+    items have these operators, the program's clock giving clock_readings in turn; return (the
+    exit code, the session as it was left). The last reading repeats: a worker thread that
+    raised would leave the program waiting for its result for ever."""
+    config, session, worktrees = fake_cosmic_ray_package_config_session_and_worktrees(
+        scratch_name, operators, ["one"])
+    site = str(Path(scratch_name) / "site")
+    script = load_script_module()
+    readings = list(clock_readings)
+    script.time = types.SimpleNamespace(
+        time=lambda: readings.pop(0) if len(readings) > 1 else readings[0])
+    pythonpath = os.environ.get("PYTHONPATH")
+    os.environ["PYTHONPATH"] = site
+    sys.path.insert(0, site)
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            exit_code = script.cosmic_ray_session_pending_mutants_run_by_parallel_workers(
+                str(config), str(session), None, not_started_after_unix_time,
+                [str(worktree) for worktree in worktrees])
+    finally:
+        sys.path.remove(site)
+        for name in [name for name in sys.modules
+                     if name == "cosmic_ray" or name.startswith("cosmic_ray.")]:
+            del sys.modules[name]
+        if pythonpath is None:
+            del os.environ["PYTHONPATH"]
+        else:
+            os.environ["PYTHONPATH"] = pythonpath
+    return exit_code, json.loads(session.read_text())
+
+
 def run_parallel_mutant_workers_cases_with_fake_cosmic_ray_package():
+    with tempfile.TemporaryDirectory() as scratch_name:
+        exit_code, session = run_parallel_mutant_workers_in_this_process_with_clock_readings(
+            scratch_name, ["first"], [5.0], 5.0)
+        check("the parallel workers start no mutant when the clock reads exactly the time after "
+              "which no mutant starts",
+              exit_code == 0 and session["results"] == {}, (exit_code, session))
+    with tempfile.TemporaryDirectory() as scratch_name:
+        exit_code, session = run_parallel_mutant_workers_in_this_process_with_clock_readings(
+            scratch_name, ["first", "second"], [10.0, 0.0], 5.0)
+        check("a mutant not started does not stop the parallel workers' program recording the "
+              "result of a mutant after it",
+              exit_code == 0 and sorted(session["results"]) == ["job-1"], (exit_code, session))
+    script = load_script_module()
+    given = []
+    script.cosmic_ray_session_pending_mutants_run_by_parallel_workers = \
+        lambda *arguments: given.append(arguments) or 0
+    # cosmic-ray's job ids are hex, so most sort before "all".
+    script.main([script.COSMIC_RAY_SESSION_PENDING_MUTANTS_RUN_BY_PARALLEL_WORKERS_FLAG,
+                 "config.toml", "session.sqlite", "0a1b,2c3d", "1700000000.5", "worktree"])
+    check("the parallel workers' command line passes on its job ids and its time after which no "
+          "mutant starts",
+          given == [("config.toml", "session.sqlite", ["0a1b", "2c3d"], 1700000000.5,
+                     ["worktree"])], given)
+    # "nonsense" sorts after "never", so only an exact match tells the two apart.
+    given.clear()
+    try:
+        script.main([script.COSMIC_RAY_SESSION_PENDING_MUTANTS_RUN_BY_PARALLEL_WORKERS_FLAG,
+                     "config.toml", "session.sqlite", "all", "nonsense", "worktree"])
+        raised = None
+    except ValueError as error:
+        raised = error
+    check("the parallel workers' command line refuses a time after which no mutant starts that "
+          "is neither \"never\" nor a number",
+          raised is not None and given == [], (raised, given))
+
     with tempfile.TemporaryDirectory() as scratch_name:
         completed, session, worktrees = run_parallel_mutant_workers_with_fake_cosmic_ray_package(
             scratch_name, ["first", "second", "third", "fourth"], ["one", "two"])
@@ -1876,6 +1988,50 @@ def run_mutants_run_at_most_and_no_mutant_started_after_unix_time_cases():
                       if each == path] for path in same_mutants}
     check("two files with the same mutants have them chosen in different orders",
           by_file["scripts/a.py"] != by_file["scripts/b.py"], by_file)
+    two_hundred_each = {"scripts/a.py": [("a", line) for line in range(200)],
+                        "scripts/b.py": [("a", line) for line in range(200)]}
+    # Past 256, where CPython stops sharing one object for each small int; an odd number is
+    # reached part-way through the files' turn. A wrong stop condition loops for ever on these,
+    # so each runs in a thread that is given up.
+    for case_name, at_most, wanted_count in [
+            ("a number below 0 chooses none", -1, 0),
+            ("a number over 256 chooses exactly that many, even when it is reached part-way "
+             "through the files' turn", 301, 301),
+            ("an even number over 256 chooses that many", 300, 300)]:
+        chosen_in_thread = []
+        thread = threading.Thread(target=lambda at_most=at_most: chosen_in_thread.append(
+            chosen(two_hundred_each, "head-a", at_most)), daemon=True)
+        thread.start()
+        thread.join(30)
+        check(case_name, not thread.is_alive() and chosen_in_thread
+              and len(chosen_in_thread[0]) == wanted_count,
+              "still choosing after 30 s" if thread.is_alive()
+              else [len(each) for each in chosen_in_thread])
+        if thread.is_alive():
+            # The thread holds the interpreter's lock in turns for ever, slowing every case after.
+            sys.exit(1)
+
+    with tempfile.TemporaryDirectory() as scratch_name:
+        session = Path(scratch_name) / "session.sqlite"
+        connection = sqlite3.connect(session)
+        connection.executescript(
+            "CREATE TABLE work_items (job_id TEXT);"
+            "CREATE TABLE mutation_specs (job_id TEXT, operator_name TEXT, occurrence INTEGER, "
+            "start_pos_row INTEGER, start_pos_col INTEGER, end_pos_row INTEGER, "
+            "end_pos_col INTEGER, operator_args TEXT);"
+            "CREATE TABLE work_results (job_id TEXT, worker_outcome TEXT);"
+            "INSERT INTO work_items VALUES ('job-a'), ('job-b'), ('job-c');"
+            "INSERT INTO mutation_specs VALUES ('job-a', 'core/Op', 0, 3, 4, 3, 9, 'one'), "
+            "('job-b', 'core/Op', 0, 3, 4, 3, 9, 'two'), ('job-c', 'core/Op', 1, 5, 0, 5, 2, NULL);"
+            "INSERT INTO work_results VALUES ('job-b', 'NORMAL'), ('job-c', 'SKIPPED');")
+        connection.commit()
+        connection.close()
+        mutants = script.cosmic_ray_session_mutants_not_skipped_by_filters("scripts/a.py", session)
+        check("a session's mutants not skipped are keyed by operator, occurrence, start and end "
+              "position and operator arguments, so mutants differing only in their arguments "
+              "are two, each with its job id and whether it has a result",
+              mutants == {("core/Op", 0, 3, 4, 3, 9, "one"): ("job-a", False),
+                          ("core/Op", 0, 3, 4, 3, 9, "two"): ("job-b", True)}, mutants)
 
     # ------------------------------------------------------------------
     # Bad invocations.
@@ -2297,6 +2453,101 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
               and "Then run the same command again:\n  python3 " in completed.stderr
               and len(worktrees_of(repository)) == 1,
               f"rc={completed.returncode} err={completed.stderr}")
+
+
+class StandardOutputWithFlushesRecorded(io.StringIO):
+    flushed = ""
+
+    def flush(self):
+        self.flushed = self.getvalue()
+        super().flush()
+
+
+def mutation_test_one_file_steps_with_cosmic_ray_faked(
+        scratch, limits, not_started_after_unix_time, clock_reading):
+    """Run mutation_test_one_file on a kept session with pending mutants, every cosmic-ray step
+    faked, the program's clock reading clock_reading, and limits as its last arguments, whether
+    the mutants run are limited and the job ids to run, none of them when limits is empty;
+    return (what it returned, each cosmic-ray subcommand run with the standard output flushed
+    before it)."""
+    script = load_script_module()
+    session = scratch / "kept.sqlite"
+    session.write_text("")
+    script.cosmic_ray_config_written_and_session_path_of_one_file = \
+        lambda *_: (scratch / "config.toml", session, 30.0)
+    script.cosmic_ray_session_kept_to_resume_has_pending_mutants_or_is_unreadable = \
+        lambda _: True
+    script.cosmic_ray_session_kept_from_an_earlier_run_mutants_skipped = lambda *_: None
+    script.time = types.SimpleNamespace(time=lambda: clock_reading)
+    script.outcomes_from_dump = lambda *_: "outcomes of the dump"
+    standard_output = StandardOutputWithFlushesRecorded()
+    steps = []
+
+    def run(command, cwd, environment=None):
+        steps.append((command[1], standard_output.flushed))
+        if command[1] == "baseline":
+            Path(command[3]).write_text("")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def run_or_raise(command, cwd, environment=None, what=None):
+        steps.append((command[1], standard_output.flushed))
+        return '["job-a", {"test_outcome": "survived"}]\n'
+
+    script.run = run
+    script.run_or_raise = run_or_raise
+    arguments = types.SimpleNamespace(
+        no_mutant_started_after_unix_time=not_started_after_unix_time,
+        parallel_mutant_workers=None,
+        mutants_with_no_result_in_kept_cosmic_ray_sessions_marked_skipped_when_head_commit_before_cutoff=False)
+    with contextlib.redirect_stdout(standard_output):
+        returned = script.mutation_test_one_file(
+            "scripts/thing.py", ["scripts/thing-test.py"], [scratch], scratch,
+            {"cosmic-ray": "cosmic-ray"}, "head", "base", arguments, {}, None, None, None, None,
+            scratch, None, *limits)
+    return returned, steps
+
+
+def run_mutation_test_one_file_and_session_made_cases_with_cosmic_ray_faked():
+    with tempfile.TemporaryDirectory() as scratch_name:
+        returned, steps = mutation_test_one_file_steps_with_cosmic_ray_faked(
+            Path(scratch_name), (True, ["job-a"]), 5.0, 5.0)
+        check("with the mutants run limited, a file whose turn comes when the clock reads exactly "
+              "the time after which no mutant starts runs neither its baseline nor a mutant",
+              returned == "outcomes of the dump" and [step for step, _ in steps] == ["dump"],
+              (returned, steps))
+    for limits, called_with in [((False, None), "unlimited"),
+                                ((), "without the arguments that limit the mutants run")]:
+        with tempfile.TemporaryDirectory() as scratch_name:
+            returned, steps = mutation_test_one_file_steps_with_cosmic_ray_faked(
+                Path(scratch_name), limits, None, 5.0)
+            flushed_before_exec = [flushed for step, flushed in steps if step == "exec"]
+            check(f"called {called_with}, a resumed session's RESUMED line is flushed before "
+                  f"cosmic-ray exec runs its mutants",
+                  returned == "outcomes of the dump" and len(flushed_before_exec) == 1
+                  and "RESUMED  scripts/thing.py: its cosmic-ray session" in flushed_before_exec[0],
+                  (returned, steps))
+    with tempfile.TemporaryDirectory() as scratch_name:
+        script = load_script_module()
+
+        def run_or_raise(command, cwd, environment=None, what=None):
+            if command[1] == "init":
+                Path(command[3]).write_text("")
+            return ""
+
+        script.run_or_raise = run_or_raise
+        script.cosmic_ray_session_mutants_skipped_but_one_per_changed_line_seeded_by_head = \
+            lambda *_: None
+        session = Path(scratch_name) / "not-yet-made" / "sessions" / "kept.sqlite"
+        try:
+            script.cosmic_ray_session_made_and_filtered(
+                "scripts/thing.py", Path(scratch_name) / "config.toml", session,
+                {name: name for name in ("cosmic-ray", "cr-filter-git", "cr-filter-pragma")},
+                Path(scratch_name), {}, None, "head")
+            refusal = None
+        except script.CouldNotRun as error:
+            refusal = str(error)
+        check("a kept session is made in a directory whose parents do not exist yet",
+              refusal is None and session.is_file(), refusal)
 
 
 def run_mutants_run_at_most_case_with_real_cosmic_ray():
@@ -3945,6 +4196,7 @@ def run_cases():
     run_parallel_mutant_workers_case_with_real_cosmic_ray()
     run_mutants_run_at_most_and_no_mutant_started_after_unix_time_cases()
     run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cases()
+    run_mutation_test_one_file_and_session_made_cases_with_cosmic_ray_faked()
     run_mutants_run_at_most_case_with_real_cosmic_ray()
 
     # ------------------------------------------------------------------
