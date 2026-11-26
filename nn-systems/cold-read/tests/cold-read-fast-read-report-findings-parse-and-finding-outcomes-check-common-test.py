@@ -45,7 +45,7 @@ Files: docs/a.md
 > ## Question 2: a heading of the document, quoted
 - 1. a restatement bullet
 
-## Question 2: Where you struggled
+## Question 2: What is unclear
 
 1. `"the rename freeze"`: undefined.
 2) `"its kind"`: ambiguous.
@@ -57,7 +57,7 @@ Files: docs/a.md
 
 ## Question 3: What it does not cover that it implies it should
 
-No issues
+No problems found
 
 ## Question 4: What should be code
 
@@ -85,7 +85,7 @@ check("a finding keeps the opening of its first line, for the agent to tell find
       findings[0].opening == '`"the rename freeze"`: undefined.' and findings[3].opening.startswith('"the 16"'),
       findings[:1])
 other_levels = module.cold_read_fast_read_report_findings(
-    "# Files examined\n\n1. docs/a.md\n\n# Question 2: Where you struggled\n\n1. a\n\n"
+    "# Files examined\n\n1. docs/a.md\n\n# Question 2: What is unclear\n\n1. a\n\n"
     "## Document: docs/b.md\n\n### Question 1: What it says\n\n1. not a finding\n\n"
     "### Question 3: What it does not cover that it implies it should\n\n1. b\n\n"
     "## Question 4: What should be code\n\n### docs/b.md\n\n1. c\n")
@@ -93,7 +93,7 @@ check("a question headed with # or ###, as some reviewers write them, holds find
       "that is no question ends the question before it",
       ids(other_levels) == ["Q2.1", "Q3.1", "Q4.1"], ids(other_levels))
 check("a report with no numbered item under a finding question has no findings",
-      module.cold_read_fast_read_report_findings("## Question 2: Where you struggled\n\nNo issues\n") == [])
+      module.cold_read_fast_read_report_findings("## Question 2: What is unclear\n\nNo problems found\n") == [])
 
 long_finding = [module.Finding(2, 1, "x" * 150)]
 check("a finding's opening is cut to FINDING_OPENING_CHARACTERS_SHOWN characters in the list",
@@ -176,12 +176,12 @@ with tempfile.TemporaryDirectory() as scratch:
         malformed = str(error)
     check("an outcomes file that is not the JSON the program writes raises ValueError naming it",
           malformed is not None and "cold-read-fast-read-finding-outcomes.json" in malformed, malformed)
-    (record / "cold-read-fast-read.md").write_text("## Question 2: Where you struggled\n\nNo issues\n")
+    (record / "cold-read-fast-read.md").write_text("## Question 2: What is unclear\n\nNo problems found\n")
     check("a record whose report has no findings needs no outcomes, whatever its outcomes file holds",
           module.cold_read_fast_read_findings_without_outcomes(record) == [])
     old_record = Path(scratch) / "old-2026-09-01"
     old_record.mkdir()
-    (old_record / "fast-read.md").write_text("## Question 2: Where you struggled\n\n1. x\n", encoding="utf-8")
+    (old_record / "fast-read.md").write_text("## Question 2: What is unclear\n\n1. x\n", encoding="utf-8")
     check("a record from before the cold-read- prefix is read under its report's older name",
           ids(module.cold_read_fast_read_findings_without_outcomes(old_record)) == ["Q2.1"])
 

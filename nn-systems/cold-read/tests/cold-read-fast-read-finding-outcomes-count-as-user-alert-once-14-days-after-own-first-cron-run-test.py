@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory() as scratch:
     scratch = Path(scratch)
     records = scratch / "cold-read-records"
     (records / "a-2026-12-02").mkdir(parents=True)
-    (records / "a-2026-12-02" / "cold-read-fast-read.md").write_text("## Question 2: Where you struggled\n\n1. x\n")
+    (records / "a-2026-12-02" / "cold-read-fast-read.md").write_text("## Question 2: What is unclear\n\n1. x\n")
     (records / "a-2026-12-02" / "cold-read-fast-read-finding-outcomes.json").write_text(json.dumps(
         {"findings": [{"finding": "Q2.1", "question": 2, "number": 1, "outcome": "applied"}]}))
 
@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory() as scratch:
           due.returncode == 0 and len(alerts) == 1
           and alerts[0]["title"] == ("How often agents applied each cold-read-fast-read question's findings, "
                                      "over two weeks")
-          and "| Question 2, Where you struggled | 1 | 0 | 100% |" in alerts[0]["alert_text"]
+          and "| Question 2, What is unclear | 1 | 0 | 100% |" in alerts[0]["alert_text"]
           and f"remove the job {JOB_NAME}" in alerts[0]["action"]
           and json.loads((state(home) / "user-alert-written.json").read_text())["user_alert_id"] == alerts[0]["id"],
           described(due))

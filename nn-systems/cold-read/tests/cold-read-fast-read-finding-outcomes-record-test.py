@@ -31,13 +31,13 @@ REPORT = """\
 [s1]
 - a point
 
-## Question 2: Where you struggled
+## Question 2: What is unclear
 
 1. `"the freeze"`: undefined.
 
 ## Question 3: What it does not cover that it implies it should
 
-No issues
+No problems found
 
 ## Question 4: What should be code
 
@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and lines[4] == f"python3 {PROGRAM} --record-finding-outcomes-in-cold-read-record {record} \\"
           and lines[5] == f"  --finding-outcome 'Q2.1={PLACEHOLDER}' \\"
           and lines[6] == f"  --finding-outcome 'Q4.1={PLACEHOLDER}'", told)
-    no_findings = scratch_record(root, "b-2026-11-19", "## Question 2: Where you struggled\n\nNo issues\n")
+    no_findings = scratch_record(root, "b-2026-11-19", "## Question 2: What is unclear\n\nNo problems found\n")
     check("after a read whose report has no findings, stderr says it needs no outcomes",
           fast_read.finding_outcomes_to_record_lines(no_findings)
           == "cold-read-fast-read: the report has no findings, so it needs no finding outcomes.")

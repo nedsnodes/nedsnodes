@@ -104,7 +104,7 @@ record = Path(os.environ["STAND_IN_RECORDS"]) / (target.stem + "-2026-10-17")
 (record / "target").mkdir(parents=True, exist_ok=True)
 (record / "target" / target.name).write_text(target.read_text())
 (record / "cold-read-fast-read.md").write_text(
-    "## Question 2: Where you struggled\n\n1. `three`: unclear.\n\n## Question 4: What should be code\n\n"
+    "## Question 2: What is unclear\n\n1. `three`: unclear.\n\n## Question 4: What should be code\n\n"
     "1. `three` — code could count it.\n" if mode == "with-findings" else "findings\n")
 print(record / "cold-read-fast-read.md")
 if mode == "path-then-exit":
