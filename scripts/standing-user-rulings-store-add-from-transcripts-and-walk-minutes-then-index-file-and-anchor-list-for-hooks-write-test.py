@@ -821,7 +821,7 @@ with tempfile.TemporaryDirectory() as directory:
 # A prompt stored before the reader knew it: the handoff-supervisor's own no-handoff prompt, put in the store as
 # an earlier run did, with a tag, gets the status not-the-user's-words; it stays in the store, tag and full-text row
 # included, and the index file and the anchor list leave it out.
-supervisor = program.transcript_reader.handoff_supervisor
+supervisor = recover.supervisor
 
 
 def store_with_an_earlier_runs_entries(case, texts, kind="user-words", state="standing"):
@@ -907,7 +907,7 @@ with tempfile.TemporaryDirectory() as directory:
 with tempfile.TemporaryDirectory() as directory:
     case = Case(directory)
     quoting = ("item 4 of 9: the user answered approved (2026-10-30 10:00), which makes its change. Remove \""
-               + program.transcript_reader.crash_recovery.IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER + "\".")
+               + recover.IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER + "\".")
     store_with_an_earlier_runs_entries(case, [quoting], kind="walk-minutes-user-ruling")
     superseded_prompt = supervisor.FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE.format(agent="beta")
     store_with_an_earlier_runs_entries(case, [superseded_prompt], state="superseded")

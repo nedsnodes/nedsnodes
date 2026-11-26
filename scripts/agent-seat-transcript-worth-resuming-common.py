@@ -4,11 +4,18 @@
 Shared by recovery and the handoff supervisor to avoid circular imports and
 keep their definitions of an empty successor aligned."""
 
+import importlib.util
 import json
 import os
 from pathlib import Path
 
-FIRST_PROMPT_AFTER_RECORDED_EXIT_MARKER = "as it does when a session is stopped on purpose"
+_launch_prompt_recognize_spec = importlib.util.spec_from_file_location(
+    "compaction_summary_and_launch_prompt_user_turn_text_recognize_common",
+    Path(__file__).with_name("compaction-summary-and-launch-prompt-user-turn-text-recognize-common.py"))
+launch_prompt_recognize = importlib.util.module_from_spec(_launch_prompt_recognize_spec)
+_launch_prompt_recognize_spec.loader.exec_module(launch_prompt_recognize)
+
+FIRST_PROMPT_AFTER_RECORDED_EXIT_MARKER = launch_prompt_recognize.FIRST_PROMPT_AFTER_RECORDED_EXIT_MARKER
 # A machinery-written opener can precede real work; reject only when work is also absent.
 EMPTY_SUCCESSOR_MARKERS = (
     "No handoff exists yet",

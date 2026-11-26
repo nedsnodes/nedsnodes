@@ -17,7 +17,8 @@ that record's text is the payload's prompt; Claude Code may not have written the
 hook runs, and the newest record is then the previous turn's, or there is none. Otherwise the prompt itself
 decides: one that opens as NOT_TYPED_PROMPT_OPENINGS lists is not his. Before either, a prompt the handoff-supervisor
 or crash recovery starts or resumes an agent-session with is not his, though Claude Code marks it `human`: the
-speaker test in SPEAKER_TEST_FILE recognizes it by those programs' own constants.
+speaker test in SPEAKER_TEST_FILE recognizes it by the constants those programs build it from, which imports
+nothing else, so this hook loads it on every prompt at little cost.
 
 ON A TYPED PROMPT the hook calls, from ALERTS_MODULE_FILE, user_alerts_claimed_delete_if_recorded_in_approval_walk_minutes_else_release_to_pending_after_30_minutes,
 then user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed, whose docstrings say what each moves.
@@ -61,7 +62,7 @@ ALERTS_MODULE_FILE = (CHECKOUT / "nn-systems" / "general-tools"
 LAUNCHED_AGENT_SESSION_ENVIRONMENT_FILE = (CHECKOUT / "nn-systems" / "handoff"
                                            / "handoff-supervisor-launched-agent-session-environment-variable-names-common.py")
 TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude-code-session-transcript-records-read-backward-common.py"
-SPEAKER_TEST_FILE = CHECKOUT / "scripts" / "search-user-messages-in-transcripts.py"
+SPEAKER_TEST_FILE = CHECKOUT / "scripts" / "compaction-summary-and-launch-prompt-user-turn-text-recognize-common.py"
 # At most half this hook's timeout in .claude/settings.json, so a stalled insert is reported, not killed with
 # the hook after the alerts are claimed; a test checks.
 INSERT_TIMEOUT_SECONDS = 5
@@ -150,7 +151,7 @@ def record_text(record):
 
 def typed_by_user(payload):
     prompt = payload.get("prompt") or ""
-    speaker_test = load_module("search_user_messages_in_transcripts", SPEAKER_TEST_FILE)
+    speaker_test = load_module("compaction_summary_and_launch_prompt_user_turn_text_recognize_common", SPEAKER_TEST_FILE)
     if speaker_test.user_turn_text_is_compaction_summary_or_launch_prompt(prompt):
         return False
     transcript = payload.get("transcript_path")

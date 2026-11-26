@@ -193,6 +193,12 @@ _remote_control_name_common_spec = importlib.util.spec_from_file_location(
 remote_control_name_common = importlib.util.module_from_spec(_remote_control_name_common_spec)
 _remote_control_name_common_spec.loader.exec_module(remote_control_name_common)
 
+_launch_prompt_recognize_spec = importlib.util.spec_from_file_location(
+    "compaction_summary_and_launch_prompt_user_turn_text_recognize_common",
+    SCRIPTS_DIRECTORY / "compaction-summary-and-launch-prompt-user-turn-text-recognize-common.py")
+launch_prompt_recognize = importlib.util.module_from_spec(_launch_prompt_recognize_spec)
+_launch_prompt_recognize_spec.loader.exec_module(launch_prompt_recognize)
+
 _worth_resuming_spec = importlib.util.spec_from_file_location(
     "seat_transcript_worth_resuming",
     SCRIPTS_DIRECTORY / "agent-seat-transcript-worth-resuming-common.py")
@@ -293,25 +299,18 @@ _agent_seat_terminal_captures_spec.loader.exec_module(agent_seat_terminal_captur
 # One loaded copy, so the GitCommandFailed checkout_freshness_catch_up raises is the class caught here.
 git_machine_readable_output = checkout_freshness_catch_up.git_output
 
-# Also opens scripts/recover-crashed-seats.py's resume prompts; the transcript reader recognizes all three by it.
-CRASH_RECOVERY_RESUME_PROMPT_OPENING = "This session was resumed by crash recovery (nedschorus#120)"
+CRASH_RECOVERY_RESUME_PROMPT_OPENING = launch_prompt_recognize.CRASH_RECOVERY_RESUME_PROMPT_OPENING
 # The opening is an EMPTY_SUCCESSOR_MARKERS entry used to recognize a workless resume.
 RESUME_PROMPT_WHEN_A_SESSION_ENDED_WITHOUT_A_HANDOFF = (
     f"{CRASH_RECOVERY_RESUME_PROMPT_OPENING}: the "
     "previous session ended without writing a handoff. Re-verify in-flight "
     "state before trusting it, then continue the work underway."
 )
-FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE = "You are {agent}. No handoff exists yet; ask what to work on."
-# Claude Code records a prompt passed on its command line as typed by a person, so this line is the only mark
-# by which scripts/search-user-messages-in-transcripts.py tells the launch command's prompt from the user's words.
+FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE = launch_prompt_recognize.FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE
 FIRST_PROMPT_FROM_LAUNCH_COMMAND_NOT_TYPED_BY_THE_USER_LINE = (
-    "The text above this line came from the handoff-supervisor's --first-prompt-file or --first-prompt; "
-    "the user did not type it.")
-# Transcripts already written end their launch command's prompt with these, so the reader must still know them.
+    launch_prompt_recognize.FIRST_PROMPT_FROM_LAUNCH_COMMAND_NOT_TYPED_BY_THE_USER_LINE)
 FIRST_PROMPT_FROM_LAUNCH_COMMAND_NOT_TYPED_BY_THE_USER_LINE_EARLIER_WORDINGS = (
-    "The handoff-supervisor was given this first prompt with --first-prompt-file or --first-prompt; "
-    "the user did not type it.",
-)
+    launch_prompt_recognize.FIRST_PROMPT_FROM_LAUNCH_COMMAND_NOT_TYPED_BY_THE_USER_LINE_EARLIER_WORDINGS)
 
 
 def first_prompt_from_launch_command_marked_not_typed_by_the_user(first_prompt: str) -> str:
@@ -1489,7 +1488,7 @@ class IgnitionPlanWithoutConversationTail:
                 waiting_approval_walk_item: tuple = ()) -> str:
         if self.unextracted_transcript_path is not None:
             recovery_note = (
-                "the previous session's conversation-tail is unavailable, because the "
+                f"{launch_prompt_recognize.IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER}, because the "
                 f"handoff-supervisor could not extract session {self.unextracted_session_id}'s "
                 "session-dialog; this next-step and the repository are your context, and "
                 f"that session's transcript is {self.unextracted_transcript_path}, which you "
@@ -1497,7 +1496,7 @@ class IgnitionPlanWithoutConversationTail:
         elif self.unextracted_transcript_paths_in_several_folders:
             paths = [str(path) for path in self.unextracted_transcript_paths_in_several_folders]
             recovery_note = (
-                "the previous session's conversation-tail is unavailable, because the "
+                f"{launch_prompt_recognize.IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER}, because the "
                 f"handoff-supervisor could not extract session {self.unextracted_session_id}'s "
                 "session-dialog; this next-step and the repository are your context, and "
                 "that session's transcript is in more than one folder, at "
@@ -1505,15 +1504,15 @@ class IgnitionPlanWithoutConversationTail:
                 "next-step leaves out something you need.")
         elif self.unextracted_transcript_expected_path is not None:
             recovery_note = (
-                "the previous session's conversation-tail is unavailable, because the "
+                f"{launch_prompt_recognize.IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER}, because the "
                 f"handoff-supervisor could not extract session {self.unextracted_session_id}'s "
                 "session-dialog, and that session's transcript is not at "
                 f"{self.unextracted_transcript_expected_path} or in any other folder under "
                 f"{PROJECTS_ROOT}/; this next-step and the repository are your whole context.")
         else:
-            recovery_note = ("the previous session's conversation-tail is unavailable; "
+            recovery_note = (f"{launch_prompt_recognize.IGNITION_WITHOUT_CONVERSATION_TAIL_MARKER}; "
                              "this next-step and the repository are your whole context.")
-        prompt = (f"(Recovered at {self.occasion}: {recovery_note}) "
+        prompt = (f"{launch_prompt_recognize.IGNITION_WITHOUT_CONVERSATION_TAIL_OPENING}{self.occasion}: {recovery_note}) "
                   + ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION)
         for line in waiting_approval_walk_item:
             prompt += " " + line
