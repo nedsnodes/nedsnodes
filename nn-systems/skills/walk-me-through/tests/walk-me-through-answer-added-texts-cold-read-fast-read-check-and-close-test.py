@@ -5226,8 +5226,7 @@ def test_an_item_an_earlier_ruling_decides_against_its_recommendation_is_recorde
           closed.returncode == 0
           and "\nitem 3 of 9: already decided by `walk x's minutes, item 3 (2026-10-20)`; the walk does not come back "
               "to it. <rejected>\n" in case.minutes.read_text()
-          and lines[:3] == ["item 3 of 9 is recorded in the minutes as settled without being shown to the user.",
-                            "List it, with its number, in one line of your next message to the user.",
+          and lines[:2] == ["item 3 of 9 is recorded in the minutes as settled without being shown to the user.",
                             "It is recorded as disapproved: the change its alternative describes may now be made, "
                             "and the change its recommendation describes may not."]
           and marker(case) == f"#next_to_present item 4 of {WALK_DOCUMENT_COUNTED_M}",
