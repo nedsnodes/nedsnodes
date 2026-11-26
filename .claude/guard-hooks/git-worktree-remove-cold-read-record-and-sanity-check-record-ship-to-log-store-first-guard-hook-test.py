@@ -908,6 +908,20 @@ for label, command, cwd, expected in (
     check(f"a removal with {label} gives {expected}",
           hook.worktrees_removed_or_unresolved_reason(command, cwd, worktrees_listed_in_r_alone) == expected,
           hook.worktrees_removed_or_unresolved_reason(command, cwd, worktrees_listed_in_r_alone))
+# A removal with no -C that the hook cannot place lists the cwd's worktrees once, not again under "<cwd>/".
+listed_once_checkout, _ = checkout_with_worktree("listedonce")
+listings_run = []
+
+
+def runner_counting_listings(argv, **keywords):
+    if argv[0] == "git" and "list" in argv:
+        listings_run.append(argv[2])
+    return subprocess.run(argv, **keywords)
+
+
+run_hook(payload_for("git worktree remove names-no-worktree", listed_once_checkout), runner=runner_counting_listings)
+check("an unplaced removal with no -C lists the cwd's worktrees once", listings_run == [str(listed_once_checkout)],
+      listings_run)
 not_a_repository_checkout, not_a_repository_worktree = checkout_with_worktree("dashcnotarepository")
 not_a_repository = _scratch / "dashcnotarepository" / "not-a-repository"
 not_a_repository.mkdir()
