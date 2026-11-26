@@ -148,8 +148,9 @@ is taken at any age; a standing document only mentioned, or named inside a
 quotation, does not count. Any other citation's ruling is dated by the earliest
 YYYY-MM-DD date in it that is not part of a name, since dates after the ruling's,
 such as a merge's, often follow it; the date in `foo-2026-10-14-minutes.md` is
-not read. A citation holding no such date is refused too, because its age cannot
-be told. Today is the local date. The now-over-later citation the program
+not read. A citation holding no such date is refused too: its ruling is taken
+as too old, and the user is asked again unless the cited line holds the date.
+Today is the local date. The now-over-later citation the program
 supplies is not checked, since the program itself records that ruling.
 
 `--now-over-later-already-decided` is --already-decided with the citation
@@ -1561,10 +1562,12 @@ RULING_TOO_OLD = (
 RULING_UNDATED = (
     "nothing written: --already-decided was refused for {item}, because its citation {citation} names no standing "
     "document with a line or section in it, such as `GHI-MD 2118 line 63`, and holds no date written "
-    "YYYY-MM-DD outside a name, so its age cannot be told; the walk-me-through skill applies a ruling found only in "
+    "YYYY-MM-DD outside a name, so it is taken as too old; the walk-me-through skill applies a ruling found only in "
     "walk-minutes or a handoff dialog for {limit} days.\n"
-    "If the ruling is in walk-minutes or a handoff dialog, add the date the user gave it to the citation, as in "
-    "\"(2026-11-20)\", and run check again.\n"
+    "If the walk-minutes line or session dialog line that records the ruling holds its date, add that date to the "
+    "citation, as in \"(2026-11-20)\", and run check again.\n"
+    "If the ruling has no date and bears on {item}, quote it in the item, show the item to the user, ask whether the "
+    "ruling still holds, and run check with the flag for his answer.\n"
     "If a standing document records the same ruling, run check again citing that document and the line or section "
     "that records it.")
 NOW_OVER_LATER_FLAG = "--now-over-later-already-decided"

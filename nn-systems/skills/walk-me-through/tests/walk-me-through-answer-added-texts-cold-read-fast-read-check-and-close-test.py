@@ -5258,8 +5258,11 @@ def test_already_decided_refuses_a_citation_with_no_readable_date_writing_nothin
     check("check --already-decided refuses a walk-minutes citation whose only date is part of a name, writing "
           "nothing",
           result.returncode == 1 and case.minutes.read_text() == before
-          and "holds no date written YYYY-MM-DD outside a name, so its age cannot be told" in result.stderr
-          and "add the date the user gave it to the citation" in result.stderr, described(result))
+          and "holds no date written YYYY-MM-DD outside a name, so it is taken as too old" in result.stderr
+          and ("session dialog line that records the ruling holds its date, add that date to the citation"
+               in result.stderr)
+          and ("If the ruling has no date and bears on item 3 of 9, quote it in the item, show the item to the "
+               "user, ask whether the ruling still holds" in result.stderr), described(result))
 
 
 def test_already_decided_takes_a_ruling_90_days_old_and_a_standing_document_at_any_age():
@@ -5451,7 +5454,8 @@ def test_an_item_the_walk_moves_on_from_after_it_was_shown_is_recorded_as_shown(
 def test_nothing_the_program_prints_tells_the_agent_to_tell_the_user_of_an_item_settled_without_him():
     usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True)
     closed = {}
-    for flags in (("--moved-on", "the question went to walk y"), ("--already-decided", "walk x, item 1")):
+    for flags in (("--moved-on", "the question went to walk y"),
+                  ("--already-decided", f"walk x, item 1 ({RECENT_RULING_DATE})")):
         case = summary_case(next_to_present="item 1 of 5")
         checked = case.run("check", *flags)
         closed[flags[0]] = (checked, case.run("close"))
