@@ -122,6 +122,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "DECIDED_BY_MODEL_NOTICE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "MODEL_CHECK_FAILED_NOTICE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "NOT_LOGGED_NOTICE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "REPLY_LINE_MODEL_ASK_OR_NOT_LABELS_NOT_LOGGED_NOTICE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "NO_PAGE_TEMPLATE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "NO_WALK_REFUSAL_INSTRUCTIONS"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "REFUSAL_INSTRUCTIONS"): LATER_PART,
