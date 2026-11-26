@@ -318,9 +318,10 @@ PREREQUISITES_PROBLEM_LINE_TEMPLATE = (
     '[rule due-task-prerequisites-unusable-correct-them] Task {task_id} "{subject}" is never raised as its metadata.prerequisites stand, because '
     "{problem}.")
 BUDGET_SKIPPED_LINE_TEMPLATE = (
-    "[rule due-task-github-call-budget-ran-out-next-stop-asks-again] This hook's {budget}-second budget for GitHub calls ran out before it asked about "
+    "This hook's {budget}-second budget for GitHub calls ran out before it asked about "
     "{condition_count} pull request(s) or GHI(s) that {task_count} open task(s) wait on; nothing "
-    "is needed, since the next stop asks again and raises each task whose prerequisites are met.")
+    "is needed, since this hook asks again when your next turn ends, and names then each task "
+    "whose prerequisites are met.")
 PREREQUISITES_CORRECTION_INSTRUCTION = (
     'Correct the task with TaskUpdate, giving its metadata a "prerequisites" list whose entries '
     "are each one of " + PREREQUISITE_FORMS + '; if the task waits on no pull request, GHI or '
@@ -592,13 +593,13 @@ class GitHubConditionChecker:
         return answer
 
     def usable_cached_answer(self, kind: str, number: int) -> "dict | None":
-        """The cached answer, when it is met or younger than the recheck interval; else None.
-        A merged pull request or a closed GHI is kept met for good: a merge never changes back,
-        and a GHI reopened after its task was raised already counts as met."""
+        """The cached answer, when it is a merged pull request or younger than the recheck
+        interval; else None. Only a merged pull request is kept met for good, because a merge
+        never changes back; a closed GHI can be reopened, so its answer expires like any other."""
         cached = self.checks.get(condition_key(kind, number))
         if not isinstance(cached, dict):
             return None
-        if cached.get("met") is True:
+        if kind == PULL_REQUEST_KIND and cached.get("met") is True:
             return cached
         if (isinstance(cached.get("checked_at_epoch"), (int, float))
                 and 0 <= self.now_epoch - cached["checked_at_epoch"]
@@ -816,10 +817,11 @@ def budget_skipped_task_lines(tasks: dict, skipped_conditions, raised: dict) -> 
 
 
 def github_conditions_the_due_task_pass_asks(tasks: dict, directory: Path, raised: dict) -> list:
-    """The pull requests and GHIs `due_task_lines` asks GitHub about, so that one query can
-    answer them first: of each open task not raised for its current prerequisites, its
-    `pr_merged` pull requests not yet raised as closed without merging, and, when no blockedBy
-    holds it, every pull request and GHI it names."""
+    """The pull requests and GHIs of the tasks no blockedBy holds, so that one query answers
+    them first: of each such open task not raised for its current prerequisites, every pull
+    request and GHI it names. A held task's pull requests stay out, because the budget goes to
+    unblocked tasks first and one number the query cannot resolve can run the whole query to
+    its timeout; `due_task_lines` still asks about them one at a time."""
     found = []
     for task_id, task in tasks.items():
         metadata = task.get("metadata")
@@ -835,7 +837,6 @@ def github_conditions_the_due_task_pass_asks(tasks: dict, directory: Path, raise
         record = raised.get(task_id) if isinstance(raised.get(task_id), dict) else {}
         if prerequisites_raised_as_met(record, prerequisites_value):
             continue
-        found += pull_request_conditions_not_raised_as_closed(conditions, record)
         if not is_held_by_blockers(task, tasks, directory):
             found += [(kind, number) for kind, number in conditions if kind in CONDITION_KINDS]
     return list(dict.fromkeys(found))
@@ -1256,7 +1257,12 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
             raise HookFault(" ".join(gh_failure_lines + budget_skipped_lines))
         if not budget_skipped_lines:
             return None
-    # A skipped check is told to the agent as context, never as a fault: a task it skipped may be due.
+        # additionalContext would start a turn for a notice that asks nothing, and the
+        # stop_hook_active it sets would silence the next stop's retry.
+        return json.dumps({"systemMessage": "agent-seat-due-task-raise-hook: "
+                                            + " ".join(budget_skipped_lines)},
+                          ensure_ascii=False)
+    # Beside other output, a skipped check is told to the agent as context: a task it skipped may be due.
     defer_lines = [DEFER_INSTRUCTION] if lines else []
     if closed_lines:
         closed_lines += CLOSED_WITHOUT_MERGING_INSTRUCTIONS

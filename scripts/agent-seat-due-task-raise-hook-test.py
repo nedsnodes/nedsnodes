@@ -76,6 +76,9 @@ try:
         responses = json.load(handle)
 except FileNotFoundError:
     responses = {{}}
+if sys.argv[1:3] == ["api", "graphql"] and responses.get("graphql") == "garbage":
+    print("not json")
+    sys.exit(0)
 if sys.argv[1:3] == ["api", "graphql"]:
     # Answers each aliased pullRequest or issue from the same responses; one with no state is
     # null with an error, and gh then exits 1 though it prints the others, as real gh does.
@@ -685,6 +688,47 @@ check("a merged answer is kept for good: after the recheck interval only the ope
       and "pullRequest(number: 115)" in calls[1]["argv"][3]
       and "pullRequest(number: 114)" not in calls[1]["argv"][3], (text, calls))
 
+# A GHI can be reopened, so its closed answer expires as an open one does.
+seat = Seat()
+seat.task("55", metadata={"prerequisites": [{"issue_closed": 116}, {"pr_merged": 117}]})
+seat.respond({"issue:116": {"state": "CLOSED", "title": "G", "url": "https://x/116"},
+              "pr:117": {"state": "OPEN", "title": "P", "url": "https://x/117"}})
+check("a closed GHI: first stop, the pull request still open, silent", silent(seat.run()))
+age_cached_answers(seat)
+seat.respond({"issue:116": {"state": "OPEN", "title": "G", "url": "https://x/116"},
+              "pr:117": {"state": "MERGED", "title": "P", "url": "https://x/117"}})
+result = seat.run()
+calls = seat.gh_calls()
+check("a closed GHI is not kept for good: after the recheck interval it is asked again, found "
+      "reopened, and the task is not raised",
+      "Act on task 55 " not in (context_of(result) or "")
+      and "issue(number: 116)" in calls[-1]["argv"][3], (context_of(result), calls))
+
+# A held task's pull request stays out of the one query, which a number it cannot resolve can
+# run to its timeout before any unblocked task is asked about.
+seat = Seat()
+seat.task("56", subject="blocker, still open")
+seat.task("57", blocked_by=["56"], metadata={"prerequisites": [{"pr_merged": 118}]})
+seat.task("58", metadata={"prerequisites": [{"pr_merged": 119}]}, subject="ready")
+seat.respond({"pr:118": {"state": "OPEN"}, "pr:119": {"state": "MERGED", "title": "R",
+                                                      "url": "https://x/119"}})
+text = context_of(seat.run()) or ""
+query_calls = [call for call in seat.gh_calls() if call["argv"][:2] == ["api", "graphql"]]
+check("the one query asks only about tasks no blockedBy holds, and the ready task is raised",
+      "Act on task 58 " in text and len(query_calls) == 1
+      and "pullRequest(number: 119)" in query_calls[0]["argv"][3]
+      and "pullRequest(number: 118)" not in query_calls[0]["argv"][3], (text, query_calls))
+
+# When the one query prints something that is not JSON, each condition is asked alone.
+seat = Seat()
+seat.task("59", metadata={"prerequisites": [{"pr_merged": 120}]})
+seat.respond({"graphql": "garbage", "pr:120": {"state": "MERGED", "title": "Q",
+                                               "url": "https://x/120"}})
+text = context_of(seat.run()) or ""
+check("the one query prints no JSON: the condition is asked alone, and the task is raised",
+      "Act on task 59 " in text
+      and [call["argv"][2] for call in seat.gh_view_calls()] == ["120"], (text, seat.gh_calls()))
+
 
 seat = Seat()
 seat.task("120", metadata={"prerequisites": [{"pr_merged": 150}]}, subject="Use the\nnew flag")
@@ -1193,10 +1237,10 @@ def hook_run_in_process(seat):
 
 
 def budget_skipped_line(condition_count, task_count):
-    return (f"[rule due-task-github-call-budget-ran-out-next-stop-asks-again] This hook's 20-second budget for GitHub calls ran out before it asked about "
+    return (f"This hook's 20-second budget for GitHub calls ran out before it asked about "
             f"{condition_count} pull request(s) or GHI(s) that {task_count} open task(s) wait on; "
-            f"nothing is needed, since the next stop asks again and raises each task whose "
-            f"prerequisites are met.")
+            f"nothing is needed, since this hook asks again when your next turn ends, and names "
+            f"then each task whose prerequisites are met.")
 
 # The first call uses the whole budget, so the remaining budget is exactly 0 for the second.
 seat = Seat()
@@ -1222,12 +1266,13 @@ try:
     fault = None
 except hook.HookFault as error:
     output, fault = None, str(error)
-# A budget skip alone asks nothing, so it must not show as "Stop hook failed", yet the skip is told.
-check("budget spent, with nothing else to say: the skip line as context, no fault",
+# A budget skip alone asks nothing: as a fault it shows as "Stop hook failed", and as context it
+# starts a turn whose stop_hook_active silences the next stop's retry, so it goes to the user.
+check("budget spent, with nothing else to say: the skip line as a systemMessage, no context "
+      "and no fault",
       fault is None and output is not None
-      and json.loads(output)["hookSpecificOutput"]["additionalContext"].startswith(
-          "[rule due-task-github-call-budget-ran-out-next-stop-asks-again] ")
-      and "ran out before it asked about" in output, (output, fault))
+      and json.loads(output) == {"systemMessage": "agent-seat-due-task-raise-hook: "
+                                                  + budget_skipped_line(1, 1)}, (output, fault))
 
 seat = Seat()
 seat.task("4", metadata={"prerequisites": [{"pr_merged": 401}]})
