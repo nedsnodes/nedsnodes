@@ -1223,3 +1223,13 @@ Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > - The supervisor is one consumer among several. A search for the module's file name in *.py found it loaded by scripts/pull-request-review-plan.py, scripts/md-drift-lint.py and nn-systems/skills/overview-write/overview-write-architecture-overview-claim-check-by-fresh-agent.py as well as nn-systems/handoff/handoff-supervisor.py:222-227. An editor relying on the sentence would think only the supervisor depends on it.
 State: open
+
+## E105 — possible problem: an assertion of the overview is contradicted
+
+Claim: Before it runs the extractor the handoff-supervisor stores, as the Remote Control name, a new title that the rename hook did not store, and then adds to the successor's initial-agent-instructions the instruction to tell the other agent-seats the new name.
+Found by: the overview claim check of 2026-11-26 against commit 9c3a0b8125498c35a75a95ef27190f99cf32a8b6; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/7ddc72e82e8963fad2259e3a5944812663d3823a-2026-11-26T06-26-41-691672Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> The instruction does not depend on the handoff-supervisor's own store. It is added whenever any name announced since launch differs from the stored name, including a rename the rename hook already stored. handoff-supervisor.py:2610 `# the Stop hook may have stored a name the agent-session handed off before announcing.`; :2611-2612 `heard_names = ([launched_remote_control_name] if launched_remote_control_name else []) + recorded_names + (`; :2617 `instruction = remote_control_name_common.handoff_agent_seat_remote_control_rename_from_each_old_name_agent_told_to_message_other_agent_seats_instruction_build(`. "and then adds" reads as if the instruction follows only the handoff-supervisor's own store.
+State: open

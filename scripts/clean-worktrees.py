@@ -57,14 +57,20 @@ needs a pull request is kept, as is one whose ancestry git cannot read.
   ended. The branch is kept, unless BRANCHES deletes it.
 
 IDLE WORKTREES. A worktree is idle, and is removed, owner file or not,
-when all of these hold: it is not an agent-home, which is a worktree directly
-inside ~/agents or one whose own git directory holds AGENT_HOME_MARKER_FILE_NAME;
+when all of these hold: it is not an agent-home, which is a worktree whose own
+git directory holds AGENT_HOME_MARKER_FILE_NAME;
 no file or directory in it, and no file in its own git directory, has changed
 for IDLE_WORKTREE_REMOVED_AFTER_DAYS days, each by its mtime except a reflog,
 by its newest entry's time; it holds no uncommitted or untracked
 file; every commit of its HEAD is on a remote-tracking ref of origin, as last
 fetched; no open pull request has its branch as head branch or its HEAD as
 head commit; and no rebase, merge, cherry-pick or revert is in progress in it.
+A worktree idle in every way but commits of its HEAD that origin lacks is idle
+once nothing in it has changed for
+IDLE_WORKTREE_WITH_UNPUSHED_COMMITS_PUSHED_AND_REMOVED_AFTER_DAYS days: --remove
+first pushes its branch to origin, and keeps it, saying why, when the push
+fails; one on no branch has no branch to push, and is kept, saying so, when
+it has no owner file, and otherwise left to the rules for owned worktrees.
 The mtimes are read before any git command, and the cleaner's `git status`
 runs with --no-optional-locks, so that its own index refresh does not reset
 the clock. Removing an idle worktree loses nothing: its branch is kept, unless BRANCHES
@@ -378,6 +384,7 @@ agent_seat_task_list_task_file_rewrite = _task_file_rewrite.agent_seat_task_list
 MERGE_LANE_REVIEW_CHECKOUT_KEPT_AFTER_ITS_PULL_REQUEST_FINISHED_HOURS = 24
 
 IDLE_WORKTREE_REMOVED_AFTER_DAYS = 2
+IDLE_WORKTREE_WITH_UNPUSHED_COMMITS_PUSHED_AND_REMOVED_AFTER_DAYS = 14
 
 AGENT_HOME_MARKER_FILE_NAME = "agent-home-marker"
 
@@ -1053,6 +1060,8 @@ class Verdict:
     # When the idle rule judged the worktree, in seconds since the epoch; --remove keeps the
     # worktree when anything in it changed since, or its HEAD did.
     idle_judged_at: float | None = None
+    # The branch the idle rule found holding commits origin lacks, which --remove pushes first.
+    unpushed_branch_to_push_before_worktree_removal: str | None = None
 
 
 def owner_text(owner):
@@ -1073,12 +1082,12 @@ def classify(worktree, branch, record, pull_requests):
     return classify_unlocked(worktree, branch, record, pull_requests)
 
 
-def is_agent_home(worktree, git_directory):
-    """Whether the worktree is an agent-home: ~/agents/<seat>, or marked by AGENT_HOME_MARKER_FILE_NAME
-    in its own git directory."""
-    # Most agent-homes predate the marker, so the location counts too.
-    return (worktree.resolve().parent == (Path.home() / "agents").resolve()
-            or (git_directory / AGENT_HOME_MARKER_FILE_NAME).exists())
+def is_agent_home(git_directory):
+    """Whether the worktree whose own git directory this is is an agent-home, marked by
+    AGENT_HOME_MARKER_FILE_NAME there."""
+    # Not by its place in ~/agents: topic worktrees are made there too, and every agent-home there
+    # carries the marker.
+    return (git_directory / AGENT_HOME_MARKER_FILE_NAME).exists()
 
 
 def path_changed_since(roots, cutoff):
@@ -1135,14 +1144,17 @@ def idle_worktree_verdict(worktree, branch, record, pull_requests):
             git_output.run_git(worktree, ["rev-parse", "--absolute-git-dir"])).strip())
     except git_output.GitCommandFailed:
         return None
-    if is_agent_home(worktree, git_directory):
+    if is_agent_home(git_directory):
         return None
     # Taken before the checks below, so that a file written while they run counts as changed.
     judged_at = time.time()
-    cutoff = judged_at - IDLE_WORKTREE_REMOVED_AFTER_DAYS * 86400
+
+    def changed_within(days):
+        cutoff = judged_at - days * 86400
+        return (path_changed_since([worktree], cutoff) is not None
+                or git_directory_file_changed_since(git_directory, cutoff) is not None)
     try:
-        if (path_changed_since([worktree], cutoff) is not None
-                or git_directory_file_changed_since(git_directory, cutoff) is not None):
+        if changed_within(IDLE_WORKTREE_REMOVED_AFTER_DAYS):
             return None
     except OSError:
         return None
@@ -1151,9 +1163,11 @@ def idle_worktree_verdict(worktree, branch, record, pull_requests):
     # An unreadable HEAD reads as "unknown", which rev-list then fails on.
     judged_head = commit_of(worktree, "HEAD")
     try:
-        if git_output.run_git(worktree, ["rev-list", judged_head, "--not", "--remotes=origin"]).strip():
+        unpushed = bool(git_output.run_git(
+            worktree, ["rev-list", judged_head, "--not", "--remotes=origin"]).strip())
+        if unpushed and changed_within(IDLE_WORKTREE_WITH_UNPUSHED_COMMITS_PUSHED_AND_REMOVED_AFTER_DAYS):
             return None
-    except git_output.GitCommandFailed:
+    except (git_output.GitCommandFailed, OSError):
         return None
     uncommitted, _ = uncommitted_or_untracked_files(worktree)
     if uncommitted is None or uncommitted:
@@ -1169,9 +1183,31 @@ def idle_worktree_verdict(worktree, branch, record, pull_requests):
         return None
     if in_progress_git_operation_keep_reason(worktree) is not None:
         return None
-    why = (f"nothing in it, its git directory included, has changed for "
-           f"{IDLE_WORKTREE_REMOVED_AFTER_DAYS} days, it holds no uncommitted or untracked file, "
-           f"GitHub holds every commit of its HEAD, and no open pull request is its")
+    if unpushed and branch is None:
+        try:
+            owner = owner_file.worktree_owner_file_read(worktree)
+        except owner_file.WorktreeOwnerFileError:
+            return None
+        if owner is not None:
+            return None
+        return Verdict(False, (
+            f"nothing in it has changed for "
+            f"{IDLE_WORKTREE_WITH_UNPUSHED_COMMITS_PUSHED_AND_REMOVED_AFTER_DAYS} days and it holds "
+            f"no uncommitted or untracked file, but its HEAD holds commits GitHub lacks and is on "
+            f"no branch, so the cleaner has no branch to push them on. If its commits are wanted, "
+            f"put them on a branch with `git -C {worktree} switch -c <branch>` and push it; the "
+            f"next --remove then pushes and removes it once it has been unchanged that long. If "
+            f"they are not wanted, remove it with `git worktree remove {worktree}`"),
+            KEPT_NO_OWNER_FILE)
+    if unpushed:
+        why = (f"nothing in it, its git directory included, has changed for "
+               f"{IDLE_WORKTREE_WITH_UNPUSHED_COMMITS_PUSHED_AND_REMOVED_AFTER_DAYS} days, it holds no "
+               f"uncommitted or untracked file, no open pull request is its, and GitHub lacks commits "
+               f"of its HEAD, which --remove first pushes on its branch {branch}")
+    else:
+        why = (f"nothing in it, its git directory included, has changed for "
+               f"{IDLE_WORKTREE_REMOVED_AFTER_DAYS} days, it holds no uncommitted or untracked file, "
+               f"GitHub holds every commit of its HEAD, and no open pull request is its")
     keep_reason = worktree_vacancy_keep_reason(worktree)
     if keep_reason is not None:
         return Verdict(False, f"{why}, but {keep_reason}", KEPT_IN_USE)
@@ -1180,8 +1216,8 @@ def idle_worktree_verdict(worktree, branch, record, pull_requests):
         return Verdict(False, f"{why}, but git cannot list its files ({listing_error})",
                        KEPT_NOT_CHECKABLE)
     return Verdict(True, why + removal_records_and_discarded_files_text(worktree, discarded),
-                   "", discarded=discarded, judged_head=judged_head,
-                   idle_judged_at=judged_at)
+                   "", discarded=discarded, judged_head=judged_head, judged_branch=branch,
+                   idle_judged_at=judged_at, unpushed_branch_to_push_before_worktree_removal=branch if unpushed else None)
 
 
 def idle_worktree_removal_keep_reason(worktree, verdict):
@@ -1196,6 +1232,11 @@ def idle_worktree_removal_keep_reason(worktree, verdict):
     head_now = commit_of(worktree, "HEAD")
     if head_now != verdict.judged_head:
         return f"its HEAD changed during this run, from {verdict.judged_head} to {head_now}"
+    branch_now = checked_out_branch_name(worktree)
+    if verdict.unpushed_branch_to_push_before_worktree_removal is not None and branch_now != verdict.unpushed_branch_to_push_before_worktree_removal:
+        return (f"its branch changed during this run, from {verdict.unpushed_branch_to_push_before_worktree_removal} to "
+                f"{branch_now or 'no branch'}, so its commits GitHub lacks may not be on the branch "
+                f"it would push")
     # Only the worktree itself: git's own reads during this run may rewrite files in its git directory.
     try:
         changed = path_changed_since([worktree], verdict.idle_judged_at)
@@ -1565,6 +1606,16 @@ def remove_worktree(worktree, branch, repo, verdict, one_named=False):
                   f"Nothing needs doing now: the next scripts/clean-worktrees.py --remove run, "
                   f"daily or at a handoff, judges it again")
             return True
+        if verdict.unpushed_branch_to_push_before_worktree_removal is not None:
+            failure = push_branch_unless_origin_holds_its_last_commit_failure(
+                repo, verdict.unpushed_branch_to_push_before_worktree_removal)
+            if failure is not None:
+                print(f"{worktree.name}: push of its branch {verdict.unpushed_branch_to_push_before_worktree_removal} FAILED, "
+                      f"worktree kept — {failure}")
+                print_next_remove_run_line(
+                    WORKTREE_KEPT_AFTER_FAILURE_NEXT_REMOVE_RUN_RETRIES_LINE_TEMPLATE.format(
+                        name=worktree.name), one_named)
+                return False
     if verdict.owner_state == owner_file.RUNNING:
         # classify() found it clean before the slow vacancy check and the shipments; its owner may
         # have written since.
