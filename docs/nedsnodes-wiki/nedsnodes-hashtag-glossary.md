@@ -27,9 +27,12 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#cold_read_target_changed_during_run#` — the line a cold-read program prints when the document changed while the reviewer read it, so the report is triaged against the copy the reviewer was given.
 - `#data#` — a project glossary label: the term of the entry it ends covers data.
 - `#declined_because#` — the cold-read approval-walk item line that gives the reason a finding was declined, opening with `cost` when cost is the only reason.
+- `#defect_already_on_main#` — a fact line ending each code finding of a pull request review: whether main's code at the merge base has the same defect, `yes`, `no` or `not checked`.
+- `#defect_evidence#` — a fact line ending each code finding of a pull request review: what shows the defect, `record`, `reproduction` or `judged from the code only`, with the record or the command and its output.
 - `#edit#` — a cold-read-fast-read finding tag: the finding is about sentences the edit added or changed, or a gap the removed text leaves.
 - `#emergency_stop_lift_handed_over#` — the emergency-stop file line that names the agent-seat that may lift the stop on the user's word; it does not lift the stop.
 - `#emergency_stop_lifted#` — the last line of an emergency-stop file once the stop is lifted, with the user's words.
+- `#false_report_of_success_on_failure#` — a fact line ending each code finding of a pull request review: whether a step whose result someone relies on can fail while the code reports success, reports nothing, or reports a failure without saying what the step changed, `yes` or `no`.
 - `#follow_up#` — on a `#root_cause_not_fixed#` line of a pull request's description, marks the link to the GHI or pull request that will fix the root cause.
 - `#follow_up_request#` — the line `#follow_up_request pull request <number>` that opens merge-lane-2's list of non-blocking findings for the author to follow up after a merge.
 - `#frozen_copy_changed_during_run#` — the line a cold-read program prints when the frozen-copy the reviewers read changed during the run.
@@ -55,6 +58,7 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#open_question#` — the line that opens an open question in a document.
 - `#pre_approved_change#` — the first line of `.walk-approved` when a change to a guarded-file needs no approval, with the exception it falls under on the second line.
 - `#prose#` — a project glossary label: the term of the entry it ends covers prose.
+- `#pull_request_triggers_the_defect#` — a fact line ending each code finding of a pull request review: whether running the code as the pull request leaves it hits the defect where running main does not, `yes`, `no` or `not checked`.
 - `#reason#` — on a design's Deferred-decisions line, marks the reason the decision was deferred or rejected.
 - `#rejected#` — a design's Deferred-decisions line for a choice the design rejects, with its `#reason#`.
 - `#replaces#` — the pull request description line `#replaces <link>` naming the pull request this one replaces, whose findings and review rounds carry over.
