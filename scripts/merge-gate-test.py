@@ -84,13 +84,18 @@ its review is any other account's, or the merge account's posted after
 reviewed-since: the 722 case at the approval and the pytorch case at drisspg's
 review hold that.
 
-The mutation section reruns named cases against a mutated COPY of the gate in a
-scratch directory, one mutation per fix, and requires each to go red. The file
-under test is never modified, so no revert can discard uncommitted work. Each
-mutation asserts that its replacement text was found. An unmutated copy is run
-after all mutations as the control. Each copy has a copy of the description
-reader, pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py, beside
-it, because the gate runs the reader from its own directory; the reader's
+Every case runs once, before the mutations, against an unmutated COPY of the
+gate in a scratch directory, made as each mutated copy is made, so a case that
+goes red on a mutated copy went red because of the mutation and not because the
+copy lacks a file the gate needs. The mutation section then reruns named cases
+against a mutated copy, one mutation per fix, and requires each to go red. The
+file under test is never modified, so no revert can discard uncommitted work.
+Each mutation asserts that its replacement text was found. After the mutations,
+case A1, everything in order, runs against the real scripts/merge-gate.sh, so
+the gate is shown to pass where it is installed, not only as a copy. Each copy
+has a copy of the description reader,
+pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py,
+beside it, because the gate runs the reader from its own directory; the reader's
 patterns are mutation-checked by the reader's own test.
 
 F7, UNSTABLE on the merge-state allow-list, has no case by the user's ruling.
@@ -2449,16 +2454,16 @@ def main():
     check_every_fixture_has_a_capture_record()
     check("the CLEAN spelling came from a capture", CLEAN == "CLEAN", f"read {CLEAN!r}")
     open_before = open_file_descriptor_count()
-    first = run_cases(GATE, "")
+    unmutated = run_cases(gate_copy(GATE.read_text()), "unmutated copy: ")
     run_mutations()
-    # The control: an unmutated copy, run after every mutation.
-    control_gate = gate_copy(GATE.read_text())
-    control = run_cases(control_gate, "control after mutations: ")
+    real_gate_name = f"real merge-gate.sh: {case_name_of(case_a1_pass_control)}"
+    real_gate_ok, real_gate_detail = case_a1_pass_control(GATE)
+    check(real_gate_name, real_gate_ok, real_gate_detail)
     open_after = open_file_descriptor_count()
     check("no file descriptor is left open by the cases and mutations",
           open_after == open_before, f"{open_before} open before them, {open_after} after")
-    print(f"\n{first} of {len(CASES)} cases passed; the unmutated control after the "
-          f"mutations passed {control} of {len(CASES)}")
+    print(f"\n{unmutated} of {len(CASES)} cases passed on the unmutated copy; case A1 "
+          f"{'passed' if real_gate_ok else 'failed'} on the real merge-gate.sh")
     shutil.rmtree(scratch, ignore_errors=True)
     if failures:
         print(f"\n{len(failures)} check(s) failed:")
