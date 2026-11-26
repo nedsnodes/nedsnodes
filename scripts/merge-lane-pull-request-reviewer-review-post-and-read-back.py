@@ -95,7 +95,8 @@ object is refused too; the agent then asks merge-lane-2. Then:
   goes to
   scripts/findings-record-codex-finding-match-and-row-add-or-decide.py match, which
   answers SAME with the findings record row already holding the finding, or NEW. A SAME
-  finding needs no grade: the posted body quotes its row's state, grade and decision
+  finding whose text answers `This pull request makes it happen:` no needs no grade; one
+  that answers yes is graded like any other. For a SAME finding with no grade, the posted body quotes its row's state, grade and decision
   under a heading, and calls it a possible regression when the row is fixed. Once every
   grade is accepted, the same program's add adds each NEW finding, with its grade, to the
   findings record, before the review is posted. The success line counts the findings held
@@ -703,10 +704,24 @@ def findings_record_summary(matched, added):
             + "".join(f"; {note}" for note in notes))
 
 
+def codex_finding_fact_line_answers(texts, label_wanted, answer_wanted):
+    """Whether any entry of a Codex finding answers its `<label_wanted>:` line with answer_wanted."""
+    return any(label == label_wanted
+               and FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer).lower().startswith(answer_wanted)
+               for text in texts for label, answer in FINDING_FACT_LINE.findall(text))
+
+
 def codex_finding_says_main_has_it(texts):
     """Whether any entry of a Codex finding answers its `Main has it:` line yes."""
-    return any(label == "Main has it" and FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer).lower().startswith("yes")
-               for text in texts for label, answer in FINDING_FACT_LINE.findall(text))
+    return codex_finding_fact_line_answers(texts, "Main has it", "yes")
+
+
+def findings_record_rows_needing_no_grade(matched, findings):
+    """The SAME answers, by finding id, of the matched findings that need no grade: those whose text answers
+    `This pull request makes it happen:` no. One that answers yes is still graded, since this pull request may
+    bring the defect back, and the earlier row's grade is for main."""
+    return {finding: answer for finding, answer in matched.items() if answer["answer"] == "SAME"
+            and codex_finding_fact_line_answers(findings[finding][3], "This pull request makes it happen", "no")}
 
 
 def findings_record_program_answers(program, subcommand, number, head, request, answer_is_readable):
@@ -724,7 +739,7 @@ def findings_record_program_answers(program, subcommand, number, head, request, 
         answers = json.loads(completed.stdout)
         if set(answers) != {entry["finding_id"] for entry in request} or not all(
                 answer_is_readable(answer) for answer in answers.values()):
-            raise ValueError(f"it does not give a readable answer for exactly the findings sent")
+            raise ValueError("it does not give a readable answer for exactly the findings sent")
     except (ValueError, TypeError, KeyError) as error:
         raise CodexRunRecordUnusable(f"the findings record program {program} {subcommand} printed an answer this "
                                      f"program cannot read ({error}): {completed.stdout.strip()[:300]}")
@@ -978,7 +993,7 @@ def main(argv=None):
             matched = findings_record_match(program, number, head, findings) if findings else {}
             body = body_with_codex_answers(
                 body, comments, codex_answers, findings, plan, number, head, arguments.review_file,
-                outputs_directory, {finding: answer for finding, answer in matched.items() if answer["answer"] == "SAME"})
+                outputs_directory, findings_record_rows_needing_no_grade(matched, findings))
             # Added only once the grades are accepted, since a row keeps the grade it was added with.
             added = findings_record_add(program, number, head, findings, matched, codex_answers)
         except CodexRunRecordUnusable as error:

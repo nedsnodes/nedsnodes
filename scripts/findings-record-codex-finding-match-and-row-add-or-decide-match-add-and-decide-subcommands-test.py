@@ -23,6 +23,12 @@ import threading
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+_git_environment_fixture_spec = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    HERE / "git-redirecting-environment-removal-test-fixture.py")
+_git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_spec)
+_git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
+_git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 scratch = Path(tempfile.mkdtemp(prefix="findings-record-match-test-")).resolve()
 os.environ["HOME"] = str(scratch / "home")
 (scratch / "home" / ".config" / "nedsnodes").mkdir(parents=True)
@@ -231,6 +237,11 @@ code, answers, err = match([fresh], head="0" * 40)
 check("a head commit git cannot read fails the match and gives the fetch command",
       code == 1 and "git could not read scripts/thing.py" in err
       and f"git -C {repository} fetch origin pull/4034/head" in err, (code, err))
+for past_end in (0, 99):
+    code, answers, err = match([finding("eeee0000000" + str(past_end % 10), "Filter capture names", capture,
+                                        line=past_end)])
+    check(f"a finding citing line {past_end}, outside the file, fails the match instead of recording an empty line",
+          code == 1 and f"cites line {past_end}, and the file has 4 line(s) there" in err, (code, err))
 code, answers, err = match([{**fresh, "heading": "No place cited"}])
 check("a heading that cites no path and line fails the match", code == 1 and "cites no `<path>:<line>`" in err,
       (code, err))

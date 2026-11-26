@@ -396,6 +396,21 @@ def findings_record_cases(scratch):
           "holds only captures" in (result.posted or {}).get("body", "")
           and "; findings record: 1 already held, 0 added" in result.stdout, result.detail)
 
+    both_lines = FACT_LINES.replace("`Main has it:` `no`", "`Main has it:` `yes`")
+    both_report = (f"<!-- provenance -->\n\n- [Codex priority P1 (P0 highest)] {on_main}\n  Body.\n"
+                   + "\n".join("  " + line for line in both_lines.splitlines()) + "\n")
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, both_report),),
+                         findings_record_match={"match": same})
+    check("a Codex finding the findings record already holds that also says this pull request makes it happen "
+          "still needs a grade, so nothing is posted without one",
+          result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr
+          and [call[0][0] for call in result.match_calls] == ["match"], result.detail)
+    result = run_program(scratch, file([main_grade], [main_comment]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, both_report),), findings_record_match={"match": same})
+    check("graded, such a finding posts with its own grade and is not added again",
+          result.code == 0 and f"- {main_id} (P1): file-for-later" in (result.posted or {}).get("body", "")
+          and [call[0][0] for call in result.match_calls] == ["match"], result.detail)
+
     fixed = (0, json.dumps({main_id: {"answer": "SAME", "record": {**row, "state": "fixed", "decision": None},
                                       "possible_regression": True}}), "")
     result = posting(file([pull_request_grade]), match=fixed)

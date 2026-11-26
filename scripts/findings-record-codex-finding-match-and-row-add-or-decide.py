@@ -5,15 +5,15 @@ The findings record is the nn-shared-database's findings_record_row table, one r
 defect a reviewer found on main, reached through the nn-shared-database service.
 
 Usage:
-  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py match
-      --pull-request N --head-commit SHA [--repository DIR] [--claude-program PATH]
-      [--service-url URL] < findings.json
-  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py add
+  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py [--service-url URL] match
+      --pull-request N --head-commit SHA [--repository DIR] [--claude-program PATH] < findings.json
+  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py [--service-url URL] add
       --pull-request N --head-commit SHA [--repository DIR] [--possible-miss-log PATH]
-      [--service-url URL] < graded-findings.json
-  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py decide
-      RECORD_ID --state STATE --decision TEXT [--filed-where TEXT]
-      [--owning-agent-seat NAME] [--service-url URL]
+      < graded-findings.json
+  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py [--service-url URL] decide
+      RECORD_ID --state STATE --decision TEXT [--filed-where TEXT] [--owning-agent-seat NAME]
+
+--service-url goes before the subcommand, since it belongs to the program, not to one subcommand.
 
 match and add read a JSON list of findings, each {"finding_id", "priority", "heading",
 "text"}, and for add also "grade", and for does-not-hold "reason": the heading is the
@@ -151,7 +151,11 @@ def line_text_at_head(repository, head, path, line, number):
         raise MatchStepFailed(LINE_UNREADABLE_REASON.format(
             path=path, head=head, repository=repository, error=completed.stderr.strip(), number=number))
     lines = completed.stdout.splitlines()
-    return lines[line - 1] if 0 < line <= len(lines) else ""
+    if not 0 < line <= len(lines):
+        raise MatchStepFailed(LINE_UNREADABLE_REASON.format(
+            path=path, head=head, repository=repository, number=number,
+            error=f"the finding cites line {line}, and the file has {len(lines)} line(s) there"))
+    return lines[line - 1]
 
 
 def match_judgment(finding, candidates, claude_program):

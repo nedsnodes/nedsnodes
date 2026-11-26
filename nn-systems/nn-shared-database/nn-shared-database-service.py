@@ -359,6 +359,15 @@ def check_event_fits_its_operation(connection, event):
         raise Answer(422, {"error": "findings-record-row-added takes a text finding_id, head_commit, "
                                     "statement and finding_text, and a text path or "
                                     "outside_program"})
+    if operation == "findings-record-row-added":
+        sighted = connection.execute(
+            "SELECT record_id FROM findings_record_row_sighting WHERE finding_id = ? AND head_commit = ?",
+            (fields["finding_id"], fields["head_commit"])).fetchone()
+        if sighted is not None:
+            raise Answer(422, {"error": f"finding {fields['finding_id']!r} at commit "
+                                        f"{fields['head_commit']!r} is already a sighting of "
+                                        f"findings record row {sighted[0]}, so it is not added "
+                                        "as a new row"})
 
 
 def apply_event(connection, event, sequence):

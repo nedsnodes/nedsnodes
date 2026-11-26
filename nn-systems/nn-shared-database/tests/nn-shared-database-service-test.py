@@ -435,6 +435,14 @@ with tempfile.TemporaryDirectory() as scratch:
                                               {**decided, "state": "wontfix"}, seat_id=None))
     check("422: a decision with a state that is not one of the findings record's states",
           status == 422 and "decided-not-worth-fixing" in answer["error"], (status, answer))
+    rows_before = db.execute("SELECT count(*) FROM findings_record_row").fetchone()[0]
+    status, answer = request("/events", event("findings-record-row-added",
+                                              {**added_fields("f-again", "A second row."), "head_commit": "c2"},
+                                              seat_id=None))
+    check("422: an add for a finding already sighted at that commit names the row holding it, and adds no row",
+          status == 422 and f"findings record row {capture_row}" in answer["error"]
+          and db.execute("SELECT count(*) FROM findings_record_row").fetchone()[0] == rows_before,
+          (status, answer))
     status, answer = request("/events", event("findings-record-row-added",
                                               {**added_fields("f-x", "x"), "path": None},
                                               seat_id=None))
