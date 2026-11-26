@@ -56,7 +56,11 @@ THE SEVEN SURFACES, in the order they are searched:
                     box's own and the log-store's copy of the Mac's.
   6. Timeshift    — snapshots on ned-box at /mnt/backup/timeshift/snapshots.
                     Ordinary world-readable directories: no privilege needed.
-                    Searched over ssh from the Mac, in place on the box.
+                    Searched over ssh from the Mac, in place on the box. A
+                    full path is tested in every snapshot; any other path
+                    is looked up only in the newest snapshot's file-name
+                    list, which scripts/timeshift-newest-snapshot-file-name-
+                    list-write.py writes each hour.
   7. Time Machine — snapshots on the Mac's EXTERNAL backup disk. Enumerating
                     them needs no privilege; READING INSIDE ONE NEEDS ROOT
                     (measured 2026-08-23: `sudo mount_apfs -o ro` refused
@@ -414,6 +418,12 @@ DEFAULT_BOX_SEARCH_ROOTS = (
     "/home/nedlern/Projects/" + REFERENCE_CHECKOUT_DIRECTORY_NAME_BEFORE_PROJECT_RENAME,
     "/home/nedlern/agents/*",
 )
+# A bare-name search reads the newest snapshot's file-name list, which this program writes each hour,
+# because a find over a snapshot's trees takes minutes on the backup disk.
+TIMESHIFT_FILE_NAME_LIST_WRITE_PROGRAM_PATH = "scripts/timeshift-newest-snapshot-file-name-list-write.py"
+TIMESHIFT_FILE_NAME_LIST_WRITE_LOG = "~/.claude/timeshift-newest-snapshot-file-name-list-write.log"
+TIMESHIFT_FILE_NAME_LIST_DIRECTORY = "~/.cache/nedsnodes-timeshift-newest-snapshot-file-name-list"
+TIMESHIFT_FILE_NAME_LIST_SUFFIX = ".paths.gz"
 DEFAULT_TRANSCRIPTS_DIR = "~/.claude/projects"
 DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedsnodes-logs"
 MAC_TRANSCRIPTS_COPY_UNDER_LOG_STORE = (
@@ -1937,8 +1947,9 @@ def _box_transcript_grep_script(wanted):
 
 
 
-def search_timeshift(wanted, box_ssh_host, snapshot_root, search_roots, runner=run_command, on_ned_box=False):
-    script = _timeshift_probe_script(wanted, snapshot_root, search_roots)
+def search_timeshift(wanted, box_ssh_host, snapshot_root, file_name_list_directory, runner=run_command,
+                     on_ned_box=False):
+    script = _timeshift_probe_script(wanted, snapshot_root, file_name_list_directory)
     if on_ned_box:
         where = locator.NED_BOX_HOSTNAME
         argv = ["bash", "-c", script]
@@ -1964,58 +1975,79 @@ def search_timeshift(wanted, box_ssh_host, snapshot_root, search_roots, runner=r
             UNAVAILABLE,
             ["the search on %s did not complete (exit %s) — %s" % (where, code, first_error or "no error text")],
         )
-    if "NOROOT" in out:
+    records = out.splitlines()
+    if "NOROOT" in records:
         return SurfaceReport("timeshift", UNAVAILABLE, ["%s does not exist on %s — is the backup drive mounted?" % (snapshot_root, where)])
+    if "NOSNAPSHOT" in records:
+        return SurfaceReport("timeshift", UNAVAILABLE, ["%s on %s holds no snapshot" % (snapshot_root, where)])
+    newest = next((line[len("NEWEST "):].strip() for line in records if line.startswith("NEWEST ")), "")
+    if "NOLIST" in records:
+        return SurfaceReport(
+            "timeshift",
+            UNAVAILABLE,
+            ["not searched — the newest snapshot, %s, has no file-name list in %s on %s yet"
+             % (newest, file_name_list_directory, where),
+             "%s lists each new snapshot at 20 minutes past each hour, and its log, %s on ned-box, says why when it "
+             "has not; a full path, starting with /, searches every snapshot now"
+             % (TIMESHIFT_FILE_NAME_LIST_WRITE_PROGRAM_PATH, TIMESHIFT_FILE_NAME_LIST_WRITE_LOG)],
+        )
 
-    hits = sorted({line[4:].strip() for line in out.splitlines() if line.startswith("HIT ")}, reverse=True)
-    unsearched = [line[10:].strip() for line in out.splitlines() if line.startswith("PROBEFAIL ")]
+    hits = sorted({line[4:].strip() for line in records if line.startswith("HIT ")}, reverse=True)
+    if newest:
+        scope = ("searched only snapshot %s on %s, from its file-name list; a full path, starting with /, "
+                 "searches every snapshot" % (newest, where))
+    else:
+        scope = "searched every snapshot under %s on %s" % (snapshot_root, where)
     if not hits:
-        if unsearched:
-            return SurfaceReport(
-                "timeshift",
-                UNAVAILABLE,
-                ["find failed under %d snapshot director%s on %s, first: %s"
-                 % (len(unsearched), "y" if len(unsearched) == 1 else "ies", where, unsearched[0]),
-                 "the rest were searched and do not have it; those %d were not searched" % len(unsearched)],
-            )
-        return SurfaceReport("timeshift", NOT_FOUND, ["searched every snapshot under %s on %s" % (snapshot_root, where)])
+        return SurfaceReport("timeshift", NOT_FOUND, [scope])
 
-    lines = ["%d snapshot(s) on %s still have it, newest first:" % (len(hits), where)]
+    lines = ["%d snapshot path(s) on %s have it, newest first:" % (len(hits), where)]
     for hit in hits[:5]:
         lines.append("    " + hit)
     if len(hits) > 5:
-        lines.append("    ... and %d older" % (len(hits) - 5))
-    if unsearched:
-        lines.append("(find failed under %d snapshot director%s, first: %s — those were not searched)"
-                     % (len(unsearched), "y" if len(unsearched) == 1 else "ies", unsearched[0]))
-    newest = hits[0]
-    snapshot_directory = newest[len(snapshot_root):].lstrip("/").split("/", 1)[0] if newest.startswith(
+        lines.append("    ... and %d more" % (len(hits) - 5))
+    if newest:
+        lines.append(scope)
+    found = hits[0]
+    snapshot_directory = found[len(snapshot_root):].lstrip("/").split("/", 1)[0] if found.startswith(
         snapshot_root) else "snapshot"
-    version = FoundVersion("timeshift-%s-%s" % (snapshot_directory, os.path.basename(newest)),
-                           "file" if on_ned_box else "box-file", newest, host=box_ssh_host)
+    version = FoundVersion("timeshift-%s-%s" % (snapshot_directory, os.path.basename(found)),
+                           "file" if on_ned_box else "box-file", found, host=box_ssh_host)
     return SurfaceReport("timeshift", FOUND, lines, versions=[version])
 
 
-def _timeshift_probe_script(wanted, snapshot_root, search_roots):
-    """Return a shell probe emitting HIT, NOROOT and PROBEFAIL records."""
-    # Keep root globs expandable, but quote the caller's path and find pattern.
-    script = ["set -u", "ROOT=%s" % shlex.quote(snapshot_root)]
+def _box_shell_path(path):
+    """Quote a path for the box's shell, leaving a leading ~ to mean that shell's own home."""
+    if path == "~":
+        return '"$HOME"'
+    if path.startswith("~/"):
+        return '"$HOME"' + shlex.quote(path[1:])
+    return shlex.quote(path)
+
+
+def _timeshift_probe_script(wanted, snapshot_root, file_name_list_directory):
+    """Return a shell probe emitting NOROOT, NOSNAPSHOT, NEWEST, NOLIST and HIT records."""
+    script = ["set -u", "set -o pipefail", "ROOT=%s" % shlex.quote(snapshot_root)]
     script.append('if [ ! -d "$ROOT" ]; then echo "NOROOT"; exit 0; fi')
-    script.append('for snap in "$ROOT"/*; do')
-    script.append('  [ -d "$snap" ] || continue')
     if wanted.startswith("/"):
+        script.append('for snap in "$ROOT"/*; do')
+        script.append('  [ -d "$snap" ] || continue')
         script.append('  target="$snap/localhost"%s' % shlex.quote(wanted))
         script.append('  if [ -e "$target" ]; then echo "HIT $target"; fi')
-    else:
-        bases = " ".join('"$snap/localhost"%s' % root for root in search_roots)
-        script.append("  for base in %s; do" % bases)
-        script.append('    [ -d "$base" ] || continue')
-        script.append('    if [ -e "$base"/%s ]; then echo "HIT $base/"%s' % (shlex.quote(wanted), shlex.quote(wanted)))
-        script.append("    else find \"$base\" -path %s -exec printf 'HIT %%s\\n' {} \\; || echo \"PROBEFAIL $base\""
-                      % shlex.quote("*/" + wanted))
-        script.append("    fi")
-        script.append("  done")
-    script.append("done")
+        script.append("done")
+        return "\n".join(script)
+    # Snapshot names are their dates, which the glob sorts, so the last directory is the newest.
+    script.append('newest=""')
+    script.append('for snap in "$ROOT"/*; do if [ -d "$snap" ]; then newest="${snap##*/}"; fi; done')
+    script.append('if [ -z "$newest" ]; then echo "NOSNAPSHOT"; exit 0; fi')
+    script.append('echo "NEWEST $newest"')
+    script.append('list=%s/"$newest"%s' % (_box_shell_path(file_name_list_directory),
+                                          shlex.quote(TIMESHIFT_FILE_NAME_LIST_SUFFIX)))
+    script.append('if [ ! -f "$list" ]; then echo "NOLIST"; exit 0; fi')
+    # A fixed-string test of whole trailing path components, as find -path "*/<wanted>" matched before.
+    script.append("zcat -- \"$list\" | WANTED=%s awk 'BEGIN { w = ENVIRON[\"WANTED\"]; n = length(w) } "
+                  "length($0) >= n && substr($0, length($0) - n + 1) == w { print \"HIT \" $0 }'"
+                  % shlex.quote("/" + wanted))
     return "\n".join(script)
 
 
@@ -2417,7 +2449,7 @@ def _combine(statuses):
     return NOT_FOUND
 
 
-def build_report(wanted, repo, transcripts_dir, box_ssh_host, snapshot_root, search_roots, skip=(),
+def build_report(wanted, repo, transcripts_dir, box_ssh_host, snapshot_root, file_name_list_directory, skip=(),
                  runner=run_command, prompt_for_root=False, log_store_root=DEFAULT_LOG_STORE_ROOT,
                  on_surface_done=None, on_ned_box=None):
     if on_ned_box is None:
@@ -2451,7 +2483,8 @@ def build_report(wanted, repo, transcripts_dir, box_ssh_host, snapshot_root, sea
         finished(search_transcripts(wanted, transcripts_dir, box_ssh_host, runner, on_ned_box=on_ned_box,
                                     mac_copy_dir=mac_copy_dir))
     if "box" not in skip and "timeshift" not in skip:
-        finished(search_timeshift(wanted, box_ssh_host, snapshot_root, search_roots, runner, on_ned_box=on_ned_box))
+        finished(search_timeshift(wanted, box_ssh_host, snapshot_root, file_name_list_directory, runner,
+                                   on_ned_box=on_ned_box))
     if "timemachine" not in skip:
         finished(search_time_machine(wanted, newest_date_held, runner=runner,
                                      prompt_for_root=prompt_for_root))
@@ -2634,7 +2667,7 @@ def main(argv=None, runner=run_command):
         args.transcripts_dir,
         args.box_ssh_host,
         args.timeshift_snapshot_root,
-        DEFAULT_BOX_SEARCH_ROOTS,
+        TIMESHIFT_FILE_NAME_LIST_DIRECTORY,
         skip=set(args.skip),
         runner=runner,
         prompt_for_root=args.prompt_for_root,

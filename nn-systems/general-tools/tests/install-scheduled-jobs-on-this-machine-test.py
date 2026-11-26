@@ -191,6 +191,11 @@ NED_BOX_NN_SHARED_DATABASE_BACKUP_LINE = (
     "15 2 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/nn-shared-database/"
     "nn-shared-database-nightly-backup-with-integrity-check.py >> "
     "/home/nedlern/.claude/nn-shared-database-nightly-backup-with-integrity-check.log 2>&1")
+# The hourly file-name list of ned-box's newest Timeshift snapshot, which a bare-name backup search reads.
+NED_BOX_TIMESHIFT_FILE_NAME_LIST_LINE = (
+    "20 * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
+    "timeshift-newest-snapshot-file-name-list-write.py >> "
+    "/home/nedlern/.claude/timeshift-newest-snapshot-file-name-list-write.log 2>&1")
 MAC_NN_SHARED_DATABASE_BACKUP_COPY_PLIST = {
     "Label": "com.nedsnodes.nn-shared-database-newest-backup-copy-to-mac",
     "ProgramArguments": ["/opt/homebrew/bin/python3",
@@ -342,7 +347,8 @@ check("the table's jobs are the two typed by hand before this program, the workt
       "requests' check, approval and merge, the daily search for credential files no "
       "cold-read-cell is denied, the weekly count of each hook rule ID in both machines' "
       "transcripts, the one count of cold-read-fast-read finding outcomes, the deletion of "
-      "old agent-seat terminal captures, the open-pull-request watcher's poll, and no other",
+      "old agent-seat terminal captures, the open-pull-request watcher's poll, the hourly "
+      "file-name list of the newest Timeshift snapshot, and no other",
       sorted(real_jobs) == ["agent-seat-idle-sweep-headless-judge-wake-messages-send-and-"
                             "user-alerts-write",
                             "agent-seat-terminal-captures-older-than-seven-days-delete",
@@ -366,6 +372,7 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "nn-shared-database-nightly-backup-with-integrity-check",
                             "no-sandbox-test-suites-run-on-main-in-a-quiet-gap",
                             "scheduled-full-test-run-of-main",
+                            "timeshift-newest-snapshot-file-name-list-write",
                             "transcript-mirror-to-log-store",
                             "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner"],
       sorted(real_jobs))
@@ -536,6 +543,8 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "line:", NED_BOX_GUARDED_FILE_PRUNE_LINE,
           "nn-shared-database-nightly-backup-with-integrity-check — cron line:",
           NED_BOX_NN_SHARED_DATABASE_BACKUP_LINE,
+          "timeshift-newest-snapshot-file-name-list-write — cron line:",
+          NED_BOX_TIMESHIFT_FILE_NAME_LIST_LINE,
           "claude-code-temp-folders-of-exited-agent-sessions-delete — cron line:",
           NED_BOX_TEMP_FOLDERS_DELETE_LINE,
           "merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-"

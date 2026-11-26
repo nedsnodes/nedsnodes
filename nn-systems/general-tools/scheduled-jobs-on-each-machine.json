@@ -148,6 +148,16 @@
       }
     },
     {
+      "name": "timeshift-newest-snapshot-file-name-list-write",
+      "owner": "pr-review-maintenance-findings-batch-fix-agent",
+      "program": "scripts/timeshift-newest-snapshot-file-name-list-write.py",
+      "arguments": [],
+      "output": ".claude/timeshift-newest-snapshot-file-name-list-write.log",
+      "on": {
+        "ned-box": {"scheduler": "cron", "schedule": "20 * * * *"}
+      }
+    },
+    {
       "name": "nn-shared-database-newest-backup-copy-to-mac",
       "owner": "fleet-restart-at-login",
       "program": "nn-systems/nn-shared-database/nn-shared-database-newest-backup-copy-to-mac.py",
