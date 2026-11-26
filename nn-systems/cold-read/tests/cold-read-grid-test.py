@@ -146,7 +146,6 @@ import hashlib
 import importlib.util
 import inspect
 import io
-import itertools
 import json
 import re
 import os
@@ -542,17 +541,41 @@ def processes_running_programs_under(*directories):
                              capture_output=True, text=True, check=True).stdout
     found = []
     for line in listing.splitlines():
-        words = line.split()[1:]
-        # A `#!/usr/bin/env python3` script is listed as `env python3 <script>` until env execs.
-        if words and Path(words[0]).name == "env":
-            words = list(itertools.dropwhile(lambda word: word.startswith("-") or "=" in word, words[1:]))
-        if not words:
-            continue
-        if "python" in Path(words[0]).name.lower():
-            words = [word for word in words[1:] if not word.startswith("-")] or words
-        if words[0].startswith(prefixes):
+        program = program_word_of_command(line.split()[1:])
+        if program is not None and program.startswith(prefixes):
             found.append(line.strip())
     return found
+
+
+ENV_OPTIONS_TAKING_AN_OPERAND = {"-u", "--unset", "-C", "--chdir"}
+PYTHON_OPTIONS_TAKING_AN_OPERAND = {"-W", "-X", "--check-hash-based-pycs"}
+
+
+def program_word_of_command(words):
+    """The program a `ps` command line runs, or the script file its Python runs; None when there is
+    neither, as for `python3 -c ...`, `python3 -m ...` or `python3 -` reading a program from stdin."""
+    # A `#!/usr/bin/env python3` script is listed as `env python3 <script>` until env execs.
+    if words and Path(words[0]).name == "env":
+        rest = iter(words[1:])
+        words = []
+        for word in rest:
+            if word in ENV_OPTIONS_TAKING_AN_OPERAND:
+                next(rest, None)
+            elif not (word.startswith("-") or "=" in word):
+                words = [word, *rest]
+    if not words:
+        return None
+    if "python" not in Path(words[0]).name.lower():
+        return words[0]
+    rest = iter(words[1:])
+    for word in rest:
+        if word == "-" or word.startswith(("-c", "-m")):
+            return None
+        if word in PYTHON_OPTIONS_TAKING_AN_OPERAND:
+            next(rest, None)
+        elif not word.startswith("-"):
+            return word
+    return words[0]
 
 
 def kill_processes_running_programs_under(*directories):
@@ -1294,11 +1317,18 @@ try:
     env_listing = subprocess.CompletedProcess(["ps"], 0, (
         f"  4242 /usr/bin/env python3 {env_listing_directory}/claude --print\n"
         f"  4243 /usr/bin/env -S PYTHONUNBUFFERED=1 python3 -u {env_listing_directory}/codex\n"
-        f"  4244 /usr/bin/env tail -F {env_listing_directory}/watched.log\n"), "")
+        f"  4244 /usr/bin/env tail -F {env_listing_directory}/watched.log\n"
+        f"  4245 /usr/bin/env -u PYTHONPATH python3 {env_listing_directory}/gemini\n"
+        f"  4246 /usr/bin/env -C {env_listing_directory}/checkout tail -F watched.log\n"
+        f"  4247 python3 - {env_listing_directory}/report.md\n"
+        f"  4248 python3 -c 'import sys' {env_listing_directory}/report.md\n"
+        f"  4249 python3 -m json.tool {env_listing_directory}/report.json\n"
+        f"  4250 python3 -W ignore {env_listing_directory}/claude\n"), "")
     with mock.patch.object(subprocess, "run", return_value=env_listing):
         listed_through_env = processes_running_programs_under(env_listing_directory)
-    check("a stub that env is still starting is found, and env running tail on a log there is not",
-          [int(line.split()[0]) for line in listed_through_env] == [4242, 4243], listed_through_env)
+    check("a stub that env is still starting is found, past env -u NAME, and env running tail on a log there,"
+          " env -C into it, or a Python reading a program from stdin, -c or -m is not",
+          [int(line.split()[0]) for line in listed_through_env] == [4242, 4243, 4245, 4250], listed_through_env)
 
     # --- Which processes a case reports and stops ------------------------------
     long_directory = scratch / ("directory-longer-than-a-terminal-line-" + "x" * 100)
@@ -3797,10 +3827,11 @@ try:
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
 
     left_running_at_end = processes_running_programs_under(scratch)
-    kill_processes_running_programs_under(scratch)
     check("no stub, launcher or grid the suite started is still running when it ends",
           left_running_at_end == [], left_running_at_end)
 finally:
+    # Also on SIGTERM: reviewers started in their own sessions outlive the suite unless stopped here.
+    kill_processes_running_programs_under(SCRATCH_ROOT)
     shutil.rmtree(SCRATCH_ROOT, ignore_errors=True)
 
 
