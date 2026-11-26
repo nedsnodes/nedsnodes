@@ -184,7 +184,7 @@ def answer_without_provenance_stamp(text: str) -> str:
     return PROVENANCE_STAMP.sub("", text, count=1).strip()
 
 
-class ModelCallsInFlight:
+class NewWordsMeaningCheckRunningModelCallProcessesTrackerWithStopAll:
     """The model-call processes the word checks have running, so that a read ended by a signal can stop them
     all and start no further call: each runs in a session of its own, which a signal to the read misses."""
 
@@ -214,7 +214,7 @@ class ModelCallsInFlight:
             cell_common.stop_process_tree(process)
 
 
-def model_call_process_run_until_deadline(calls: ModelCallsInFlight, command: list, *, what: str,
+def model_call_process_run_until_deadline(calls: NewWordsMeaningCheckRunningModelCallProcessesTrackerWithStopAll, command: list, *, what: str,
                                           cwd: pathlib.Path, stdin_text, deadline: float) -> tuple:
     """Run one model-call process to its end or to `deadline`. Returns (exit status, stdout, stderr), or
     (None, the cause the call gave no answer, "")."""
@@ -245,11 +245,11 @@ def model_call_process_run_until_deadline(calls: ModelCallsInFlight, command: li
 
 def cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause(launcher: pathlib.Path, cell_label: str, prompt_template: str,
                                        question_text: str, work_directory: pathlib.Path,
-                                       deadline: float, calls: ModelCallsInFlight = None) -> tuple:
+                                       deadline: float, calls: NewWordsMeaningCheckRunningModelCallProcessesTrackerWithStopAll = None) -> tuple:
     """One model call through a cold-read-cell launcher on the fast cold-read-tier: `question_text` is the
     target, `prompt_template` the prompt. Returns (the answer without its provenance stamp, "") or (None, the
     cause of the failure). The launcher runs in a process group of its own, stopped at `deadline`."""
-    calls = calls or ModelCallsInFlight()
+    calls = calls or NewWordsMeaningCheckRunningModelCallProcessesTrackerWithStopAll()
     # One directory below the work directory, so the launcher's misplaced-report recovery, which searches
     # the report's grandparent, sees no other call's report.
     report = work_directory / "answer" / f"{cell_label}-answer.md"
@@ -283,7 +283,7 @@ def cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_o
         return None, f"the {cell_label} call's answer could not be read: {error}"
 
 
-class NewWordModelCalls:
+class NewWordsMeaningCheckColdReadCellLauncherCallsWithOneSharedDeadline:
     """The `ask` new_word_fresh_reader_meaning_guess_and_compare_with_text_meaning takes: each call through
     `launcher` in a directory of its own under `scratch_directory`, every call stopped at one `deadline`,
     NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS from now when None, and stop_all to stop them all."""
@@ -293,7 +293,7 @@ class NewWordModelCalls:
         self.scratch_directory = scratch_directory
         self.deadline = (time.monotonic() + NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS
                          if deadline is None else deadline)
-        self.calls = ModelCallsInFlight()
+        self.calls = NewWordsMeaningCheckRunningModelCallProcessesTrackerWithStopAll()
         self.call_numbers = itertools.count(1)
 
     def __call__(self, cell_label, prompt_template, question_text):

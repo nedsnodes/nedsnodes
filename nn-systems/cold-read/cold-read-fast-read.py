@@ -445,7 +445,7 @@ WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING = "## Question 4: What shoul
 WITHOUT_QUESTION_4_OPTION = "--without-question-4"
 CALLER_TIME_LIMIT_SECONDS_OPTION = "--caller-time-limit-seconds"
 # After the word checks end, the read still waits for Question 4's cell, writes its report and ships the record.
-COLD_READ_FAST_READ_FINISH_AFTER_WORD_CHECKS_ALLOWANCE_SECONDS = 30
+COLD_READ_FAST_READ_FINISH_AFTER_NEW_WORDS_MEANING_CHECKS_ALLOWANCE_SECONDS = 30
 WITHOUT_QUESTION_4_SECTION_LINE = (
     f"Question 4 was not asked: this fast read was run with {WITHOUT_QUESTION_4_OPTION}.")
 WHAT_SHOULD_BE_CODE_QUESTION = WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING + """
@@ -1765,7 +1765,7 @@ def what_should_be_code_section(cell: WhatShouldBeCodeQuestionCell) -> str:
     return f"\n{WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING}\n\n{failure}\n"
 
 
-def word_checks_deadline_for_caller_time_limit(read_started: float, caller_time_limit_seconds):
+def new_words_meaning_checks_end_time_from_read_start_and_caller_time_limit(read_started: float, caller_time_limit_seconds):
     """The monotonic time by which the checks of the words with a meaning of their own must end, for a caller
     that stops the read `caller_time_limit_seconds` after `read_started`, or None, their own limit, when the
     caller sets none."""
@@ -1773,7 +1773,7 @@ def word_checks_deadline_for_caller_time_limit(read_started: float, caller_time_
         return None
     return min(time.monotonic() + new_words.NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS,
                read_started + caller_time_limit_seconds
-               - COLD_READ_FAST_READ_FINISH_AFTER_WORD_CHECKS_ALLOWANCE_SECONDS)
+               - COLD_READ_FAST_READ_FINISH_AFTER_NEW_WORDS_MEANING_CHECKS_ALLOWANCE_SECONDS)
 
 
 def fast_read_report_finish_and_print_path(
@@ -1795,7 +1795,7 @@ def fast_read_report_finish_and_print_path(
     answered or the new words were checked."""
     new_words_answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
         cell_report.read_text(encoding="utf-8"))
-    word_model_calls = new_words.NewWordModelCalls(word_check_launcher, scratch, deadline=word_checks_deadline)
+    word_model_calls = new_words.NewWordsMeaningCheckColdReadCellLauncherCallsWithOneSharedDeadline(word_check_launcher, scratch, deadline=word_checks_deadline)
     new_words_section, new_words_stderr_lines = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
         new_words_answer, whole_document=not (edit_changed_ids or edit_removed_units),
         edit_added_or_changed_no_sentence=bool(edit_removed_units) and not edit_changed_ids,
@@ -1932,7 +1932,7 @@ def main() -> int:
     parser.add_argument(
         CALLER_TIME_LIMIT_SECONDS_OPTION, type=int, metavar="SECONDS",
         help="the seconds after which the caller stops this read; the checks of the words with a meaning of "
-             f"their own then end {COLD_READ_FAST_READ_FINISH_AFTER_WORD_CHECKS_ALLOWANCE_SECONDS} seconds "
+             f"their own then end {COLD_READ_FAST_READ_FINISH_AFTER_NEW_WORDS_MEANING_CHECKS_ALLOWANCE_SECONDS} seconds "
              "before that, or sooner, so the report is written in time")
     parser.add_argument(
         TEXT_INTENDED_READER_CATEGORY_OPTION, choices=TEXT_INTENDED_READER_CATEGORIES,
@@ -2061,7 +2061,7 @@ def main() -> int:
             edit_removed_units=edit_removed_units,
             text_intended_reader_category=text_intended_reader_category,
             scratch=pathlib.Path(scratch),
-            word_checks_deadline=word_checks_deadline_for_caller_time_limit(
+            word_checks_deadline=new_words_meaning_checks_end_time_from_read_start_and_caller_time_limit(
                 read_started, args.caller_time_limit_seconds))
         try:
             quota_error_line = ""

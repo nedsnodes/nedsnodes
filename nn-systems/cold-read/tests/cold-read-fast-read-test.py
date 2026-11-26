@@ -3537,12 +3537,12 @@ with tempfile.TemporaryDirectory() as new_words_scratch_name:
 # --- The word checks' deadline under a caller's time limit, such as /explain's ---------------------------------
 _now = time.monotonic()
 check("with no caller time limit, the word checks keep their own limit",
-      _fast_read.word_checks_deadline_for_caller_time_limit(_now, None) is None)
-_deadline = _fast_read.word_checks_deadline_for_caller_time_limit(_now - 100, 540)
+      _fast_read.new_words_meaning_checks_end_time_from_read_start_and_caller_time_limit(_now, None) is None)
+_deadline = _fast_read.new_words_meaning_checks_end_time_from_read_start_and_caller_time_limit(_now - 100, 540)
 check("a caller that stops the read 540 s after it started gets word checks that end the allowance before that",
-      abs(_deadline - (_now - 100 + 540 - _fast_read.COLD_READ_FAST_READ_FINISH_AFTER_WORD_CHECKS_ALLOWANCE_SECONDS)) < 1,
+      abs(_deadline - (_now - 100 + 540 - _fast_read.COLD_READ_FAST_READ_FINISH_AFTER_NEW_WORDS_MEANING_CHECKS_ALLOWANCE_SECONDS)) < 1,
       repr(_deadline - _now))
-_deadline = _fast_read.word_checks_deadline_for_caller_time_limit(_now, 100000)
+_deadline = _fast_read.new_words_meaning_checks_end_time_from_read_start_and_caller_time_limit(_now, 100000)
 check("a caller limit longer than the word checks' own leaves their own limit",
       abs(_deadline - (_now + _fast_read.new_words.NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS)) < 5,
       repr(_deadline - _now))

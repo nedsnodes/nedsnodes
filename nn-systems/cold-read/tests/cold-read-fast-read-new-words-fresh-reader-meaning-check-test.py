@@ -240,16 +240,16 @@ with tempfile.TemporaryDirectory() as scratch_name:
     check("a call whose files cannot be written, here because its directory already exists, gives no answer "
           "and its cause, and raises nothing",
           answer_text is None and "could not be written" in cause and "File exists" in cause, repr(cause))
-    real_start = new_words.ModelCallsInFlight.start
+    real_start = new_words.NewWordsMeaningCheckRunningModelCallProcessesTrackerWithStopAll.start
 
     def start_refused(self, command, **popen_arguments):
         raise OSError(11, "Resource temporarily unavailable")
-    new_words.ModelCallsInFlight.start = start_refused
+    new_words.NewWordsMeaningCheckRunningModelCallProcessesTrackerWithStopAll.start = start_refused
     try:
         answer_text, cause = new_words.cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause(
             launcher, "new-word-meaning-guess", "{TARGET_PATH} {REPORT_PATH}", "`answer`\n", scratch / "e", later)
     finally:
-        new_words.ModelCallsInFlight.start = real_start
+        new_words.NewWordsMeaningCheckRunningModelCallProcessesTrackerWithStopAll.start = real_start
     check("a launcher that cannot start, as at a process limit, gives no answer and its cause, and raises nothing",
           answer_text is None and "could not start" in cause and "Resource temporarily unavailable" in cause,
           repr(cause))
@@ -258,7 +258,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
     import os
     import signal
     import threading
-    calls = new_words.NewWordModelCalls(launcher, scratch / "signalled", deadline=time.monotonic() + 120)
+    calls = new_words.NewWordsMeaningCheckColdReadCellLauncherCallsWithOneSharedDeadline(launcher, scratch / "signalled", deadline=time.monotonic() + 120)
     started_calls = []
     real_call = new_words.cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause
 
