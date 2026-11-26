@@ -33,6 +33,10 @@ Line numbers are on main at adb96dc59. The last column names the agent-seat whos
 
 The two 0.5-second limits are the likeliest to fail.
 
+## Load test of the hung-update row
+
+The hung-update row is now at lines 1117-1137 of the handoff supervisor test file on main at c64990f57. PR [GHI 1830: handoff-supervisor, pre-push hook and launch-claude test suites stop failing timed work on a wall-clock limit](https://github.com/nedsnodes/nedsnodes/pull/2956) gave it the timeout form that What to do asks for: the case asserts status 124 and the "was stopped" message, and its one elapsed-time check, `elapsed < hung_update_backstop_seconds`, is a backstop of 15 times the 1-second timeout. Codex finding bbab0f2a6d44, raised in merge-lane-1's round-1 review of [PR 4972](https://github.com/nedsnodes/nedsnodes/pull/4972) (`nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/merge-lane-1/review-4972-r1.json`), judged from the code alone that this backstop can still fail when ned-box is busy. On 2026-11-25 merge-lane-1 ran the test file twice on ned-box, which has 16 CPUs, with 48 `yes` CPU hogs added on top of a load average near 22; the load average rose to about 60, and both runs passed. Ten direct calls of `run_agent_binary_update_under_lock` with the same stub agent and the same timeout, made under the same load, each returned 124 within 1.04 s. Only an injected stall failed the bound: a standalone script that makes the same call, paused with SIGSTOP for 15 s, returned 124 after 15.37 s, which the test's backstop would count as a failure although the timeout worked. So CPU load did not make this check fail; a pause of about 14 s in the test process would. This row therefore counts as rewritten for the closing condition under What to do. PR 2956's commit message says it also rewrote the held-lock row of this file and the rows of the pre-push hook and the two launch-claude test files; this section checked none of those, so the table above still lists them as they stood at adb96dc59.
+
 ## What to do
 
 merge-lane-2 sends each owner this issue's link. For each check it owns, the owner rewrites the check so that load cannot fail it, keeping what it proves:
