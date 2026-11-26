@@ -88,8 +88,11 @@ from its author.
 The held list is held-pull-requests.txt in the state directory, which
 merge-lane-2 edits: one pull request number to a line, with blank lines and
 lines starting "#" ignored. A held pull request is neither merged nor
-reported. The program reads no project-wide merge pause, because the
-repository has none; removing its cron line stops it altogether.
+reported. While the merge queue is stopped, that is while the merge
+program's stop file, merge-queue-stopped.txt in the outputs directory,
+exists, a passing pull request is neither approved, merged, reported nor
+recorded: it is left for the next invocation, which handles it once the
+stop is lifted. Removing its cron line stops the program altogether.
 
 An invocation that stops, exit 2 below, also writes its reason and the time
 it stopped to needs-a-look/invocation-stopped.txt, which each later stop
@@ -145,6 +148,9 @@ REPOSITORY = common.REPOSITORY
 CHECKOUT = Path(__file__).resolve().parents[1]
 MERGE_PROGRAM = Path(__file__).resolve().with_name(
     "merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py")
+_merge_spec = importlib.util.spec_from_file_location("merge_lane_pull_request_merge", MERGE_PROGRAM)
+merge_program = importlib.util.module_from_spec(_merge_spec)
+_merge_spec.loader.exec_module(merge_program)
 TITLE_PREFIX = "GHI-MD edit for issue"
 PROVISIONAL_HEADING = "## Provisional additions (not yet vetted by the user)"
 MARKDOWN_PARSER_MODULE = (CHECKOUT / "nn-systems" / "general-tools"
@@ -476,6 +482,18 @@ class Invocation:
         say(f"pull request {number} needs a look ({why}); the needs-a-look notice for "
             f"merge-lane-2 is at {message}")
 
+    def left_while_the_merge_queue_is_stopped(self, number):
+        """Return whether the merge queue is stopped, saying that the pull request is left."""
+        stop_file = (self.arguments.merge_lane_worktrees_and_outputs_directory
+                     / merge_program.MERGE_QUEUE_STOP_FILE_NAME)
+        if not stop_file.exists():
+            return False
+        say(f"pull request {number} is left for the next invocation, unrecorded: the merge "
+            f"queue is stopped while {stop_file} exists, so this job neither approves nor merges "
+            f"it, and records no nn-head-commit for it, so cron's next run of this job checks "
+            f"it again; the stop ends when merge-lane-2 resumes the merge queue")
+        return True
+
     def handle(self, pull_request):
         number, head = pull_request["number"], pull_request["headRefOid"]
         if number in self.held:
@@ -507,6 +525,8 @@ class Invocation:
             self.report(pull_request, problem)
             return
         section_is_new = PROVISIONAL_HEADING not in base_text.split("\n")
+        if self.left_while_the_merge_queue_is_stopped(number):
+            return
         review_tools_worktree_move_to_main(self.arguments.review_tools_worktree_at_main)
         try:
             review = gh_json(self.environment, "api", "--method", "POST",
@@ -527,6 +547,11 @@ class Invocation:
         if merge.returncode == 0:
             say(f"pull request {number} ({path}) merged: "
                 f"{(merge.stdout.splitlines() or [''])[-1]}")
+            return
+        # The merge program refuses with this exit while the queue is stopped; the stop can
+        # appear after the check above, and a head recorded for it would never be tried again.
+        if (merge.returncode == merge_program.EXIT_COULD_NOT_RUN
+                and self.left_while_the_merge_queue_is_stopped(number)):
             return
         self.failed = True
         outcome = {3: "merged, but a step after the merge was not done",

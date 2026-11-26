@@ -89,6 +89,9 @@ if os.path.exists(stdout_path):
 else:
     print("merge line one\nmerge line two\nmerge program last line", flush=True)
 code = int(open(os.path.join(directory, "merge.exit")).read())
+if os.path.exists(os.path.join(directory, "merge.writes-the-stop-file")):
+    outputs = sys.argv[sys.argv.index("--merge-lane-worktrees-and-outputs-directory") + 1]
+    open(os.path.join(outputs, "merge-queue-stopped.txt"), "w").write("stopped meanwhile\n")
 if code < 0:
     os.kill(os.getpid(), -code)
 sys.exit(code)
@@ -561,6 +564,30 @@ def main():
                   code == 1 and f"exited {merge_exit}: {outcome}" in message
                   and "merge line one\nmerge line two\nmerge program last line" in message
                   and scratch.record() == {"9": HEAD}, f"exit {code}\n{output}\n{message}")
+
+        scratch = Scratch(root, "merge-queue-stopped-before")
+        scratch.outputs.mkdir(parents=True, exist_ok=True)
+        (scratch.outputs / program.merge_program.MERGE_QUEUE_STOP_FILE_NAME).write_text("stopped\n")
+        scratch.routes(routes_for())
+        code, output = scratch.run()
+        check("while the merge queue is stopped, a passing pull request is neither approved, "
+              "merged, reported nor recorded, and the invocation exits 0",
+              code == 0 and approvals(scratch) == [] and scratch.merge_calls() == []
+              and scratch.messages() == [] and not scratch.record()
+              and "pull request 9 is left for the next invocation, unrecorded" in output,
+              f"exit {code}\n{output}\n{scratch.messages()}\n{scratch.record()}")
+
+        scratch = Scratch(root, "merge-queue-stopped-during-the-merge")
+        (scratch.directory / "merge.exit").write_text("2")
+        (scratch.directory / "merge.writes-the-stop-file").write_text("")
+        scratch.routes(routes_for())
+        code, output = scratch.run()
+        check("a merge refused with exit 2 because the merge queue stopped after the check is "
+              "neither reported nor recorded, so a later invocation tries it again",
+              code == 0 and len(scratch.merge_calls()) == 1 and scratch.messages() == []
+              and not scratch.record()
+              and "pull request 9 is left for the next invocation, unrecorded" in output,
+              f"exit {code}\n{output}\n{scratch.messages()}\n{scratch.record()}")
 
         scratch = Scratch(root, "merge-stop-longer-than-the-line-limit")
         (scratch.directory / "merge.exit").write_text("3")
