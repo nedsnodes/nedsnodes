@@ -238,8 +238,8 @@ def launcher_accepts_seat_name(name, bash_options=(), locale_environment=None, b
     raise AssertionError(f"launch-claude-ubuntu {name!r} stopped at neither check: {result.stderr!r}")
 
 
-for name in ["merge-lane-2", "reboot_test", "_x", "9", "a.b", ".hidden", "-v", "a;b", "a b", "é"]:
-    check(f"the forced command accepts the seat name {name!r} exactly when launch-claude-ubuntu does",
+for name in ["merge-lane-2", "reboot_test", "_x", "9", "a.b", ".hidden", "-v", "-x", "a;b", "a b", "a/b", "x\n", "", "é"]:
+    check(f"the shared agent-seat name pattern accepts {name!r} exactly when launch-claude-ubuntu does",
           bool(forced_command.AGENT_SEAT_NAME_PATTERN.fullmatch(name)) == launcher_accepts_seat_name(name),
           name)
 

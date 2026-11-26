@@ -1,33 +1,34 @@
 # Project Goals and Philosophy
 
-This page holds the project's goals and philosophy: the user's founding statement, what it asks of an agent on every task, and how agents work with the user. Where a principle meets a Standing decision of the objective page, the principle names the decision and does not restate it. A user-ruling on one task's content is not a principle here. The user's words behind each principle are quoted in the section Sources at the end, cited as S1, S2 and so on.
+This page holds the project's goals and philosophy: the user's founding statement, what it asks of an agent on every task, and how agents work with the user. A user-ruling on one task's content is not a principle here. The user's words behind each principle are quoted in the section Sources at the end, cited as S1, S2 and so on.
 
 ## The founding statement
 
-The user gave merge-lane-2 a statement of the project's philosophy on 2026-11-03 at about 21:20Z; S1 quotes it whole. Principles 1 to 5 state what it asks of an agent. The founding statement is the parent of the project's objective page, [nedsnodes-ai-native-software-development-objective.md](../nedsnodes-ai-native-software-development-objective.md), whose Standing decisions say what the system is built from.
+The user gave merge-lane-2 a statement of the project's philosophy on 2026-11-03 at about 21:20Z; S1 quotes it whole. Principles 1 to 5 state what it asks of an agent. The founding statement is the parent of the project's objective page, [nedsnodes-ai-native-software-development-objective.md](../nedsnodes-ai-native-software-development-objective.md).
 
 ## What the statement asks of an agent
 
 ### 1. Encode each repeatable rule wherever practical, and keep judgment for the steps that need it
 
-Wherever practical, an agent puts a rule that code, a schema, a state machine or a test can hold reliably into one of them, because agents debug and test code well and judge prose poorly; a guard still meets the two conditions of the bullet of `CLAUDE.md` that begins "Propose a guard". Each step that needs judgment gets clear questions, inputs and expected decisions, as S1 says. Standing decision 22, "Prose always precedes code", applies. Fresh-readers, not the writing agent, test whether prose is clear, and the user reviews the final prose that Standing decision 19 names; an obvious-error-fix stays an agent's to make. Sources: S1 to S5.
+Wherever practical, an agent puts a rule that code, a schema, a state machine or a test can hold reliably into one of them, because agents debug and test code well and judge prose poorly; a guard still meets the two conditions of the bullet of `CLAUDE.md` that begins "Propose a guard". Each step that needs judgment gets clear questions, inputs and expected decisions, as S1 says. Prose always precedes code: the design and the contract are prose, and the implementation comes from them; the test plan is prose, and the tests come from it. Fresh-readers, not the writing agent, test whether prose is clear, and the user reviews all final prose, after its cold read and before it lands: in the design-to-main pipeline the designs, the contracts and the test plans, and outside it the documents that govern the project, but not code changes or traffic between nodes; an obvious-error-fix stays an agent's to make. Sources: S1 to S5.
 
-### 2. Put every finding in one of four categories
+### 2. Put every finding in one of five categories
 
-The statement says "three categories" and lists four; this page uses four, defined in the user's later words (S35). Every finding, from a review, a test or an approval-walk, goes in one:
+The statement says "three categories" and lists four; this page uses those four, defined in the user's later words (S35), and a fifth, Declined. Every finding, from a review, a test or an approval-walk, goes in one:
 
 1. Must fix now: the finding prevents the next step from being completed or validated correctly. Only this category holds the work back.
 2. Fix next: in a follow-up pull request on the finding's topic, opened after the current one merges, with a task holding the finding until that pull request opens, or as the next item in the approval-walk.
 3. Fix during maintenance: a nit, or another maintenance kind of thing.
 4. File an improvement, a feature or a change: as a task if it is short term and of smaller scope, or as a GHI if it is longer term or of larger scope.
+5. Declined: a check shows the finding wrong, or the user has already ruled on the question it raises. A declined finding gets no record of its own: its reason, or the quoted user-ruling, is attached to the finding where it was reported, as a reply to its review comment, on its line in the cold-read-record's triage, or under its item in the walk-minutes.
 
 A finding filed in category 4 stays visible, with the reason for filing it rather than fixing it, a defined follow-up, its prerequisites, and what it unblocks; prerequisites are done first. An improvement or an addition a review finds, rather than a defect, is a finding like any other, and falls in category 4: the user's words in S35 answer the question he asked in S34.
 
-An agent fixes what must be fixed and leaves the rest to its category, because an agent that works on a few things does them well. In a pull request review, a finding that the "Review scope" section of `docs/agents/pr-reviewer-instructions.md` says blocks the merge is must fix now. The agent that runs a review or a test files what it defers. Where maintenance findings are held, and how a finding is placed among categories 2 to 4, are still open, listed in the section Deferred-decisions of [GHI 2522](https://github.com/nedschorus/nedschorus/issues/2522). Sources: S6 to S9, S34, S35.
+An agent fixes what must be fixed and leaves the rest to its category, because an agent that works on a few things does them well. In a pull request review, a finding that the "Review scope" section of `docs/agents/pr-reviewer-instructions.md` says blocks the merge is must fix now. The agent that runs a review or a test files what it defers. Where maintenance findings are held, and how a finding is placed among categories 2 to 4, are still open, listed in the section Deferred-decisions of [GHI 2522](https://github.com/nedsnodes/nedsnodes/issues/2522). Sources: S6 to S9, S34, S35.
 
 ### 3. Keep a checked claim, and reopen it only for a reason
 
-An agent keeps a checked and supported claim with its evidence and the conditions under which it stays valid, and reopens it only when an input changes, an assumption fails, or contradictory evidence appears, because a repeated prose review gives inconsistent verdicts. Code is still tested on every change. Standing decision 5, "Creation alternates with independent review", applies. A finding on text the user has already decided is quoted with his user-ruling and not reported again, as Standing decision 25 says, unless a real defect needs that user-ruling changed, as /walk-me-through says. Source: S10.
+An agent keeps a checked and supported claim with its evidence and the conditions under which it stays valid, and reopens it only when an input changes, an assumption fails, or contradictory evidence appears, because a repeated prose review gives inconsistent verdicts. Code is still tested on every change. Creation alternates with independent review, and a changed output invalidates the old review. A finding on text the user has already decided is quoted with his user-ruling and not reported again, unless a real defect needs that user-ruling changed, as /walk-me-through says. Source: S10.
 
 ### 4. Give every review, test and approval a purpose, and fix the process behind a recurring failure
 
@@ -45,11 +46,11 @@ An agent does work the user trusts agents with without asking him or explaining 
 
 ### 7. Count more work as a win when the result works better
 
-More code, more steps, or simple changes such as renames count as a win when the result works better. The limit is real: a step that goes from a millisecond to a week is a cost. Standing decision 26, "Evidence first; cost is a bound", applies. Sources: S13 to S16.
+More code, more steps, or simple changes such as renames count as a win when the result works better. The limit is real: a step that goes from a millisecond to a week is a cost. Evidence comes first, and cost is a bound: an agent chooses the work that gives the strongest evidence that the code is good and maintainable, and CPU time, tokens and storage limit that choice and do not rank it. Sources: S13 to S16.
 
 ### 8. State the case against as it is, even when it is weak
 
-An agent states the strongest case against its recommendation that it has, and calls it weak when it is. The user accepts that about 5% of the items settled without him would have had a different answer from him. An approval-walk item that proposes a change needs no answer from him when its change is of a kind that the paragraph of `.claude/skills/walk-me-through/SKILL.md` beginning "An item needs no answer from the user" lists, and its case against is rated none, or rated weak and names only cost, or only that the change alters text the user approved word for word on an earlier date. Widening that rule is the subject of GHI [Approve obvious approval-walk items automatically, by criteria drawn from the user's tracked obvious approvals, after the advisor checks each one](https://github.com/nedschorus/nedschorus/issues/1809). Sources: S17, S18.
+An agent states the strongest case against its recommendation that it has, and calls it weak when it is. The user accepts that about 5% of the items settled without him would have had a different answer from him. An approval-walk item that proposes a change needs no answer from him when its change is of a kind that the paragraph of `.claude/skills/walk-me-through/SKILL.md` beginning "An item needs no answer from the user" lists, and its case against is rated none, or rated weak and names only cost, or only that the change alters text the user approved word for word on an earlier date. Widening that rule is the subject of GHI [Approve obvious approval-walk items automatically, by criteria drawn from the user's tracked obvious approvals, after the advisor checks each one](https://github.com/nedsnodes/nedsnodes/issues/1809). Sources: S17, S18.
 
 ### 9. A case against that says only "this takes work" is not a real case
 
@@ -57,11 +58,11 @@ An agent still states such a case, and the user reads it as no case. Sources: S1
 
 ### 10. Search for his earlier user-ruling before asking him
 
-Before an agent asks the user to decide something, it searches for his earlier user-ruling with the /find-info skill and builds on one that answers the same case; Standing decision 25 also applies. Source: S20.
+Before an agent asks the user to decide something, it searches for his earlier user-ruling with the /find-info skill and builds on one that answers the same case; a finding that touches text the user has already decided is quoted with his user-ruling and not reported again. Source: S20.
 
 ### 11. Bring him one decision at a time
 
-Anything that needs the user reaches him one decision at a time, as Standing decision 20 says, in an approval-walk when the trigger of /walk-me-through is met. Sources: S21, S22.
+Anything that needs the user reaches him one decision at a time, in an approval-walk when the trigger of /walk-me-through is met. Sources: S21, S22.
 
 ### 12. Give him the essence, and keep the details for agents
 
@@ -73,7 +74,7 @@ An agent consults the advisor, the stronger model Claude Code's advisor tool ask
 
 ### 14. Back each promise to him with a hook or a program
 
-When an agent tells the user that something will not happen again, a hook or a program makes sure of it, not a sentence in `CLAUDE.md` or a note in Claude Code's auto-memory. Standing decision 13 says which tier carries a rule. Sources: S27, S28.
+When an agent tells the user that something will not happen again, a hook or a program makes sure of it, not a sentence in `CLAUDE.md` or a note in Claude Code's auto-memory. A rule is put at the cheapest tier that can carry it: code, which is fast and reliable; an AI, which is slower and less reliable but still useful; or the user, who is slowest and scarce. Sources: S27, S28.
 
 ### 15. Say how you know a fix works
 
@@ -85,7 +86,7 @@ An agent keeps a file for what the file is worth; a file nothing builds on may s
 
 ## What implementing the philosophy changes
 
-GHI [Implementing the project's goals and philosophy: every finding sorted into four categories, checked claims kept with their evidence, and one standard in every agent's instructions](https://github.com/nedschorus/nedschorus/issues/2522) lists each place that produces findings, from pull request reviews to approval-walks, says how far each agrees, and carries the work. The enforcement path is GHI [Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedschorus/nedschorus/issues/2505).
+GHI [Implementing the project's goals and philosophy: every finding sorted into four categories, checked claims kept with their evidence, and one standard in every agent's instructions](https://github.com/nedsnodes/nedsnodes/issues/2522) lists each place that produces findings, from pull request reviews to approval-walks, says how far each agrees, and carries the work. The enforcement path is GHI [Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedsnodes/nedsnodes/issues/2505).
 
 ## Sources
 
@@ -110,7 +111,7 @@ A transcript is cited with the UTC time of the user's message in it. Walk-minute
 - S17. 2026-10-28T20:58:55Z, transcript of S4: "if we demand a substitute criteria for the worst reason against, we're going to take something that's somewhat understandable and noisy and not noisy to something that's less understandable and more noisy." Then: "I think I'm going to have to accept a 5% mistake rate. So if like 95% of the time I would approve something that had a weak objection, that's good enough."
 - S18. 2026-10-25T03:25:00Z, reboot-test's agent-session: "my attention is limited, and so I'd rather make occasional mistakes and fix them when they're visible than spend a lot of time approving things that are obvious." Transcript `nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/ned-box/projects/-home-nedlern-agents-reboot-test/2e4e1378-f76e-43ce-9dd0-bfa03d22f6b8.jsonl`.
 - S19. 2026-11-01 18:22, item 6.2 of approval-walk cold-read-improvement-handoff-intake-decisions-2026-10-31: "ao - case against is merely this takes work." Walk-minutes `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/cold-read-improvement-handoff-intake-decisions-2026-10-31-minutes.md`, line 108.
-- S20. 2026-10-28T20:34:11Z, item 1.2 of approval-walk cold-read-research-carried-items-2026-10-28: "Ao This item I've ruled on at least 3 or 4 times in the past, and I assume we've now fixed that bug so that I won't be seeing this one again." Transcript `nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/projects/-Users-el-agents-cold-read-research/87e00ba1-357a-4f2b-ac40-d652a90d0185.jsonl`. GHI [ruling-agent keeps user-rulings, checks approval-walk items against them](https://github.com/nedschorus/nedschorus/issues/2118) counts the re-asked items.
+- S20. 2026-10-28T20:34:11Z, item 1.2 of approval-walk cold-read-research-carried-items-2026-10-28: "Ao This item I've ruled on at least 3 or 4 times in the past, and I assume we've now fixed that bug so that I won't be seeing this one again." Transcript `nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/projects/-Users-el-agents-cold-read-research/87e00ba1-357a-4f2b-ac40-d652a90d0185.jsonl`. GHI [ruling-agent keeps user-rulings, checks approval-walk items against them](https://github.com/nedsnodes/nedsnodes/issues/2118) counts the re-asked items.
 - S21. 2026-08-25T23:44:03Z, MD-skills's agent-session on the Mac: "I'm a human. I can only concentrate on one thing at a time, which is why I constantly use the walk skill." Transcript `nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/projects/-Users-el-agents-MD-skills/04c55cfe-d3b6-43b3-89b7-76e9932d459f.jsonl`.
 - S22. 2026-11-01T22:50:19Z, prime-intellect's agent-session: "organize your questions, comments, recommendations or anything else that needs my attention into a walk." Transcript `nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/ned-box/projects/-home-nedlern-agents-prime-intellect/f3fce88d-1ceb-4ac8-aad3-ab3ec2a40ce3.jsonl`.
 - S23. 2026-11-01, after item 6.1 of the approval-walk of S19: "you can put stuff in a walk that I don't see ... I want to click on something and see it. That doesn't need to be the only record ... it would be efficient for the walk to compile stuff for the walk or agents or code ... That would be different from what it compiles for me and what I see". Walk-minutes of S19, line 104.

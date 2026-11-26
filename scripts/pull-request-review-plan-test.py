@@ -286,6 +286,9 @@ def run_unit_cases():
               normalized(source) == normalized(source.replace("old", "new")))
     check("normalized AST ignores a printed module constant named as a message",
           normalized('CHECK_MESSAGE = "old"\nprint(CHECK_MESSAGE)\n') == normalized('CHECK_MESSAGE = "new"\nprint(CHECK_MESSAGE)\n'))
+    steering_constant_source = 'MODE = "old"\ndef main(requested_mode):\n    print(MODE)\n    if requested_mode == MODE:\n        return 1\n'
+    check("normalized AST keeps a printed module constant that is also compared",
+          normalized(steering_constant_source) != normalized(steering_constant_source.replace("old", "new")))
     prompt_before = "# Task\n\nRead the whole file, then\nreport each name.\n\n- first step\n- second step\n"
     compare = review_plan_module.prompt_texts_differ_only_in_trailing_whitespace_or_blank_lines
     cosmetic_cases = [
@@ -697,12 +700,12 @@ def run_agent_text_cases(fixture):
     f_string_entry = next((entry for entry in entries if entry["label"] == "print in show_message()"), {})
     check("changed print f-strings retain placeholders and old/new text", "{name}" in f_string_entry.get("old_text", "") and "{name}" in f_string_entry.get("new_text", "") and "Old message" in f_string_entry["old_text"] and "New message" in f_string_entry["new_text"], entries)
     f_string_command = f_string_entry.get("fast_read_command")
-    f_string_target = Path(shlex.split(f_string_command)[-1]) if f_string_command else Path()
-    check("an f-string message's target holds the text the agent reads, each field a <source> stand-in, "
+    f_string_target = Path(shlex.split(f_string_command)[3]) if f_string_command else Path()
+    check("an f-string message's target holds the text the agent reads, each field a <filled in: source> stand-in, "
           "not the f-string's Python source",
           f_string_entry.get("new_text") == "f'New message for {name}'"
-          and f_string_entry.get("new_text_as_agent_reads_it_with_placeholder_stand_ins") == "New message for <name>"
-          and f_string_target.is_file() and f_string_target.read_text(encoding="utf-8") == "New message for <name>\n"
+          and f_string_entry.get("new_text_as_agent_reads_it_with_placeholder_stand_ins") == "New message for <filled in: name>"
+          and f_string_target.is_file() and f_string_target.read_text(encoding="utf-8") == "New message for <filled in: name>\n"
           and f_string_target.name == f_string_entry["fast_read_target_file_name"], f_string_entry)
     check("changed raise text is listed with context", any(entry["label"] == "raise in show_message()" and entry["old_text"] == "Old failure" and entry["new_text"] == "New failure" for entry in entries), entries)
     check("changed advice constants are listed", any(entry["label"] == "CHECK_ADVICE =" and entry["old_text"] == "Old advice ``` marker" and entry["new_text"] == "New advice ``` marker" for entry in entries), entries)
@@ -858,8 +861,10 @@ def run_fast_read_command_cases(fixture):
         command_words = shlex.split(whole_entry["fast_read_command"])
     except ValueError:
         command_words = []  # An unquoted target can leave a quote unclosed; the case below then fails by name.
-    target = Path(command_words[-1]) if len(command_words) == 4 else Path()
-    check("each listed message gets a fast-read command whose target holds its new text",
+    target = (Path(command_words[3]) if len(command_words) == 6
+              and command_words[4:] == ["--text-intended-reader-category", "agent-readable"] else Path())
+    check("each listed message gets a fast-read command whose target holds its new text, "
+          "read as agent-readable",
           whole_entry["fast_read_command"].startswith(command_prefix) and whole_entry["fast_read_target_error"] is None
           and target.is_relative_to(fixture.message_target_temporary_directory)
           and target.read_text(encoding="utf-8") == "New failure\n", whole_entry)
@@ -893,7 +898,8 @@ def run_fast_read_command_cases(fixture):
           json_result.returncode == 3 and bool(blocked_entries)
           and all(entry["fast_read_command"] is None and entry["fast_read_target_error"] for entry in blocked_entries)
           and "1 listed tool-message-to-agent has no cold-read-fast-read command, because its text" in json_result.stderr
-          and "--target <that file's full path>" in json_result.stderr, json_result)
+          and "--target <that file's full path> --text-intended-reader-category agent-readable"
+          in json_result.stderr, json_result)
     blocked_entry = blocked_entries[0] if blocked_entries else {
         "path": "", "line": 0, "new_text_as_agent_reads_it_with_placeholder_stand_ins": ""}
     file_name = review_plan_module._message_reminder_hook.fast_read_target_path(
@@ -1324,8 +1330,9 @@ def run_architecture_overview_claim_check_cases(fixture):
     fixture.configure_github_answers(head)
     blob = fixture.git_command("rev-parse", f"{head}:{FIXTURE_OVERVIEW_PATH}")
     result = fixture.run_review_plan(*flag)
-    check("an added overview with no claim-check report is refused, naming the overview and the command that checks it",
+    check("an added overview with no claim-check report is refused, naming the head's 12-character short hash, the overview and the command that checks it",
           refusal_has_expected_prefix(result) and not result.stdout
+          and f"the overview's text at head {head[:12]} shows that no " in result.stderr
           and f"{FIXTURE_OVERVIEW_PATH} (git blob {blob[:12]} at head): looked " in result.stderr
           and "newest report found: none" in result.stderr
           and f"--overview {FIXTURE_OVERVIEW_PATH}\n" in result.stderr, result.stderr)

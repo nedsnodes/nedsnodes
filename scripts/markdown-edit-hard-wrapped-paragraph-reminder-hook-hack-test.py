@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Before anything runs git: a run started with GIT_DIR set must still build this
@@ -330,11 +331,12 @@ if PARSER_AVAILABLE:
         check(f"silent: {case_name}", hook.markdown_has_hard_wrapped_paragraph(text) is False)
 
     large_text = ("One whole paragraph on one line.\n\n" * 50000)
-    import time as _time
-    _started = _time.monotonic()
+    # CPU time of this process, because wall-clock time on a loaded machine measures the machine, not the detector.
+    cpu_seconds_before = time.process_time()
     hook.markdown_has_hard_wrapped_paragraph(large_text)
-    check("a 1.6 MB file is judged in under five seconds",
-          _time.monotonic() - _started < 5.0)
+    detector_cpu_seconds = time.process_time() - cpu_seconds_before
+    check("a 1.6 MB file is judged in under five seconds of CPU time",
+          detector_cpu_seconds < 5.0, f"{detector_cpu_seconds:.3f} CPU seconds")
 else:
     print("the detector's cases were not run: markdown-it-py is missing")
 

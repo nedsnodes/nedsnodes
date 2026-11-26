@@ -43,6 +43,11 @@ crash_recovery = importlib.util.module_from_spec(_crash_recovery_spec)
 _crash_recovery_spec.loader.exec_module(crash_recovery)
 handoff_supervisor = crash_recovery.supervisor
 
+_handoff_extract_conversation_spec = importlib.util.spec_from_file_location(
+    "handoff_extract_conversation", Path(__file__).resolve().parent / "handoff-extract-conversation.py")
+handoff_extract_conversation = importlib.util.module_from_spec(_handoff_extract_conversation_spec)
+_handoff_extract_conversation_spec.loader.exec_module(handoff_extract_conversation)
+
 DEFAULT_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 WRAPPED_BLOCK = re.compile(r"\A\s*<[a-z-]+>.*</[a-z-]+>\s*\Z", re.DOTALL)
 PROGRAM_PROMPT_ENTRYPOINT = "sdk-cli"
@@ -144,8 +149,10 @@ def is_interrupt_notice(record):
                  if isinstance(block, dict) and block.get("type") == "text"]
     else:
         return False
-    return any(isinstance(text, str) and text.lstrip().startswith("[Request interrupted")
-               for text in texts)
+    # The message's whole text, so that a prompt the user typed holding a notice, pasted or in a
+    # block of its own after his words, is still his.
+    return handoff_extract_conversation.text_is_whole_interrupt_notice(
+        "".join(text for text in texts if isinstance(text, str)))
 
 
 def assistant_text(record):

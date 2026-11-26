@@ -45,6 +45,9 @@ launcher's list holds the logged-out text alone, and a codex whose stderr
 carries the captured 401 line leaves the cell naming `cause: logged-out` in
 its own stderr, the line the grid lifts.
 
+The service tier is pinned for both tiers: the deep tier and the
+second-strongest-model tier each ask codex for the Fast service tier.
+
 Everything else about this cell — the model and effort pins, the memory store
 being off for the launch, the stray-write detector, the provenance stamp's
 fields — is NOT covered here; this file was written for the exit-code seam
@@ -108,7 +111,7 @@ def build_scratch_repository(scratch):
 # 0.153.4) from a scratch directory outside any checkout with an empty
 # CODEX_HOME: `CODEX_HOME=$(mktemp -d) codex exec --sandbox read-only
 # --skip-git-repo-check "say hi"`, exit 1, this line on stderr. Its source
-# is recorded beside recognised_failure_texts_for_model in the cell.
+# is recorded beside RECOGNISED_FAILURE_TEXTS in the cell.
 CODEX_LOGGED_OUT_LINE = (
     "2026-09-18T19:37:41.140816Z ERROR codex_api::endpoint::responses_websocket: "
     "failed to connect to websocket: HTTP error: 401 Unauthorized, "
@@ -126,6 +129,12 @@ if os.environ.get("COLD_READ_CODEX_CELL_TEST_STUB_ARGV_PATH"):
     with open(os.environ["COLD_READ_CODEX_CELL_TEST_STUB_ARGV_PATH"], "w",
               encoding="utf-8") as argv_handle:
         json.dump(sys.argv, argv_handle)
+if os.environ.get("COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"):
+    import json
+    with open(os.environ["COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"], "w",
+              encoding="utf-8") as tokens_handle:
+        json.dump([name for name in ("GH_TOKEN", "GITHUB_TOKEN") if name in os.environ],
+                  tokens_handle)
 report_path = os.environ["COLD_READ_CODEX_CELL_TEST_STUB_REPORT_PATH"]
 # A report outside the checkout is written into the directory the cell adds.
 if "--add-dir" in sys.argv:
@@ -165,7 +174,7 @@ def check(case_name, condition, detail=""):
 
 
 def run_cell(stub_directory, stub_body, report_path, *arguments, argv_path=None,
-             added_listing_path=None):
+             added_listing_path=None, caller_github_tokens=None, github_tokens_path=None):
     """Run the cell as a subprocess with a stub codex first on PATH.
 
     A subprocess, not an import of main(): the exit code is the subject
@@ -186,6 +195,12 @@ def run_cell(stub_directory, stub_body, report_path, *arguments, argv_path=None,
         environment["COLD_READ_CODEX_CELL_TEST_STUB_ARGV_PATH"] = str(argv_path)
     if added_listing_path is not None:
         environment["COLD_READ_CODEX_CELL_TEST_STUB_ADDED_LISTING_PATH"] = str(added_listing_path)
+    if caller_github_tokens is not None:
+        for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+            environment.pop(name, None)
+        environment.update(caller_github_tokens)
+    if github_tokens_path is not None:
+        environment["COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"] = str(github_tokens_path)
     return subprocess.run(
         [sys.executable, str(CELL_SCRIPT), "--report", str(report_path), *arguments],
         capture_output=True, text=True, check=False, env=environment,
@@ -269,7 +284,7 @@ with tempfile.TemporaryDirectory() as scratch:
         "cold_read_codex_cell_under_test", CELL_SCRIPT)
     codex_module = importlib.util.module_from_spec(codex_spec)
     codex_spec.loader.exec_module(codex_module)
-    recognised = codex_module.recognised_failure_texts_for_model("gpt-5-codex")
+    recognised = codex_module.RECOGNISED_FAILURE_TEXTS
     check("the launcher recognises one text, and it is logged-out",
           [text.cause_class for text in recognised] == ["logged-out"],
           repr(recognised))
@@ -338,6 +353,23 @@ with tempfile.TemporaryDirectory() as scratch:
           and f"prompt_file={draft_prompt} " in report_text.splitlines()[0],
           repr(report_text[:300]))
 
+    # --- Codex is given no GitHub token from its caller --------------------
+    # An agent-seat's supervisor sets GH_TOKEN to the agent-seat's own token; each variable is
+    # set on its own so that a launcher still passing either one fails its own case.
+    for github_token_variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+        report.unlink(missing_ok=True)
+        tokens_dump = scratch / f"codex-received-{github_token_variable}.json"
+        result = run_cell(stubs, STUB_CODEX_WRITES_REPORT, report,
+                          "--cell", "defect-hunt", "--tier", "deep", "--target", str(target),
+                          caller_github_tokens={github_token_variable: "a-token-codex-must-not-see"},
+                          github_tokens_path=tokens_dump)
+        received_names = (json.loads(tokens_dump.read_text(encoding="utf-8"))
+                          if tokens_dump.is_file() else None)
+        check(f"a caller's {github_token_variable} does not reach codex",
+              result.returncode == 0 and received_names == [],
+              f"exit {result.returncode}; codex received {received_names!r}; "
+              f"stderr={result.stderr[-600:]!r}")
+
     # --- The successful path, which must keep working ----------------------
     report.unlink(missing_ok=True)
     argv_dump = scratch / "successful-cell-argv.json"
@@ -404,6 +436,25 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the added directory is removed after the report is moved",
           bool(added_directories) and not Path(added_directories[0]).exists(),
           repr(added_directories))
+
+    def service_tier_settings(argv):
+        return [argv[index + 1] for index, argument in enumerate(argv[:-1])
+                if argument == "-c" and argv[index + 1].startswith("service_tier=")]
+
+    check("the deep tier asks codex for the Fast service tier",
+          service_tier_settings(received_argv) == ['service_tier="priority"'],
+          repr(service_tier_settings(received_argv)))
+    second_tier_argv_dump = scratch / "second-strongest-model-cell-argv.json"
+    report.unlink(missing_ok=True)
+    result = run_cell(stubs, STUB_CODEX_WRITES_REPORT, report,
+                      "--cell", "defect-hunt", "--tier", "second-strongest-model",
+                      "--target", str(target), argv_path=second_tier_argv_dump)
+    second_tier_argv = (json.loads(second_tier_argv_dump.read_text(encoding="utf-8"))
+                        if second_tier_argv_dump.is_file() else None)
+    check("the second-strongest-model tier asks codex for the Fast service tier",
+          result.returncode == 0 and second_tier_argv is not None
+          and service_tier_settings(second_tier_argv) == ['service_tier="priority"'],
+          f"exit {result.returncode}; argv={second_tier_argv!r}; stderr={result.stderr[-300:]!r}")
 
     # --- A report that cannot be moved to its destination fails the cell ----
     locked_directory = scratch / "a-directory-the-cell-cannot-write"
