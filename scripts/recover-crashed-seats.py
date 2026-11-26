@@ -169,7 +169,6 @@ open, whose report line says WINDOW NOT OPENED and how to open it by hand.
 import argparse
 import importlib.util
 import os
-import re
 import shlex
 import shutil
 import subprocess
