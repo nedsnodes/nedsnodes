@@ -206,15 +206,17 @@ FINDING_FACT_LINE_OLDER_LABELS = {"Main has it": "#defect_already_on_main",
                                   "This pull request makes it happen": "#pull_request_triggers_the_defect",
                                   "Reports success on failure": "#false_report_of_success_on_failure",
                                   "Shown by": "#defect_evidence"}
-# A hashtag or a label may open a list item of any kind and sit inside code or bold marks, and a label's colon
-# may sit inside or outside them.
+# A hashtag or a label may open a list item of any kind and sit inside code or bold marks, and a colon may
+# follow either, inside or outside those marks; `_` is a word character, so a hashtag's closing marks are
+# taken before the check that no longer hashtag goes on.
 FINDING_FACT_LINE = re.compile(
     r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(?:("
     + "|".join(re.escape(hashtag) for hashtag in FINDING_FACT_LINE_HASHTAGS)
-    + r")(?!\w)|("
+    + r")[`*_]*(?!\w):?|("
     + "|".join(re.escape(label) for label in FINDING_FACT_LINE_OLDER_LABELS)
     + r")[`*_]*:)(.*)$", re.MULTILINE)
-FINDING_FACT_LINE_MARKS_AND_SPACE = re.compile(r"[`*_\s]")
+# An answer holds a letter or a digit; marks, punctuation and space alone answer nothing.
+FINDING_FACT_LINE_ANSWER_LETTER_OR_DIGIT = re.compile(r"[^\W_]")
 OUTSIDE_THE_DIFF_HEADING = fix_round.OUTSIDE_THE_DIFF_HEADING
 OUTSIDE_THE_DIFF_LINE_FORMAT = "- `{path}:{line}`: {body}"
 OUTSIDE_THE_DIFF_LINE_PATTERN = fix_round.OUTSIDE_THE_DIFF_LINE_PATTERN
@@ -457,7 +459,7 @@ def finding_fact_lines_lacking(text):
     in FINDING_FACT_LINE_HASHTAGS order; empty when every one is there with an answer."""
     answered = {hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]
                 for hashtag, label, answer in FINDING_FACT_LINE.findall(text)
-                if FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer)}
+                if FINDING_FACT_LINE_ANSWER_LETTER_OR_DIGIT.search(answer)}
     return tuple(hashtag for hashtag in FINDING_FACT_LINE_HASHTAGS if hashtag not in answered)
 
 

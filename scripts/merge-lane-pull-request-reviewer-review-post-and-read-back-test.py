@@ -310,6 +310,22 @@ def finding_fact_line_count_cases(scratch):
           result.code == 0 and "; 2 of 2 finding(s) lack an answered fact line: "
           "scripts/thing.py:4 lacks '#defect_evidence' | scripts/thing.py:5 lacks '#defect_evidence'"
           in result.stdout, result.detail)
+    hashtags_answered_but = ("A finding.\n#defect_already_on_main no\n#pull_request_triggers_the_defect yes\n"
+                             "#false_report_of_success_on_failure no\n")
+    colon_only = {"path": "scripts/thing.py", "line": 4, "body": hashtags_answered_but + "#defect_evidence:"}
+    full_stop_only = {"path": "scripts/thing.py", "line": 5, "body": hashtags_answered_but + "#defect_evidence."}
+    bold_underscores = {"path": "scripts/thing.py", "line": 6,
+                        "body": hashtags_answered_but + "__#defect_evidence__ judged from the code only"}
+    bold_colon = {"path": "scripts/thing.py", "line": 7,
+                  "body": hashtags_answered_but + "**#defect_evidence:** reproduction"}
+    result = run_program(scratch, review("APPROVE", comments=[colon_only, full_stop_only, bold_underscores,
+                                                              bold_colon]))
+    check("a hashtag followed by only a colon or a full stop counts as lacking, and a hashtag inside `__` bold "
+          "marks, or followed by a colon inside bold marks, counts as answered",
+          result.code == 0 and "; 2 of 4 finding(s) lack an answered fact line: "
+          "scripts/thing.py:4 lacks '#defect_evidence' | scripts/thing.py:5 lacks '#defect_evidence'"
+          in result.stdout and "scripts/thing.py:6" not in result.stdout
+          and "scripts/thing.py:7" not in result.stdout, result.detail)
     older = {"path": "scripts/thing.py", "line": 6, "body": f"A finding.\n\n{OLDER_LABEL_FACT_LINES}"}
     older_short = {"path": "scripts/thing.py", "line": 7, "body": OLDER_LABEL_FACT_LINES.replace(
         "- `Main has it:` `no`\n", "")}
