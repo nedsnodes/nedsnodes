@@ -3,7 +3,7 @@
 
 Usage:
   scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py <pull request number>
-      <base commit> [--expected-head-commit COMMIT] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
+      <base commit> [--expected-head-commit COMMIT] [--main-commit COMMIT] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
 The base commit is the merge base for a first review, or the nn-head-commit
 reviewed before for a fix-round, unless that fix-round merged main or rewrote
@@ -32,7 +32,10 @@ With --expected-head-commit, the run refuses before the review when pr<n>-head
 holds another commit, since the review would record the wrong one. When
 pr<n>-head holds another commit after the review than before it, because
 another run rebuilt the worktree meanwhile, the run is recorded with exit
-code 2, since Codex may have reviewed the other commit.
+code 2, since Codex may have reviewed the other commit. Its message prints
+the commands that rebuild the worktrees and review again only when
+--main-commit names the main commit pr<n>-merged was built on, as the review
+program passes it.
 merge-lane-pull-request-reviewer-review-post-and-read-back.py
 reads it to tell a Codex run that found nothing from one that failed.
 gh reads the description with the merge account's token, the one file every
@@ -77,6 +80,9 @@ def parse_arguments(argv):
                              "rewrote history, the nn-head-commit reviewed before")
     parser.add_argument("--expected-head-commit",
                         help="refuse unless pr<n>-head holds this commit")
+    parser.add_argument("--main-commit",
+                        help="the main commit pr<n>-merged was built on, for the rebuild command printed "
+                             "when pr<n>-head moves during the review")
     common.add_directory_options(parser, "cx/")
     return common.resolve_path_options(parser.parse_args(argv))
 
@@ -114,26 +120,24 @@ def main(argv=None):
                      else f"has a head commit that could not be read: {head_after.stderr.strip()}")
         directory_options = common.directory_options_argv(arguments)
         commit_to_review = arguments.expected_head_commit or head.stdout.strip()
-        review_program = shlex.join([str(Path(__file__).resolve().with_name(
-            "merge-lane-pull-request-worktrees-reviewer-brief-codex-review-and-head-tests-run-without-merge.py")),
-            str(number)]) + (" <brief specifications file> [--head-commit-reviewed-before <commit>], giving the "
-                             "brief specifications file and, for a fix-round, the --head-commit-reviewed-before "
-                             "commit that this review round was started with")
-        main_commit = pull_request_merged_worktree_main_commit(arguments, environment)
-        if main_commit.returncode == 0:
+        if arguments.main_commit:
             rebuild = shlex.join([str(Path(__file__).resolve().with_name(
                 "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py")), str(number), commit_to_review,
-                main_commit.stdout.strip(), *directory_options])
-            rerun = shlex.join([str(Path(__file__).resolve()), str(number),
-                                base, "--expected-head-commit", commit_to_review, *directory_options])
+                arguments.main_commit, *directory_options])
+            rerun = shlex.join([str(Path(__file__).resolve()), str(number), base, "--expected-head-commit",
+                                commit_to_review, "--main-commit", arguments.main_commit, *directory_options])
             steps = (f"1. Rebuild the worktrees: {rebuild}\n"
                      f"   If it fails, do what it prints.\n"
                      f"2. Then review again: {rerun}\n")
         else:
-            steps = (f"The main commit {common.pull_request_merged_worktree(arguments, number)} was built on "
-                     f"could not be read, so no rebuild command is printed: {main_commit.stderr.strip()}\n"
-                     f"Review the pull request again with the review program, which rebuilds pr{number}-head and "
-                     f"pr{number}-merged at the head and main it reads from origin: {review_program}\n")
+            steps = (f"This run was given no --main-commit naming the main commit that "
+                     f"{common.pull_request_merged_worktree(arguments, number)} was built on, so it prints no "
+                     f"command to rebuild pr{number}-head and pr{number}-merged or to rerun this Codex review.\n"
+                     f"Do not run the review program, scripts/"
+                     f"merge-lane-pull-request-worktrees-reviewer-brief-codex-review-and-head-tests-run-without-"
+                     f"merge.py, again for this round: that program's Claude review step may already have posted "
+                     f"a review of {commit_to_review}. Send merge-lane-2 this output, word for word, with the "
+                     f"SendMessage tool; merge-lane-2 decides how this round's Codex review is run again.\n")
         print(f"PR {number}: the Codex review exited {exit_code}, but "
               f"{common.pull_request_head_worktree(arguments, number)} held commit {head.stdout.strip()} "
               f"when the review started and now {now_holds}, so the review may not be of "
@@ -171,15 +175,6 @@ def pull_request_head_commit(arguments, environment):
     return subprocess.run(
         ["git", f"--git-dir={worktree / '.git'}", f"--work-tree={worktree}", "rev-parse",
          "--verify", "HEAD^{commit}"],
-        capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
-
-
-def pull_request_merged_worktree_main_commit(arguments, environment):
-    # pr<n>-merged holds the head merged onto main, so its first parent is the main commit it was built on.
-    worktree = common.pull_request_merged_worktree(arguments, arguments.pull_request)
-    return subprocess.run(
-        ["git", f"--git-dir={worktree / '.git'}", f"--work-tree={worktree}", "rev-parse",
-         "--verify", "HEAD^1^{commit}"],
         capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
 
 

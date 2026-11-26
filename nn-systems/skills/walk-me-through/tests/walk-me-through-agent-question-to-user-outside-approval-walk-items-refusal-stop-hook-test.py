@@ -404,6 +404,8 @@ def test_the_block_message_says_what_to_do():
              "other lines of the item. This hook passes the question only when the item in the walk-document holds every flagged line "
              "that way, and refuses again until it does; it ignores a `>` quote mark or a list mark such as `-` or "
              "`1.` at the start of a line, bold, italic and code marks, and letter case, so you may add or drop those. "
+             "Just before the alternative, state the strongest case against the recommendation on one line that "
+             "opens with `#case_against` and a rating, none, weak, medium, strong or very strong. "
              "Give the item one recommendation and one alternative, and end it with the recommendation stated as "
              "an action, as in `Recommendation: <what you recommend doing>.` State the alternative before it, as in "
              "`The alternative: <what D does instead>.`"),
@@ -456,7 +458,7 @@ def test_a_question_like_line_goes_to_the_model():
           and "--no-session-persistence" in argv, calls)
     check("the model is given the labelling prompt and, as JSON, the question-like line, the message, the waiting "
           "item's text and the message that started the turn with who sent it",
-          calls and calls[0]["stdin"].startswith(hook.MODEL_PROMPT)
+          calls and calls[0]["stdin"].startswith(hook.QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT)
           and judged_entry(calls[0]) == {
               "id": "L1", "line": "The fix has a second part, and I recommend building it next.",
               "turn_started_by": "human", "message_that_started_the_turn": "A",
@@ -474,7 +476,7 @@ def test_a_question_like_line_goes_to_the_model():
 
 
 def judged_entry(call):
-    return json.loads(call["stdin"][len(hook.MODEL_PROMPT):])[0]
+    return json.loads(call["stdin"][len(hook.QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT):])[0]
 
 
 def judged_line(call):
@@ -544,7 +546,8 @@ def test_a_question_about_something_other_than_the_waiting_item_still_blocks():
 
 
 def judgement(lines, **keywords):
-    return hook.model_judgement(lines, lines, "## Item 2 of 10", "human", "A", **keywords)
+    index, failure = hook.model_judgement(lines, range(len(lines)), "## Item 2 of 10", "human", "A", **keywords)
+    return None if index is None else lines[index], failure
 
 
 def test_a_failed_model_check_blocks():
@@ -597,10 +600,11 @@ def test_a_failed_model_check_blocks():
         check("each question-like line is judged in a call of its own, numbered by its place",
               sorted((judged_entry(call)["id"], judged_line(call)) for call in calls)
               == [("L1", "a"), ("L2", "b"), ("L3", "c")], calls)
-        argv = calls[-1]["argv"] if calls else []
         check("each call is sent the labelling schema and system prompt",
-              json.loads(argv[argv.index("--json-schema") + 1]) == hook.MODEL_SCHEMA
-              and argv[argv.index("--system-prompt") + 1] == hook.MODEL_SYSTEM_PROMPT, argv)
+              len(calls) == 3 and all(
+                  json.loads(argv[argv.index("--json-schema") + 1]) == hook.MODEL_SCHEMA
+                  and argv[argv.index("--system-prompt") + 1] == hook.MODEL_SYSTEM_PROMPT
+                  for argv in (call["argv"] for call in calls)), calls)
         os.environ["FAKE_CLAUDE_MODE"] = "sleep:3"
         started = time.monotonic()
         line, failure = judgement(["a", "b", "c"], timeout_seconds=20)
@@ -903,6 +907,42 @@ def test_the_final_message_from_the_payload_is_checked():
     check_silent("a turn with no text in the transcript or the payload passes", case.run())
 
 
+def test_the_final_message_already_in_the_transcript_is_checked_once():
+    case = Case()
+    case.reply("Should I merge it?")
+    check_blocked("a question in the final message blocks", case.run(last_assistant_message="Should I merge it?"),
+                  '"Should I merge it?"')
+    check("the payload's final message, already the transcript's last assistant text, is judged once, not twice",
+          [judged_line(call) for call in case.model_calls()] == ["Should I merge it?"], case.model_calls())
+
+
+def test_a_long_message_is_cut_around_the_line_as_the_benchmark_cut_it():
+    case = Case()
+    before = "\n".join(f"Report line {number} is done." for number in range(400))
+    after = "\n".join(f"Closing note {number} is filed." for number in range(200))
+    line = "I recommend building the second part next."
+    case.reply(f"{before}\n{line}\n{after}")
+    case.run(model="no")
+    calls = case.model_calls()
+    message = judged_entry(calls[0])["agent_message_holding_the_line"] if calls else ""
+    at = message.find(line)
+    check("a long message's entry holds only the window around the line, marked as cut on both sides",
+          len(calls) == 1 and message.startswith("[...] ") and message.endswith(" [...]")
+          and at == len("[...] ") + hook.AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE
+          and len(message) - at - len(line) == hook.AGENT_MESSAGE_CHARACTERS_KEPT_AFTER_THE_LINE + len(" [...]"),
+          (len(message), at))
+    shared_start = "The second part of the fix is ready, and every test for it passes"
+    case.reply(f"{shared_start}.\n{before}\n{shared_start}; should I merge it?\n{after}")
+    calls_before = len(case.model_calls())
+    case.run(model="no")
+    calls = case.model_calls()[calls_before:]
+    message = judged_entry(calls[0])["agent_message_holding_the_line"] if calls else ""
+    check("the window is cut around the judged line, not around an earlier line that starts with the same text",
+          len(calls) == 1 and message.startswith("[...] ")
+          and message.find(f"{shared_start}; should I merge it?")
+          == len("[...] ") + hook.AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE, (len(message), message[:80]))
+
+
 def test_the_shown_item_and_quotes_from_it_are_not_checked():
     case = Case()
     case.reply("Recorded your answer to item 1.\n\n" + ITEM_2_SHOWN)
@@ -1068,7 +1108,10 @@ def test_a_new_text_line_shown_as_if_you_approve_the_new_text_is_the_items_own_t
              "If you approve, the new text: the hook waits for the list."),
             ("a `#new` line that opens with a quote mark passes shown after `If you approve, the new text:`",
              "> #new The new text: the hook waits for the quote.",
-             "If you approve, the new text: the hook waits for the quote.")):
+             "If you approve, the new text: the hook waits for the quote."),
+            ("a `#new` line after a part's `Part 1.` passes shown as `Part 1. If you approve, the new text:`",
+             "Part 1. #new The new text: the hook waits for the part.",
+             "Part 1. If you approve, the new text: the hook waits for the part.")):
         varied = Case(minutes="#next_to_present item 1.2 of 6",
                       document=document.replace(HANDOFF_WALK_ITEM_1_2_LINES[2], document_line))
         varied.reply(HANDOFF_WALK_ITEM_1_2_REPLY.replace(HANDOFF_WALK_ITEM_1_2_REPLY.split("\n\n")[4], shown_line))
@@ -1095,6 +1138,19 @@ def test_every_turn_is_checked_whoever_started_it():
                  text_record("Noted.\n\nItem 2 of 10 is waiting for your answer."))
     check_silent("a question from an earlier turn is not checked again when the newer turn's start has no "
                  "turnOrigin", case.run())
+    scheduled_prompt = opening_prompt("scheduled", "Hourly stall check.", isMeta=True, promptSource="system")
+    case.records(USER_PROMPT, text_record("Should I open the pull request?"), scheduled_prompt,
+                 text_record("The stall check found nothing. I recommend merging PR 1922 next."))
+    calls_before = len(case.model_calls())
+    check_blocked("a scheduled turn after the user's turn is checked", case.run(model="yes"),
+                  "I recommend merging PR 1922 next.")
+    calls = case.model_calls()[calls_before:]
+    check("a scheduled turn's own opening prompt, not the user's earlier one, starts the turn the model is given, "
+          "and the earlier turn's question is not judged again",
+          [(judged_entry(call)["turn_started_by"], judged_entry(call)["message_that_started_the_turn"],
+            judged_line(call)) for call in calls]
+          == [("scheduled", "Hourly stall check.",
+               "The stall check found nothing. I recommend merging PR 1922 next.")], calls)
 
 
 def test_when_the_hook_stays_silent():
@@ -1153,6 +1209,9 @@ def test_which_line_is_flagged_and_how_lines_are_joined():
     case.reply("Should I run one of these:\n- `delete-all.py`\n- **keep.py**")
     check_blocked("a flagged list is named as written, line by line, marks included", case.run(),
                   '"Should I run one of these:\n- `delete-all.py`\n- **keep.py**"')
+    case.reply("Should I run `delete-all.py`?\n\nShould I run `keep.py`?")
+    check_blocked("of two lines checked alike but written differently, the one the model flags is named as written",
+                  case.run(model="yes:2"), '"Should I run `keep.py`?"')
     case.reply("Should I merge the café page now?")
     case.run()
     check("the log keeps a sentence's letters as written", "café" in case.log.read_text(encoding="utf-8"),

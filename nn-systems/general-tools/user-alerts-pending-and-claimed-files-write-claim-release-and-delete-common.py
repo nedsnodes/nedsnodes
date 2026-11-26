@@ -16,9 +16,12 @@ is an os.rename into claimed/, which succeeds for one caller only, so each alert
 claim sets the file's modification time to the claim time, because a rename keeps the old one, and that time is
 what the 30-minute limit reads. A returned alert keeps its agent-seat, because files are moved, never rewritten.
 
-Failures: a file another agent-session moved first is skipped, never an error. A pending or claimed file that
-is not a JSON object raises ValueError, and any other OSError is raised, to the caller, which reports it.
+Failures: a file another agent-session moved first is skipped, never an error. A pending file that is not a JSON
+object, or that cannot be read, such as a directory, is moved into claimed/ and its ValueError or OSError raised,
+so the next prompt claims the alerts after it; a claimed file that is not a JSON object raises ValueError, and any
+other OSError is raised; the caller reports each.
 """
+import importlib.util
 import json
 import os
 import re
@@ -26,12 +29,18 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+_agent_seat_name_specification = importlib.util.spec_from_file_location(
+    "agent_seat_name_regular_expression_constant_same_as_launch_claude_ubuntu_check_common",
+    Path(__file__).resolve().with_name("agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py"))
+_agent_seat_name = importlib.util.module_from_spec(_agent_seat_name_specification)
+_agent_seat_name_specification.loader.exec_module(_agent_seat_name)
+AGENT_SEAT_NAME_PATTERN = _agent_seat_name.AGENT_SEAT_NAME_PATTERN
+
 USER_ALERTS_RELATIVE_TO_HOME = Path(".local") / "state" / "nedsnodes" / "user-alerts"
 CLAIM_LIMIT_SECONDS = 30 * 60
 # An agent-seat the user seldom types in, so an approval-walk there holds only these alerts and is easy to spot.
 USER_ALERT_AGENT_SEAT_WHEN_ALERT_NAMES_NONE = "merge-lane-1"
 AGENTS_RELATIVE_TO_HOME = Path("agents")
-AGENT_SEAT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 USER_ALERT_LINE = re.compile(r"#user_alert\s+(\S+)")
 # Walk-minutes on ned-box, relative to the home directory: closed ones in the log-store, open ones under
 # docs/walk/ of each checkout, which are agent-homes, the worktrees beside or inside them, and the
@@ -52,7 +61,7 @@ def user_alerts_directory():
 
 def agent_home_on_ned_box_found(agent_seat):
     """Whether ~/agents/<agent_seat> is a git checkout, as an agent-home is."""
-    return (isinstance(agent_seat, str) and bool(AGENT_SEAT_NAME.match(agent_seat))
+    return (isinstance(agent_seat, str) and bool(AGENT_SEAT_NAME_PATTERN.fullmatch(agent_seat))
             and (Path.home() / AGENTS_RELATIVE_TO_HOME / agent_seat / ".git").exists())
 
 
@@ -105,7 +114,9 @@ def user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(agent_
         try:
             try:
                 alert = user_alert_read_from_json_file(path)
-            except ValueError:
+            except FileNotFoundError:
+                raise
+            except (ValueError, OSError):
                 # Moved out of pending/ before the error is raised, so the next prompt claims the alerts after it.
                 os.rename(path, target)
                 os.utime(target, (claim_time, claim_time))

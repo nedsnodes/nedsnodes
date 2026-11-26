@@ -48,8 +48,9 @@ Usage:
                 and one in
                 SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or
                 SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the first
-                COMMIT alone, since a pull request head test run leaves
-                out the former and most of the latter. Without it
+                COMMIT alone, the safe side, since a pull request head
+                test run leaves out the former, and the latter unless
+                the change edits a file it reads. Without it
                 every suite runs. Without --only-suites-named,
                 and where suites run in nn-test-sandboxes, it keeps a
                 suite in SUITES_RUN_WITHOUT_ANY_SANDBOX only when the
@@ -4780,19 +4781,25 @@ def suites_selected_since_every_commit(top, suites, recordings, commits, differs
     program differs from the first commit, and a suite in
     SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the
     first commit alone."""
-    selections = [suites_selected_since(top, suites, recordings, commit, differ,
-                                        files_only_strace_saw_by_suite, read_only_recordings,
-                                        read_only_directory)
-                  for commit, differ in zip(commits, differs)]
+    def selected_since(commit, differ):
+        return suites_selected_since(top, suites, recordings, commit, differ,
+                                     files_only_strace_saw_by_suite, read_only_recordings,
+                                     read_only_directory)
+
+    first = selected_since(commits[0], differs[0])
     if len(commits) == 1:
-        return selections[0]
-    if "scripts/run-all-test-suites.py" in differs[0]:
+        return first
+    if PROGRAM in differs[0]:
         # A pull request head test run runs main's copy of this program, never the pull
         # request's, so no suite has run under a changed copy before the after-merge test run.
+        # The later comparisons are not made, so a later commit they could not read stops
+        # nothing; differs already shows that each commit resolves.
         return [(suite, True, f"judged by the comparison with the first commit alone, "
                               f"{commits[0][:12]}, since a pull request head test run runs "
                               f"main's test runner, never a changed one: {why}")
-                for suite, _, why in selections[0]]
+                for suite, _, why in first]
+    selections = [first] + [selected_since(commit, differ)
+                            for commit, differ in zip(commits[1:], differs[1:])]
     combined = []
     for index, suite in enumerate(suites):
         if suite in SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or suite in SUITES_RUN_WITHOUT_ANY_SANDBOX:
@@ -4859,8 +4866,8 @@ def selective_test_run_selection_without_no_sandbox_suites(
             kept.append((suite, selected, why))
             continue
         # Judged by the first commit alone, as suites_selected_since_every_commit judges it:
-        # a later commit, a head test run's, never ran the suite, and holds the pull
-        # request's own change, so no file the change edits differs from it.
+        # a later commit, a head test run's, holds the pull request's own change, so no file
+        # the change edits differs from it, and that run may have left the suite out.
         edited = no_sandbox_suite_file_it_read_that_differs_or_none(
             suite, recordings.get(suite), files_only_strace_saw_by_suite.get(suite), differs[0])
         if edited is None:

@@ -264,6 +264,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/obsolete-file-edit-warning-hook.py", "PUSHED_NO_OVERLAP_LINE"): LATER_PART,
     ("scripts/obsolete-file-edit-warning-hook.py", "PUSHED_OVERLAP_LINE"): LATER_PART,
     ("scripts/obsolete-file-edit-warning-hook.py", "RECORD_WRITE_FAILED_LINE"): LATER_PART,
+    ("scripts/obsolete-file-edit-warning-hook.py", "UNDO_ONLY_THIS_EDIT_LINES"): LATER_PART,
     ("scripts/post-compaction-session-continues-hook.py", "FAULT_LINE"): LATER_PART,
     ("scripts/post-compaction-session-continues-hook.py", "MARKER_PATH_NOT_CLEARED_INSTRUCTION"): LATER_PART,
     ("scripts/post-compaction-session-continues-hook.py", "MARKER_PATH_UNKNOWN_INSTRUCTION"): LATER_PART,

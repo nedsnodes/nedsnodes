@@ -8,8 +8,10 @@ handoff-asked marker files and files recording a shown notice are ones this suit
 real ~/.claude/handoffs. The threshold hook computes HANDOFF_DIRECTORY from
 Path.home() at import, so HOME decides the directory.
 
-The agent-seat name variable is set or removed explicitly in every case, because
-an agent-seat running this suite has its own value in the environment.
+The agent-seat name and launched session id variables are set or removed explicitly
+in every case, because an agent-seat running this suite has its own values in the
+environment. A case that sets an agent-seat name runs as the launched agent-session,
+whose session id the launched session id variable holds, unless it names another.
 
 The exit code is asserted on every case: exit 2 from a UserPromptSubmit hook
 would block the user's message.
@@ -38,6 +40,7 @@ _supervisor_specification = importlib.util.spec_from_file_location(
 supervisor = importlib.util.module_from_spec(_supervisor_specification)
 _supervisor_specification.loader.exec_module(supervisor)
 AGENT_NAME_VARIABLE = supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE
+LAUNCHED_SESSION_ID_VARIABLE = supervisor.HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE
 
 failures = []
 
@@ -50,11 +53,16 @@ def check(case_name, condition, detail=""):
         failures.append(case_name)
 
 
-def run_hook(payload, home, agent_seat_name=None, raw_input_text=None):
+def run_hook(payload, home, agent_seat_name=None, raw_input_text=None, launched_session_id=None):
     environment = {**os.environ, "HOME": str(home)}
     environment.pop(AGENT_NAME_VARIABLE, None)
+    environment.pop(LAUNCHED_SESSION_ID_VARIABLE, None)
     if agent_seat_name is not None:
         environment[AGENT_NAME_VARIABLE] = agent_seat_name
+        if launched_session_id is None and isinstance(payload, dict):
+            launched_session_id = payload.get("session_id")
+        if launched_session_id:
+            environment[LAUNCHED_SESSION_ID_VARIABLE] = launched_session_id
     text = raw_input_text if raw_input_text is not None else json.dumps(payload)
     return subprocess.run([sys.executable, str(HOOK_SCRIPT)], input=text, capture_output=True,
                           text=True, check=False, env=environment)
@@ -199,6 +207,13 @@ with tempfile.TemporaryDirectory() as workspace:
     check("no transcript_path: the line names the launched agent-seat",
           result.returncode == 0 and shown_notice(result) == expected_named("seat-c"),
           f"code {result.returncode}, stdout {result.stdout!r}")
+
+    marker("s-child").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-child", "transcript_path": str(untitled)}, home,
+                      agent_seat_name="seat-a", launched_session_id="s-parent")
+    check("a child agent-session started from the launched one's shell: the line names no agent-seat",
+          result.returncode == 0 and shown_notice(result) == EXPECTED_UNNAMED,
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
     # ---- faults --------------------------------------------------------------
 
