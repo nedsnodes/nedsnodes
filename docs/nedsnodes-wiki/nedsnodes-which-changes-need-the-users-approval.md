@@ -43,7 +43,7 @@ A change is the difference an agent's work makes, from before it starts to after
 
 A specific change the user approved before an agent makes it, approved-by-walk or approved in conversation. A "y" approves only the question it answers, not another proposal in the same message. The user's approval reaches an agent second-hand, through a task prompt or another agent's message, only when that text quotes his exact words for this change, with the agent-session and time he wrote them. A user-approved-change includes:
 - a place that a change approved in this agent-session missed, fixed exactly as the change fixed the other places;
-- carrying a user-ruling to a place that does not yet say what the user-ruling says, such as a program's message, a prompt, code, a test or another document, changing only what is needed to make the place say what the user-ruling says, with the user-ruling cited in the commit message.
+- carrying a user-ruling to a place that does not yet say what the user-ruling says, such as a program's message, a prompt, code, a test or another document, changing only the words or code that state it, with the user-ruling cited in the commit message or the edited text; every other change in the same edit is judged on its own.
 
 ### cosmetic-change
 
