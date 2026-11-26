@@ -146,6 +146,11 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py",
             "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-user-message-copied-to-walk-minutes-without-valid-outcome-turn-end-refusal-stop-hook.py",
+            "timeout": 30
           }
         ]
       }

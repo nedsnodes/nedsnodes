@@ -42,6 +42,14 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# Before anything runs git: the walk-minutes cases `git init` scratch checkouts.
+_git_environment_fixture_spec = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    Path(__file__).resolve().with_name("git-redirecting-environment-removal-test-fixture.py"))
+_git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_spec)
+_git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
+_git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
+
 # The suite's own HOME; the module docstring says why. LAUNCH_HOME is captured
 # before the redirect, because the first case pins that the hook's directory is
 # this suite's own and not the one the suite was started under.
@@ -2963,6 +2971,144 @@ for importing_script in (HOOK_SCRIPT,
     union_annotations = runtime_union_annotations(importing_script)
     check(f"{importing_script.name} imports under Python 3.9: no `X | None` annotation evaluated at import",
           not union_annotations, union_annotations)
+
+
+def checkout_with_open_walk_and_copied_line(directory, outcome=None):
+    """A git checkout whose open approval-walk holds one copied user message, with the outcome line when given."""
+    checkout = Path(directory)
+    (checkout / "docs" / "walk").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+    (checkout / "docs" / "walk" / "poem.md").write_text("## Item 3 of 9: the page\n\nRecommendation: keep it.\n")
+    lines = ["#next_to_present item 3 of 9",
+             "#user_message_copied 1 2026-11-23T17:38:04Z item 3 of 9 baseline 0123456789abcdef, in his words: `reword it`"]
+    if outcome:
+        lines.append(f"#user_message_outcome 1 {outcome}")
+    minutes = checkout / "docs" / "walk" / "poem-minutes.md"
+    minutes.write_text("\n".join(lines) + "\n")
+    return minutes
+
+
+ATTENDED = {"CLAUDE_CODE_SESSION_ATTENDED": "1", hook.REINCARNATION_OWNED_BY_CALLER_VARIABLE: ""}
+
+
+def run_with_walk(workspace, name, tokens, checkout, environment=ATTENDED):
+    session_id = f"handoff-threshold-hook-test-walk-{name}"
+    transcript = transcript_with_usage(workspace, f"{name}.jsonl", tokens)
+    return session_id, run_hook({"session_id": session_id, "transcript_path": str(transcript), "cwd": str(checkout)},
+                                extra_environment=environment)
+
+
+with tempfile.TemporaryDirectory() as walk_workspace:
+    walk_root = Path(walk_workspace)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "no-outcome")
+    walk_session, result = run_with_walk(walk_root, "no-outcome", 400_000, minutes_path.parents[2])
+    check("a copied line with no outcome holds the handoff silently below the ceiling",
+          result.returncode == 0 and result.stderr == "" and not hook.handoff_asked_marker_path(walk_session).exists()
+          and not hook.deferred_marker_path(walk_session).exists(), result)
+    minutes_path.write_text(minutes_path.read_text() + "#user_message_outcome 1 no change\n")
+    transcript = walk_root / "no-outcome.jsonl"
+    result = run_hook({"session_id": walk_session, "transcript_path": str(transcript),
+                       "cwd": str(minutes_path.parents[2])}, extra_environment=ATTENDED)
+    check("the handoff fires at the next Stop once the line has an outcome",
+          result.returncode == 2 and is_handoff_instruction(result.stderr), result)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "open", "open")
+    _, result = run_with_walk(walk_root, "open", 400_000, minutes_path.parents[2])
+    check("an `open` outcome is an outcome, so it does not hold the handoff",
+          result.returncode == 2 and is_handoff_instruction(result.stderr), result)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "bare-answer", "no change")
+    bare_answer_walk_finder = hook.load_module_by_path("walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
+                                                       hook.WALK_FINDER_FILE)
+    minutes_path.write_text(minutes_path.read_text() + bare_answer_walk_finder.approval_walk_minutes_user_message_copied_line_build(
+        minutes_path.read_text(), "item 3 of 9", minutes_path.with_name("poem.md"), "a", datetime.now(timezone.utc),
+        bare_answer_walk_finder.markdown_parser(), needs_no_outcome=True) + "\n")
+    _, result = run_with_walk(walk_root, "bare-answer", 400_000, minutes_path.parents[2])
+    check("a copied bare answer needs no outcome, so it does not hold the handoff",
+          result.returncode == 2 and is_handoff_instruction(result.stderr), result)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "ceiling")
+    _, result = run_with_walk(walk_root, "ceiling", 700_000, minutes_path.parents[2])
+    check("at the ceiling the handoff goes ahead with a copied line that has no outcome",
+          result.returncode == 2 and is_handoff_instruction(result.stderr), result)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "below-threshold")
+    walk_session, result = run_with_walk(walk_root, "below-threshold", 100_000, minutes_path.parents[2])
+    check("below the threshold the hook says nothing about a copied line",
+          result.returncode == 0 and result.stderr == "" and not hook.handoff_asked_marker_path(walk_session).exists(), result)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "headless")
+    _, result = run_with_walk(walk_root, "headless", 400_000, minutes_path.parents[2],
+                              {"CLAUDE_CODE_SESSION_ATTENDED": "0", hook.REINCARNATION_OWNED_BY_CALLER_VARIABLE: ""})
+    check("an agent-session no user attends is not held for a copied line",
+          result.returncode == 2 and is_handoff_instruction(result.stderr), result)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "awaited-finished")
+    finished_session = "handoff-threshold-hook-test-walk-awaited-finished"
+    hook.handoff_deferred_marker_and_refused_commands_files_common.handoff_deferred_marker_write(
+        hook.HANDOFF_DIRECTORY, finished_session,
+        hook.handoff_deferred_marker_and_refused_commands_files_common.HandoffDeferredMarker(
+            used_percentage=40.0, deferral_began_at=datetime.now(timezone.utc), awaited_subagent_ids=[],
+            awaited_background_task_ids=[], awaited_work_is_unknown=False, awaited_workflow_ids=[]))
+    _, result = run_with_walk(walk_root, "awaited-finished", 400_000, minutes_path.parents[2])
+    check("a deferral whose awaited work has finished is still held by a copied line with no outcome",
+          result.returncode == 0 and result.stderr == "" and not hook.handoff_asked_marker_path(finished_session).exists(),
+          result)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "unreadable")
+    minutes_path.write_bytes(minutes_path.read_bytes() + b"\xff\xfe\n")
+    _, result = run_with_walk(walk_root, "unreadable", 400_000, minutes_path.parents[2])
+    check("walk-minutes that cannot be read do not stop the handoff, and the message says so",
+          result.returncode == 2 and HANDOFF_INSTRUCTION_PATTERN.search(result.stderr) is not None
+          and "could not read the approval-walk files" in result.stderr, result)
+    for instruction in ("If exactly one file docs/walk/<name>-minutes.md in this checkout has a last `#next_to_present` "
+                        "line that is not `none` or `closed`, first write any change agreed with the user",
+                        "If more than one such file exists, first write each such change into the walk-document of "
+                        "the approval-walk the change belongs to.",
+                        "If no such file exists, no approval-walk is open, so there is nothing to write.",
+                        "Then run the /handoff skill."):
+        check(f"the could-not-read message gives the line {instruction!r}", instruction in result.stderr, result.stderr)
+    check("the could-not-read message leaves no case without a file to write to", "cannot tell" not in result.stderr,
+          result.stderr)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "symlinked-cwd")
+    (minutes_path.parents[2] / "scripts").mkdir()
+    outside_checkout = walk_root / "outside-checkout"
+    outside_checkout.mkdir()
+    (outside_checkout / "link").symlink_to(minutes_path.parents[2] / "scripts")
+    symlink_session, result = run_with_walk(walk_root, "symlinked-cwd", 400_000, outside_checkout / "link")
+    check("a cwd that is a symlink from outside the checkout into a subdirectory holds the handoff for a copied line",
+          result.returncode == 0 and result.stderr == "" and not hook.handoff_asked_marker_path(symlink_session).exists(),
+          result)
+
+    minutes_path = checkout_with_open_walk_and_copied_line(walk_root / "empty-dot-git")
+    (minutes_path.parents[2] / "sub" / ".git").mkdir(parents=True)
+    empty_git_session, result = run_with_walk(walk_root, "empty-dot-git", 400_000, minutes_path.parents[2] / "sub")
+    check("a subdirectory holding an empty `.git` directory holds the handoff for a copied line",
+          result.returncode == 0 and result.stderr == "" and not hook.handoff_asked_marker_path(empty_git_session).exists(),
+          result)
+
+    unloadable_finder = walk_root / "walk-finder-that-cannot-load.py"
+    unloadable_finder.write_text("import re\nre.compile('(?P<')\n")
+    real_walk_finder_file = hook.WALK_FINDER_FILE
+    hook.WALK_FINDER_FILE = unloadable_finder
+    no_walk_checkout = walk_root / "no-walk-minutes"
+    no_walk_checkout.mkdir()
+    subprocess.run(["git", "init", "-q", str(no_walk_checkout)], check=True)
+    real_attended = os.environ.get("CLAUDE_CODE_SESSION_ATTENDED")
+    os.environ["CLAUDE_CODE_SESSION_ATTENDED"] = "1"
+    try:
+        check("a checkout with no walk-minutes never loads the walk finder, which the Mac's Python cannot load",
+              hook.handoff_deferral_check_whether_open_approval_walk_has_user_message_copied_to_walk_minutes_without_valid_outcome(str(no_walk_checkout)) is False)
+        check("a cwd git cannot answer for, with no walk-minutes, holds nothing and reports no problem",
+              hook.handoff_deferral_check_whether_open_approval_walk_has_user_message_copied_to_walk_minutes_without_valid_outcome(str(no_walk_checkout / ".git")) is False)
+    finally:
+        hook.WALK_FINDER_FILE = real_walk_finder_file
+        if real_attended is None:
+            del os.environ["CLAUDE_CODE_SESSION_ATTENDED"]
+        else:
+            os.environ["CLAUDE_CODE_SESSION_ATTENDED"] = real_attended
 
 print()
 if failures:
