@@ -29,15 +29,27 @@ _git_output_spec = importlib.util.spec_from_file_location(
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
+_glossary_entries_spec = importlib.util.spec_from_file_location(
+    "glossary_entries_of_project_and_system_glossaries_read_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "glossary-entries-of-project-and-system-glossaries-read-common.py")
+glossary_entries = importlib.util.module_from_spec(_glossary_entries_spec)
+_glossary_entries_spec.loader.exec_module(glossary_entries)
 
 GIT_CALL_TIMEOUT_SECONDS = 20
 MAIN_REF = "origin/main"
 ORDINARY_HYPHENATED_WORDS_LIST_PATH = "docs/nedsnodes-wiki/nedsnodes-ordinary-hyphenated-words-list.md"
+<<<<<<< HEAD
 GLOSSARY_FILE_SUFFIX = "-glossary.md"
 # One token set per main commit, shared by every caller on this machine. None means the folder of
 # that name in the temporary directory, found when first used: a program that only imports this
 # one, such as merge-lane-2's watcher, must still start where no temporary directory is writable.
 MAIN_TOKEN_CACHE_DIRECTORY = None
+=======
+GLOSSARY_FILE_SUFFIX = glossary_entries.GLOSSARY_FILE_SUFFIX
+# One token set per main commit, shared by every caller on this machine.
+MAIN_TOKEN_CACHE_DIRECTORY = Path(tempfile.gettempdir()) / "new-shared-names-main-token-cache"
+>>>>>>> origin/cold-read-terminology-cell-json-answer-runner-schema-and-rules-check-and-glossary-lookups-topic-branch
 # Files larger than this on main are data, not prose or code a name is defined in.
 MAIN_BLOB_SIZE_LIMIT_BYTES = 2_000_000
 
@@ -63,7 +75,6 @@ FENCED_CODE_PATTERN = re.compile(r"```.*?```", re.S)
 INLINE_CODE_PATTERN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 # A backquoted span is a name only when it is one token that a separator joins; commands and flags are not.
 BACKQUOTED_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)+(?:\.[a-z]{1,5})?$")
-GLOSSARY_ENTRY_PATTERN = re.compile(r"^- \*\*([^*]+)\*\*", re.M)
 UPPER_CASE_CONSTANT_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$")
 ORDINARY_HYPHENATED_WORD_LINE_PATTERN = re.compile(r"^- ([a-z]+(?:-[a-z]+)+)\s*$", re.M)
 # A token on main: what a candidate must equal whole to count as already there.
@@ -176,8 +187,7 @@ def markdown_names(text: str):
     return names
 
 
-def glossary_terms(text: str):
-    return {match.group(1).strip() for match in GLOSSARY_ENTRY_PATTERN.finditer(text)}
+glossary_terms = glossary_entries.glossary_terms
 
 
 def every_glossary_term(checkout: Path):
