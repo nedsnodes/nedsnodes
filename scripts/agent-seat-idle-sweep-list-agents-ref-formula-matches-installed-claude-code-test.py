@@ -131,8 +131,5 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except Exception as error:  # noqa: BLE001 - a crashed test file must exit 2, not 1
-        print(f"the test file crashed: {type(error).__name__}: {error}")
-        sys.exit(2)
+    # A crash ends the suite with its traceback and no END line, which is how the test runner tells it apart from a failure.
+    sys.exit(main())
