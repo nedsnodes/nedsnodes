@@ -1060,11 +1060,14 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                                     and not any(paired is found for paired in restates)), None)
         # A Codex finding id is a hash of the finding's priority and heading only, so a comment left unpaired
         # under an earlier finding's id but worded differently may be that finding reworded or another defect
-        # with the same heading: refuse rather than guess.
+        # with the same heading: refuse rather than guess. A comment paired by text on another line than its
+        # pair may be a new defect worded alike, so it is checked too; on the same line it is a restatement.
         for index, comment in enumerate(parsed):
-            if restates[index] is not None:
+            if restates[index] is not None and restates[index]["line"] == comment["line"]:
                 continue
             for found in earlier:
+                if any(paired is found for paired in restates):
+                    continue
                 shared_ids = comment["codex_finding_ids"] & found["codex_finding_ids"]
                 if (comment["compared"][:2] == found["compared"][:2] and comment["compared"] != found["compared"]
                         and shared_ids):

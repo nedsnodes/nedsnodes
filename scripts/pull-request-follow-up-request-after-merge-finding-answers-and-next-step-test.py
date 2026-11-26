@@ -1739,6 +1739,28 @@ def test_print_block():
                                                "aaaaaaaaaaaa).\n"
                                                "2. fix-next: `scripts/thing.py:9`: Add a test for the rename "
                                                "(Codex finding aaaaaaaaaaaa).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Add a test for the rename (Codex finding "
+                                                            "aaaaaaaaaaaa).", line=9),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=25)])
+    check(f"{PRINT_BLOCK} refuses a later review's comment worded as one earlier finding but on another line, when "
+          "another earlier finding under its Codex finding id is worded differently, rather than drop a new finding",
+          code == 1 and out == ""
+          and ("line 25, under Codex finding id aaaaaaaaaaaa of an earlier finding, in review 1 of pull request 1964 "
+               "on line 9 of the same file, but worded differently") in err, out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Add a test for the rename (Codex finding "
+                                                            "aaaaaaaaaaaa).", line=9),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(21, 2, "**fix-next** Add a test of the rename (Codex finding "
+                                                            "aaaaaaaaaaaa).", line=9)])
+    check(f"{PRINT_BLOCK} names, when it refuses a reworded comment, the earlier finding no restatement paired, not "
+          "the one restated word for word",
+          code == 1 and out == "" and "on line 9 of the same file, but worded differently" in err
+          and "on line 3 of the same file" not in err, out + err)
     code, out, err = print_block([merge_lane_review(1), merge_lane_review(2), merge_lane_review(3)],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
                                   merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
