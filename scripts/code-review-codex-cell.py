@@ -652,7 +652,8 @@ def codex_review_object_as_prose_report(text: str) -> str:
             raise CodexReviewObjectNotConvertible(
                 f"finding {number} has a title, body or path that is not valid UTF-8")
         indented_body = "\n".join("  " + line if line else line for line in body.splitlines())
-        # Codex's prose render keeps a title's own tag and adds one only to a title without one.
+        # Codex's prose render writes a title as it is, keeping its own tag. A title without one gets the
+        # numeric priority's tag here only, so that it has a finding id, which Codex's prose would not give it.
         heading = title if CODEX_TITLE_PRIORITY_LABEL.match(title) else f"[P{priority}] {title}"
         findings.append(f"- {heading} — {path}:{start}-{end}\n{indented_body}")
     if not findings:

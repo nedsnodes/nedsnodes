@@ -59,11 +59,14 @@ records pull-request-head-test-run.py filed under hr/pr<n>/log-store in the
 worktrees and outputs directory, one test log per pr<n>-merged commit, named
 by its hash, the program takes each test log whose last record says it tested
 that commit and exited 0, and uses the one started last. When there is no
-such record, or a test log cannot be read, which the program prints, no head
-test run gives a commit. When only one of the two is known, the program compares
-with that one alone; when neither is, it compares with
-the nn-head-commit alone, which predates main's newer merges and so selects more
-suites, never fewer; the program prints that it fell back. The page
+such record, a test log cannot be read, or git cannot read the commit, which
+the program prints, no head test run gives a commit. When the newest main commit
+is not known, the nn-head-commit, which predates main's newer merges and so
+selects more suites, never fewer, takes its place as the first commit; so with
+neither known, the program compares with the nn-head-commit alone, and with no
+head test run's commit, with the first commit alone; the program prints which.
+When the test runner at the merge commit predates comparing with several
+commits, the program compares with the first commit alone and says so. The page
 docs/nedsnodes-wiki/nedsnodes-how-the-test-runner-selects-which-nn-test-suites-a-test-run-runs.md
 says why both comparisons are made. The run's suite logs and test-run-report.txt go in
 <merge-lane-worktrees-and-outputs-directory>/pr<n>-after-merge-test-run-logs-<the
@@ -897,25 +900,33 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
     def branch_holds_mains_first_failing_commit(suite, test, first_failed):
         if first_failed in held_by_commit:
             return held_by_commit[first_failed]
-        # The merge base with first_failed, not with origin/main, which may hold the merge
-        # commit itself by the time a reader acts on the STOP.
+        # Walked from first_failed, not from origin/main, which may hold the merge commit itself
+        # by the time a reader acts on the STOP; along first parents only, so the commit named is
+        # one main's tip once was, not a topic commit main took in through a merge.
         ancestor = subprocess.run(
-            ["git", "-C", str(worktree), "merge-base", first_failed, merge_commit],
+            ["git", "-C", str(worktree), "rev-list", "--first-parent", "--parents", first_failed,
+             f"^{merge_commit}"],
             capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
-        if ancestor.returncode not in (0, 1):
+        if ancestor.returncode != 0:
             print(f"STOP: pull request {arguments.pull_request} merged into {base_branch!r}, but "
                   f"git could not say whether {base_branch!r} holds {first_failed[:12]}, the "
                   f"main commit whose test run first failed {test_named(suite, test)}, so this "
                   f"program counts the failure of every test first failed there as "
                   f"{base_branch!r}'s own, not main's; the STOP this program prints last lists "
-                  f"those failures among the ones that are not main's. `git merge-base "
-                  f"{first_failed} {merge_commit}` said: {git_error(ancestor)}\n"
+                  f"those failures among the ones that are not main's. `git rev-list "
+                  f"--first-parent --parents {first_failed} ^{merge_commit}`, where "
+                  f"{merge_commit[:12]} is the merge commit on {base_branch!r}, said: "
+                  f"{git_error(ancestor)}\n"
                   f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
             kept["complete"] = False
-        merge_base = ancestor.stdout.strip() if ancestor.returncode == 0 else None
-        held_by_commit[first_failed] = merge_base == first_failed
-        if merge_base and merge_base != first_failed:
-            left_main_at[first_failed] = merge_base
+            held_by_commit[first_failed] = False
+            return False
+        # Each line is a commit merge_commit lacks, then its first parent; none means it holds
+        # first_failed, and the last line's parent is where the branch left main's history.
+        lacked = ancestor.stdout.split("\n")[-2].split() if ancestor.stdout.strip() else []
+        held_by_commit[first_failed] = not lacked
+        if len(lacked) > 1:
+            left_main_at[first_failed] = lacked[1]
         return held_by_commit[first_failed]
 
     left_main_at = {}
@@ -1002,7 +1013,10 @@ def after_merge_test_run_closing_message_printed_returning_whether_stop(argument
                   f"fixing for it.\n"
                   f"If that test passes there, {tested} broke it: the author fixes it on "
                   f"{tested}.\n"
-                  f"If {suite} is not in that commit, main gained it after {tested} left, so "
+                  f"If {suite} is not in that commit"
+                  + (f", or does not run {test_named(suite, test)} there"
+                     if test_named(suite, test) != suite else "")
+                  + f", main gained it after {tested} left, so "
                   f"this check cannot say whose failure it is: say so when you tell the author "
                   f"and the user.")
         print(TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE)
@@ -1144,31 +1158,54 @@ def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(m
     return True
 
 
-def after_merge_test_run_by_hand_command(since, merge_commit_text):
-    """Return the command that tests main by hand as the after-merge test run would: with the
-    recorded commit when the record names one that is an ancestor of the merge commit, else
-    with since. The ancestor check is in the command, because a recovery printed before the
-    merge commit is fetched cannot make it."""
-    run = "python3 scripts/run-all-test-suites.py --only-suites-whose-recorded-inputs-changed-since"
+# Only a test runner with this function compares with every commit given; an older one keeps
+# the last --only-suites-whose-recorded-inputs-changed-since alone.
+TEST_RUNNER_SOURCE_LINE_WHOSE_PRESENCE_SHOWS_THE_RUNNER_SELECTS_SUITES_SINCE_EVERY_COMMIT_GIVEN = (
+    "def suites_selected_since_every_commit(")
+
+
+def after_merge_test_run_suite_selection_commits_choose(no_test_failing_on_main, head_tested,
+                                                        head_commit):
+    """The commits the after-merge test run compares with, first commit first. The first, by
+    which alone the suites a head test run leaves out are judged, is the newest main commit
+    whose after-merge test run left no test failing, else the nn-head-commit; head_tested,
+    when known, comes second."""
+    first = no_test_failing_on_main or head_commit
+    return [first] if head_tested is None else [first, head_tested]
+
+
+def after_merge_test_run_command_build(compared_with):
+    return "python3 scripts/run-all-test-suites.py " + " ".join(
+        f"--only-suites-whose-recorded-inputs-changed-since {commit}" for commit in compared_with)
+
+
+def after_merge_test_run_by_hand_command(head_tested, head_commit, merge_commit_text):
+    """Return the command that tests main by hand as the after-merge test run would, before the
+    program could check whether the recorded newest main commit whose after-merge test run
+    left no test failing is an ancestor of the merge commit: the command makes that check,
+    because a recovery printed before the merge commit is fetched cannot."""
+    without_it = after_merge_test_run_command_build(
+        after_merge_test_run_suite_selection_commits_choose(None, head_tested, head_commit))
     path = newest_main_commit_whose_after_merge_test_run_left_no_test_failing_file()
     try:
         commit = path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
-        return f"{run} {since}"
+        return without_it
     if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
-        return f"{run} {since}"
+        return without_it
+    with_it = after_merge_test_run_command_build(
+        after_merge_test_run_suite_selection_commits_choose(commit, head_tested, head_commit))
     return (f"if git merge-base --is-ancestor {commit} {merge_commit_text}; then "
-            f"since={commit}; else since={since}; fi; {run} \"$since\"")
+            f"{with_it}; else {without_it}; fi")
 
 
 def after_merge_test_run(arguments, merge_commit, base_branch):
     """Run the selective test run in a fresh worktree at merge_commit, the merge into base_branch;
     return an exit code."""
     checkout = arguments.review_tools_worktree_at_main
-    since, why_no_head_test_run = head_test_run_passed_merged_commit(arguments)
-    if since is None:
-        since = arguments.head_commit
-    by_hand = after_merge_test_run_by_hand_command(since, merge_commit or "<the merge commit>")
+    head_tested, why_no_head_test_run = head_test_run_passed_merged_commit(arguments)
+    by_hand = after_merge_test_run_by_hand_command(head_tested, arguments.head_commit,
+                                                   merge_commit or "<the merge commit>")
     if not merge_commit:
         print(f"STOP: merged, but the merge commit could not be read, so main was not "
               f"tested.\n"
@@ -1207,39 +1244,57 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
               f"{git_error(add)}\n{next_steps}")
         return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
 
+    if head_tested is not None:
+        # A test log can outlive the pr<n>-merged commit it names, which git prunes once
+        # nothing reaches it, and the runner refuses a commit it cannot read.
+        readable = git("cat-file", "-e", f"{head_tested}^{{commit}}")
+        if readable.returncode != 0:
+            why_no_head_test_run = (f"git cannot read {head_tested[:12]}, the commit the head "
+                                    f"test run passed on, in {checkout}: {git_error(readable)}")
+            head_tested = None
     no_test_failing_on_main, why_not_no_test_failing_on_main = (
         newest_main_commit_whose_after_merge_test_run_left_no_test_failing_read(git, merge_commit))
-    compared_with = [since]
-    if no_test_failing_on_main is not None and why_no_head_test_run is None:
-        # The head commit, the fallback, is no commit a test run passed on, so only a head
-        # test run's commit is a second comparison.
-        compared_with = [no_test_failing_on_main, since]
-        print(f"selecting the nn-test-suites whose recorded inputs changed both since "
-              f"{no_test_failing_on_main[:12]}, the newest main commit whose after-merge test "
-              f"run left no test failing, and since {since[:12]}, the commit the head test run "
-              f"passed on, so a suite runs only when both comparisons select it")
-    elif no_test_failing_on_main is not None:
-        compared_with = [no_test_failing_on_main]
+    compared_with = after_merge_test_run_suite_selection_commits_choose(
+        no_test_failing_on_main, head_tested, arguments.head_commit)
+    if no_test_failing_on_main is None:
+        print(f"no main commit whose after-merge test run left no test failing is used: "
+              f"{why_not_no_test_failing_on_main}.")
+    if head_tested is None and no_test_failing_on_main is None:
+        print(f"selecting the nn-test-suites whose recorded inputs changed since the head "
+              f"commit {arguments.head_commit[:12]}, which selects more suites than "
+              f"the merge changed: {why_no_head_test_run}.\n"
+              f"Nothing to do: this run still tests every suite the merge could have "
+              f"changed.")
+    elif head_tested is None:
         print(f"selecting the nn-test-suites whose recorded inputs changed since "
               f"{no_test_failing_on_main[:12]}, the newest main commit whose after-merge test "
               f"run left no test failing; not also since a commit a head test run passed on, "
               f"because {why_no_head_test_run}")
+    elif no_test_failing_on_main is None:
+        print(f"selecting the nn-test-suites whose recorded inputs changed both since the head "
+              f"commit {arguments.head_commit[:12]}, by which alone the suites a head test run "
+              f"leaves out are judged, and since {head_tested[:12]}, the commit the head test "
+              f"run passed on: pull request {arguments.pull_request}'s head merged with main as "
+              f"main was when that run started")
     else:
-        print(f"no main commit whose after-merge test run left no test failing is used: "
-              f"{why_not_no_test_failing_on_main}.")
-        if why_no_head_test_run is not None:
-            print(f"selecting the nn-test-suites whose recorded inputs changed since the head "
-                  f"commit {since[:12]}, which selects more suites than "
-                  f"the merge changed: {why_no_head_test_run}.\n"
-                  f"Nothing to do: this run still tests every suite the merge could have "
-                  f"changed.")
-        else:
-            print(f"selecting the nn-test-suites whose recorded inputs changed since "
-                  f"{since[:12]}, the commit the head test run passed on: "
-                  f"pull request {arguments.pull_request}'s head merged with main as main was "
-                  f"when that run started")
-    by_hand = "python3 scripts/run-all-test-suites.py " + " ".join(
-        f"--only-suites-whose-recorded-inputs-changed-since {commit}" for commit in compared_with)
+        print(f"selecting the nn-test-suites whose recorded inputs changed both since "
+              f"{no_test_failing_on_main[:12]}, the newest main commit whose after-merge test "
+              f"run left no test failing, and since {head_tested[:12]}, the commit the head test "
+              f"run passed on, so a suite runs only when both comparisons select it")
+    worktree_runner = worktree / "scripts" / "run-all-test-suites.py"
+    # A runner that is missing or cannot be read is left to the run below, which reports it.
+    try:
+        worktree_runner_text = worktree_runner.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        worktree_runner_text = None
+    if (len(compared_with) > 1 and worktree_runner_text is not None
+            and TEST_RUNNER_SOURCE_LINE_WHOSE_PRESENCE_SHOWS_THE_RUNNER_SELECTS_SUITES_SINCE_EVERY_COMMIT_GIVEN
+            not in worktree_runner_text):
+        print(f"comparing with {compared_with[0][:12]} alone after all: the test runner at the "
+              f"merge commit predates comparing with several commits, and would keep only the "
+              f"last one given, {compared_with[-1][:12]}")
+        compared_with = compared_with[:1]
+    by_hand = after_merge_test_run_command_build(compared_with)
 
     runner = common.run_all_test_suites
     store = common.merge_lane_head_test_run_recorded_inputs_store_directory(arguments)

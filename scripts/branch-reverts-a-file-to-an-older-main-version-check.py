@@ -171,9 +171,12 @@ def report_lines(head_hash, base, reverted):
     lines += [
         "This usually means the branch was squashed or rebuilt from an index older "
         "than its new base, such as with `git reset --soft %s`." % base,
-        "If you did not mean to undo that commit: for each file above, run "
-        "`git checkout %s -- <path>`, put this branch's own changes to the file "
-        "back on top, and commit." % base,
+        "If you did not mean to undo that commit, then for each file above: if "
+        "`git diff HEAD -- <path>` prints anything, save it with `git diff HEAD -- "
+        "<path> > <a file outside this checkout>`, because the next command overwrites "
+        "the file's uncommitted changes in the index and the working tree; run `git "
+        "checkout %s -- <path>`; put this branch's own changes to the file, and any you "
+        "saved, back on top; and commit." % base,
         "If you mean to undo it: name the commit, by at least its first %d "
         "characters, in a commit message on this branch, as `git revert` does."
         % SHORT_COMMIT_LENGTH,

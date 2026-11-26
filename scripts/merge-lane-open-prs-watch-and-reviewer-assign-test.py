@@ -1082,10 +1082,46 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
                 return open_at_seed
 
         exit_code, lines, errors = seed_with(PutBackByHandWhileGitHubIsRead())
-        check("a seed run whose assignment file is put back while GitHub is read exits 1 and keeps "
-              "that file",
-              exit_code == 1 and "appeared while the open pull requests were read" in errors
-              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n", errors)
+        check("a seed run whose assignment file is put back whole while GitHub is read keeps that "
+              "file and says so, exiting 0 with nothing to rerun",
+              exit_code == 0 and "exists and every line of it reads correctly" in "\n".join(lines)
+              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n", f"{lines} {errors}")
+        seeded.unlink()
+
+        class PutBackDamagedWhileGitHubIsRead(PutBackByHandWhileGitHubIsRead):
+            def __getitem__(self, _index):
+                seeded.write_text("4028 lane-one\n", encoding="utf-8")
+                return open_at_seed
+
+        exit_code, lines, errors = seed_with(PutBackDamagedWhileGitHubIsRead())
+        check("a seed run whose assignment file is put back damaged while GitHub is read exits 1, "
+              "keeps that file and says how to repair it",
+              exit_code == 1 and "The file is damaged" in errors
+              and seeded.read_text(encoding="utf-8") == "4028 lane-one\n", errors)
+        seeded.unlink()
+
+        real_unlink = watcher_module.Path.unlink
+
+        def unlink_failing_for_the_temporary_file(self, *args, **kwargs):
+            if self.name.endswith(".partial") and seeded.exists():
+                raise OSError(5, "Input/output error")
+            return real_unlink(self, *args, **kwargs)
+
+        watcher_module.Path.unlink = unlink_failing_for_the_temporary_file
+        try:
+            exit_code, lines, errors = seed_with([open_at_seed])
+        finally:
+            watcher_module.Path.unlink = real_unlink
+        leftovers = list(scratch.glob("seeded.txt.*.partial"))
+        check("a seed run whose assignment file is made but whose temporary file cannot then be "
+              "removed exits 0, says the file was made, and names the temporary file left behind",
+              exit_code == 0 and seeded.read_text(encoding="utf-8").startswith("4028 merge-lane-1\n")
+              and "was made, but its temporary file" in errors and "Input/output error" in errors
+              and "No assignment file was made" not in errors
+              and len(leftovers) == 1 and str(leftovers[0].resolve()) in errors,
+              f"exit {exit_code!r} {errors}")
+        for leftover in leftovers:
+            leftover.unlink()
         seeded.unlink()
         seed.write_text("4028 lane-one\n", encoding="utf-8")
         exit_code, lines, errors = seed_with([open_at_seed])
@@ -2048,6 +2084,55 @@ def run_poll_once_cases(scratch_root, token_file):
           code == 1 and machine.state_path.read_text(encoding="utf-8") == before
           and "could not record" in machine.tasks_read()[0]["subject"] + machine.errors,
           f"{code} {machine.errors}")
+
+    machine = machine_for("append-fails-two-runs-after-assigning")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.events_path.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    first = machine.run()
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+    second = machine.run()
+    kept_while_failing = machine.assignments.read_text(encoding="utf-8")
+    machine.events_path.rmdir()
+    third = machine.run()
+    assigned = [line for line in machine.event_lines() if " REVIEW-ASSIGNED " in line]
+    check("when two runs in a row cannot append after dealing reviews, the assignment file is put "
+          "back each time, and the first run that can append records each pull request's "
+          "REVIEW-ASSIGNED line once",
+          (first, second, third) == (1, 1, 0) and kept_while_failing == ""
+          and [line.split()[2] for line in assigned] == ["#1", "#2"]
+          and [line.split()[0] for line in
+               machine.assignments.read_text(encoding="utf-8").splitlines()] == ["1", "2"],
+          f"{(first, second, third)} {kept_while_failing!r} {assigned} {machine.errors}")
+
+    machine = machine_for("append-and-put-back-fail")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.events_path.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    real_write = watcher_module.merge_lane_pull_request_review_assignments_file_write
+    writes = []
+
+    def write_then_fail(path, text):
+        writes.append(text)
+        if len(writes) > 1:
+            raise OSError("injected: the put-back write failed")
+        real_write(path, text)
+
+    watcher_module.merge_lane_pull_request_review_assignments_file_write = write_then_fail
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.merge_lane_pull_request_review_assignments_file_write = real_write
+    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+    check("when the append fails and the assignment file cannot be put back, the failure task "
+          "names the pull request the file keeps with no REVIEW-ASSIGNED line recorded",
+          code == 1 and "could not be put back" in description
+          and "PR #1 REVIEW-ASSIGNED" in description,
+          f"{code} {description} {machine.errors}")
 
     machine = machine_for("another-repository-default-directory")
     # Should these cases regress into a poll, it must not touch merge-lane-2's real state or tasks.
