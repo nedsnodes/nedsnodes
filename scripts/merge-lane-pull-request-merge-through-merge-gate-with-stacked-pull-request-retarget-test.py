@@ -133,6 +133,8 @@ sys.exit(route.get("exit", 0))
 
 FAKE_RUNNER = r'''#!/usr/bin/env python3
 import json, os, sys
+# The merge program reads this line to tell that the runner compares with every commit given:
+# def suites_selected_since_every_commit(
 directory = os.environ["MERGE_LANE_MERGE_TEST_DIRECTORY"]
 with open(os.path.join(directory, "runner-calls.log"), "a") as log:
     log.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
@@ -698,6 +700,47 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
           and f"inputs changed since {parent[:12]} and since {merged[:12]}" in output
           and recorded == merge_commit,
           f"exit {exit_code}\n{output}\n{calls}\n{recorded}")
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-at-parent-and-runner-compares-with-one-commit", "PARENT\n",
+        head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))],
+        origin_files={"scripts/run-all-test-suites.py": FAKE_RUNNER.replace(
+            "# def suites_selected_since_every_commit(\n", "")})
+    merged = merged_commit(scratch, "no-test-failing-at-parent-and-runner-compares-with-one-commit")
+    check("when the test runner at the merge commit predates comparing with several commits, "
+          "which would keep only the last commit given, the after-merge test run compares with "
+          "the first commit alone and says so",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since", parent]
+          and calls[0]["argv"].count("--only-suites-whose-recorded-inputs-changed-since") == 1
+          and f"comparing with {parent[:12]} alone after all: the test runner at the merge "
+              f"commit predates comparing with several commits, and would keep only the last "
+              f"one given, {merged[:12]}" in output,
+          f"exit {exit_code}\n{output}\n{calls}")
+
+    # The merge commit's runner exists but cannot be read, as when its permissions deny reading.
+    real_read_text = Path.read_text
+
+    def runner_unreadable(path, *args, **kwargs):
+        if path.name == "run-all-test-suites.py":
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_read_text(path, *args, **kwargs)
+
+    Path.read_text = runner_unreadable
+    try:
+        exit_code, output, calls, parent, merge_commit, recorded = case(
+            "no-test-failing-at-parent-and-runner-unreadable", "PARENT\n",
+            head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
+    finally:
+        Path.read_text = real_read_text
+    merged = merged_commit(scratch, "no-test-failing-at-parent-and-runner-unreadable")
+    check("when the test runner at the merge commit cannot be read, the after-merge test run "
+          "leaves it to the run, comparing with both commits, instead of stopping in a traceback",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][:4] == ["--only-suites-whose-recorded-inputs-changed-since", parent,
+                                       "--only-suites-whose-recorded-inputs-changed-since", merged]
+          and "alone after all" not in output,
+          f"exit {exit_code}\n{output}\n{calls}")
 
     exit_code, output, calls, parent, merge_commit, recorded = case(
         "no-test-failing-at-parent-and-head-test-run-failed", "PARENT\n",
@@ -2362,19 +2405,22 @@ def main():
                 (f"{'f' * 40}.txt", head_test_run_record("f" * 40, 0, "2026-11-07T19:00:00Z"))])
         merged = merged_commit(scratch, name)
         calls = runner_calls(scratch, name)
-        check("when main has not moved since the head test run, the after-merge run selects "
-              "since the pr10-merged commit of the passing record started last, whose tree is "
-              "the merge commit's, so no suite is selected",
-              exit_code == 0 and len(calls) == 1 and calls[0]["argv"][:2] == [
+        check("when main has not moved since the head test run and no main commit whose "
+              "after-merge test run left no test failing is recorded, the after-merge run "
+              "selects since the head commit, by which alone the suites a head test run leaves "
+              "out are judged, and since the pr10-merged commit of the passing record started "
+              "last, whose tree is the merge commit's",
+              exit_code == 0 and len(calls) == 1 and calls[0]["argv"][:4] == [
+                  "--only-suites-whose-recorded-inputs-changed-since", HEAD,
                   "--only-suites-whose-recorded-inputs-changed-since", merged]
               and tree_of(scratch, name, merged)
               == tree_of(scratch, name, origin_commit(scratch, name))
-              and f"selecting the nn-test-suites whose recorded inputs changed since "
-                  f"{merged[:12]}, the commit the head test run passed on: "
-                  f"pull request 10's head merged with main as main was when that run started"
-                  in output
-              and f"changed since {merged[:12]}" in output
-              and "since the head commit" not in output,
+              and f"selecting the nn-test-suites whose recorded inputs changed both since the "
+                  f"head commit {HEAD[:12]}, by which alone the suites a head test run leaves "
+                  f"out are judged, and since {merged[:12]}, the commit the head test run "
+                  f"passed on: pull request 10's head merged with main as main was when that "
+                  f"run started" in output
+              and f"changed since {HEAD[:12]} and since {merged[:12]}" in output,
               f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
 
         name = "since-merged-past-an-unreadable-test-log"
@@ -2386,9 +2432,27 @@ def main():
         calls = runner_calls(scratch, name)
         check("a test log that cannot be read is passed over, and a passing record in a "
               "test log read after it is still used",
-              exit_code == 0 and len(calls) == 1 and calls[0]["argv"][:2] == [
+              exit_code == 0 and len(calls) == 1 and calls[0]["argv"][:4] == [
+                  "--only-suites-whose-recorded-inputs-changed-since", HEAD,
                   "--only-suites-whose-recorded-inputs-changed-since", merged]
               and "could not be read, so it is not used" in output,
+              f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
+
+        name = "since-head-when-the-head-tested-commit-cannot-be-read"
+        exit_code, output, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+            head_test_run_test_logs=[(f"{'e' * 40}.txt", head_test_run_record("e" * 40, 0))])
+        calls = runner_calls(scratch, name)
+        check("a passing head test run record whose commit git cannot read, as after git pruned "
+              "it, is not passed to the runner, which would refuse it: the after-merge run "
+              "selects since the head commit alone and says why",
+              exit_code == 0 and len(calls) == 1 and calls[0]["argv"][:2] == [
+                  "--only-suites-whose-recorded-inputs-changed-since", HEAD]
+              and calls[0]["argv"].count("--only-suites-whose-recorded-inputs-changed-since") == 1
+              and f"git cannot read {'e' * 12}, the commit the head test run passed on, in "
+                  in output
+              and f"changed since the head commit {HEAD[:12]}, which selects more suites "
+                  f"than the merge changed" in output,
               f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
 
         for name, test_logs, notice in (
@@ -2693,11 +2757,31 @@ def main():
               "the after-merge test run would, and with the head commit otherwise",
               exit_code_recorded == 3
               and f"run: if git merge-base --is-ancestor {recorded_commit} " in output_recorded
-              and f"; then since={recorded_commit}; else since={HEAD}; fi; python3 "
-                  f"scripts/run-all-test-suites.py "
-                  f"--only-suites-whose-recorded-inputs-changed-since \"$since\"\n"
+              and f"; then python3 scripts/run-all-test-suites.py "
+                  f"--only-suites-whose-recorded-inputs-changed-since {recorded_commit}; else "
+                  f"python3 scripts/run-all-test-suites.py "
+                  f"--only-suites-whose-recorded-inputs-changed-since {HEAD}; fi\n"
                   in output_recorded,
               f"exit {exit_code_recorded}\n{output_recorded}")
+
+        name = "fetch-fails-after-merge-with-a-record-and-a-passing-head-test-run"
+        exit_code_both, output_both, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], routes, before_the_program_runs=record_written,
+            head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
+        merged = merged_commit(scratch, name)
+        check("a fetch that fails after the merge, with a recorded commit and a passing head "
+              "test run: the recovery command compares with the same commits the after-merge "
+              "test run would, the head test run's commit second in either case",
+              exit_code_both == 3
+              and f"run: if git merge-base --is-ancestor {recorded_commit} " in output_both
+              and f"; then python3 scripts/run-all-test-suites.py "
+                  f"--only-suites-whose-recorded-inputs-changed-since {recorded_commit} "
+                  f"--only-suites-whose-recorded-inputs-changed-since {merged}; else "
+                  f"python3 scripts/run-all-test-suites.py "
+                  f"--only-suites-whose-recorded-inputs-changed-since {HEAD} "
+                  f"--only-suites-whose-recorded-inputs-changed-since {merged}; fi\n"
+                  in output_both,
+              f"exit {exit_code_both}\n{output_both}")
         check("a fetch that fails after the merge exits 3 without a test run",
               exit_code == 3 and runner_calls(scratch, "fetch-fails-after-merge") == []
               and "could not fetch origin in " in output
