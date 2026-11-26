@@ -349,7 +349,7 @@ def names_a_word_expanded_to(command, word, machines, unchecked):
         if line not in unchecked:
             unchecked.append(line)
         return None
-    pattern = fnmatch_pattern(word.split("/", 1)[0])
+    pattern = fnmatch_pattern(word.split("/", 1)[0])  # pragma: no mutate, [0] is the text before the first / whatever split's limit, so a limit of 2 gives what 1 gives
     return sorted(name for name in entries if fnmatch.fnmatchcase(name, pattern))
 
 
@@ -371,10 +371,10 @@ def grep_arguments_options_end_and_option_value_positions(arguments):
             if argument in GREP_LONG_OPTIONS_TAKING_A_VALUE:
                 values.add(index)
                 index += 1
-        elif argument.startswith("-") and argument != "-":
+        elif argument.startswith("-"):
             for position, letter in enumerate(argument[1:], start=1):
                 if letter in GREP_SHORT_OPTIONS_TAKING_A_VALUE:
-                    if position == len(argument) - 1:
+                    if position == len(argument) - 1:  # pragma: no mutate, position runs from 1 to len(argument) - 1, so >= gives what == gives
                         values.add(index)
                         index += 1
                     break
@@ -444,7 +444,8 @@ def agents_grep_options_and_patterns_without_file_names(command, machines, unche
     options_end, option_values = grep_arguments_options_end_and_option_value_positions(arguments)
     arguments = [argument for position, (word, argument) in enumerate(zip(words, arguments))
                  if not (position < options_end and position not in option_values
-                         and argument.startswith("-") and plain(word) != word
+                         and argument.startswith("-")
+                         and plain(word) != word  # pragma: no mutate, plain only turns marker characters into lower ASCII glob characters, so plain(word) < word holds exactly when they differ
                          and command.directory is not None
                          and names_a_word_expanded_to(command, word, machines, unchecked))]
     kept = []
