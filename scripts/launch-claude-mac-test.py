@@ -868,7 +868,7 @@ def main() -> int:
               result.returncode == 2
               and f"launch-claude-mac: refused, because {missing_checkout / SUPERVISOR_WITHIN_A_CHECKOUT} "
                   "does not exist" in result.stderr
-              and "pass the root of a nedschorus checkout that exists" in result.stderr
+              and "pass the root of a nedsnodes checkout that exists" in result.stderr
               and "claude" not in sandbox.invoked_commands().replace("python3", "")
               and not sandbox.tmux_argv()
               and not (sandbox.home / "agents" / "seat-m").exists(),
