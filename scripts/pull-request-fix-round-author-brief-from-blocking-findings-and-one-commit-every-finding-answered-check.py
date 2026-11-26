@@ -746,7 +746,9 @@ def round_facts(number, reviewer_login):
                              and does_merge_lane_review_ask_for_fix_round(review, author, reviewer_login)), anchor)
     return (url, head, branch, review_links(latest_first(anchor, reviews)), frozen_head,
             findings, nits, fix_round_number,
-            None if recorded else [review.get("id") for review in reviews], anchor.get("submitted_at"),
+            # Dismissed reviews are named too, so that a later round on this frozen-head does not take their
+            # copies directories for an earlier brief's.
+            None if recorded else frozen_head_review_ids, anchor.get("submitted_at"),
             first_requesting.get("id"), frozen_head_review_ids, merge_lane)
 
 
@@ -961,12 +963,12 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
     worktree = topic_worktree_of_branch(branch) or topic_worktree_made_by_creator(branch)
     in_worktree = ["-C", str(worktree)]
     # Ignored files are left out: they never reach a commit. So is the answers file this program writes while it is
-    # untracked, which a branch cut before .gitignore named it does not ignore; a staged one is a change, because
-    # the next commit would carry it.
+    # not staged: untracked, which a branch cut before .gitignore named it does not ignore, or modified where HEAD
+    # tracks it. A staged one is a change, because the next commit would carry it.
     answers_name = ANSWERS_FILE_NAME_FORMAT.format(number=number)
     changed = [entry for entry in git_output.nul_separated_fields(git([*in_worktree, "status", "--porcelain", "-z",
                                                                        "--untracked-files=all"]))
-               if not (entry[3:] == answers_name and entry[:2] == "??")]
+               if not (entry[3:] == answers_name and entry[0] in " ?")]
     quoted = shlex.quote(str(worktree))
     # Each command stands on a line of its own, so that no punctuation of the sentence around it is copied with it.
     rerun = f"cd {quoted} && {program_command(number, reviewer_login)}"
@@ -1053,10 +1055,10 @@ def print_brief(number, reviewer_login):
     worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, len(findings) + len(nits),
                                              review_submitted_at, merge_lane)
     answers_path = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
-    kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
-        worktree, number, round_review_id
-    )
     common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
+    kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
+        worktree, number, round_review_id, common
+    )
     other_reviews_directories = [
         pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
             worktree, number, other_review_id, common)
@@ -1068,8 +1070,15 @@ def print_brief(number, reviewer_login):
         answers_kept_copies_oldest_first(directory)
     kept_copies = fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers_path, len(findings) + len(nits),
                                                                      kept_copies_directory)
-    other_reviews_kept_copies = [kept_answers for directory in other_reviews_directories
-                                 for kept_answers in answers_kept_copies_oldest_first(directory)]
+    try:
+        other_reviews_kept_copies = [kept_answers for directory in other_reviews_directories
+                                     for kept_answers in answers_kept_copies_oldest_first(directory)]
+    except StepFailed as error:
+        if not kept_copies:
+            raise
+        # The answers file now holds only placeholders, so the failure names where its earlier text is kept.
+        raise StepFailed(f"{error}. This round's copies of the answers file's earlier text are kept at "
+                         + ", ".join(map(str, kept_copies)) + ".") from None
     lines = [
         f"Fix-round brief for pull request {url}",
         f"Frozen-head: {frozen_head}",
