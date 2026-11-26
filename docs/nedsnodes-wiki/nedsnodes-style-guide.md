@@ -1,6 +1,6 @@
 # Style guide
 
-This page lists words to avoid in this project and what to write instead. Most of the words below each name several different things here, so a reader cannot tell which one the writer meant; "land" has a project word that replaces it; the pronouns leave a reader who lacks the writer's context guessing what each stands for. A listed word stays when it is used in its ordinary English meaning, sits inside code or a quotation, or is talked about rather than used. Write a word you talk about in backquotes, as the table's first column does.
+This page lists words to avoid in this project and what to write instead, and, in its section on absolutes, when an absolute word such as 'always' or 'never' may stay. Most of the words below each name several different things here, so a reader cannot tell which one the writer meant; "land" has a project word that replaces it; the pronouns leave a reader who lacks the writer's context guessing what each stands for. A listed word stays when it is used in its ordinary English meaning, sits inside code or a quotation, or is talked about rather than used. Write a word you talk about in backquotes, as the table's first column does.
 
 `scripts/style-guide-word-checker-hack.py` reads the table below. After an agent's Edit or Write of a markdown file, `scripts/style-guide-word-checker-markdown-edit-hook-hack.py` reports each listed word in the text just written, and the writer decides whether each hit needs changing. Changing a row changes what the hook reports. A form is also reported with a capital first letter, such as "Seat" at the start of a sentence; besides the forms in the third column, the checker skips code, link targets, paths and text in double quotes.
 
@@ -46,3 +46,7 @@ This page lists words to avoid in this project and what to write instead. Most o
 | `or` | `or` | | "one or the other" or "one or both", wherever a reader could take "or" either way | messages to other agents, messages to the user |
 
 "Applies to" names where the word is avoided: files, messages to other agents, and messages to the user. The pronoun rows and the `or` row apply to messages only; no program checks them.
+
+## Absolutes in agent-instructions and tool-messages-to-agent
+
+When writing agent-instructions or a tool-message-to-agent, absolute words like "always", "never", "every", "all" or "cannot" can backfire in unforeseen conditions. Before you write such a word, look for an exception; if you find any, name each or soften the wording; if you find none, the absolute stands.
