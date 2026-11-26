@@ -3497,7 +3497,13 @@ def settling_left_unclosed(walk_finder, minutes, parser, named):
     it, as when the advisor objected: the item is then shown, and rerunning the settling would record it twice."""
     match = unclosed_last_answer(walk_finder, minutes, parser)
     settled = {f"not asked, {not_asked_label(kind)}" for kind in NOT_ASKED_KINDS + NOT_ASKED_NO_KIND_VALUES}
-    return bool(match and match["item"].lower() == named.lower() and match["answered"] in settled)
+    return bool(match and match["item"].lower() == named.lower()
+                and (match["answered"] in settled or answer_is_already_decided(match["answered"])))
+
+
+def answer_is_already_decided(answered):
+    """True when the walk-minutes answer was recorded by --already-decided, whatever answer its ruling gives."""
+    return answered.startswith(ALREADY_DECIDED_PREFIX) or ", " + ALREADY_DECIDED_PREFIX in answered
 
 
 NO_ANSWER_ROWS_HEADING = ("Rows of the no-answer table {item} could settle by; if a row's meaning fits {item}, do "
@@ -4749,7 +4755,7 @@ def close(arguments):
         output = [line.format(item=item) for line in (CLOSE_MOVED_ON_SHOWN_LINES
                                                       if settled == CHECK_MOVED_ON_SHOWN_PREFIX
                                                       else CLOSE_NOT_SHOWN_LINES)]
-    elif answered.startswith(ALREADY_DECIDED_PREFIX) or ", " + ALREADY_DECIDED_PREFIX in answered:
+    elif answer_is_already_decided(answered):
         # The ruling comes last and may hold any words, so the answer is read only from before it.
         ruled_answer, _, ruling = answered.partition(ALREADY_DECIDED_PREFIX)
         against = ruled_answer.startswith(DISAPPROVED)

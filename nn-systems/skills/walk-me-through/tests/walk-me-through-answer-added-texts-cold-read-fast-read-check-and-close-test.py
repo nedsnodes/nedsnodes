@@ -5902,6 +5902,14 @@ def test_the_read_step_presents_an_item_rated_none_that_is_shown_all_the_same():
         ("that `check --not-asked 2` settled but close has not closed, as when the advisor objected",
          close_the_issue_case(recorded="item 22 of 26: settled without asking the user, not asked, kind 2 "
                                        "#case_against_none (2026-11-07 16:20), which makes its change. Fast reads:\n")),
+        ("that `check --already-decided ... D` settled but close has not closed, as when the advisor objected",
+         close_the_issue_case(recorded="item 22 of 26: settled without asking the user, disapproved, already decided "
+                                       "by `walk x's minutes, item 3 (2026-10-20)` #case_against_none (2026-11-07 "
+                                       "16:20), which makes its change. Fast reads:\n")),
+        ("that `check --already-decided` settled but close has not closed, as when the advisor objected",
+         close_the_issue_case(recorded="item 22 of 26: settled without asking the user, already decided by `walk x's "
+                                       "minutes, item 3 (2026-10-20)` #case_against_none (2026-11-07 16:20), which "
+                                       "makes its change. Fast reads:\n")),
         ("whose touches line names a file not yet written, which `check --not-asked none` refuses",
          close_the_issue_case(touches="#not_asked_touches docs/a-page-the-change-adds.md\n\n")),
     )
