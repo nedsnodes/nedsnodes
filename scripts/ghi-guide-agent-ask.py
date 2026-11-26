@@ -218,6 +218,10 @@ ASK_TIMEOUT_SECONDS = int(os.environ.get("GHI_GUIDE_AGENT_ASK_TIMEOUT_SECONDS", 
 LOGGED_OUT_PATTERN = re.compile(r"authenticat|oauth", re.IGNORECASE)
 LOGGED_OUT_REMEDY = (f" — the claude on {AGENT_BOX} is logged out; run `claude auth login` "
                      f"there (from the Mac: `ssh -t {AGENT_BOX} claude auth login`), then retry")
+# What claude prints when --resume names a session it has no transcript for
+# (seen on ned-box 2026-11-26). A saved id it rejects this way would fail every
+# later ask, so the ask forgets it; a timeout or any other failure keeps it.
+CLAUDE_RESUME_SESSION_NOT_FOUND_PATTERN = re.compile(r"No conversation found with session ID")
 # The box gets the ask's own budget plus room for the ssh round trip and a
 # routine refresh. This does NOT guarantee the Mac outlasts every box-side
 # run: the ask's deadline bounds only the claude turns, while the mirror
@@ -646,11 +650,15 @@ def state_lock(lock_path: Path):
         raise SeatDirectoryUnusable(
             f"the seat directory at {lock_path.parent} is not usable: {error}") from error
     try:
+        # Only the flock may be caught: an OSError the caller raises inside the
+        # with-block, such as a failed save_state, must reach it unchanged.
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            yield True
         except OSError:
-            yield False
+            acquired = False
+        else:
+            acquired = True
+        yield acquired
     finally:
         handle.close()
 
@@ -1016,6 +1024,9 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
 
     answer_reply, error = turn(resume_prompt, session_id)
     if answer_reply is None:
+        if locked and CLAUDE_RESUME_SESSION_NOT_FOUND_PATTERN.search(error or ""):
+            state.pop(GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY, None)
+            save_state(state_path, state)
         return None, None, f"ghi-guide-agent ask failed: {error}"
     session_id = answer_reply.get("session_id", session_id)
     answer, problem = ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(answer_reply, kinds)
