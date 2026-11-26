@@ -486,7 +486,9 @@ def shown_item_lines(reply_lines, document_lines, units, openings):
             openings, first, end, number, numbers, total)) for number in numbers or [None]]
         if unit_shown:
             # A Withdrawn heading, an opening that names no item, ends the lead-in as it ends an item's lines.
-            withdrawn = [line for line in openings if first < line < end and not openings[line][0]]
+            withdrawn = [line for line in openings
+                         if first < line < end  # pragma: no mutate, no Withdrawn heading starts a unit, so none sits on its first line, and every opening at or past end follows each item's start, so neither bound's edge changes the min
+                         and not openings[line][0]]
             for line in document_lines[first:min([start for _, start, _ in spans] + withdrawn)]:
                 shown |= normalized_lines([line, answer_hook.new_text_as_shown(line) or ""])
         for number, start, stop in spans:
