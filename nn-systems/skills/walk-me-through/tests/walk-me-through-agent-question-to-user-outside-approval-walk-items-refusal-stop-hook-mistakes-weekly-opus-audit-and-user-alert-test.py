@@ -147,18 +147,39 @@ def test_which_rows_are_sampled():
     rows = [row("Old? [x]", True, days_ago=8), row("Failed call?", None), row("Twice?", True, session="s2"),
             row("Twice?", False, session="s2", days_ago=0.5), row("Twice?", True, session="s3"),
             dict(row("Missing context?", True), agent_message_holding_the_line=7),
-            dict(row("No time zone?", True), time="2026-11-29T06:00:00"), dict(row("No time?", True), time=None)]
-    rows[-1].pop("time")
+            dict(row("No time zone?", True), time="2026-11-29T06:00:00"), dict(row("No time?", True), time=None),
+            dict(row("List session?", True), session=[]), row("No waiting item?", True)]
+    rows[-3].pop("time")
+    rows[-1].pop("waiting_walk_item_text")
     case = Case(rows, extra_text="not json\n[1, 2]\n")
     case.run()
     lines = sorted((item["row"]["line"], item["row"]["session"], item["row"]["ask"]) for item in case.record()["lines"])
     check("rows older than the week, rows with no verdict and malformed rows are left out; a line judged twice in "
           "one agent-session counts once, with its newest verdict",
           lines == [("Twice?", "s2", False), ("Twice?", "s3", True)], lines)
-    check("malformed rows, a row with a time but no time zone and a row with no time included, are counted",
-          case.record()["counts"]["malformed_rows"] == 5, case.record()["counts"])
+    check("malformed rows, a row with a time but no time zone, a row with no time, a session that is not a string "
+          "and a row missing a field included, are counted",
+          case.record()["counts"]["malformed_rows"] == 7, case.record()["counts"])
     empty = Case()
     check("a week with no lines exits 0 and makes no call", empty.run() == 0 and empty.model_calls() == [], empty.stderr)
+
+
+def test_a_now_without_a_time_zone_is_refused_before_anything_is_read():
+    case = Case([row("Ask? [x]", True)])
+    saved_stderr = sys.stderr
+    try:
+        with open(case.root / "stderr.txt", "w") as sys.stderr:
+            try:
+                job.main(["--now", "2026-11-30T06:15"],
+                         environment={job.hook.REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_PATH_VARIABLE: str(case.log)})
+                status = None
+            except SystemExit as stop:
+                status = stop.code
+    finally:
+        sys.stderr = saved_stderr
+    check("a --now with no time zone exits 2, naming the value, and writes no record",
+          status == 2 and "has no time zone" in (case.root / "stderr.txt").read_text() and case.record() is None,
+          status)
 
 
 def test_a_missed_ask_writes_one_user_alert():

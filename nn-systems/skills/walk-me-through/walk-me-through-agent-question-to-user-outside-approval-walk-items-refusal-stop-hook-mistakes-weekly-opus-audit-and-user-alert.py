@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Once a week, have Opus label a sample of the lines the question-check Stop hook's model judged in the past week,
+"""Have Opus label a sample of the lines the question-check Stop hook's model judged in the week before the run,
 against the answer key's labelling rules; write the counts to the log-store; and write a user-alert, which becomes an
 item of the user's approval-walk, only when a threshold below is crossed.
 
     python3 <this file>
 
-It runs once a week on ned-box, from the table nn-systems/general-tools/scheduled-jobs-on-each-machine.json, which
-nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py installs as this cron line:
-    15 6 * * 1 /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert.py >> /home/nedlern/.claude/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert.log 2>&1
+It is not in nn-systems/general-tools/scheduled-jobs-on-each-machine.json, so it runs only when started by hand.
 
 THE LINES are the rows of the hook's log of each reply line it sent its model, with the model's ask-or-not label,
 which walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py writes and its
@@ -39,7 +37,7 @@ one was written, is one JSON file named for the run's UTC time in COUNTS_DIRECTO
 
 Exit status: 0 when every sampled line was labelled and the record, and any user-alert, were written. 1 when the
 log-store, the log or the labelling prompt cannot be read, a labelling call failed, or the record or the user-alert
-could not be written; the error goes to stderr, and so to the cron log above, and never into a user-alert, which is
+could not be written; the error goes to stderr, and never into a user-alert, which is
 kept for a crossed threshold. Lines whose call failed are left out of the counts, and the counts of the lines
 labelled still decide whether an alert is written.
 
@@ -150,8 +148,9 @@ def window_lines(log_text, start, end):
             continue
         try:
             row = json.loads(text)
-            if not isinstance(row, dict) or not all(isinstance(row.get(field), (str, type(None)))
-                                                    for field in ENTRY_FIELDS) or not isinstance(row.get("line"), str):
+            if (not isinstance(row, dict)
+                    or not all(field in row and isinstance(row[field], (str, type(None))) for field in ENTRY_FIELDS)
+                    or not isinstance(row.get("line"), str) or not isinstance(row.get("session"), str)):
                 raise ValueError("not a row of the hook's log")
             time = datetime.datetime.fromisoformat(row["time"])
             in_window = start <= time < end
@@ -300,9 +299,16 @@ def run(environment, now, rng, program):
     return status
 
 
+def time_with_time_zone(text):
+    time = datetime.datetime.fromisoformat(text)
+    if time.tzinfo is None:
+        raise argparse.ArgumentTypeError(f"{text!r} has no time zone; give one, as in {text}+00:00")
+    return time
+
+
 def main(argv=None, environment=None, rng=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--now", type=datetime.datetime.fromisoformat,
+    parser.add_argument("--now", type=time_with_time_zone,
                         help="the end of the week sampled, as an ISO 8601 time with its time zone; default: now")
     arguments = parser.parse_args(argv)
     now = arguments.now or datetime.datetime.now(datetime.timezone.utc)

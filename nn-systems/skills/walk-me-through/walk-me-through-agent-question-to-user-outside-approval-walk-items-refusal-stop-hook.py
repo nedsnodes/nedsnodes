@@ -145,8 +145,7 @@ EVERY LINE SENT TO THE MODEL is logged too, as one JSON line each, with the
 time, session, walk, MODEL, the entry the call was sent, and the verdict: `ask`
 true or false with the model's `reason`, or null with the call's `failure`. The lines go to
 REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_FILE_NAME beside the refusal log, found the same way;
-REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_PATH_VARIABLE overrides the path. The weekly
-maintenance-job
+REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_PATH_VARIABLE overrides the path. The program
 walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook-mistakes-weekly-opus-audit-and-user-alert.py
 samples them. Logging never changes whether the hook blocks: when these lines
 cannot be logged, a block's reason says so, and a reply that passes still
