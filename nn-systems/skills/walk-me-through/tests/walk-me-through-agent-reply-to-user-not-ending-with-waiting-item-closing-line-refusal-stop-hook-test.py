@@ -517,12 +517,6 @@ def test_a_plain_text_line_that_reads_as_a_closing_line_only_once_rendered_is_no
                    case.run(), "no closing line for `Item 2 of 9` ends the reply")
 
 
-def test_the_no_decision_line_is_the_walk_skills():
-    skill = (Path(__file__).resolve().parents[4] / ".claude" / "skills" / "walk-me-through" / "SKILL.md").read_text()
-    check("SKILL.md ends a no-decision sub-step with the line the hook reads",
-          'ends with the line "No decision here; type N or next to continue."' in skill, "no such sentence")
-
-
 def test_item_holding_original_and_proposed_sections():
     case = Case()
     case.walk_files(minutes="#next_to_present item 9 of 9.")

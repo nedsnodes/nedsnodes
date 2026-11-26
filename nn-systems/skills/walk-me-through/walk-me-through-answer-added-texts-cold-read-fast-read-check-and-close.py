@@ -88,9 +88,7 @@ walk's marker. A check without --user-reply-as-typed is refused, writing
 nothing, and so is one that gives it with any of those four. A reply that is a
 navigation word alone, next, N, continue or go, whatever its case and any
 trailing period or exclamation mark, is refused for every answer but
---moved-on-no-decision, writing nothing: it approves nothing, and the
-walk-me-through skill lets it advance only an item with no recommendation
-outstanding.
+--moved-on-no-decision, writing nothing: it approves nothing.
 
 The texts an answer adds are the item's lines that begin with the answer's
 mark, `#new` or `#new_if_d`, as CHECK below describes them. A, AO, Aa, O2 and
@@ -402,11 +400,7 @@ APPROVAL-WALK-WAITING-ITEM-COLD-READ-FAST-READ gives the item the
 item's lines in the walk-document, heading and fenced code included, keyed by
 the sha256 of that text unchanged, whitespace included. It first refuses,
 as CHECK does and before it starts any read, an item with a `#new` or
-`#new_if_d` mark whose text would not be read whole; then it refuses, also
-before any read, an item whose text up to its first `###` sub-step, or one of
-whose `###` sub-steps, holds more than 500 words, counting every run of
-characters between spaces that holds a letter or a digit, on every line but
-those opening `#approval_walk_item_`. Then, for an item that is to be shown, it
+`#new_if_d` mark whose text would not be read whole. Then, for an item that is to be shown, it
 refuses, before any read, an item whose text states the
 current status of something outside the walk, such as an agent-seat offline,
 `claude` logged out, a machine down or work on hold, as
@@ -1331,8 +1325,8 @@ USER_WORDS_NOT_ASKED = (
 NAVIGATION_WORD_REFUSED = (
     "nothing written: the user's reply \"{words}\" is a navigation word alone, which does not approve, disapprove "
     "or defer {item}, so check does not record it as {answered}.\n"
-    "If {item} ends with a recommendation, ask the user to answer it with A, AO, Aa, D or Z, because the "
-    "walk-me-through skill lets a navigation word alone advance only when no recommendation is outstanding.\n"
+    "If {item} ends with a recommendation, ask the user to answer it with A, AO, Aa, D or Z, because a navigation "
+    "word answers no recommendation.\n"
     "If {item} asks for no decision, such as a summary item, run `{command}`, then close.")
 MOVED_ON_NO_DECISION_REFUSED = (
     "nothing written: {item} recommends \"{recommendation}\", so it asks for a decision, and --moved-on-no-decision "
@@ -1738,7 +1732,7 @@ FRESH_AGENT_REWRITE_DUE_LINES = (
 FRESH_AGENT_REWRITE_BRIEF_LINES = (
     "Write afresh the text of one item of an approval-walk, the item {title}. Its earlier texts are left out of "
     "this brief on purpose: write it from the user's words and the files below, not from any earlier text.",
-    "Read {skill} for how an item is written, and keep the item within the word limit it gives.",
+    "Read {skill} for how an item is written.",
     "The user's words on this item, and on the item whose held answer raised it, in the lines of the walk-minutes "
     "{minutes} that hold them:",
 )
@@ -1818,28 +1812,6 @@ READ_AHEAD_NOT_STARTED = ("No cold-read-fast-read could be started ahead for the
                           "from you now, since when that item waits its read step reads it or reports the problem "
                           "again. The problem: {problem}")
 GIT_LS_FILES_FAILED = "every changed word, since `git ls-files` failed in {top} ({error}) and file names were not known"
-APPROVAL_WALK_ITEM_WORD_LIMIT = 500
-# The user has not decided whether the hashtag marker lines, such as `#new`, `#new_if_d` and `#case_against`, and
-# the texts quoted on `#old` and `#new` lines count toward the limit; until he does, only a line opening with one
-# of these, which the item page shows apart from the item's text, is left out of the count.
-APPROVAL_WALK_ITEM_WORD_COUNT_LEFT_OUT_LINE_OPENINGS = ("#approval_walk_item_",)
-APPROVAL_WALK_ITEM_WORD_COUNT_LEFT_OUT_LINE = re.compile(
-    LINE_OPENING_MARKERS + "(?:" + "|".join(map(re.escape, APPROVAL_WALK_ITEM_WORD_COUNT_LEFT_OUT_LINE_OPENINGS)) + ")")
-# A run of characters between spaces that holds a letter or a digit, so Markdown's `##`, `-`, `>` and `|` are no words.
-APPROVAL_WALK_ITEM_WORD = re.compile(r"\S*[^\W_]\S*")
-APPROVAL_WALK_ITEM_SUB_STEP_HEADING_MARKUP = "###"
-APPROVAL_WALK_ITEM_OVER_WORD_LIMIT = (
-    "nothing read: {item} was not given its cold-read-fast-read, because the text from line {line} of the "
-    "walk-document {document}, `{heading}`, has {count} words, over the limit of {limit} words for an item or a "
-    "sub-step, and the user is shown no item longer than that. A word here is a run of characters between spaces or line "
-    "breaks that holds a letter or a digit; every line of the item counts, heading, code and hashtag marker lines "
-    "included, except a line opening with {left_out}, and each `###` sub-step, numbered or not, counts on its own.\n"
-    "Split that text into `###` sub-steps, each within {limit} words, headed and ended as the walk-me-through skill's "
-    "paragraph opening \"Limit each item to {limit} words\" says; do not cut the text down to fit, since the user wants "
-    "long material broken into steps, not compressed.\n"
-    "Then run `{command}` again.\n"
-    "From now on, write each item and each sub-step within {limit} words when you write it into the walk-document.")
-
 SYSTEM_STATUS_CLAIM_PHRASES_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
                                     / "agent-text-possibly-stale-system-status-claim-phrases-match-common.py")
 SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG = "--possibly-stale-system-status-claims-rechecked"
@@ -2085,64 +2057,6 @@ def item_text(walk_finder, minutes, value, numbers, total, parser, named_by=None
                                                   command=command))
     lines = text.split("\n")
     return document, "\n".join(line for first, end in ranges for line in lines[first:end]).strip()
-
-
-def approval_walk_item_word_counted_line_ranges(walk_finder, text, tokens, parser, spans, numbers):
-    """Return the (first, end) line ranges counted for the items numbered, one per text the skill counts on its
-    own: each numbered item's own lines, even under a heading it shares with other items; when several items
-    are shown together, the lines of their shared heading above the first item's opening; and each of the
-    item's numbered sub-steps, such as `### Item 3.1 of 9`, which item_unit_spans reads as units of their own,
-    taken as approval_walk_item_sub_step_units_below_item_in_walk_document takes them, with the lines of a heading
-    several sub-steps share above the first sub-step's opening."""
-    openings = walk_finder.item_opening_lines(text, parser, tokens)
-    all_units = walk_finder.item_unit_spans(text, parser)
-
-    def own_range(unit, number):
-        unit_numbers, unit_total, _, first, end = unit
-        return walk_finder.approval_walk_item_line_range_within_heading_shared_by_several_items(
-            openings, first, end, number, unit_numbers, unit_total)
-
-    def shared_heading_text(unit):
-        first_opening = min(own_range(unit, part)[0] for part in unit[0])
-        return [(unit[3], first_opening)] if first_opening > unit[3] else []
-
-    ranges = []
-    for number in numbers:
-        unit = next(unit for unit in spans if number in unit[0])
-        ranges.append(own_range(unit, number))
-        if len(numbers) > 1 and len(unit[0]) > 1:
-            ranges += shared_heading_text(unit)
-        for each in walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(all_units, unit, [number]):
-            parts =[part for part in each[0] if part.startswith(number + ".") and part not in numbers]
-            ranges += [own_range(each, part) for part in parts]
-            if parts and len(each[0]) > 1:
-                ranges += shared_heading_text(each)
-    return sorted(set(ranges))
-
-
-def approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value, numbers, total, parser, item, command,
-                                                    skipped_start=None):
-    """Raise Failure when an item's text up to its first `###` sub-step, a sub-step, or the text of a heading
-    several items or sub-steps share above the first of them, has more words than APPROVAL_WALK_ITEM_WORD_LIMIT,
-    naming the first such text; the text starting at line skipped_start, such as a sub-step about to be rewritten,
-    is not counted. A sub-step is a `###` heading, numbered or not; a deeper heading is part of the text it falls
-    in."""
-    document, text, tokens, _, spans = item_line_ranges(walk_finder, minutes, value, numbers, total, parser)
-    lines = text.split("\n")
-    sub_steps = {token.map[0] for token in tokens if token.type == "heading_open" and token.level == 0
-                 and token.map is not None and token.markup == APPROVAL_WALK_ITEM_SUB_STEP_HEADING_MARKUP}
-    for first, end in approval_walk_item_word_counted_line_ranges(walk_finder, text, tokens, parser, spans, numbers):
-        starts = sorted({first} | {line for line in sub_steps if first < line < end})
-        for start, stop in zip(starts, starts[1:] + [end]):
-            if start == skipped_start:
-                continue
-            count = sum(len(APPROVAL_WALK_ITEM_WORD.findall(line)) for line in lines[start:stop]
-                        if not APPROVAL_WALK_ITEM_WORD_COUNT_LEFT_OUT_LINE.match(line))
-            if count > APPROVAL_WALK_ITEM_WORD_LIMIT:
-                raise Failure(APPROVAL_WALK_ITEM_OVER_WORD_LIMIT.format(
-                    item=item, line=start + 1, document=document, heading=lines[start].strip(), count=count,
-                    limit=APPROVAL_WALK_ITEM_WORD_LIMIT, command=command,
-                    left_out=" or ".join(f"`{opening}`" for opening in APPROVAL_WALK_ITEM_WORD_COUNT_LEFT_OUT_LINE_OPENINGS)))
 
 
 def proposed_texts(marks_found, marks):
@@ -3948,12 +3862,6 @@ def waiting_item_read(arguments, sub_step_of=None):
     document, text = item_text(walk_finder, minutes, value, numbers, total, parser,
                                refused_unless_marks_read=(item, command))
     rewrite_file = arguments.approval_walk_item_fresh_agent_rewrite_file
-    # Before the kept versions are written, so a refused item's document is left as it was. With a rewrite, the
-    # rewrite's own text is checked once it is in place: a rerun after an over-limit rewrite whose count reset failed
-    # must reach the rewrite branch to finish that reset.
-    if rewrite_file is None:
-        approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value, numbers, total, parser, item,
-                                                        command)
     sub_step = approval_walk_item_first_numbered_sub_step_without_answer(walk_finder, minutes, value, numbers, total,
                                                                          parser)
     keep = (walk_finder, minutes, value, numbers, total, parser, earlier, item, text, command_reading_again)
@@ -3963,10 +3871,6 @@ def waiting_item_read(arguments, sub_step_of=None):
     whole_number = numbers[0].split(".")[0]
     if rewrite_file is not None:
         unit = walk_finder.waiting_item_units(document, value, numbers, total, parser)[1][0]
-        # A read that started from the whole item checks the whole item, as the read without a rewrite does before
-        # it turns to the sub-step: the other sub-steps before anything is written, the rewrite once it is in place.
-        for above in (sub_step_of[2] if sub_step_of else []):
-            approval_walk_item_text_over_word_limit_refused(*above[:6], above[7], command, skipped_start=unit[3])
         # Run again, this command finds the rewrite already in place and only counts, so it is the one to repeat.
         rewrite_command = read_step_command_with_cwd(top, FRESH_AGENT_REWRITE_FLAG, str(rewrite_file),
                                                      *rechecked_words)
@@ -3982,8 +3886,6 @@ def waiting_item_read(arguments, sub_step_of=None):
         # The rewrite stays in place when it is refused, as an agent's own revision does, and is fixed the same way.
         _, text = item_text(walk_finder, minutes, value, numbers, total, parser,
                             refused_unless_marks_read=(item, command))
-        approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value, numbers, total, parser, item,
-                                                        command)
     # Before anything is written, so a refused item leaves the walk-minutes and the walk-document as they were; an
     # item settled without being shown is not refused, since no status in it reaches the user.
     recheck_line, past_words = None, ([], lambda: [])
