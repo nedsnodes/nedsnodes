@@ -48,7 +48,7 @@ Each invocation, under a lock that keeps two from overlapping:
    message sent on the wait that the re-check did not find backed, and says so when the
    pull-request events task the quoted message named is no longer open; 15 minutes after that, if the
    agent-seat is still idle, code logs the step that follows the escalation, which sends nothing
-   and writes no user-alert, and sends it nothing more on the wait. A rule 2
+   and writes no user-alert; code then runs no further step on the wait. A rule 2
    message due on a wait whose escalation is due goes on the wait first, so that the re-check
    judges its sentences and the escalation names them instead of the message. Before the escalation of a wait a rule 2 message was sent on, the
    rule 2 judge re-checks every sentence the wait must answer for, those of a message whose send
