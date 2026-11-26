@@ -71,12 +71,14 @@ DRAFT_PULL_REQUEST_DESCRIPTION = (
     "owner replaces it with what the pull request changes, ending with the defect line CLAUDE.md "
     "asks for.\n")
 BRANCHES_NOT_FULLY_ON_GITHUB_OPENING_MESSAGE = (
-    "[rule turn-end-push-branches-not-fully-on-github] At this turn end, these branches of your "
-    "agent-seat did not fully reach GitHub:")
+    "[rule turn-end-push-branches-not-fully-on-github] At this turn end, these branches may not "
+    "have fully reached GitHub; a line saying a worktree's owner file could not be read may "
+    "name another agent-seat's branch:")
 BRANCHES_NOT_FULLY_ON_GITHUB_NEXT_STEP_MESSAGE = (
-    "For a branch whose line says it was not pushed, fix what the line names, and the next "
-    "turn end pushes it; do not push it by hand, because a ready pull request's head is "
-    "frozen. When a line quotes the pre-push hook's refusal, follow that refusal's steps.")
+    "When a line quotes the pre-push hook's refusal, follow that refusal's steps, including "
+    "any push. Otherwise, for a branch whose line says it was not pushed, fix what the line "
+    "names, and the next turn end pushes it; do not push it by hand, because its pull request "
+    "may be ready.")
 
 
 def load_module(name, path):
