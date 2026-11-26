@@ -1152,13 +1152,11 @@ def merge_lane_cases(scratch):
     approving_with_nit = run_program(scratch, review("APPROVE", comments=[
         nit(3, "A misspelt name."), finding(2, "fix-next")]), arguments=MERGE_LANE_ARGUMENTS)
     code, out, err = follow_up_block_from_posted_reviews([with_nit.posted, approving_with_nit.posted])
-    check("round trip: print-follow-up-request-block-from-merge-lane-2-reviews prints a nit as a "
-          "fix-in-maintenance finding, the same nit restated in a later review once",
+    check("round trip: print-follow-up-request-block-from-merge-lane-2-reviews leaves out a nit and a "
+          "fix-in-maintenance finding, which go to maintenance-fix-agent, and prints the fix-next finding",
           code == 0 and err == "" and out == (
               "#follow_up_request pull request 7\n"
-              "1. fix-in-maintenance: `scripts/thing.py:3`: A misspelt name.\n"
-              "2. fix-in-maintenance: `scripts/thing.py:4`: Finding on line 4.\n"
-              "3. fix-next: `scripts/thing.py:2`: Finding on line 2.\n"),
+              "1. fix-next: `scripts/thing.py:2`: Finding on line 2.\n"),
           f"exit {code}\nstdout: {out}\nstderr: {err}\n{approving_with_nit.detail}")
 
     categorized = run_program(scratch, review("APPROVE", comments=[
@@ -1172,14 +1170,13 @@ def merge_lane_cases(scratch):
     code, out, err = follow_up_block_from_posted_reviews([categorized.posted, restated.posted])
     check("round trip: the follow-up program's print-follow-up-request-block-from-merge-lane-2-reviews "
           "reads the category of each posted non-blocking comment, inline and moved into the body, "
-          "leaves out the must-fix-now one, joins a two-line finding onto one line, and prints a "
-          "finding a later review restates once",
+          "leaves out the must-fix-now and fix-in-maintenance ones, joins a two-line finding onto one line, and "
+          "prints a finding a later review restates once",
           code == 0 and err == "" and out == (
               "#follow_up_request pull request 7\n"
               "1. fix-next: `scripts/thing.py:2`: First line. Second line.\n"
               "2. file-for-later: `scripts/thing.py:4`: Finding on line 4.\n"
-              "3. fix-in-maintenance: `scripts/other.py:8`: Outside.\n"
-              "4. fix-next: `scripts/thing.py:1`: A new one.\n"),
+              "3. fix-next: `scripts/thing.py:1`: A new one.\n"),
           f"exit {code}\nstdout: {out}\nstderr: {err}\n{categorized.detail}")
 
     lookalike = ("Rename it, as this list says:\n"
