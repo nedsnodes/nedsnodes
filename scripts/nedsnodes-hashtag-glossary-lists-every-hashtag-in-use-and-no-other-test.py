@@ -3,9 +3,10 @@
 
 A hashtag is found in either form: closed, `#` and lowercase words joined by underscores and a closing `#`, as in
 `#next_to_present#`; or open, without the closing `#`, which only a hashtag of two or more words can be told by, as in
-`#next_to_present`. A `#` right after a letter, a digit, `/`, `.`, `&`, `;`, `#`, `(` or `]` starts no hashtag, so a
-URL fragment, a link to a heading or a colour is not read as one. A one-word hashtag, such as `#new`, is found only
-by its listed name.
+`#next_to_present`. A `#` right after a letter, a digit, `/`, `.`, `&`, `;`, `#` or `]` starts no hashtag, and one
+right after `(` starts no open one, so a URL fragment, a link to a heading or a colour is not read as one. An open
+one-word hashtag is found only when it is one of those in use when hashtags came to take two or more words, such as
+`#new`.
 
 Fails, naming the hashtag and a file:
   - a hashtag used in a tracked file but not listed, searching every file but the glossary itself, docs/walk/ and
@@ -36,13 +37,17 @@ TOP = Path(__file__).resolve().parent.parent
 GLOSSARY = "docs/nedsnodes-wiki/nedsnodes-hashtag-glossary.md"
 NOT_SEARCHED_FOR_USES = (GLOSSARY, "docs/walk/", "cold-read-records/", "docs/issues/")
 TEST_FILE = re.compile(r"(?:^|/)tests?/|-test\.(?:py|sh)$|(?:^|/)[^/]*-test-[^/]*/")
-NOT_A_HASHTAG_START = r"(?<![\w/.&;#(\]])"
+# A link to a heading, `](#heading)`, never ends with `#`, so only an open hashtag cannot start right after `(`.
+NOT_A_CLOSED_HASHTAG_START = r"(?<![\w/.&;#\]])"
+NOT_AN_OPEN_HASHTAG_START = r"(?<![\w/.&;#(\]])"
 NAME = r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*"
-CLOSED = re.compile(NOT_A_HASHTAG_START + rf"#({NAME})#")
-OPEN_OF_TWO_OR_MORE_WORDS = re.compile(NOT_A_HASHTAG_START + r"#([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?![\w#<-])")
+CLOSED = re.compile(NOT_A_CLOSED_HASHTAG_START + rf"#({NAME})#")
+OPEN_OF_TWO_OR_MORE_WORDS = re.compile(NOT_AN_OPEN_HASHTAG_START + r"#([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?![\w#<-])")
 BULLET = re.compile(rf"^- `#({NAME})#` — \S")
 # The one-word hashtags in use when hashtags came to take two or more words; no other may be one word.
 ONE_WORD_HASHTAGS_KEPT = frozenset({"code", "data", "edit", "new", "prose", "reason", "rejected", "replaces"})
+OPEN_ONE_WORD_KEPT = re.compile(NOT_AN_OPEN_HASHTAG_START + "#(" + "|".join(sorted(ONE_WORD_HASHTAGS_KEPT))
+                                + r")(?![\w#<-])")
 
 
 def listed_names(glossary_text):
@@ -75,14 +80,15 @@ def hashtags_used(texts):
     """{name: the first file using it} for every hashtag found in texts, {path: text}, in either form."""
     used = {}
     for path, text in texts.items():
-        for pattern in (CLOSED, OPEN_OF_TWO_OR_MORE_WORDS):
+        for pattern in (CLOSED, OPEN_OF_TWO_OR_MORE_WORDS, OPEN_ONE_WORD_KEPT):
             for found in pattern.finditer(text):
                 used.setdefault(found[1], path)
     return used
 
 
 def is_used(name, texts):
-    use = re.compile(NOT_A_HASHTAG_START + "#" + re.escape(name) + r"(?:#|(?![\w-]))")
+    use = re.compile(f"{NOT_A_CLOSED_HASHTAG_START}#{re.escape(name)}#"
+                     f"|{NOT_AN_OPEN_HASHTAG_START}#{re.escape(name)}(?![\\w-])")
     return any(use.search(text) for path, text in texts.items() if path != GLOSSARY)
 
 
@@ -149,8 +155,9 @@ unlisted_open = problems_in(with_texts({"docs/b.md": "#approval_walk_paused for 
 check("an open hashtag of two words the glossary does not list fails",
       any("#approval_walk_paused#" in problem for problem in unlisted_open), unlisted_open)
 not_hashtags = problems_in(with_texts({"docs/b.md": "https://x/pull/1#discussion_r5 [a](#some_heading) #fff a#b_c "
-                                                    "#reason here #discussion_r<id>\n"}))
-check("a URL fragment, a heading link, a colour, a placeholder and a one-word open mark are not read as hashtags",
+                                                    "#task here #discussion_r<id>\n"}))
+check("a URL fragment, a heading link, a colour, a placeholder and a one-word open mark not kept from before the "
+      "two-word rule are not read as hashtags",
       not_hashtags == [], not_hashtags)
 check("a hashtag only quoted in walk files, cold-read-records, GHI-MDs or tests is not required to be listed",
       problems_in(with_texts({"docs/walk/w-minutes.md": "#user_alert 3\n",
@@ -158,6 +165,15 @@ check("a hashtag only quoted in walk files, cold-read-records, GHI-MDs or tests 
                               "docs/issues/1-x.md": "#proposed_hashtag\n",
                               "scripts/thing-test.py": "'#made_up_marker x'\n"})) == [],
       "a skipped file's hashtag was required")
+in_parentheses = problems_in(with_texts({"docs/b.md": "For example: (#made_up_marker#)\n"}))
+check("a closed hashtag right after `(` the glossary does not list fails",
+      any("docs/b.md uses #made_up_marker#" in problem for problem in in_parentheses), in_parentheses)
+check("a listed hashtag used only closed right after `(` counts as used",
+      problems_in(with_texts({"docs/a.md": "#next_to_present item 3\n(#root_cause#) the cause\n#new text\n"})) == [],
+      "a closed use after `(` did not count")
+unlisted_kept = problems_in(with_glossary(GOOD_GLOSSARY.replace("- `#new#` — a one-word hashtag.\n", "")))
+check("a kept one-word hashtag used only open whose bullet is gone fails",
+      any("docs/a.md uses #new#" in problem for problem in unlisted_kept), unlisted_kept)
 unused = problems_in(with_texts({"docs/a.md": "#next_to_present item 3\n#new text\n"}))
 check("a listed hashtag no other file uses fails", any("lists #root_cause#, which no" in problem for problem in unused),
       unused)
