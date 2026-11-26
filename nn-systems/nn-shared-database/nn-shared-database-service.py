@@ -59,8 +59,8 @@ POST /events answers:
 The findings record holds one findings_record_row row per defect, never deleted, since no
 operation deletes one. A findings-record-row-added event makes a row in state new, with the
 event's sequence number as its record_id, and a sighting of its finding_id; a
-findings-record-row-sighted event records one more finding as a sighting of a row, once per
-finding_id and head_commit; a findings-record-row-decided event sets a row's state, one of
+findings-record-row-sighting-added event records one more finding as a sighting of a row, once per
+finding_id and head_commit; a findings-record-row-decision-recorded event sets a row's state, one of
 FINDINGS_RECORD_ROW_STATES, and its decision, and its filed_where and owning_agent_seat
 unless null. None of the three names an agent-seat.
 
@@ -116,15 +116,15 @@ OPERATION_FIELDS = {
                              "main_has_it", "this_pull_request_makes_it_happen",
                              "reports_success_on_failure", "shown_by", "grade", "decision",
                              "filed_where", "owning_agent_seat"},
-    "findings-record-row-sighted": {"record_id", "finding_id", "pull_request", "head_commit"},
-    "findings-record-row-decided": {"record_id", "state", "decision", "filed_where",
+    "findings-record-row-sighting-added": {"record_id", "finding_id", "pull_request", "head_commit"},
+    "findings-record-row-decision-recorded": {"record_id", "state", "decision", "filed_where",
                                "owning_agent_seat"},
 }
 FINDINGS_RECORD_ROW_STATES = ("new", "filed", "decided-fix", "decided-not-worth-fixing", "needs-user",
                          "fixed")
 FINDINGS_RECORD_ROW_SEARCH_CANDIDATES = 3
 OPERATIONS_THAT_NAME_NO_AGENT_SEAT = {"machine-booted", "findings-record-row-added",
-                                      "findings-record-row-sighted", "findings-record-row-decided"}
+                                      "findings-record-row-sighting-added", "findings-record-row-decision-recorded"}
 OPERATIONS_THAT_MAY_NAME_A_NEW_AGENT_SEAT = {"agent-seat-created", "agent-seat-seen"}
 
 SCHEMA = """
@@ -344,10 +344,10 @@ def check_event_fits_its_operation(connection, event):
             and connection.execute("SELECT 1 FROM agent_seat WHERE seat_id = ?",
                                    (event["seat_id"],)).fetchone() is None:
         raise Answer(422, {"error": f"no agent-seat has seat_id {event['seat_id']!r}"})
-    if operation == "findings-record-row-decided" and fields["state"] not in FINDINGS_RECORD_ROW_STATES:
+    if operation == "findings-record-row-decision-recorded" and fields["state"] not in FINDINGS_RECORD_ROW_STATES:
         raise Answer(422, {"error": f"the state {fields['state']!r} is not one of "
                                     f"{', '.join(FINDINGS_RECORD_ROW_STATES)}"})
-    if operation in ("findings-record-row-sighted", "findings-record-row-decided") \
+    if operation in ("findings-record-row-sighting-added", "findings-record-row-decision-recorded") \
             and connection.execute("SELECT 1 FROM findings_record_row WHERE record_id = ?",
                                    (fields["record_id"],)).fetchone() is None:
         raise Answer(422, {"error": f"no findings record row has record_id "
@@ -392,11 +392,11 @@ def apply_event(connection, event, sequence):
                 (sequence, fields["finding_text"]))
         execute("INSERT OR IGNORE INTO findings_record_row_sighting VALUES (?, ?, ?, ?, ?)",
                 (fields["finding_id"], fields["head_commit"], sequence, fields["pull_request"], at))
-    elif operation == "findings-record-row-sighted":
+    elif operation == "findings-record-row-sighting-added":
         execute("INSERT OR IGNORE INTO findings_record_row_sighting VALUES (?, ?, ?, ?, ?)",
                 (fields["finding_id"], fields["head_commit"], fields["record_id"],
                  fields["pull_request"], at))
-    elif operation == "findings-record-row-decided":
+    elif operation == "findings-record-row-decision-recorded":
         execute("UPDATE findings_record_row SET state = ?, decision = ?, "
                 "filed_where = coalesce(?, filed_where), "
                 "owning_agent_seat = coalesce(?, owning_agent_seat), decided_at = ? "

@@ -229,7 +229,9 @@ for name, reply in (("a record id it was not given", dict(answer="SAME 99999")),
           and "the judgment step" in err
           and (count("findings_record_row"), count("findings_record_row_sighting")) == before, (code, err))
 code, answers, err = match([fresh], claude=str(scratch / "no-such-claude"))
-check("a judgment step that cannot be run fails the match", code == 1 and "could not be run" in err, (code, err))
+check("a judgment step that cannot be run fails the match, and says to rerun once and then tell the user",
+      code == 1 and "could not be run" in err and "run once more the command you ran" in err
+      and "do not run it a third time" in err, (code, err))
 timeout, program.MATCH_JUDGMENT_TIMEOUT_SECONDS = program.MATCH_JUDGMENT_TIMEOUT_SECONDS, 0.5
 slow = scratch / "slow-claude"
 slow.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(5)\n")
@@ -256,6 +258,8 @@ check("a service that cannot be reached fails the match with the service call's 
       "no review of the pull request until the user answers if a second try fails",
       code == 1 and "cannot be reached" in err and "post no review of pull request 4034 until he answers" in err,
       (code, err))
+check("a failed service call gives only the service's own instructions, with no rerun of this program's own",
+      code == 1 and "run once more" not in err, (code, err))
 code, added, err = add([{**fresh, "grade": "fix-next"}], service_url="http://127.0.0.1:9")
 check("a service that cannot be reached fails the add", code == 1
       and "FAILED: the findings record add, " in err and "stopped at finding dddd00000004" in err and "cannot be reached" in err,
