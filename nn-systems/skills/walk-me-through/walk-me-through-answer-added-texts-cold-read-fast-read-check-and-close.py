@@ -2520,8 +2520,10 @@ def explicit_path_override_words(arguments):
 
 
 def flag_and_value_words(flag, value):
-    """The words for a flag and its value; argparse rejects a separate value that opens with a dash."""
-    return [f"{flag}={value}"] if value.startswith("-") else [flag, value]
+    """The words for a flag and its value, which every printed command builds here. argparse refuses a separate
+    value only when it opens with a dash and holds no space, so only that value is joined to its flag: joined, a
+    value of a flag taking several words, such as --already-decided, would leave the words after it unparsed."""
+    return [f"{flag}={value}"] if value.startswith("-") and " " not in value else [flag, value]
 
 
 def check_command_with_cwd(top, *words):
@@ -2788,8 +2790,8 @@ def check(arguments):
         raise Failure(CHECK_SEVERAL_WAITING.format(minutes=minutes, item=item, one_item_line=NEXT_MARKER_LINE.format(
             value=f"item <number>{f' of {total}' if total else ''}")))
     words = " ".join((arguments.user_reply_as_typed or "").split())
-    moved_on_no_decision_command = check_command_with_cwd(top, "--moved-on-no-decision", "--user-reply-as-typed",
-                                                          words)
+    moved_on_no_decision_command = check_command_with_cwd(top, "--moved-on-no-decision",
+                                                          *flag_and_value_words("--user-reply-as-typed", words))
     not_shown_flag = ("--not-asked" if arguments.not_asked is not None
                       else NOW_OVER_LATER_FLAG if arguments.now_over_later_already_decided
                       else "--already-decided" if arguments.already_decided is not None
@@ -4128,10 +4130,11 @@ def last_answer(walk_finder, minutes, parser, top):
                   f"`--help` lists it.")
 
 
-def walk_document_items(walk_finder, minutes, value, numbers, total, parser, step, top, stamp=True):
+def walk_document_items(walk_finder, minutes, value, numbers, total, parser, step, top, stamp=True, step_words=()):
     """Return (M as the walk finder counts it, the walk-document's items in order, the summary item or None, its
     units, the placing of the items not yet shown), an item being its number, or, for an unnumbered item, its
-    heading's line index, an int, which unnumbered_item_numbered numbers when it is shown.
+    heading's line index, an int, which unnumbered_item_numbered numbers when it is shown. A refusal's rerun command
+    is step with step_words, the flags and values the step was run with.
 
     The placing maps each unnumbered item but the summary item to (its sort key, the items it waits on), as
     unshown_items_placing reads them; first, with stamp, it writes the `#approval_walk_item_first_entered` line, with
@@ -4153,7 +4156,7 @@ def walk_document_items(walk_finder, minutes, value, numbers, total, parser, ste
             units = walk_finder.item_unit_spans(stamped, parser)
             order, summary, placing = walk_document_order(walk_finder, stamped, units, parser, document, today)
     except WalkOrderUnusable as problem:
-        raise Failure(WALK_ORDER_REFUSED.format(problem=problem, command=step_command_with_cwd(top, step)))
+        raise Failure(WALK_ORDER_REFUSED.format(problem=problem, command=step_command_with_cwd(top, step, *step_words)))
     if stamped != text:
         document.write_text(stamped, encoding="utf-8")
     count = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)
@@ -4835,18 +4838,17 @@ def bump(arguments):
     as the docstring's --bump paragraph says."""
     walk_finder = load_walk_finder()
     top, minutes, value, parser = the_open_walk(walk_finder, arguments.cwd)
+    bump_words = [*flag_and_value_words("--bump", arguments.bump),
+                  *(flag_and_value_words("--user-reply-as-typed", arguments.user_reply_as_typed)
+                    if arguments.user_reply_as_typed else [])]
     pending = unclosed_last_answer(walk_finder, minutes, parser)
     if pending:
-        bump_command = check_command_with_cwd(top, *flag_and_value_words("--bump", arguments.bump),
-                                              *(flag_and_value_words("--user-reply-as-typed",
-                                                                     arguments.user_reply_as_typed)
-                                                if arguments.user_reply_as_typed else []))
         raise Failure(BUMP_ANSWER_NOT_CLOSED.format(minutes=minutes, item=pending["item"],
                                                     close_command=step_command_with_cwd(top, "close"),
-                                                    bump_command=bump_command))
+                                                    bump_command=check_command_with_cwd(top, *bump_words)))
     waiting, numbers, total = waiting_items(walk_finder, value, minutes)
     _, _, _, units, placing = walk_document_items(walk_finder, minutes, value, numbers, total, parser,
-                                                  "check --bump", top, stamp=False)
+                                                  "check", top, stamp=False, step_words=bump_words)
     document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
     lines = document.read_text(encoding="utf-8").split("\n")
     title = heading_title(walk_finder, "## " + arguments.bump.strip().lstrip("# "))
@@ -4860,8 +4862,9 @@ def bump(arguments):
             raise Failure(BUMP_ALREADY_SHOWN.format(heading=lines[named[0][3]].strip(), document=document,
                                                     state=state))
         example = next((lines[first].strip().lstrip("#").strip() for first in placing), "the point of the item")
-        raise Failure(BUMP_NOT_FOUND.format(document=document, title=arguments.bump.strip(),
-                                            command=check_command_with_cwd(top, "--bump", example)))
+        raise Failure(BUMP_NOT_FOUND.format(
+            document=document, title=arguments.bump.strip(),
+            command=check_command_with_cwd(top, *flag_and_value_words("--bump", example))))
     first, end = unshown[0][3], unshown[0][4]
     _, waiting_units = walk_finder.waiting_item_units(document, value, numbers, total, parser, units)
     before = waiting_units[0][3]
