@@ -1872,8 +1872,9 @@ def test_print_block_leaves_fix_in_maintenance_findings_to_the_maintenance_fix_a
           err)
     code, out, err = print_block(reviews, [merge_lane_comment(10, 1, "Rename it.")], subcommand=maintenance_block)
     check(f"{maintenance_block} refuses an unmarked comment, saying how to write both blocks by hand",
-          code == 1 and out == "" and "leave it out of that block, and send maintenance-fix-agent with SendMessage "
-                                      "the line" in err, err)
+          code == 1 and out == "" and "leave it out of that block, and send maintenance-fix-agent, whose ListAgents "
+                                      "name is pr-review-maintenance-findings-batch-fix-agent, a SendMessage "
+                                      "message of the line" in err, err)
 
 
 for test in (test_help, test_block_parsing, test_print_block, test_print_block_with_replaced_pull_requests,
