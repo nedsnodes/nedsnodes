@@ -133,6 +133,15 @@ refuses the checkout and the program stops. A review whose Codex cell runs
 from the same worktree at the same time may fail when the checkout moves
 files under it; such a review is run again.
 
+One run of this program at a time merges and tests main: each run first takes
+merge-program.lock in --merge-lane-worktrees-and-outputs-directory, waiting for
+it, and holds it until it exits, so no merge starts while another run's
+after-merge test run is still running. When the program exits 3 or 4, it writes
+merge-queue-stopped.txt in that directory, naming the pull request and the exit
+code; the merge queue program starts no merge while that file exists, and this
+program, once it holds the lock, merges nothing and exits 2 while it exists. When
+the lock file cannot be opened, the program merges nothing and exits 2.
+
 Last, once the pull request has merged, the program runs
 merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py,
 beside it, with the merge account's GH_TOKEN, and prints what it printed:
@@ -166,6 +175,8 @@ anything else.
 """
 
 import argparse
+import datetime
+import fcntl
 import importlib.util
 import json
 import os
@@ -226,6 +237,12 @@ EXIT_REFUSED = 1
 EXIT_COULD_NOT_RUN = 2
 EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE = 3
 EXIT_MERGE_OUTCOME_UNKNOWN = 4
+# Outcomes after which main may be failing or untested, so the merge queue must not go on.
+EXITS_THAT_STOP_THE_MERGE_QUEUE = (EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE,
+                                   EXIT_MERGE_OUTCOME_UNKNOWN)
+# Both in --merge-lane-worktrees-and-outputs-directory; the merge queue program reads them.
+MERGE_PROGRAM_RUN_LOCK_FILE_NAME = "merge-program.lock"
+MERGE_QUEUE_STOP_FILE_NAME = "merge-queue-stopped.txt"
 MERGE_GATE_DOCUMENTED_EXITS = (0, 1, 2)
 MERGE_GATE = Path("scripts") / "merge-gate.sh"
 SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM = Path(__file__).resolve().with_name(
@@ -1420,6 +1437,70 @@ def surviving_mutant_test_prs_go_ahead_printed(environment):
 
 def main(argv=None, wait=time.sleep):
     arguments = parse_arguments(argv)
+    outputs = arguments.merge_lane_worktrees_and_outputs_directory
+    lock_path = outputs / MERGE_PROGRAM_RUN_LOCK_FILE_NAME
+    try:
+        outputs.mkdir(parents=True, exist_ok=True)
+        lock = open(lock_path, "a")
+    except OSError as error:
+        print(f"STOP: not merged: could not open {lock_path}, the lock that lets one merge and "
+              f"its after-merge test run go at a time: {error}\n"
+              f"Tell the user that merges cannot run because {lock_path} cannot be opened: "
+              f"{error}. A subagent tells the agent that dispatched it instead.")
+        return EXIT_COULD_NOT_RUN
+    with lock:
+        # Held through the after-merge test run, so no caller's merge starts while main's
+        # latest test run is still running.
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(f"waiting for {lock_path}: another run of this program is merging or "
+                  f"testing main; this run goes on by itself when that one ends", flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        # Read only once the lock is held, since the run that held it may have just written it.
+        stop_file = outputs / MERGE_QUEUE_STOP_FILE_NAME
+        try:
+            stop_reason = stop_file.read_text().strip()
+        except FileNotFoundError:
+            stop_reason = None
+        except OSError as error:
+            stop_reason = f"it exists but could not be read: {error}"
+        if stop_reason is not None:
+            queue_program = Path(__file__).resolve().with_name(
+                "merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py")
+            print(f"STOP: not merged: the merge queue is stopped, because {stop_file} says: "
+                  f"{stop_reason}\n"
+                  f"No merge may start until main is handled. If you are merge-lane-2, run: "
+                  f"python3 {queue_program} merge-batch-start\n"
+                  f"and do what its STOPPED line says, which covers a stop with or without a "
+                  f"stopped notice. Otherwise tell merge-lane-2 this message, with Claude Code's "
+                  f"SendMessage tool, naming pull request {arguments.pull_request}.")
+            return EXIT_COULD_NOT_RUN
+        exit_code = merged_and_main_tested(arguments, wait)
+        if exit_code in EXITS_THAT_STOP_THE_MERGE_QUEUE:
+            merge_queue_stopped(outputs / MERGE_QUEUE_STOP_FILE_NAME, arguments.pull_request,
+                                exit_code)
+    return exit_code
+
+
+def merge_queue_stopped(stop_file, pull_request, exit_code):
+    """Write the stop file, which the merge queue program reads before each merge."""
+    reason = (f"pull request {pull_request}'s merge program exited {exit_code}, "
+              f"{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}")
+    try:
+        stop_file.write_text(reason + "\n")
+    except OSError as error:
+        print(f"could not write {stop_file}, so the merge queue does not stop for this outcome: "
+              f"{error}\n"
+              f"Until main is handled, no merge may start: if you are merge-lane-2, append a "
+              f"HOLD- line for each waiting pull request to the merge queue file; otherwise "
+              f"tell merge-lane-2 this, with Claude Code's SendMessage tool, naming pull "
+              f"request {pull_request} and exit {exit_code}.")
+        return
+    print(f"merge queue stopped: {stop_file} says: {reason}")
+
+
+def merged_and_main_tested(arguments, wait):
     try:
         token = common.read_merge_account_token()
     except common.MergeAccountTokenUnusable as unusable:
