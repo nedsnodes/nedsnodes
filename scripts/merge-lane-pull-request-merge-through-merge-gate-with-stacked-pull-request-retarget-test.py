@@ -970,6 +970,13 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
         mains_tip = commit_tree(message="main's history, apart from the branch's")
         return commit_tree(mains_tip, cut_from, message="main merges the branch's base in")
 
+    def blob_not_commit(directory):
+        # rev-list lists nothing for a blob, which without ^{commit} read as "the branch holds it".
+        return subprocess.run(
+            ["git", "-C", str(directory / "review-tools"), "hash-object", "-w", "--stdin"],
+            input="not a commit\n", capture_output=True, text=True, env=GIT_ENVIRONMENT,
+            check=True).stdout.strip()
+
     def one_recorded_and_one_new_case(directory):
         failed_suites_record_written(directory, tests=["case recorded"])
         failed_suites_as_written.append(failed_suites_record_of(directory))
@@ -1021,8 +1028,13 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
               "test first failed there as 'stacked-topic-branch''s own, not main's; the STOP this "
               "program prints last lists those failures among the ones that are not main's. "
               "`git rev-list --first-parent --parents "
-              "ffffffffffffffffffffffffffffffffffffffff ^",
+              "ffffffffffffffffffffffffffffffffffffffff^{commit} ^",
               TELL_AUTHOR_AND_USER],
+             ["main may be broken", "nothing is needed"]),
+            ("failed-into-another-branch-first-failing-commit-is-a-blob", RUNNER_FAILED, 3,
+             ["STOP: pull request 10 merged into 'stacked-topic-branch', but git could not say "
+              "whether 'stacked-topic-branch' holds ",
+              "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
              ["main may be broken", "nothing is needed"])):
         prepare = {
             "failed-into-another-branch-cut-before-main-began-failing":
@@ -1033,6 +1045,8 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
             "failed-into-another-branch-first-failing-commit-unknown":
                 # Two tests first failed at one commit: one git fault, one STOP.
                 recorded_at_commit(lambda directory: "f" * 40, tests=["case a", "case b"]),
+            "failed-into-another-branch-first-failing-commit-is-a-blob":
+                recorded_at_commit(blob_not_commit),
         }.get(name, recorded_failure_only)
         failed_suites_as_written.clear()
         exit_code, output, _, _, _ = run_case(
@@ -1049,7 +1063,8 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
               and all(line in output for line in expected_lines)
               and not any(line in output for line in unexpected)
               and output.count("git could not say") == (
-                  1 if name.endswith("first-failing-commit-unknown") else 0)
+                  1 if name.endswith(("first-failing-commit-unknown",
+                                      "first-failing-commit-is-a-blob")) else 0)
               and (name not in left_main
                    or "Before the author fixes it, run scripts/broken-test.py in a worktree at "
                       f"{left_main[name][0]}, the commit where 'stacked-topic-branch' left "
