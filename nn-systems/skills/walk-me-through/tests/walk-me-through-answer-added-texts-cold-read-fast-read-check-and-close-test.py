@@ -311,10 +311,7 @@ class Case:
                                environment=environment, ignored_signal=ignored_signal, reply=reply,
                                agent_session_id=agent_session_id, stdout_closed=stdout_closed)
         if not keep_printed_overrides:
-            overrides = " " + shlex.join([
-                "--cold-read-records", os.path.abspath(self.records),
-                "--fast-read-program", os.path.abspath(fast_read_program or self.stand_in),
-                "--counts-log", os.path.abspath(self.checkout / (counts_log or self.counts_log))])
+            overrides = " " + shlex.join(printed_path_overrides(self, counts_log, fast_read_program))
             result.stdout, result.stderr = (result.stdout.replace(overrides, ""),
                                             result.stderr.replace(overrides, ""))
         if wait_for_reads_ahead:
@@ -455,6 +452,13 @@ PROGRAMS_LOADED_ONCE_FOR_FORKED_RUNS = {}
 def check_command_for(case, *words):
     """The check command, with these flags and values, that the program prints for case's walk."""
     return shlex.join(["python3", str(PROGRAM), "check", *words, "--cwd", str(case.checkout.resolve())])
+
+
+def printed_path_overrides(case, counts_log=None, fast_read_program=None):
+    """The path overrides Case.run gives, as every command the program prints repeats them."""
+    return ["--cold-read-records", os.path.abspath(case.records),
+            "--fast-read-program", os.path.abspath(fast_read_program or case.stand_in),
+            "--counts-log", os.path.abspath(case.checkout / (counts_log or case.counts_log))]
 
 
 def case_paths(case):
@@ -5206,8 +5210,7 @@ def check_and_its_printed_retry_run_outside_the_checkout(case, flags, environmen
     printed = re.search("`(" + re.escape(shlex.join(["python3", str(PROGRAM)])) + " check [^`]*)`", result.stderr)
     if printed is None:
         return result, None, None
-    retry = subprocess.run(["bash", "-c", printed[1] + " " + shlex.join(paths_but_cwd)], capture_output=True,
-                           text=True, env=environment, cwd=elsewhere)
+    retry = subprocess.run(["bash", "-c", printed[1]], capture_output=True, text=True, env=environment, cwd=elsewhere)
     return result, printed[1], retry
 
 
@@ -6238,20 +6241,21 @@ def settle_command(case):
 def test_the_read_step_says_an_item_rated_none_that_asks_a_decision_is_not_shown_and_how_to_settle_it():
     for flags in ((), (AFTER_FIXES,)):
         case = close_the_issue_case()
-        result = case.run(WAITING_ITEM_READ, *flags)
+        result = case.run(WAITING_ITEM_READ, *flags, keep_printed_overrides=True)
         named = " ".join((WAITING_ITEM_READ,) + flags)
         check(f"{named} on item 22, rated none after revision, does not say to present it and prints the command "
               "that settles it", result.returncode == 0
               and result.stdout.startswith("item 22 of 26 is not to be shown to the user: it asks a decision and its "
                                            "`#case_against` line rates the case against none")
-              and f"Then run `{settle_command(case)}` and do what it prints." in result.stdout
+              and f"Then run `{settle_command(case)} {shlex.join(printed_path_overrides(case))}` and do what it "
+                  "prints." in result.stdout
               and "Present" not in result.stdout and "present item 22" not in result.stdout
               and "#not_asked_touches" in result.stdout and times_read(case, "## Item 22 of 26") == 0,
               described(result) + case.calls.read_text())
     document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     document.write_text(document.read_text().replace("#case_against none:", "#not_asked_touches\n\n#case_against none:"))
     printed = re.search(r"Then run `([^`]+)` and do what it prints\.", result.stdout)
-    settled = subprocess.run(shlex.split(printed[1] if printed else "false") + case_paths(case)[2:],
+    settled = subprocess.run(shlex.split(printed[1] if printed else "false"),
                              capture_output=True, text=True, cwd=case.checkout)
     check("the command the read step prints settles item 22 once it has an empty `#not_asked_touches` line",
           settled.returncode == 0
@@ -8036,9 +8040,11 @@ def each_printed_command_names_a_file(result):
 
 
 def run_printed_command(case, command):
-    """Run a command the program printed through a shell, as an agent does, with the case's test doubles added."""
+    """Run a command the program printed through a shell, as an agent does. It adds only --gh-program, which no
+    printed command repeats, so command must come from output kept whole, as Case.run's keep_printed_overrides
+    keeps it: a printed command that dropped a path override then runs without it."""
     return subprocess.run(
-        ["bash", "-c", command + " " + shlex.join(case_paths(case)[2:] + ["--gh-program", str(case.gh)])],
+        ["bash", "-c", command + " " + shlex.join(["--gh-program", str(case.gh)])],
         capture_output=True, text=True, cwd=case.root,
         env=dict(os.environ, STAND_IN_MODE="", STAND_IN_CALLS=str(case.calls),
                  STAND_IN_ARGUMENTS=str(case.fast_read_arguments), STAND_IN_RECORDS=str(case.records),
@@ -8053,7 +8059,7 @@ def printed_command_with(result, words):
 
 def check_every_printed_command_from_a_path_holding_a_space():
     case = item_read_case()
-    checked = case.run("check")
+    checked = case.run("check", keep_printed_overrides=True)
     check("from a path holding a space, check prints a close command naming the program",
           each_printed_command_names_a_file(checked), described(checked))
     closed = run_printed_command(case, printed_command_with(checked, " close "))
@@ -8084,7 +8090,7 @@ def check_every_printed_command_from_a_path_holding_a_space():
 
     refused_case = Case(next_to_present="item 1 of 9", document=bump_walk())
     refused_case.run("check")
-    refused = refused_case.run("check", "--bump", "three", reply="bump three")
+    refused = refused_case.run("check", "--bump", "three", reply="bump three", keep_printed_overrides=True)
     refused_close = run_printed_command(refused_case, printed_command_with(refused, " close "))
     refused_case.wait_for_reads_ahead()
     check("from a path holding a space, a refused check --bump prints a close command that runs",
@@ -8105,7 +8111,7 @@ def check_every_printed_command_from_a_path_holding_a_space():
           "record", len(ship) == 3 and Path(ship[1]).is_file() and Path(ship[2]).is_dir(), described(not_shipped))
 
     deferred_case = Case()
-    deferred = deferred_case.run("check", "--deferred")
+    deferred = deferred_case.run("check", "--deferred", keep_printed_overrides=True)
     deferred_close = run_printed_command(deferred_case, printed_command_with(deferred, " close "))
     deferred_case.wait_for_reads_ahead()
     check("from a path holding a space, check on the route that records an answer with no change prints a close "
@@ -8133,7 +8139,8 @@ def check_read_step_retry_after_failed_scratch_removal_drops_only_the_after_fixe
     answered_and_closed(case)
     rechecked_flag = "--possibly-stale-system-status-claims-rechecked"
     rechecked = f"ran git status at 10:00 with {AFTER_FIXES} in mind"
-    stopped = case.run(WAITING_ITEM_READ, AFTER_FIXES, rechecked_flag, rechecked, mode="stopped-unremovable SIGTERM")
+    stopped = case.run(WAITING_ITEM_READ, AFTER_FIXES, rechecked_flag, rechecked, mode="stopped-unremovable SIGTERM",
+                       keep_printed_overrides=True)
     for directory in case.temporary_directory.iterdir():
         if (directory / "locked").exists():
             (directory / "locked").chmod(0o700)  # Else the suite's own removal leaves it behind.
@@ -8142,7 +8149,8 @@ def check_read_step_retry_after_failed_scratch_removal_drops_only_the_after_fixe
     check("the retry a failed scratch removal prints drops the after-fixes flag and keeps --cwd and the recheck value "
           "whole, each holding the flag's text",
           stopped.returncode == -signal.SIGTERM and AFTER_FIXES not in words
-          and words[2:] == [WAITING_ITEM_READ, rechecked_flag, rechecked, "--cwd", str(case.checkout.resolve())],
+          and words[2:] == [WAITING_ITEM_READ, rechecked_flag, rechecked, "--cwd", str(case.checkout.resolve()),
+                            *printed_path_overrides(case)],
           described(stopped))
     ran = run_printed_command(case, retry)
     case.wait_for_reads_ahead()
@@ -8364,13 +8372,65 @@ def test_a_printed_recovery_command_keeps_the_explicit_path_overrides_as_absolut
 
 def test_a_printed_command_gives_an_option_like_value_in_flag_equals_value_form():
     case = Case()
-    failed = case.run("check", "--user-reply-as-typed=--no-cache", mode="failed", reply=None)
+    failed = case.run("check", "--user-reply-as-typed=--no-cache", mode="failed", reply=None,
+                      keep_printed_overrides=True)
     retry = printed_command_with(failed, " check ")
     check("the printed check keeps an option-like reply in --flag=value form",
           "--user-reply-as-typed=--no-cache" in shlex.split(retry), described(failed))
     rerun = run_printed_command(case, retry)
     check("the printed check with an option-like reply runs and records the reply",
           rerun.returncode == 0 and "--no-cache" in case.minutes.read_text(), described(rerun))
+
+
+def test_every_printed_flag_and_value_runs_when_the_value_opens_with_a_dash():
+    citation = f"- the user-ruling of {RECENT_RULING_DATE} in walk minutes"
+    case = Case(next_to_present="item 3 of 9", document=WALK_DOCUMENT.replace("#case_against weak:", "#case_against:"))
+    refused = case.run("check", "--already-decided", citation, "D", keep_printed_overrides=True)
+    retry = printed_command_with(refused, " check ")
+    rerun = run_printed_command(case, retry)
+    check("the check a refused --already-decided prints keeps a dash-opening citation holding a space and its answer "
+          "as separate words, and runs to the same refusal",
+          refused.returncode == 1 and ["--already-decided", citation, "D"] == shlex.split(retry)[3:6]
+          and rerun.returncode == 1 and "unrecognized arguments" not in rerun.stderr,
+          described(refused) + described(rerun))
+
+    plain = SUB_STEPS_DOCUMENT.replace("Recommendation: change the sentence.\n",
+                                       '<div title="<!--">\nRecommendation: hidden.\n</div>\n')
+    case = Case(next_to_present="item 1.2 of 2", document=plain)
+    case.minutes.write_text("# Minutes\n\n#next_to_present item 1.2 of 2\n")
+    hidden = case.run("check", "--moved-on-no-decision", "--user-reply-as-typed=-skip", reply=None,
+                      keep_printed_overrides=True)
+    retry = printed_command_with(hidden, "--moved-on-no-decision")
+    rerun = run_printed_command(case, retry)
+    check("the check --moved-on-no-decision a hidden recommendation's refusal prints gives a dash-opening reply in "
+          "--flag=value form, and runs to the same refusal",
+          hidden.returncode == 1 and 'recommends "hidden' in hidden.stderr
+          and "--user-reply-as-typed=-skip" in shlex.split(retry)
+          and rerun.returncode == 1 and 'recommends "hidden' in rerun.stderr,
+          described(hidden) + described(rerun))
+
+    case = Case(next_to_present="item 1 of 9", document=ordered_walk(
+        unshown_item("--verbose", f"{CATEGORY_TAG}must_fix_now"), unshown_item("three", f"{CATEGORY_TAG}fix_next")))
+    missing = case.run("check", "--bump", "four", reply="bump four", keep_printed_overrides=True)
+    suggested = re.search(r"as in `([^`]+)`", missing.stderr)
+    rerun = run_printed_command(case, suggested[1] if suggested else "false")
+    check("the check --bump a refused --bump suggests gives a dash-opening title in --flag=value form, and runs",
+          missing.returncode == 1 and suggested and "--bump=--verbose" in shlex.split(suggested[1])
+          and rerun.returncode == 0 and "is now the waiting item" in rerun.stdout,
+          described(missing) + described(rerun))
+
+    case = Case(next_to_present="item 1 of 9", document=bump_walk().replace(f"{CATEGORY_TAG}must_fix_now", ""))
+    unordered = case.run("check", "--bump", "three", reply="bump three", keep_printed_overrides=True)
+    retry = printed_command_with(unordered, " check ")
+    document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+    document.write_text(bump_walk())
+    rerun = run_printed_command(case, retry)
+    check("the check --bump an unusable walk order's refusal prints repeats the title and the reply, and runs once the "
+          "walk-document is fixed",
+          unordered.returncode == 1 and shlex.split(retry)[3:7] == ["--bump", "three", "--user-reply-as-typed",
+                                                                    "bump three"]
+          and rerun.returncode == 0 and "is now the waiting item" in rerun.stdout,
+          described(unordered) + described(rerun))
 
 
 def stopped_by_sigterm(*_):
