@@ -56,7 +56,8 @@ whichever checkout this script runs from, because the seat's handoff-supervisor 
 the code of the checkout its launcher took it from. Before step 4 it checks only that
 the reference-checkout holds scripts/launch-claude-mac; a reference-checkout that
 holds the launcher but not nn-systems/handoff/handoff-supervisor.py is not handled:
-step 4 retires the tmux session and the launcher then refuses, leaving the seat down.
+step 4 retires the tmux session and the launcher then refuses, leaving the seat down
+until the reference-checkout is back on main and this script is run again.
 
 That split means --machine ubuntu needs this script present in the box's
 checkout. The box checkout is pulled by hand today (nedschorus#45), so a box
