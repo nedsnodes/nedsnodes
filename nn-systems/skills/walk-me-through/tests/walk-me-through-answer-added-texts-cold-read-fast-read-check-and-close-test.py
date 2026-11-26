@@ -60,6 +60,11 @@ _scratch_directory_common_spec = importlib.util.spec_from_file_location(
     / "test-scratch-directory-whose-earlier-killed-runs-leftovers-are-removed-first-common.py")
 _scratch_directory_common = importlib.util.module_from_spec(_scratch_directory_common_spec)
 _scratch_directory_common_spec.loader.exec_module(_scratch_directory_common)
+_case_workers_spec = importlib.util.spec_from_file_location(
+    "nn_test_suite_cases_run_in_forked_worker_processes_common",
+    Path(__file__).resolve().parents[3] / "general-tools" / "nn-test-suite-cases-run-in-forked-worker-processes-common.py")
+case_workers = importlib.util.module_from_spec(_case_workers_spec)
+_case_workers_spec.loader.exec_module(case_workers)
 SUITE_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removing_killed_runs_leftovers(
     "answer-added-texts-fast-read-check-test-")
 WALK_NAME = "poem-page-2026-10-12"
@@ -8681,12 +8686,20 @@ def test_an_earlier_text_whose_source_matches_a_kept_version_is_not_kept_again()
           "again", "Withdrawn version 2" not in after, after)
 
 
+def worker_scratch_directory_set(number):
+    """Give a case worker a scratch directory of its own, since Case names its directories from a counter."""
+    global SUITE_ROOT
+    SUITE_ROOT = SUITE_ROOT / f"worker-{number}"
+    SUITE_ROOT.mkdir()
+
+
 def main():
     signal.signal(signal.SIGTERM, stopped_by_sigterm)
     try:
-        for name, function in sorted(globals().items()):
-            if name.startswith("test_") and callable(function):
-                function()
+        case_workers.nn_test_suite_cases_run_in_forked_worker_processes(
+            [(name, function) for name, function in sorted(globals().items())
+             if name.startswith("test_") and callable(function)],
+            failures, worker_setup=worker_scratch_directory_set)
     finally:
         shutil.rmtree(SUITE_ROOT, ignore_errors=True)
     if failures:
