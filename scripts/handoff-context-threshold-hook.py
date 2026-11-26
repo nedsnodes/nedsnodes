@@ -126,7 +126,7 @@ HANDOFF_INSTRUCTION = (
     "reached the reincarnation threshold. Run the /handoff skill now."
 )
 
-HANDOFF_THRESHOLD_HOOK_LINE_ADDED_TO_HANDOFF_REQUEST_WHEN_APPROVAL_WALK_FILES_CANNOT_BE_READ = (
+HANDOFF_THRESHOLD_HOOK_HANDOFF_REQUEST_INSTRUCTION_WHEN_APPROVAL_WALK_FILES_CANNOT_BE_READ_LINE = (
     "The threshold-hook could not read the approval-walk files in this checkout ({problem}), so it did not delay this "
     "session-handoff for a copied user message with no outcome.\n"
     "If exactly one file docs/walk/<name>-minutes.md in this checkout has a last `#next_to_present` line that is not "
@@ -1176,7 +1176,7 @@ def main(argv=None) -> int:
 
     print(HANDOFF_INSTRUCTION.format(share=share), file=sys.stderr)
     if walk_minutes_problem is not None:
-        print(HANDOFF_THRESHOLD_HOOK_LINE_ADDED_TO_HANDOFF_REQUEST_WHEN_APPROVAL_WALK_FILES_CANNOT_BE_READ.format(problem=repr(walk_minutes_problem)), file=sys.stderr)
+        print(HANDOFF_THRESHOLD_HOOK_HANDOFF_REQUEST_INSTRUCTION_WHEN_APPROVAL_WALK_FILES_CANNOT_BE_READ_LINE.format(problem=repr(walk_minutes_problem)), file=sys.stderr)
     if background_tasks_list_is_missing:
         print(BACKGROUND_TASKS_LIST_MISSING_SENTENCE.format(
                   claude_version=claude_version_or_why_unread()),

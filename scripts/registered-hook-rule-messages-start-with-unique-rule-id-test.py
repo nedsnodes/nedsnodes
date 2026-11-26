@@ -228,7 +228,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/handoff-context-threshold-hook.py", "MODEL_ID_NOT_IN_CONTEXT_WINDOW_TABLE_LINE"): LATER_PART,
     ("scripts/handoff-context-threshold-hook.py", "NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION"): LATER_PART,
     ("scripts/handoff-context-threshold-hook.py", "UNREADABLE_MARKER_REPLACED_LINE"): LATER_PART,
-    ("scripts/handoff-context-threshold-hook.py", "HANDOFF_THRESHOLD_HOOK_LINE_ADDED_TO_HANDOFF_REQUEST_WHEN_APPROVAL_WALK_FILES_CANNOT_BE_READ"): LATER_PART,
+    ("scripts/handoff-context-threshold-hook.py", "HANDOFF_THRESHOLD_HOOK_HANDOFF_REQUEST_INSTRUCTION_WHEN_APPROVAL_WALK_FILES_CANNOT_BE_READ_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-message-copied-to-walk-minutes-without-valid-outcome-turn-end-refusal-stop-hook.py", "WALK_ME_THROUGH_STOP_HOOK_REFUSAL_TELLING_AGENT_TO_RECORD_COPIED_USER_MESSAGE_OUTCOME_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-message-copied-to-walk-minutes-without-valid-outcome-turn-end-refusal-stop-hook.py", "WALK_ME_THROUGH_STOP_HOOK_REFUSAL_PRINTF_COMMAND_PER_OUTCOME_RECORDING_COPIED_USER_MESSAGE_OUTCOME_IN_WALK_MINUTES_LINE"): LATER_PART,
     ("scripts/markdown-edit-hard-wrapped-paragraph-reminder-hook-hack.py", "PARSER_MISSING_BELOW_MINIMUM_PYTHON_MESSAGE"): HOOK_FAILED,
