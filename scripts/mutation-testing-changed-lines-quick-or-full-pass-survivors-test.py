@@ -897,18 +897,16 @@ def run_recorded_mutant_killed_check_cases():
          "origin/main still has the lines it replaces, so your branch changed them.\n"
          "If your branch changed them on purpose", 2),
         ("origin/main changed only a context line beside the replaced line, so it still has the "
-         "replaced line and the branch changed it, exit 2",
-         {"scripts/thing.py": "def double(x):\n    # doubled\n    return x + x\n"},
-         could_not_be_judged_line, "so your branch changed them", 2),
-        ("origin/main still has the replaced line and the branch changed it: the verdict says to "
-         "edit the lines back, never to reset the whole file, exit 2",
+         "replaced line and the branch changed it: the verdict says to edit the lines back, never "
+         "to reset the whole file, exit 2",
          {"scripts/thing.py": "def double(x):\n    # doubled\n    return x + x\n"},
          could_not_be_judged_line,
-         "Otherwise, edit the lines the diff replaces back as origin/main has them, which git diff "
-         "origin/main -- scripts/thing.py shows, keep your test in another file, commit both, and "
-         "run this command again. Do not run git checkout origin/main -- scripts/thing.py: it "
-         "would also throw away every other change your branch and your uncommitted work made to "
-         "scripts/thing.py.", 2),
+         ("so your branch changed them",
+          "Otherwise, edit the lines the diff replaces back as origin/main has them, which git diff "
+          "origin/main -- scripts/thing.py shows, keep your test in another file, commit both, and "
+          "run this command again. Do not run git checkout origin/main -- scripts/thing.py: it "
+          "would also throw away every other change your branch and your uncommitted work made to "
+          "scripts/thing.py."), 2),
         ("origin/main renamed the file and kept the line, so it is not gone, exit 2",
          {"scripts/renamed-thing.py": HEAD_FILES["scripts/thing.py"]}, could_not_be_judged_line,
          "git blame follows a line it replaces to scripts/renamed-thing.py:2 on origin/main, so "
@@ -937,7 +935,8 @@ def run_recorded_mutant_killed_check_cases():
                 origin_main_earlier_files={"scripts/thing.py": HEAD_FILES["scripts/thing.py"]})
             check(f"a recorded mutant that does not apply at the head: {case_name}",
                   completed.returncode == wanted_exit and wanted_line in "\n" + completed.stdout
-                  and wanted in completed.stdout,
+                  and all(text in completed.stdout
+                          for text in ((wanted,) if isinstance(wanted, str) else wanted)),
                   f"rc={completed.returncode} out={completed.stdout} err={completed.stderr}")
     cannot_tell = "whether origin/main still has the lines it replaces cannot be told"
 
