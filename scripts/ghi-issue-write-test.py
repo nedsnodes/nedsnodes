@@ -3041,6 +3041,35 @@ def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
           and len(one_edit_with_title(moved, EDIT_TITLE)) == 1,
           (outcome, moved.calls, lines))
 
+    class MainMovesAfterTheRead(Recorder):
+        """Another worktree's fetch moves origin/main, to a commit that
+        renamed the issue's file, once step 5 has read main's copy."""
+
+        def __call__(self, arguments, timeout=None, cwd=None, check=True):
+            if (" ".join(arguments) == MAIN_COMMIT_CALL
+                    and any(" ".join(call) == main_copy
+                            for call in self.calls)):
+                self.calls.append(list(arguments))
+                self.timeouts.append(timeout)
+                return Completed("9" * 40 + "\n")
+            return super().__call__(arguments, timeout, cwd, check)
+
+    moved_on = MainMovesAfterTheRead({
+        title_view: Completed(json.dumps(
+            {"title": "Handoff dialog: older words"})),
+        "gh issue view 570": issue_json("Handoff dialog: older words",
+                                        placeholder),
+        main_copy: Completed(FILE_TEXT),
+        "git ls-tree": Completed(EDIT_RELATIVE + "\0")})
+    lines = []
+    outcome = tool.create(source, REPO, scratch, moved_on, lines.append)
+    check("when origin/main moves after step 5 read main's copy, the body "
+          "keeps its placeholder and the run says step 5 was not done and why",
+          not moved_on.ran("gh issue edit")
+          and any(line.startswith("step 5 not done: origin/main moved from "
+                                  f"{MAIN_COMMIT}") for line in lines),
+          (outcome, moved_on.calls, lines))
+
     dated_text = FILE_TEXT.replace(f"# {EDIT_TITLE}",
                                    f"# {EDIT_TITLE} on 2026-11-26")
     dated, lines, outcome = numbered_run(
@@ -3088,6 +3117,39 @@ def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
           and not renamed.ran("gh pr create")
           and len(one_edit_with_title(renamed, reviewed_heading)) == 1,
           (outcome, renamed.calls, lines))
+    class MergedIntoStaging(Recorder):
+        """gh, asked for merged pull requests from the filing branch,
+        finds one merged into a staging branch, and none into main."""
+
+        def __call__(self, arguments, timeout=None, cwd=None, check=True):
+            joined = " ".join(arguments)
+            if "gh pr list" in joined and "--state merged" in joined:
+                self.calls.append(list(arguments))
+                self.timeouts.append(timeout)
+                if "--base main" in joined:
+                    return Completed("[]")
+                return Completed(json.dumps([{"number": 7}]))
+            return super().__call__(arguments, timeout, cwd, check)
+
+    staging = MergedIntoStaging({
+        "gh issue list": Completed(json.dumps([{
+            "number": 570, "title": EDIT_TITLE,
+            "body": tool.placeholder_body(key, REPO)}])),
+        title_view: Completed(json.dumps({"title": EDIT_TITLE})),
+        "git show": Completed(reviewed),
+        "git ls-tree": Completed(""),
+        "git ls-remote": Completed(""),
+        "gh pr create": Completed("pr\n")})
+    lines = []
+    try:
+        outcome = tool.create(original, REPO, scratch, staging, lines.append)
+    except tool.Refused as raised:
+        outcome = raised
+    check("a filing pull request merged into a base other than main is not "
+          "taken for the filing, so the rerun lands the file",
+          staging.ran("git worktree add")
+          and not isinstance(outcome, tool.Refused),
+          (outcome, staging.calls, lines))
     unmerged, lines, outcome = rerun_on_original_after_review_renamed(False)
     check("and with no merged filing pull request the rerun lands the file "
           "as before",

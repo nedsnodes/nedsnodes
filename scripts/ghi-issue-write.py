@@ -1865,8 +1865,11 @@ def landed_file_of_merged_filing_pull_request(repo: str, number: int,
     merged, and the branch is deleted on merge, so without this a rerun
     lands the file a second time. Raises when main holds other than one file
     for the issue, since this run cannot tell which one the filing landed."""
+    # --base main: a filing branch's pull request merged into another base
+    # never put the file on main.
     listed = runner(["gh", "pr", "list", "--repo", repo, "--head", branch,
-                     "--state", "merged", "--json", "number"])
+                     "--base", "main", "--state", "merged", "--json",
+                     "number"])
     if not json.loads(listed.stdout or "[]"):
         return None
     paths = ghi_md_paths_for_issue(number, repository_root, runner,
@@ -2226,6 +2229,16 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
             repo, number, paths, main_commit, repository_root, runner)
     except DatedHeading as raised:
         heading, dated = None, raised
+    # The reads above are pinned to main_commit, so a fetch since then that
+    # renamed or removed the issue's file leaves them succeeding on a path
+    # main no longer holds; the body would link a file that is gone.
+    tip = origin_main_commit_hash(repository_root, runner)
+    if tip != main_commit:
+        report(f"step 5 not done: origin/main moved from {main_commit} to "
+               f"{tip} while this run read issue {number}'s files, so its "
+               "body keeps the placeholder.")
+        report(f"Rerun: {create_rerun_command(repo, rerun_on)}")
+        return False
     command = ["gh", "issue", "edit", str(number), "--repo", repo,
                "--body", links_body(repo, paths)]
     if heading is not None:
