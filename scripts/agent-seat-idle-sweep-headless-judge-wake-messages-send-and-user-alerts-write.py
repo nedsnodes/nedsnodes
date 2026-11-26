@@ -312,9 +312,13 @@ SENTENCES_ANSWER_SCHEMA = {
 
 # Without this sentence, a sender dropped the last sentence from a message that asks the agent-seat
 # a question, taking it for an instruction to the sender.
-KEEP_THE_LAST_SENTENCE = (
-    f'The text ends with the sentence "{DO_NOT_REPLY_SENTENCE}" That sentence is written to the '
-    "agent-seat, not to you, and is part of the message: keep it.")
+# SendMessage's own description asks for a first line that says what the message is about, which
+# pulls a sender to rewrite a text that opens "Your task ...".
+SEND_THE_TEXT_AS_IT_STANDS = (
+    'The whole text is written to the agent-seat, not to you: "you" and "your" in it mean the '
+    "agent-seat, and its first line is the one the program chose, even where SendMessage's "
+    f'description asks for another. The text ends with the sentence "{DO_NOT_REPLY_SENTENCE}" '
+    "That sentence is part of the message too. Send the whole text as it stands.")
 
 FIND_THE_ENTRY = """\
 Find the agent-seat's entry with ListAgents (load ListAgents and SendMessage with ToolSearch first \
@@ -331,7 +335,7 @@ judge nothing: the program has decided the message is sent.
 The agent-seat is {seat}. {find_the_entry}
 
 Send it one message with SendMessage, whose "message" is the text between the two lines of dashes \
-below, exactly as written, with nothing added or removed. {keep_the_last_sentence} Then answer: \
+below, exactly as written, with nothing added or removed. {send_the_text_as_it_stands} Then answer: \
 sent true if SendMessage succeeded, otherwise false, and reason, one sentence.
 ----------
 {text}
@@ -345,7 +349,7 @@ Send it, with one SendMessage call for each, to each of these agent-seats, each 
 ref of its entry: {seats}. For each agent-seat, {find_the_entry}
 
 Each message is the text between the two lines of dashes below, exactly as written, with nothing \
-added or removed. {keep_the_last_sentence} Then answer: sent true if every send succeeded, \
+added or removed. {send_the_text_as_it_stands} Then answer: sent true if every send succeeded, \
 otherwise false, and reason, one sentence naming any agent-seat you could not send to.
 ----------
 {text}
@@ -1087,12 +1091,12 @@ class Sweep:
             (seat, ref), = refs.items()
             prompt = SENDER_PROMPT.format(seat=seat, text=text,
                                           find_the_entry=FIND_THE_ENTRY.format(seat=seat, ref=ref),
-                                          keep_the_last_sentence=KEEP_THE_LAST_SENTENCE)
+                                          send_the_text_as_it_stands=SEND_THE_TEXT_AS_IT_STANDS)
         else:
             prompt = NOTICE_SENDER_PROMPT.format(
                 seats=", ".join(f"{seat} [{ref}]" for seat, ref in refs.items()), text=text,
                 find_the_entry=FIND_THE_ENTRY.format(seat="<agent-seat>", ref="<its ref>"),
-                keep_the_last_sentence=KEEP_THE_LAST_SENTENCE)
+                send_the_text_as_it_stands=SEND_THE_TEXT_AS_IT_STANDS)
         started_at = self.current()
         outcome = run_headless(prompt, SEND_ANSWER_SCHEMA, SENDING_TOOLS, self.working_directory,
                                self.timeout_seconds)

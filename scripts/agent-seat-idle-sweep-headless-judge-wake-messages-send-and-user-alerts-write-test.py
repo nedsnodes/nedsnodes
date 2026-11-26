@@ -204,8 +204,11 @@ def judged(send, message="", reason="r", raised=()):
 
 
 DO_NOT_REPLY = "Do not reply to this message: the idle sweep sent it, and nothing acts on a reply."
-KEEP_IT = (f'The text ends with the sentence "{DO_NOT_REPLY}" That sentence is written to the '
-           "agent-seat, not to you, and is part of the message: keep it.")
+KEEP_IT = ('The whole text is written to the agent-seat, not to you: "you" and "your" in it mean '
+           "the agent-seat, and its first line is the one the program chose, even where "
+           "SendMessage's description asks for another. The text ends with the sentence "
+           f'"{DO_NOT_REPLY}" That sentence is part of the message too. Send the whole text as it '
+           "stands.")
 
 
 def ends_with_do_not_reply_once(text):
@@ -2245,7 +2248,8 @@ machine.seat("alpha", DONE_TURN)
 machine.handoff_put_off()
 machine.script(sent_ok())
 machine.run(0)
-check("the sender is told that the do-not-reply sentence is part of the message",
+check("the sender is told that the whole text, its first line and the do-not-reply sentence "
+      "included, is written to the agent-seat and is sent as it stands",
       KEEP_IT in machine.claude_calls()[0]["prompt"].replace("\n", " "), machine.claude_calls())
 
 
