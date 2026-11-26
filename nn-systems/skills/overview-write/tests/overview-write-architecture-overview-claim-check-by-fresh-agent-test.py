@@ -250,7 +250,7 @@ def run_unit_cases():
     check("a proposed-improvements file beside an overview is not an overview path",
           claim_check.nn_architecture_overview_described_system_name_from_page_path(
               "docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview-proposed-improvements-or-changes-x.md") is None)
-    check("an overview's one proposed-improvements-or-changes-file is in its system's docs/, outside the wiki folder",
+    check("an overview's one proposed-changes-file is in its system's docs/, outside the wiki folder",
           claim_check.nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(OVERVIEW) == PROPOSALS)
     check("the pointer line names the file and its directory in separate backtick spans, so md-drift-lint at an older "
           "commit, where the file is missing, finds no path to check",
@@ -319,7 +319,7 @@ def run_covering_judge_unit_cases():
         grandparent_was_missing = not expected.parent.parent.exists()
         written = claim_check.write_fix_later_claims_to_proposed_improvements_or_changes_file(
             repository, OVERVIEW, [claims[2]], "a" * 40, "report.md", for_regular_maintenance=True)
-        check("a fix-later claim is written to a new proposed-improvements-or-changes-file whose directory and its parent "
+        check("a fix-later claim is written to a new proposed-changes-file whose directory and its parent "
               "do not exist yet",
               grandparent_was_missing and written == expected and expected.is_file()
               and "a new claim" in expected.read_text(encoding="utf-8"), written)
@@ -340,7 +340,7 @@ MUST_FIX_REPORT = ("VERDICT 1 supported: the tool sets x\n  nn-systems/example/t
 
 
 def proposed_improvements_or_changes_files(fixture):
-    """Every proposed-improvements-or-changes-file in the checkout, resolved, as the program prints them: the test
+    """Every proposed-changes-file in the checkout, resolved, as the program prints them: the test
     sandbox's temporary directory is a symlink."""
     return sorted(path.resolve() for path in fixture.repository.rglob("*-proposed-improvements-or-changes*")
                   if ".git" not in path.parts)
@@ -372,7 +372,7 @@ def run_ranked_claim_cases(fixture, blob):
     check("the report holds the ranks after the recheck in its header, and the recheck's answer after the report",
           report_text.split("\n\n", 1)[0].endswith("\nranks after the recheck: 1 must-fix, 0 fix-later, 0 nit")
           and "# Recheck of VERDICT 2, which the report above ranks must-fix" in report_text, report_text)
-    check("a run with no fix-later claim writes no proposed-improvements-or-changes-file",
+    check("a run with no fix-later claim writes no proposed-changes-file",
           not proposed_improvements_or_changes_files(fixture))
 
     fixture.answer(claude_stdout=MUST_FIX_REPORT,
@@ -530,7 +530,7 @@ def run_ranked_claim_cases(fixture, blob):
 
 
 def run_covering_judge_cases(fixture):
-    """Run after run_ranked_claim_cases, which leaves no proposed-improvements-or-changes-file and origin/main at the
+    """Run after run_ranked_claim_cases, which leaves no proposed-changes-file and origin/main at the
     code commit."""
     fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
     report = ("VERDICT 1 contradicted fix-later: the tool sets x once\n  COVERED-CLAIM-EVIDENCE\n"

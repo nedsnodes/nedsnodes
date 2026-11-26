@@ -34,7 +34,7 @@ a program so that no step depends on an agent remembering it:
    checked against, so a report stays valid across a rebase or a fix-round
    that leaves the overview's text alone, and no model runs again for it.
 7. Appends each claim ranked fix later that the overview's one
-   proposed-improvements-or-changes-file does not hold yet to that file in the
+   proposed-changes-file does not hold yet to that file in the
    checkout the program runs from, creating the file when it is missing. A
    claim the file holds word for word, in an entry of any state, is not
    appended. When claims remain and the file has unsettled entries, entries
@@ -82,7 +82,7 @@ exits 6 only when the run would otherwise exit 0; any other exit code is
 kept. The worktree's folder is deleted with the temporary directory either
 way, but git's record of the worktree stays in the checkout until the
 cleanup command the program prints is run. Apart from that record and the
-proposed-improvements-or-changes-file of step 7, the program writes nothing in
+proposed-changes-file of step 7, the program writes nothing in
 the checkout it is run from.
 
 Usage:
@@ -227,7 +227,7 @@ The overview's writer disputes verdicts of an earlier check. The file {answers} 
 
 
 UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_PROMPT_TEMPLATE = """\
-You are a fresh-agent of the overview claim check. It checked the nn-architecture-overview {overview} against the code and ranked the claims below fix later: loose, incomplete or badly worded, but no agent would act wrongly on them. Each such claim is recorded as an entry in the overview's proposed-improvements-or-changes-file, {proposals}, unless an unsettled entry there, one whose State: line says open or needs the user and not settled, already covers it. Judge, for each claim, whether one of the unsettled entries below covers it: an entry covers a claim when settling the entry would also settle the claim, because both are about the same statement of the overview and the same fault in it, however each is worded. An entry about another statement, or about another fault in the same statement, does not cover it. You have no tools; everything you need is below.
+You are a fresh-agent of the overview claim check. It checked the nn-architecture-overview {overview} against the code and ranked the claims below fix later: loose, incomplete or badly worded, but no agent would act wrongly on them. Each such claim is recorded as an entry in the overview's proposed-changes-file, {proposals}, unless an unsettled entry there, one whose State: line says open or needs the user and not settled, already covers it. Judge, for each claim, whether one of the unsettled entries below covers it: an entry covers a claim when settling the entry would also settle the claim, because both are about the same statement of the overview and the same fault in it, however each is worded. An entry about another statement, or about another fault in the same statement, does not cover it. You have no tools; everything you need is below.
 
 The claims, each with the evidence the check gave:
 {claims}
@@ -268,7 +268,7 @@ NEXT_ACTION_SUFFIX_WHEN_FIX_LATER_CLAIMS_WRITTEN_TO_PROPOSED_IMPROVEMENTS_OR_CHA
     "file's entries. Nits are listed in the report only; regular maintenance cleans them up.")
 NEXT_ACTION_SUFFIX_WHEN_FOLLOW_UP_PULL_REQUEST_LEAVES_FIX_LATER_CLAIMS_TO_REGULAR_MAINTENANCE = (
     " The claims ranked fix later that are new to this check were appended to {path}: commit that file on this "
-    "branch. The overview's proposed-improvements-or-changes-file on origin/main already holds claims from this "
+    "branch. The overview's proposed-changes-file on origin/main already holds claims from this "
     "program, so this is a follow-up pull request, and regular maintenance takes these claims, not another "
     "follow-up. Nits are listed "
     "in the report only; regular maintenance cleans them up too.")
@@ -411,7 +411,7 @@ def result_from_fresh_agent_report(report, recheck_reports=None):
 
 
 def nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path):
-    """Return the repository-relative path of the overview's one proposed-improvements-or-changes-file."""
+    """Return the repository-relative path of the overview's one proposed-changes-file."""
     return PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_PATH_TEMPLATE.format(
         system=nn_architecture_overview_described_system_name_from_page_path(overview_path))
 
@@ -518,7 +518,7 @@ def normalized_claim(text):
 
 def write_fix_later_claims_to_proposed_improvements_or_changes_file(repository, overview_path, new_claims, commit,
                                                                     report_path, for_regular_maintenance):
-    """Append the new claims ranked fix later to the overview's proposed-improvements-or-changes-file in the checkout,
+    """Append the new claims ranked fix later to the overview's proposed-changes-file in the checkout,
     creating it when it is missing; return its path, or None when there is no claim to append."""
     destination = repository / nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
     existing = destination.read_text(encoding="utf-8") if destination.exists() else ""
@@ -729,7 +729,7 @@ def check_overview_claims(arguments):
     appended_sections = "".join(f"\n\n# Recheck of VERDICT {number}, which the report above ranks must-fix\n\n{recheck}"
                                 for number, recheck in sorted(recheck_reports.items()))
     if covering_answer is not None:
-        appended_sections += ("\n\n# Which unsettled entry of the proposed-improvements-or-changes-file covers each claim ranked "
+        appended_sections += ("\n\n# Which unsettled entry of the proposed-changes-file covers each claim ranked "
                               f"fix later that it did not hold word for word\n\n{covering_answer}")
     fix_later_file = None
     if claims is not None:

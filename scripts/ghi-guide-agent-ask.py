@@ -53,7 +53,7 @@ the other wants the user.
 A draft that conflicts with a ruling the user made gets the ruling question,
 not a verdict. too-similar is a soft block an agent may pass on its own
 judgment, and a ruling is the user's to settle; the GHI write tool writes the
-issue and records the question in a proposed-improvements-or-changes-file
+issue and records the question in a proposed-changes-file
 in the log-store on ned-box. Every ruling question carries the number of the issue
 holding the ruling, its `ruling_issue`, so that record can cite the ruling. The prompt reaches ghi-guide-agent at a cold start, so a session started
 earlier keeps its old prompt until it is next reincarnated.
