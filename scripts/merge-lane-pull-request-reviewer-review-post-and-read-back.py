@@ -30,7 +30,7 @@ COMMENT, and merge-lane-2 records the verdict itself.
 With --github-account ned-review-merge, the file is merge-lane-2's own review,
 which restates every finding the round's reviewers raised, each comment with
 exactly "path", "line", "body" and "finding_category", one of FINDING_CATEGORIES, the
-four categories of the goals and philosophy page, and may carry "nit": true, which marks a
+first four categories of the goals and philosophy page, and may carry "nit": true, which marks a
 fix-in-maintenance finding as a nit for the fix-round program to carry; "nit" with any other
 value, or on a comment of any other category, is refused. It is posted with the merge
 account's token, read as
@@ -173,7 +173,8 @@ MERGE_LANE_ACCOUNT = "ned-review-merge"
 POSTED_VERDICTS = ("APPROVE", "REQUEST_CHANGES")
 MERGE_GATE = Path(__file__).resolve().with_name("merge-gate.sh")
 NEW_ACTIVITY_COUNT_OPTION = "--print-new-activity-count-after-reviewed-since-bound"
-# The goals and philosophy page's four categories of a finding; only the first blocks. A program after the
+# The goals and philosophy page's first four categories of a finding; only the first blocks. Its fifth, Declined,
+# is the grade DOES_NOT_HOLD_GRADE. A program after the
 # post reads each category only from comments, so a Codex finding graded with any of them needs one.
 FINDING_CATEGORIES = ("must-fix-now", "fix-next", "fix-in-maintenance", "file-for-later")
 BLOCKING_CATEGORY = "must-fix-now"
