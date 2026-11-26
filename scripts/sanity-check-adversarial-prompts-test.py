@@ -254,16 +254,21 @@ def main():
         log_path = pathlib.Path(scratch) / "run.log"
         run_log.attach(log_path)
         text_written, warning_written = threading.Event(), threading.Event()
+        # A wait that timed out means the forced order did not happen, and the
+        # case would pass even on a wrapper that joins the lines.
+        waits_timed_out = []
 
         def saved_line_cell():
             run_log.write("saved: cell-a.md")
             text_written.set()
-            warning_written.wait(5)
+            if not warning_written.wait(5):
+                waits_timed_out.append("the saved-line cell's wait for the warning")
             run_log.write("\n")
             run_log.flush()
 
         def warning_cell():
-            text_written.wait(5)
+            if not text_written.wait(5):
+                waits_timed_out.append("the warning cell's wait for the saved line's text")
             real_stdout = sys.stdout
             sys.stdout = run_log
             try:
@@ -278,6 +283,8 @@ def main():
         for cell in cells:
             cell.join(10)
         run_log.detach()
+        check("the two cells wrote in the forced order, the WARNING between the saved line's "
+              "text and its newline", not waits_timed_out, f"timed out: {waits_timed_out}")
         expected_lines = {"saved: cell-a.md", "WARNING: cell-b warned", "Do the next step."}
         for where, printed in (("the stream", stream.getvalue()),
                                ("the run log", log_path.read_text(encoding="utf-8"))):
@@ -287,6 +294,47 @@ def main():
                   set(lines) == expected_lines and len(lines) == 3
                   and lines[lines.index("WARNING: cell-b warned") + 1] == "Do the next step.",
                   repr(printed))
+
+    # An agent-binary's stderr that does not end with a newline is printed with
+    # end="" and flushed; the WARNING printed next would join it on one line.
+    with tempfile.TemporaryDirectory() as scratch:
+        stream = io.StringIO()
+        run_log = runner.RunOutputCopiedToRecordLog(stream)
+        log_path = pathlib.Path(scratch) / "run.log"
+        run_log.attach(log_path)
+        real_stdout = sys.stdout
+        sys.stdout = run_log
+        try:
+            print("agent-binary stderr with no newline", end="", flush=True)
+            runner.print_warning_with_its_next_step("cell-b warned", "Do the next step.")
+        finally:
+            sys.stdout = real_stdout
+        run_log.detach()
+        for where, printed in (("the stream", stream.getvalue()),
+                               ("the run log", log_path.read_text(encoding="utf-8"))):
+            check(f"a flushed fragment is ended in {where}, so the WARNING after it opens its own line",
+                  printed.splitlines()[:2] == ["agent-binary stderr with no newline",
+                                               "WARNING: cell-b warned"],
+                  repr(printed))
+
+    # Once stdout's reader has exited, detach's flush raises BrokenPipeError;
+    # the run log must still be closed.
+    class StreamWhoseReaderHasExited(io.StringIO):
+        def flush(self):
+            raise BrokenPipeError("reader exited")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        run_log = runner.RunOutputCopiedToRecordLog(StreamWhoseReaderHasExited())
+        run_log.attach(pathlib.Path(scratch) / "run.log")
+        log_file = run_log._file
+        try:
+            run_log.detach()
+            raised = None
+        except BrokenPipeError as error:
+            raised = error
+        check("detach closes the run log even when flushing stdout raises BrokenPipeError",
+              raised is not None and log_file.closed and run_log._file is None,
+              f"raised={raised!r}, log closed={log_file.closed}")
 
     # Case 1: a file already dirty before the run, rewritten by a cell.
     with tempfile.TemporaryDirectory() as scratch:
