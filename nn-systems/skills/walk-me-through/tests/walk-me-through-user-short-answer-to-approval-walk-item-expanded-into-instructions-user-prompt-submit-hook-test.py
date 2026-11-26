@@ -146,13 +146,9 @@ class OutputLines(list):
 def is_at_most_the_own_words_message(result):
     """Whether the hook exited 0 with no stderr, and printed nothing or only its message for a reply in the user's
     own words, so that a crash, or a reply read as an answer, fails."""
-    if result.returncode != 0 or result.stderr:
-        return False
-    if not result.stdout.strip():
+    if result.returncode == 0 and not result.stderr and not result.stdout.strip():
         return True
-    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-    return context.startswith("[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-"
-                              "settled-on-non-recommended-option] ")
+    return is_only_the_own_words_message(result)
 
 
 class Case:
@@ -313,10 +309,14 @@ def test_a_hyphen_between_the_letters_of_ao_o2_and_o3_is_read_as_that_letter():
 
 
 def is_only_the_own_words_message(result):
-    """Whether the hook exited 0 and its context is the message for a reply in the user's own words, and no more."""
+    """Whether the hook exited 0 and its context is the message for a reply in the user's own words, and no more.
+    Output that is not JSON holding a context is a no, so the case is reported as a FAIL with its prompt."""
     if result.returncode != 0 or result.stderr or not result.stdout.strip():
         return False
-    lines = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n")
+    try:
+        lines = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n")
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return False
     return len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING) and lines[1] == SETTLED_LINE
 
 
@@ -961,12 +961,20 @@ def test_r_on_a_next_to_present_line_that_names_no_item_tells_the_agent_to_show_
 
 
 def test_r_whose_item_cannot_be_read_still_goes_to_the_agent():
-    for case, item in ((Case(next_to_present="item 7 of 9"), "item 7 of 9"),
-                       (Case(next_to_present="item 4 of 9", document=None), "item 4 of 9")):
-        result = case.run("r")
-        lines = case.lines("r")
-        check(f"R on {item}, whose walk-document holds no such item or does not exist, tells the agent to publish it",
-              not_blocked(result) and lines is not None and lines[1:] == r_lines("R", item), f"lines {lines!r}")
+    case = Case(next_to_present="item 7 of 9")
+    result = case.run("r")
+    lines = case.lines("r")
+    check("R on item 7 of 9, which its walk-document holds no heading for, says why it cannot be read, then tells "
+          "the agent to publish it",
+          not_blocked(result) and lines is not None
+          and lines[1].startswith("The hook could not read the text of item 7 of 9 from the walk-document ")
+          and "would refuse to build the item's page: the `#next_to_present` line" in lines[1]
+          and lines[2:] == r_lines("R", "item 7 of 9"), f"lines {lines!r}")
+    case = Case(next_to_present="item 4 of 9", document=None)
+    result = case.run("r")
+    lines = case.lines("r")
+    check("R on item 4 of 9, whose walk-document does not exist, tells the agent to publish it",
+          not_blocked(result) and lines is not None and lines[1:] == r_lines("R", "item 4 of 9"), f"lines {lines!r}")
 
 
 def test_numbered_answers():
@@ -2994,6 +3002,34 @@ def test_a_closing_line_never_takes_the_point_of_another_heading_for_its_number(
     text = "\n".join(case.lines("2 r") or [])
     check("R on item 2 while item 7 waits names neither heading's point",
           "keep it" not in text and "remove it" not in text and "page2" in text, text)
+
+
+def test_m_on_an_item_with_no_heading_reports_why_before_the_publish_steps():
+    case = Case(next_to_present="items 5 and 6 of 9", document="# A walk\n\n## Item 5 of 9: fix a path\n\nFix it.\n")
+    case.minutes("#item_page item 5 of 9 https://claude.ai/artifact/PageOfItem5\n\n#next_to_present items 5 and 6 of 9")
+    lines = case.lines("m")
+    at = next((index for index, line in enumerate(lines or []) if line.startswith("The hook found no `#item_page`")),
+              None)
+    check("M on an item with no heading says the hook could not read it, and why, before the publish steps",
+          at is not None and lines[at - 1].startswith("The hook could not read the text of item 6 of 9 from the "
+                                                      "walk-document")
+          and "no heading `Item 6`" in lines[at - 1], f"lines {lines!r}")
+
+
+def test_the_own_words_predicates_fail_output_that_is_not_only_the_own_words_message():
+    def result(stdout, returncode=0, stderr=""):
+        return subprocess.CompletedProcess([], returncode, stdout, stderr)
+    own_words = Case(next_to_present="item 4 of 9").run("more responses 4")
+    context = json.loads(own_words.stdout)["hookSpecificOutput"]["additionalContext"]
+    for name, output in (("not JSON", "not json"), ("JSON without hookSpecificOutput", "{}"),
+                         ("a context with a line after the own-words message",
+                          json.dumps({"hookSpecificOutput": {"additionalContext": context + "\nAnd act on 4 as A."}}))):
+        check(f"output that is {name} is neither only nor at most the own-words message",
+              not is_only_the_own_words_message(result(output))
+              and not is_at_most_the_own_words_message(result(output)))
+    check("no output at all is at most the own-words message", is_at_most_the_own_words_message(result("")))
+    check("the hook's own-words message is at most the own-words message",
+          is_at_most_the_own_words_message(own_words), f"stdout {own_words.stdout!r}")
 
 
 def main():

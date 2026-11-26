@@ -203,7 +203,10 @@ EMBEDDED_PROMPT_COPY_AND_SOURCE_PAIRS = (
 # the plan from the environment, and a counter file that counts launches so
 # "fail_first_attempts": N fails the first N and succeeds after; "hang"
 # sleeps past any deadline a case sets; "wait_for_file" fails unless that file
-# appears within 20 s; "started_file" is written first thing.
+# appears within 20 s; "started_file" is written first thing; "answers_by_prompt",
+# a list of [text, answer], writes the answer of the first text the prompt holds
+# and succeeds, which is how a case answers the new-word calls apart from the
+# fast-clarify cell, since all run on one model.
 STUB_AGY = """#!/usr/bin/env python3
 import json, os, pathlib, re, sys
 argv = sys.argv
@@ -239,6 +242,12 @@ if "edit_document" in step:
         handle.write("An edit made while the reviewer read.\\n")
 if "delete_document" in step:
     pathlib.Path(step["delete_document"]).unlink()
+for needle, answer in step.get("answers_by_prompt", []):
+    if needle in prompt:
+        answer_path = pathlib.Path(re.search(r"Write your report to (\\S+), once", prompt).group(1))
+        answer_path.parent.mkdir(parents=True, exist_ok=True)
+        answer_path.write_text(answer, encoding="utf-8")
+        sys.exit(0)
 if launches <= step.get("fail_first_attempts", 0):
     sys.stderr.write(step.get("fail_stderr", "stub agy: simulated failure on launch %d\\n" % launches))
     sys.exit(step.get("fail_exit", 1))
@@ -2242,12 +2251,13 @@ def ssh_time_limit_seconds_with_agy_cell(agy_cell_text):
 
 check("the ssh time limit of a read on ned-box follows the agy cell's per-model limit, "
       "the length of the fast cold-read-tier's model chain, the Sonnet backup's allowance "
-      "and the Question 4 cell's time limit",
+      "the time limit for checking new words and the Question 4 cell's time limit",
       ssh_time_limit_seconds_with_agy_cell(
           "COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS = 45 * 60\n"
           "TIER_TO_AGY_MODEL_CHAIN = {'fast': ('model-a', 'model-b')}\n")
       == warning_module.FAST_READ_ATTEMPTS * 2 * 45 * 60
       + warning_module.COLD_READ_FAST_READ_SONNET_BACKUP_RUN_ALLOWANCE_SECONDS + 5 * 60
+      + warning_module.new_words.NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS
       + warning_module.COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS)
 check("the Question 4 prompt carries the fast-clarify prompt's reading rules whole, "
       "from their first sentence to their last",
@@ -3481,6 +3491,48 @@ with tempfile.TemporaryDirectory() as edit_scratch:
           and "Give this whole message to the user" in result.stderr
           and launches_counted(edit_counter) == 0,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr[-400:]!r}")
+
+# --- Words with a meaning of their own: the cell's list is checked word by word, and the report says what became of each.
+with tempfile.TemporaryDirectory() as new_words_scratch_name:
+    new_words_scratch = Path(new_words_scratch_name).resolve()
+    repository = build_scratch_repository(new_words_scratch)
+    scratch_glossary = repository / "docs" / "nedsnodes-wiki" / "nedsnodes-glossary.md"
+    scratch_glossary.parent.mkdir(parents=True)
+    scratch_glossary.write_text("# glossary\n\n- **agent-seat** — a named agent.\n", encoding="utf-8")
+    scratch_repository_fixture.git(repository, "add", str(scratch_glossary))
+    scratch_repository_fixture.git(repository, "commit", "-q", "-m", "glossary")
+    new_words_suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
+    new_words_counter = new_words_scratch / "agy-launches"
+    new_words_module = script_under_test_module().new_words
+    cell_report_with_new_words = (
+        "STUB FAST READ: of the walk item\n\n## Words with a meaning of their own\n\n"
+        "- `rider`: the words the user types after the A or D that answers an approval-walk item\n"
+        "- `agent-seat`: an agent with a name of its own\n")
+    result = run_fast_read(
+        repository, new_words_scratch / "stubs",
+        {"*": {"report": cell_report_with_new_words,
+               "answers_by_prompt": [
+                   ["takes it to mean", "A person riding a horse."],
+                   ["Decide whether a reader who acted on the guessed meaning", new_words_module.NEW_WORD_MEANING_COMPARE_ANSWER_DIFFERS]]}},
+        new_words_suggestions, "docs/walk/a-walk-item-draft.md", new_words_counter)
+    new_words_text = (new_words_suggestions.read_text(encoding="utf-8")
+                      if new_words_suggestions.is_file() else "")
+    check("a listed word a fresh reader takes another way is named in the report's new words section, "
+          "with the text's meaning and the guess, and the cell's own section of those words is gone",
+          result.returncode == 0
+          and new_words_module.NEW_WORDS_REPORT_SECTION_HEADING in new_words_text
+          and "- `rider`: the text means: the words the user types after the A or D" in new_words_text
+          and "a model took it to mean: A person riding a horse." in new_words_text
+          and "\n## Words with a meaning of their own\n" not in new_words_text,
+          f"exit {result.returncode}; report={new_words_text[-1500:]!r}; stderr={result.stderr[-800:]!r}")
+    check("a listed word a glossary has is dropped, not checked, and the read launches the two calls "
+          "for the other word only",
+          "already has these words: `agent-seat`." in new_words_text
+          and launches_counted(new_words_counter) == 3,
+          f"launches={launches_counted(new_words_counter)}; report={new_words_text[-600:]!r}")
+    check("stderr counts what became of the listed words",
+          "cold-read-fast-read: words with a meaning of their own: 2 listed, 1 already in a glossary, 0 read as the text means, "
+          "1 read another way, 0 not checked" in result.stderr, result.stderr[-800:])
 
 print()
 if failures:

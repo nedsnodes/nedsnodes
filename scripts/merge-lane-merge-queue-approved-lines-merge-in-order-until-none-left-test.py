@@ -770,6 +770,67 @@ def stopping_cases(scratch):
           output.startswith("DIED MID-MERGE: ") and in_progress.exists()
           and case.run("merge-batch-start")[1].startswith("DIED MID-MERGE: ")
           and case.merge_calls() == [], f"{output}\n{in_progress.exists()}")
+    check("merge-batch-start exits 1 when the dead batch's stop file cannot be written, and "
+          "says so instead of saying the stop file now says so",
+          exit_code == 1 and "FAILED: the stop file or the stopped notice could not be written"
+          in output and "now say so" not in output, f"exit {exit_code}\n{output}")
+
+    case = Case(scratch, "outside-stop-notice-unwritable", [approved(10, A)], {"10": pr(A)})
+    (case.outputs / STOP_FILE_NAME).write_text("the GHI-MD edit merge job's merge exited 3\n")
+    case.batches.mkdir()
+    (case.batches / program.MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME).write_text("a file, not a directory\n")
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("a stop file written outside the batch whose stopped notice cannot be written exits 1, "
+          "the log saying why",
+          exit_code == 1 and "could not write the notice" in output and case.merge_calls() == [],
+          f"exit {exit_code}\n{output}")
+
+    case = Case(scratch, "dead-batch-stop-file-unwritable-run-directly", [approved(10, A)],
+                {"10": pr(A)})
+    case.batches.mkdir()
+    (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
+        "pull request 9, started 2026-11-25T10:00:00Z\n")
+    shutil.rmtree(case.outputs)
+    case.outputs.write_text("a file, not a directory\n")
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("a direct run that finds a dead batch and cannot write the stop file exits 1, and "
+          "keeps the in-progress file",
+          exit_code == 1 and (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).exists()
+          and case.merge_calls() == [], f"exit {exit_code}\n{output}")
+
+    case = Case(scratch, "resume-command-names-the-directories", [approved(10, A)], {"10": pr(A)},
+                merge_outcomes={"10": {"exit": 3, "merged": True}})
+    case.run("merge-batch-run-in-queue-order")
+    stopped = [text for name, text in case.notices().items() if name.startswith("stopped-")]
+    start_code, start_output = case.run("merge-batch-start")
+    named = (f"--merge-queue-file {case.queue} --merge-batches-directory {case.batches} "
+             f"--merge-program-outputs-directory {case.outputs} merge-batch-resume")
+    check("the resume command in the stopped notice and in merge-batch-start's STOPPED line "
+          "names the merge queue file and both directories in use",
+          stopped and named in stopped[0] and named in start_output,
+          f"{stopped}\n{start_output}")
+
+    case = Case(scratch, "relative-outputs-directory", [approved(10, A)], {"10": pr(A)},
+                merge_outcomes={"10": {"exit": 3, "merged": True}})
+    relative = case.outputs.relative_to(scratch)
+    saved_directory = os.getcwd()
+    os.chdir(scratch)
+    try:
+        argv = case.argv("merge-batch-run-in-queue-order")
+        argv[argv.index(str(case.outputs))] = str(relative)
+        saved = dict(os.environ)
+        os.environ.update(case.environment)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                program.main(argv)
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+    finally:
+        os.chdir(saved_directory)
+    check("a relative --merge-program-outputs-directory is made absolute, so the merge program, "
+          "run in its own checkout, writes the stop file this program reads",
+          "exited 3" in (case.stop_text() or ""), case.stop_text())
 
 
 def next_merge_decision_cases(scratch):
@@ -834,6 +895,41 @@ def starting_cases(scratch):
           and output_again.startswith("STOPPED: ") and case.notices() == first_notices
           and case.merge_calls() == [], f"{output}\n{output_again}\n{case.notices()}")
 
+    case = Case(scratch, "died-mid-merge-notice-unwritable", [approved(10, A)], {"10": pr(A)})
+    case.batches.mkdir()
+    in_progress = case.batches / program.MERGE_IN_PROGRESS_FILE_NAME
+    in_progress.write_text("pull request 10, started 2026-11-25T10:00:00Z\n")
+    notices = case.batches / program.MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME
+    notices.write_text("a file where the notices directory goes\n")
+    exit_code, output = case.run("merge-batch-start")
+    kept = in_progress.exists()
+    notices.unlink()
+    exit_code_again, output_again = case.run("merge-batch-start")
+    check("a dead batch whose stop file is written but whose stopped notice is not keeps the "
+          "in-progress file, so the rerun the FAILED line asks for writes the notice",
+          exit_code == 1 and "FAILED: " in output and kept
+          and exit_code_again == 0 and output_again.startswith("DIED MID-MERGE: ")
+          and any(name.startswith("stopped-") for name in case.notices())
+          and not in_progress.exists() and case.merge_calls() == [],
+          f"{output}\n{output_again}\n{case.notices()}")
+
+    case = Case(scratch, "merge-only-batch-finds-the-lock-held", [approved(10, A)],
+                {"10": pr(A)})
+    case.batches.mkdir()
+    (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
+        "pull request 11, started 2026-11-25T10:00:00Z\n")
+    with open(case.batches / program.MERGE_BATCH_LOCK_FILE_NAME, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        exit_code, output = case.run("merge-batch-run-in-queue-order", "--merge-only", "10")
+    stopped = [text for name, text in case.notices().items() if name.startswith("stopped-")]
+    check("a merge batch started to merge a pull request first with --merge-only that finds "
+          "merge-batch.lock held writes the stop file and a stopped notice saying the merge did "
+          "not run, exits 1, and leaves the running batch's in-progress file",
+          exit_code == 1 and "--merge-only" in (case.stop_text() or "")
+          and len(stopped) == 1 and "did not run" in stopped[0] and case.merge_calls() == []
+          and (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).exists(),
+          f"{output}\n{case.stop_text()}\n{stopped}")
+
     case = Case(scratch, "run-directly-after-a-death", [approved(10, A)], {"10": pr(A)})
     case.batches.mkdir()
     (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
@@ -843,6 +939,105 @@ def starting_cases(scratch):
           "nothing and writes the stop file and a stopped notice",
           exit_code == 0 and case.merge_calls() == [] and "main is untested" in (case.stop_text() or "")
           and any(name.startswith("stopped-") for name in case.notices()), f"{output}\n{case.notices()}")
+
+    case = Case(scratch, "run-directly-after-a-death-with-the-merge-programs-stop-file",
+                [approved(10, A)], {"10": pr(A)})
+    case.batches.mkdir()
+    (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
+        "pull request 9, started 2026-11-25T10:00:00Z\n")
+    (case.outputs / STOP_FILE_NAME).write_text("pull request 9's merge program exited 3\n")
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    stopped = [text for name, text in case.notices().items() if name.startswith("stopped-")]
+    check("a direct run after a batch died, with the merge program's stop file in place, keeps "
+          "that stop file and quotes it with the in-progress file in one stopped notice",
+          exit_code == 0 and case.stop_text() == "pull request 9's merge program exited 3\n"
+          and len(stopped) == 1 and "main is untested" in stopped[0]
+          and "pull request 9's merge program exited 3" in stopped[0]
+          and case.merge_calls() == [], f"{case.stop_text()}\n{stopped}")
+
+    case = Case(scratch, "start-while-a-healthy-batch-takes-the-lock", [approved(10, A)],
+                {"10": pr(A)})
+    real_flock = program.fcntl.flock
+    real_popen = program.subprocess.Popen
+    healthy_batch = []
+
+    def a_healthy_batch_takes_the_lock_when_it_is_released(lock, operation):
+        result = real_flock(lock, operation)
+        if operation == fcntl.LOCK_UN and not healthy_batch:
+            holder = open(case.batches / program.MERGE_BATCH_LOCK_FILE_NAME, "a")
+            real_flock(holder, fcntl.LOCK_EX)
+            healthy_batch.append(holder)
+            (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
+                "pull request 10, started 2026-11-25T10:00:00Z\n")
+        return result
+    program.fcntl.flock = a_healthy_batch_takes_the_lock_when_it_is_released
+    program.subprocess.Popen = lambda *arguments, **keywords: None
+    try:
+        exit_code, output = case.run("merge-batch-start")
+    finally:
+        program.fcntl.flock = real_flock
+        program.subprocess.Popen = real_popen
+        for holder in healthy_batch:
+            holder.close()
+    check("a start makes its dead-batch check while it holds merge-batch.lock, so a healthy batch "
+          "that takes the lock and writes its in-progress file is not taken for a dead one",
+          not output.startswith("DIED MID-MERGE") and case.stop_text() is None
+          and case.notices() == {}, f"{output}\n{case.stop_text()}")
+
+    case = Case(scratch, "resume-while-a-healthy-batch-takes-the-lock", [approved(10, A)],
+                {"10": pr(A)})
+    (case.outputs / STOP_FILE_NAME).write_text("stopped\n")
+    real_flock = program.fcntl.flock
+    real_popen = program.subprocess.Popen
+    healthy_batch = []
+
+    def a_healthy_batch_takes_the_lock_when_resume_releases_it(lock, operation):
+        result = real_flock(lock, operation)
+        if operation == fcntl.LOCK_UN and not healthy_batch:
+            holder = open(case.batches / program.MERGE_BATCH_LOCK_FILE_NAME, "a")
+            real_flock(holder, fcntl.LOCK_EX)
+            healthy_batch.append(holder)
+            (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
+                "pull request 10, started 2026-11-25T10:00:00Z\n")
+        return result
+    program.fcntl.flock = a_healthy_batch_takes_the_lock_when_resume_releases_it
+    program.subprocess.Popen = lambda *arguments, **keywords: None
+    try:
+        exit_code, output = case.run("merge-batch-resume")
+    finally:
+        program.fcntl.flock = real_flock
+        program.subprocess.Popen = real_popen
+        for holder in healthy_batch:
+            holder.close()
+    check("resume removes the stop file and the in-progress file while it holds merge-batch.lock, "
+          "so a healthy batch that takes the lock keeps its in-progress file",
+          not healthy_batch or (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).exists(),
+          f"{output}\n{healthy_batch}")
+    check("resume makes no check outside merge-batch.lock that a batch could take the lock in",
+          healthy_batch == [], output)
+
+    case = Case(scratch, "loop-retakes-the-lock-after-another-batch-died", [approved(10, A)],
+                {"10": pr(A), "11": pr(B)})
+    real_flock = program.fcntl.flock
+    released = []
+
+    def another_batch_dies_while_the_lock_is_free(lock, operation):
+        if operation == fcntl.LOCK_UN and not released:
+            released.append(True)
+            with open(case.queue, "a") as queue:
+                queue.write(approved(11, B) + "\n")
+            (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
+                "pull request 12, started 2026-11-25T10:00:00Z\n")
+        return real_flock(lock, operation)
+    program.fcntl.flock = another_batch_dies_while_the_lock_is_free
+    try:
+        exit_code, output = case.run("merge-batch-run-in-queue-order")
+    finally:
+        program.fcntl.flock = real_flock
+    check("a merge batch that takes the lock back after another batch died mid-merge stops, "
+          "and merges nothing more",
+          [call[0] for call in case.merge_calls()] == ["10"]
+          and "main is untested" in (case.stop_text() or ""), f"{case.merge_calls()}\n{output}")
 
     case = Case(scratch, "lock-held-and-stopped", [approved(10, A)], {"10": pr(A)})
     case.batches.mkdir()
@@ -875,6 +1070,33 @@ def starting_cases(scratch):
           "stop file is left",
           exit_code == 2 and output.startswith("REFUSED: pull request 99 is not waiting")
           and case.stop_text() == "stopped\n", output)
+
+    case = Case(scratch, "resume-merge-only-reads-the-queue-before-the-lock", [approved(10, A)],
+                {"10": pr(A)})
+    (case.outputs / STOP_FILE_NAME).write_text("stopped\n")
+    real_queue_lines = program.MergeQueuePullRequestMergeBatchRunner.queue_lines
+    lock_free_during_read = []
+
+    def a_batch_tries_the_lock_while_resume_reads_the_queue(self):
+        case.batches.mkdir(parents=True, exist_ok=True)
+        with open(case.batches / program.MERGE_BATCH_LOCK_FILE_NAME, "a") as other:
+            try:
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(other, fcntl.LOCK_UN)
+                lock_free_during_read.append(True)
+            except BlockingIOError:
+                lock_free_during_read.append(False)
+        return real_queue_lines(self)
+    program.MergeQueuePullRequestMergeBatchRunner.queue_lines = \
+        a_batch_tries_the_lock_while_resume_reads_the_queue
+    try:
+        exit_code, output = case.run("merge-batch-resume", "--merge-only", "99")
+    finally:
+        program.MergeQueuePullRequestMergeBatchRunner.queue_lines = real_queue_lines
+    check("resume --merge-only reads the queue file before it takes merge-batch.lock, so a merge "
+          "batch arriving then is not sent away ALREADY RUNNING by a resume that is refused",
+          exit_code == 2 and lock_free_during_read and all(lock_free_during_read),
+          f"{output}\n{lock_free_during_read}")
 
     case = Case(scratch, "start-cannot-start", [approved(10, A)], {"10": pr(A)})
     real_popen = program.subprocess.Popen
