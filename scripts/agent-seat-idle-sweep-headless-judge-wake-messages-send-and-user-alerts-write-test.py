@@ -918,7 +918,7 @@ check("rule 2: idle 15 minutes after the escalation: the step is logged, and no 
       and not machine.alerts(),
       (machine.events("wait_step"), machine.alerts()))
 
-SECOND_PROMISE = "I'll fix it after lunch."
+SECOND_PROMISE = "I'll fix it once lunch is over."
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
 machine.script(sent_ok())
@@ -2682,7 +2682,7 @@ machine.script(sent_ok())
 code, _ = machine.run(90)
 check("after the reset, the promise message the escalation's pause held back is sent",
       code == 0 and [event["step"] for event in machine.events("message_sent")] == ["nudge", "nudge"]
-      and "after lunch" in machine.events("message_sent")[-1]["text"],
+      and "once lunch is over" in machine.events("message_sent")[-1]["text"],
       (code, machine.events("message_sent"), machine.claude_calls()))
 groups = machine.events("rule_2_sentences_on_wait")
 check("after the reset, the promise judged again is not logged on the wait a second time, and "
@@ -2753,7 +2753,7 @@ check("one sentence judged backed and a promise unbacked, then an escalation sen
       code == 0 and ANNOUNCED in checked_sentences_before_reset
       and SECOND_PROMISE not in checked_sentences_before_reset
       and [event["step"] for event in sent] == ["nudge", "nudge"]
-      and "after lunch" in sent[-1]["text"] and "PR 1633" not in sent[-1]["text"],
+      and "once lunch is over" in sent[-1]["text"] and "PR 1633" not in sent[-1]["text"],
       (code, checked_sentences_before_reset, sent, machine.claude_calls()))
 
 machine = Machine()
