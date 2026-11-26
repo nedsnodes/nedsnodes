@@ -86,11 +86,11 @@ none, one the cold-read-grid names itself: `RETRYING:` at the first failure,
 first failures are not retried and go straight to `FAILED` and absence: a
 cause the user can clear (cell_common.USER_CLEARABLE_CAUSE_CLASSES), which a
 retry would only meet again, and an attempt stopped at the time limit. The
-time limit is 4 hours per attempt, counted on time.monotonic(), which leaves
+time limit is 2 hours per attempt, counted on time.monotonic(), which leaves
 out time the machine was asleep on both Linux (CLOCK_MONOTONIC) and macOS
 (mach_absolute_time), so a Mac that sleeps overnight does not trip it; the
 attempt is stopped with its children, its cause is `timed-out — timed out
-after 4 hours`, and a report it had written is deleted as unfinished, so it
+after 2 hours`, and a report it had written is deleted as unfinished, so it
 neither ships nor counts as a review. The `FAILED` line of an attempt whose cause the user can
 clear ends with "Tell the user: ...", once per agent-binary and cause, so
 the user hears of it while the other cold-read-cells run. When
@@ -249,18 +249,24 @@ GRID_CELL_ROSTER = (
 
 
 class GridCell(typing.NamedTuple):
-    """One cold-read-cell of the run; model and effort None keep the launcher's tier pin."""
+    """One cold-read-cell of the run; model, effort and per-model-run timeout None keep the launcher's own."""
 
     runtime: str
     cell_pass: str
     tier: str
     model: typing.Optional[str]
     effort: typing.Optional[str]
+    per_model_run_timeout_seconds: typing.Optional[int] = None
 
 
-# agy serves only the fast tier, so Neon runs on it with the model and effort given here.
+# Its model chain is the one model given, so one model run, plus the agy cell's
+# kill margin, must fit within CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS.
+GEMINI_NEON_DEFECT_HUNT_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 40 * 60
+# agy serves only the fast tier, so Neon runs on it with the model, effort and
+# time limit given here, not the fast read's.
 GEMINI_NEON_DEFECT_HUNT_CELL = GridCell(
-    "agy", "defect-hunt", "fast", "gemini-4-neon-high", "high")
+    "agy", "defect-hunt", "fast", "gemini-4-neon-high", "high",
+    GEMINI_NEON_DEFECT_HUNT_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS)
 GRID_CELLS = tuple(
     GridCell(runtime, cell_pass, tier, None, effort)
     for runtime in ("claude", "codex")
@@ -413,9 +419,9 @@ CELL_POLL_INTERVAL_OVERRIDE_VARIABLE = "COLD_READ_GRID_CELL_POLL_INTERVAL_SECOND
 CELL_POLL_INTERVAL_DEFAULT_SECONDS = 5.0
 # Tests shorten the limit so a timed-out attempt is seen in seconds.
 CELL_ATTEMPT_TIMEOUT_OVERRIDE_VARIABLE = "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS"
-CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS = 4 * 60 * 60
+CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS = 2 * 60 * 60
 TIMED_OUT_CAUSE_CLASS = "timed-out"
-TIMED_OUT_CAUSE_DETAIL = "timed out after 4 hours"
+TIMED_OUT_CAUSE_DETAIL = f"timed out after {CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS / 3600:g} hours"
 STOPPED_CELL_UNFINISHED_REPORT_DELETED_PHRASE = "; the unfinished report it had written is deleted"
 
 
@@ -937,6 +943,8 @@ def launch_cells(target: pathlib.Path, record_dir: pathlib.Path,
             command += ["--model", cell.model]
         if cell.effort:
             command += ["--effort", cell.effort]
+        if cell.per_model_run_timeout_seconds:
+            command += ["--per-model-run-timeout-seconds", str(cell.per_model_run_timeout_seconds)]
         # The reviewer writes its report; captured chat can omit findings written before tool calls.
         running[report_path] = start_attempt(command, report_path, 1, stderr_path)
     return running

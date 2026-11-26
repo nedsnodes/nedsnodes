@@ -1132,7 +1132,7 @@ with tempfile.TemporaryDirectory() as scratch:
     copied_agy_cell = repository / "nn-systems" / "cold-read" / "cold-read-agy-cell.py"
     copied_agy_cell.write_text(
         copied_agy_cell.read_text(encoding="utf-8")
-        .replace("COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n",
+        .replace("COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 15 * 60\n",
                  "COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 1\n")
         .replace("COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS = 60\n",
                  "COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS = 1\n"),
@@ -1309,7 +1309,7 @@ with tempfile.TemporaryDirectory() as scratch:
     copied_fast_read = repository / "nn-systems" / "cold-read" / "cold-read-fast-read.py"
     copied_fast_read.write_text(
         copied_fast_read.read_text(encoding="utf-8").replace(
-            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n",
+            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 10 * 60\n",
             "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 5\n"),
         encoding="utf-8")
     suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
@@ -1363,7 +1363,7 @@ with tempfile.TemporaryDirectory() as scratch:
     copied_fast_read = repository / "nn-systems" / "cold-read" / "cold-read-fast-read.py"
     copied_fast_read.write_text(
         copied_fast_read.read_text(encoding="utf-8").replace(
-            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n",
+            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 10 * 60\n",
             "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 2\n"),
         encoding="utf-8")
     suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
@@ -1509,7 +1509,7 @@ with tempfile.TemporaryDirectory() as scratch:
     copied_fast_read = repository / "nn-systems" / "cold-read" / "cold-read-fast-read.py"
     copied_fast_read.write_text(
         copied_fast_read.read_text(encoding="utf-8").replace(
-            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n",
+            "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 10 * 60\n",
             "COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 2\n"),
         encoding="utf-8")
     suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
@@ -2259,6 +2259,15 @@ check("the ssh time limit of a read on ned-box follows the agy cell's per-model 
       + warning_module.COLD_READ_FAST_READ_SONNET_BACKUP_RUN_ALLOWANCE_SECONDS + 5 * 60
       + warning_module.new_words.NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS
       + warning_module.COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS)
+check("the ssh time limit of a read on ned-box is built from the agy cell's 15-minute "
+      "default, killed a minute later, the Sonnet backup's 10 minutes and the Question 4 "
+      "cell's 10 minutes",
+      warning_module.agy_cell.COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS == 16 * 60
+      and warning_module.COLD_READ_FAST_READ_RUN_ON_NED_BOX_OVER_SSH_TIMEOUT_SECONDS
+      == warning_module.FAST_READ_ATTEMPTS
+      * len(warning_module.agy_cell.TIER_TO_AGY_MODEL_CHAIN[warning_module.FAST_READ_TIER]) * 16 * 60
+      + 10 * 60 + 5 * 60 + 10 * 60,
+      repr(warning_module.COLD_READ_FAST_READ_RUN_ON_NED_BOX_OVER_SSH_TIMEOUT_SECONDS))
 check("the Question 4 prompt carries the fast-clarify prompt's reading rules whole, "
       "from their first sentence to their last",
       warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES.startswith(warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES_OPENING_WORDS)

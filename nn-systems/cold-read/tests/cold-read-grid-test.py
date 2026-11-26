@@ -613,7 +613,7 @@ def wrote_then_hung_checks(result, left_running, repository, elapsed):
     checks.append(("a timed-out cell that had written its report: FAILED says the unfinished report is deleted",
                    lines_opening(result, "saved:") == []
                    and len(failed_lines) == 8
-                   and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
+                   and all(" — timed-out — timed out after 2 hours (stderr kept: " in line
                            and line.endswith(".stderr.log); the unfinished report it had written is deleted")
                            for line in failed_lines),
                    f"elapsed {elapsed:.1f}s; stdout={result.stdout!r}"))
@@ -1192,7 +1192,7 @@ try:
     check("every attempt past the limit, the Question 4 cell's included, is FAILED as timed out, "
           "with no RETRYING line",
           lines_opening(result, "RETRYING:") == [] and len(failed_lines) == 8
-          and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
+          and all(" — timed-out — timed out after 2 hours (stderr kept: " in line
                   for line in failed_lines),
           repr(result.stdout))
     check("no timed-out cell's report is saved, none landed, exit 1",
@@ -2496,6 +2496,35 @@ try:
         if attempt.process is not None:
             grid_module.cell_common.stop_process_tree(attempt.process, grace_seconds=0.1)
     check("stopping a cell reaps its launcher", attempt.process.returncode is not None)
+
+    # The agy cell's default limit is the fast read's; only the grid's Gemini cell passes its own.
+    launched_commands = {}
+    with mock.patch.object(grid_module, "start_attempt",
+                           lambda command, report_path, *rest: launched_commands.setdefault(
+                               report_path.name, command)):
+        grid_module.launch_cells(scratch / "target.md", scratch, scratch / "origin.md")
+    agy_command = launched_commands.get("agy-hunt-gemini-4-neon-high.md", [])
+    timeout_flag = "--per-model-run-timeout-seconds"
+    check("the grid gives its Gemini defect-hunt cell 40 minutes per model run, "
+          "and no other cell a per-model-run time limit",
+          timeout_flag in agy_command
+          and agy_command[agy_command.index(timeout_flag) + 1] == str(40 * 60)
+          and not any(timeout_flag in command for name, command in launched_commands.items()
+                      if name != "agy-hunt-gemini-4-neon-high.md"),
+          repr(launched_commands))
+    agy_cell_spec = importlib.util.spec_from_file_location(
+        "cold_read_agy_cell_under_test", SYSTEM_DIRECTORY / "cold-read-agy-cell.py")
+    agy_cell_module = importlib.util.module_from_spec(agy_cell_spec)
+    agy_cell_spec.loader.exec_module(agy_cell_module)
+    check("the Gemini defect-hunt cell's one model run, with the agy cell's kill margin, "
+          "ends before the grid's cell-attempt time limit",
+          grid_module.GEMINI_NEON_DEFECT_HUNT_CELL.model is not None
+          and grid_module.GEMINI_NEON_DEFECT_HUNT_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS
+          + agy_cell_module.COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS
+          < grid_module.CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS)
+    check("the timed-out cause names the grid's cell-attempt time limit, 2 hours",
+          grid_module.TIMED_OUT_CAUSE_DETAIL == "timed out after 2 hours",
+          repr(grid_module.TIMED_OUT_CAUSE_DETAIL))
 
     # An interrupted grid exits while its cells keep writing the record: each cell holds the record's
     # being-written lock too, so the record is not shipped until the last cell has exited.
