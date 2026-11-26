@@ -895,6 +895,41 @@ def starting_cases(scratch):
           and output_again.startswith("STOPPED: ") and case.notices() == first_notices
           and case.merge_calls() == [], f"{output}\n{output_again}\n{case.notices()}")
 
+    case = Case(scratch, "died-mid-merge-notice-unwritable", [approved(10, A)], {"10": pr(A)})
+    case.batches.mkdir()
+    in_progress = case.batches / program.MERGE_IN_PROGRESS_FILE_NAME
+    in_progress.write_text("pull request 10, started 2026-11-25T10:00:00Z\n")
+    notices = case.batches / program.MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME
+    notices.write_text("a file where the notices directory goes\n")
+    exit_code, output = case.run("merge-batch-start")
+    kept = in_progress.exists()
+    notices.unlink()
+    exit_code_again, output_again = case.run("merge-batch-start")
+    check("a dead batch whose stop file is written but whose stopped notice is not keeps the "
+          "in-progress file, so the rerun the FAILED line asks for writes the notice",
+          exit_code == 1 and "FAILED: " in output and kept
+          and exit_code_again == 0 and output_again.startswith("DIED MID-MERGE: ")
+          and any(name.startswith("stopped-") for name in case.notices())
+          and not in_progress.exists() and case.merge_calls() == [],
+          f"{output}\n{output_again}\n{case.notices()}")
+
+    case = Case(scratch, "merge-only-batch-finds-the-lock-held", [approved(10, A)],
+                {"10": pr(A)})
+    case.batches.mkdir()
+    (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
+        "pull request 11, started 2026-11-25T10:00:00Z\n")
+    with open(case.batches / program.MERGE_BATCH_LOCK_FILE_NAME, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        exit_code, output = case.run("merge-batch-run-in-queue-order", "--merge-only", "10")
+    stopped = [text for name, text in case.notices().items() if name.startswith("stopped-")]
+    check("a merge batch started to merge a pull request first with --merge-only that finds "
+          "merge-batch.lock held writes the stop file and a stopped notice saying the merge did "
+          "not run, exits 1, and leaves the running batch's in-progress file",
+          exit_code == 1 and "--merge-only" in (case.stop_text() or "")
+          and len(stopped) == 1 and "did not run" in stopped[0] and case.merge_calls() == []
+          and (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).exists(),
+          f"{output}\n{case.stop_text()}\n{stopped}")
+
     case = Case(scratch, "run-directly-after-a-death", [approved(10, A)], {"10": pr(A)})
     case.batches.mkdir()
     (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
