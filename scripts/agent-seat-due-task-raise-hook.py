@@ -186,8 +186,9 @@ without merging and, when there is any, the instructions for re-planning it,
 then two lines per prerequisites list the hook cannot use, then the
 next-action prompt's lines, then one line per condition gh could not answer
 at this stop, then, when the budget left a condition unchecked, one line
-counting those conditions and the open tasks that wait on them. Nothing to raise or name and no next-action prompt, a budget skip
-included, since it asks nothing: nothing printed, exit 0. A fault, such as a payload
+counting those conditions and the open tasks that wait on them; that line alone, with nothing
+else to print, goes out the same way, as context that asks nothing, exit 0. Nothing to raise,
+name or count and no next-action prompt: nothing printed, exit 0. A fault, such as a payload
 that is not a JSON object, a state file that cannot be written, a condition
 gh could not answer at a stop with nothing else to print, or any exception:
 one line on stderr naming the hook and the fault, nothing on stdout, exit 1.
@@ -262,8 +263,8 @@ GITHUB_REPOSITORY = "nedsnodes/nedsnodes"
 CONDITION_RECHECK_INTERVAL_SECONDS = 300
 GH_CALL_TIMEOUT_SECONDS = 8
 GH_CALLS_TOTAL_BUDGET_SECONDS = 20
-# One `gh pr view` took 0.59 seconds on ned-box on 2026-11-26; with less time left than this, a
-# call can only time out, which would be reported as a GitHub failure.
+# A `gh pr view` takes over half a second on ned-box; with less time left than this, a call can
+# only time out, which would be reported as a GitHub failure.
 GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS = 2
 
 # condition kind -> (gh subcommand, the gh state that means met, the ID-type
@@ -317,7 +318,7 @@ PREREQUISITES_PROBLEM_LINE_TEMPLATE = (
     '[rule due-task-prerequisites-unusable-correct-them] Task {task_id} "{subject}" is never raised as its metadata.prerequisites stand, because '
     "{problem}.")
 BUDGET_SKIPPED_LINE_TEMPLATE = (
-    "This hook's {budget}-second budget for GitHub calls ran out before it asked about "
+    "[rule due-task-github-call-budget-ran-out-next-stop-asks-again] This hook's {budget}-second budget for GitHub calls ran out before it asked about "
     "{condition_count} pull request(s) or GHI(s) that {task_count} open task(s) wait on; nothing "
     "is needed, since the next stop asks again and raises each task whose prerequisites are met.")
 PREREQUISITES_CORRECTION_INSTRUCTION = (
@@ -1253,7 +1254,9 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
     if not lines and not closed_lines and not problem_lines and not next_action_lines:
         if gh_failure_lines:
             raise HookFault(" ".join(gh_failure_lines + budget_skipped_lines))
-        return None  # a budget skip alone asks nothing, so it is no fault
+        if not budget_skipped_lines:
+            return None
+    # A skipped check is told to the agent as context, never as a fault: a task it skipped may be due.
     defer_lines = [DEFER_INSTRUCTION] if lines else []
     if closed_lines:
         closed_lines += CLOSED_WITHOUT_MERGING_INSTRUCTIONS

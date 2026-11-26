@@ -655,8 +655,8 @@ def age_cached_answers(seat):
     seat.state_path.write_text(json.dumps(state))
 
 
-# merge-lane-2 had 88 conditions on 2026-11-26; asked one by one at 0.59 seconds each they spent
-# the 20-second budget, and every one went back to gh every five minutes, merged ones included.
+# An agent-seat with many conditions, asked one by one, spends the budget, and every one goes back
+# to gh every five minutes, merged ones included.
 seat = Seat()
 for number in range(601, 641):
     seat.task(str(number), metadata={"prerequisites": [{"pr_merged": number}]})
@@ -1193,7 +1193,7 @@ def hook_run_in_process(seat):
 
 
 def budget_skipped_line(condition_count, task_count):
-    return (f"This hook's 20-second budget for GitHub calls ran out before it asked about "
+    return (f"[rule due-task-github-call-budget-ran-out-next-stop-asks-again] This hook's 20-second budget for GitHub calls ran out before it asked about "
             f"{condition_count} pull request(s) or GHI(s) that {task_count} open task(s) wait on; "
             f"nothing is needed, since the next stop asks again and raises each task whose "
             f"prerequisites are met.")
@@ -1222,9 +1222,12 @@ try:
     fault = None
 except hook.HookFault as error:
     output, fault = None, str(error)
-# The user saw "Stop hook failed" for a budget skip alone on 2026-11-26, though it asks nothing.
-check("budget spent, with nothing else to say: silent, exit 0, no fault",
-      output is None and fault is None, (output, fault))
+# A budget skip alone asks nothing, so it must not show as "Stop hook failed", yet the skip is told.
+check("budget spent, with nothing else to say: the skip line as context, no fault",
+      fault is None and output is not None
+      and json.loads(output)["hookSpecificOutput"]["additionalContext"].startswith(
+          "[rule due-task-github-call-budget-ran-out-next-stop-asks-again] ")
+      and "ran out before it asked about" in output, (output, fault))
 
 seat = Seat()
 seat.task("4", metadata={"prerequisites": [{"pr_merged": 401}]})
