@@ -1605,6 +1605,7 @@ PROPOSED_TEXT_REVISIONS_BEFORE_FRESH_AGENT_REWRITE = 3
 PROPOSED_TEXT_REVISIONS_FILE = "item-{number}-proposed-text-revisions.json"
 FRESH_AGENT_REWRITE_FILE = "item-{number}-fresh-agent-rewrite.md"
 USER_WORDS_IN_MINUTES_PHRASE = "his words"
+USER_LINE_OPENING = "User"
 MARKDOWN_LINK_TARGET = re.compile(r"\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)|<([A-Za-z][A-Za-z0-9+.-]*:[^>\s]+)>")
 PROPOSED_TEXT_REVISIONS_UNREADABLE = (
     "{item} is not read: {path}, this program's count of the revisions of the `#new` lines of item {whole_number} and its "
@@ -1656,7 +1657,8 @@ FRESH_AGENT_REWRITE_BRIEF_LINES = (
     "this brief on purpose: write it from the user's words and the files below, not from any earlier text.",
     "Read {skill} for how an item is written, and keep the item within the word limit it gives.",
     "The user's words on this item, and on the item whose held answer raised it, in the lines of the walk-minutes "
-    "{minutes} that hold them:",
+    "{minutes} that hold them. A reply recorded as given while an item waited may be a new point he raised then "
+    "rather than words on that item; leave out of the item any such reply that is not about it:",
 )
 FRESH_AGENT_REWRITE_NO_USER_WORDS = ("- none: no line of the walk-minutes holds his words and names item {whole_number}, one of "
                                      "its sub-steps, its title, an item whose held answer raised it, or the item that waited when it "
@@ -3301,7 +3303,8 @@ def approval_walk_item_linked_files(text, ned_box_home, mac_mount):
 def approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes_text, whole_number, titles):
     """Return each line of the walk-minutes that holds the user's words and names, before his words, item whole_number, one of its sub-steps, one of titles, or an
     item whose held answer raised item whole_number, or that waited when the user bumped it, or that raised an item
-    that did, with its sub-steps: the user's reply on that item is what the raised item is about."""
+    that did, with its sub-steps: the user's reply on that item is what the raised item is about. A line opening `User`
+    that names one of titles anywhere counts too, without "his words"."""
     wholes = {whole_number}
     raisers = [({number.split(".")[0] for number in held}, {number.split(".")[0] for number in raised})
                for _, held, _, raised in held_answers(walk_finder, minutes_text, parser)]
@@ -3322,6 +3325,10 @@ def approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes_text, 
         # name any item number.
         naming = line.split(USER_WORDS_IN_MINUTES_PHRASE, 1)[0]
         if naming == line:
+            # A line an agent copied by hand opens with `User` but may not say "his words"; its title, often in an
+            # outcome after his words, names the item.
+            if line.startswith(USER_LINE_OPENING) and any(title and title.lower() in line.lower() for title in titles):
+                found.append(line)
             continue
         named = set()
         for numbers in walk_finder.WITHDRAWN_HEADING_ITEMS.finditer(naming):

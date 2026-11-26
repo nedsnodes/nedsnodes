@@ -8407,6 +8407,44 @@ def test_the_fresh_agent_brief_holds_the_bumped_item_s_raising_reply_and_not_a_n
           brief)
 
 
+def test_the_fresh_agent_brief_holds_a_hand_copied_user_line_naming_the_title_and_warns_of_a_new_point_while_it_waited():
+    """An agent copied by hand the user's words that raised item 3, naming its title only in the outcome after them
+    and not saying "his words"; later the user raised a new point while item 3 waited, which the hook recorded as
+    on item 3."""
+    spec = importlib.util.spec_from_file_location("walk_short_answer_hook_for_hand_copy_test", SHORT_ANSWER_HOOK_FILE)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    hand_copied = ('User, 2026-11-25 (with his approval of item 1): "are we sure one poem a job is enough?" Outcome: '
+                   "added as the walk item 'the poem page lists one poem per job'. <open>")
+    unrelated = ('User, 2026-11-25 (with his approval of item 2): "the menu is too long" Outcome: added as the walk '
+                 "item 'the menu page'. <open>")
+    new_point = hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
+        date_and_time="2026-11-26 04:50Z", item="item 3 of 9", words="`are we running out of Neon?`")
+    original = revised_item_case
+
+    def hand_copied_case():
+        case = original()
+        case.minutes.write_text("# Minutes\n\n" + "\n".join((hand_copied, unrelated, "#next_to_present item 3 of 9",
+                                                              new_point, "")))
+        return case
+    globals()["revised_item_case"] = hand_copied_case
+    try:
+        case, results, _ = revised_item_case_revised_three_times_across_a_split()
+    finally:
+        globals()["revised_item_case"] = original
+    last = results[4]
+    brief = last.stdout.split("----- brief for the fresh-agent: start -----\n")[-1].split(
+        "----- brief for the fresh-agent: end -----")[0]
+    check("at the third revision the read step prints the brief", last.returncode == 1 and "has been revised three "
+          "times" in last.stdout, "".join(described(result) for result in results))
+    check("the brief holds the hand-copied line that names item 3's title after his words", f"- {hand_copied}" in brief,
+          brief)
+    check("the brief leaves out a hand-copied line naming another item's title", "the menu is too long" not in brief,
+          brief)
+    check("the brief tells the fresh-agent that a reply given while the item waited may be a new point",
+          f"- {new_point}" in brief and "may be a new point he raised then" in brief, brief)
+
+
 def test_the_fresh_agent_rewrite_takes_the_place_of_the_item_s_text_and_starts_the_count_again():
     case, _, _ = revised_item_case_revised_three_times_across_a_split()
     rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
