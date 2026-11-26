@@ -21,9 +21,10 @@ nn-systems/general-tools/scheduled-jobs-on-each-machine.json.
 WHAT ONE RUN DOES, in order.
 
   1. Makes a scratch clone holding the hook and every file under scripts/ and
-     nn-systems/ that loading the hook's two modules reads, as the working tree
-     has them; a probe that loads those modules finds the files, so the clone
-     follows the modules' imports without a list kept by hand. The clone has one
+     nn-systems/ that loading the hook's module,
+     nn-systems/handoff/uncommitted-work-snapshots.py, reads, as the working
+     tree has them; a probe that loads that module finds the files, so the clone
+     follows the module's imports without a list kept by hand. The clone has one
      commit and sits in a temporary directory.
   2. Runs `claude -p` on Haiku from that clone, with the hook registered for
      Bash calls through --settings, and asks it to run one shell command that
@@ -31,10 +32,7 @@ WHAT ONE RUN DOES, in order.
   3. Checks that claude exited 0 with a result that is not an error; that the
      clone has exactly one work-snapshot; that the work-snapshot holds the
      file; that its owner key names the process this program started as
-     claude; that its transcript trailer names claude's session id; and that
-     the clone's scripts/worktree-owner-file-read-and-write.py, which the hook
-     loads to write a subagent's owner file and whose failure it only reports
-     to claude, loads.
+     claude; and that its transcript trailer names claude's session id.
   4. Writes the record, a header line, step 3's PASS and FAIL lines and a
      VERDICT line, to the log-store:
      nedlern@ned-box:/home/nedlern/nedsnodes-logs/uncommitted-work-snapshot-hook-scheduled-checks-that-real-claude-session-is-recorded-as-owner/<machine>/<YYYY-MM-DD>.txt,
@@ -85,7 +83,6 @@ SYSTEM_DIRECTORY = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SYSTEM_DIRECTORY.parent.parent
 MODULE_RELATIVE = Path("nn-systems/handoff/uncommitted-work-snapshots.py")
 HOOK_RELATIVE = Path("scripts/uncommitted-work-snapshot-hook.py")
-OWNER_FILE_MODULE_RELATIVE = Path("scripts/worktree-owner-file-read-and-write.py")
 SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY = ("scripts", "nn-systems")
 LIVE_CHECK_FILE_NAME = "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner-marker-file-created-by-real-claude-session.txt"
 LIVE_CHECK_PROMPT = (f"Run this one shell command and nothing else: "
@@ -161,16 +158,15 @@ sys.stdout.write("\\0".join(sorted(opened)))
 
 
 def files_the_hook_loads():
-    """The hook and the files under the code directories that loading its modules reads."""
+    """The hook and the files under the code directories that loading its module reads."""
     completed = subprocess.run(
         [sys.executable, "-c", LOADED_FILES_PROBE_SOURCE, str(REPOSITORY_ROOT),
          os.pathsep.join(SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY),
-         str(MODULE_RELATIVE), str(OWNER_FILE_MODULE_RELATIVE)],
+         str(MODULE_RELATIVE)],
         capture_output=True, text=True, check=False,
         env=runner.environment_without_git_redirecting_variables())
     if completed.returncode != 0:
-        raise RuntimeError(f"loading {MODULE_RELATIVE} and {OWNER_FILE_MODULE_RELATIVE} from the "
-                           f"working tree failed: "
+        raise RuntimeError(f"loading {MODULE_RELATIVE} from the working tree failed: "
                            f"{(completed.stderr.strip().splitlines() or ['no detail'])[-1]}")
     return sorted({str(HOOK_RELATIVE), *filter(None, completed.stdout.split("\0"))})
 
@@ -315,17 +311,8 @@ def owner_check_result_lines(arguments, scratch):
                 f"{type(error).__name__}: {error}"]
     claude_process_id, exit_code, stdout, stderr = wait_for_claude(
         process, arguments.timeout_seconds)
-    loaded = subprocess.run(
-        [sys.executable, "-c",
-         "import importlib.util, sys; spec = importlib.util.spec_from_file_location('m', sys.argv[1]); "
-         "spec.loader.exec_module(importlib.util.module_from_spec(spec))",
-         str(clone / OWNER_FILE_MODULE_RELATIVE)],
-        capture_output=True, text=True, check=False)
-    load_line = (f"PASS the clone's {OWNER_FILE_MODULE_RELATIVE} loads" if loaded.returncode == 0
-                 else f"FAIL the clone's {OWNER_FILE_MODULE_RELATIVE} does not load, so the hook "
-                      f"writes no owner file: {(loaded.stderr.strip().splitlines() or ['no detail'])[-1]}")
-    return [*check_results(clone, claude_process_id, exit_code, stdout, stderr,
-                           arguments.timeout_seconds), load_line]
+    return check_results(clone, claude_process_id, exit_code, stdout, stderr,
+                         arguments.timeout_seconds)
 
 
 def main(argv=None, now=None):
