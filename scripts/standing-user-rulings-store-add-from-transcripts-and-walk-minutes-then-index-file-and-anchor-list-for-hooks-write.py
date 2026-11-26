@@ -306,8 +306,9 @@ NOT_THE_USERS_WORDS_CHECK_FAILED_INSTRUCTIONS = (
     OWNER_REPORT_INSTRUCTION,
 )
 OUTPUT_FAILED_INSTRUCTIONS = (
-    "The store keeps every entry this run added; hooks go on reading the last index file and anchor list "
-    "written whole, since each is renamed into place only once written.",
+    "The store keeps every entry this run added. Each file a FAILED line above names is left as an earlier run "
+    "wrote it whole, since each is renamed into place only once written, and hooks go on reading it; a file no "
+    "FAILED line names was replaced with this run's.",
     "If the error says the disk is full, free space on the log-store's disk first.",
     "Then run `" + RUN_AGAIN_COMMAND + "` once more; if it fails the same way again, send prime-intellect, the "
     "agent-seat that owns this program, the FAILED line above with SendMessage.",
@@ -827,13 +828,14 @@ def run(log_store, agents_directory, repository_checkout, failures_only=False):
     built_at = utc_now_text()
     lines, anchors = index_lines(connection, repository, built_at)
     index_path, anchor_path = store_directory / INDEX_FILE_NAME, store_directory / ANCHOR_LIST_FILE_NAME
-    index_bytes = anchor_bytes = "not written"
-    try:
-        index_bytes = write_whole(index_path, lines)
-        anchor_bytes = write_whole(anchor_path, anchors)
-    except OSError as error:
-        failures_with_instructions.append((FAILED_LINE.format(what="the index file or the anchor list", error=error),
-                                           OUTPUT_FAILED_INSTRUCTIONS))
+    written_bytes = {}
+    for what, path, its_lines in (("the index file", index_path, lines), ("the anchor list", anchor_path, anchors)):
+        try:
+            written_bytes[path] = write_whole(path, its_lines)
+        except OSError as error:
+            written_bytes[path] = "not written"
+            failures_with_instructions.append((FAILED_LINE.format(what=f"{what} {path}", error=error),
+                                               OUTPUT_FAILED_INSTRUCTIONS))
     failures = [line for line, _ in failures_with_instructions]
     with connection:
         connection.execute("INSERT INTO index_program_runs (started_at_utc, finished_at_utc, user_words_added, "
@@ -845,12 +847,11 @@ def run(log_store, agents_directory, repository_checkout, failures_only=False):
             if its_instructions == instructions:
                 print(line, file=sys.stderr)
         print("\n".join(instructions), file=sys.stderr)
-    if failures_only:
-        return EXIT_SOURCE_OR_OUTPUT_FAILED if failures else EXIT_OK
-    print(SUMMARY_LINE.format(user_words=user_words_added, walk=walk_added, set_count=set_count,
-                              cleared_count=cleared_count, index=index_path,
-                              entries=len(lines) - 1, index_bytes=index_bytes, anchors_path=anchor_path,
-                              anchors=len(anchors), anchor_bytes=anchor_bytes))
+    if not failures_only:
+        print(SUMMARY_LINE.format(user_words=user_words_added, walk=walk_added, set_count=set_count,
+                                  cleared_count=cleared_count, index=index_path, entries=len(lines) - 1,
+                                  index_bytes=written_bytes[index_path], anchors_path=anchor_path,
+                                  anchors=len(anchors), anchor_bytes=written_bytes[anchor_path]))
     return EXIT_SOURCE_OR_OUTPUT_FAILED if failures else EXIT_OK
 
 

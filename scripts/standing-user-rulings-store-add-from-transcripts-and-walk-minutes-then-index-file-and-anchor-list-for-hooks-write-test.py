@@ -628,10 +628,27 @@ with tempfile.TemporaryDirectory() as directory:
     (case.store_directory / (program.INDEX_FILE_NAME + ".partial")).mkdir(parents=True)
     result = case.run()
     check("an index file that cannot be written is reported FAILED, exit 1, and the store keeps the entries",
-          result.returncode == 1 and "FAILED: the index file or the anchor list:" in result.stderr
+          result.returncode == 1
+          and f"FAILED: the index file {case.store_directory / program.INDEX_FILE_NAME}:" in result.stderr
+          and "FAILED: the anchor list" not in result.stderr
           and f"`python3 {PROGRAM.resolve()}` once more" in result.stderr and "not written" in result.stdout
           and [entry[1] for entry in case.entries()] == ["kept"]
           and not (case.store_directory / program.INDEX_FILE_NAME).exists(), described(result))
+
+# The anchor list cannot be written after the index file was replaced, in a --failures-only run as cron makes.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    case.transcript("ned-box", [human("indexed", "2026-10-22T00:00:00Z")])
+    (case.store_directory / (program.ANCHOR_LIST_FILE_NAME + ".partial")).mkdir(parents=True)
+    result = case.run("--failures-only")
+    check("with --failures-only, an anchor list that cannot be written after the index file was replaced is named "
+          "FAILED, the index file is not, the index file holds the new words, no summary is printed, and exit is 1",
+          result.returncode == 1 and result.stdout == ""
+          and f"FAILED: the anchor list {case.store_directory / program.ANCHOR_LIST_FILE_NAME}:" in result.stderr
+          and "FAILED: the index file" not in result.stderr
+          and "a file no FAILED line names was replaced with this run's" in result.stderr
+          and "indexed" in (case.store_directory / program.INDEX_FILE_NAME).read_text(encoding="utf-8")
+          and not (case.store_directory / program.ANCHOR_LIST_FILE_NAME).exists(), described(result))
 
 # origin/main cannot be read.
 with tempfile.TemporaryDirectory() as directory:
