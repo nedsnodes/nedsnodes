@@ -307,9 +307,8 @@ The idle sweep's entry, `agent-seat-idle-sweep-headless-judge-wake-messages-send
 - Whether the due-task Stop hook's state file records the conditions each raise was made under, so that the hook itself reports a raise repeated with no change to them, the case the first entry of § Provisional additions waits on.
 - Whether the rule 5 judge is told that an open task it is handed waits on a pull request closed without merging, which today it is handed as any open task that nothing holds, though its `blockedBy` tasks or its other `prerequisites` may still hold it.
 - Whether code, rather than the judge, works out which open tasks a rule 5 message names, by matching each task's id or subject in the message's text as it already does for running work, instead of taking the ids the judge lists.
-- Whether rule 3 in § Who decides, and what is sent, names Decided point 14's withheld rule 3 message and the rule 5 judge that new open tasks still go to meanwhile.
-- What makes a put-off handoff the same one, for Decided point 14's repeat rule, when its handoff-deferral marker file is removed and written again within one agent-session.
 - Whether a sentence that only declines an action but that a promise phrase matches, such as "I'll hold off on opening pull requests today", which the hold phrase "I'll hold" matches, goes to the judge instead of being settled unbacked by code when no task could back it.
+- Whether a sentence that announces an action and holds an "if you" that sets no condition on the user, such as "I'll push no further changes, but I'll run the tests again even if you already ran them.", goes to the judge instead of being tagged conditional on the user and not raised; Decided point 7 keeps a sentence the user's next move conditions from being raised.
 
 ### Phase 2 of More kinds of prerequisite
 
