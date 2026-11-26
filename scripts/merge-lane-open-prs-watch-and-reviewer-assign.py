@@ -1025,11 +1025,47 @@ class EventLinesAppendFailed(OSError):
         self.read_back = read_back
 
 
+def event_file_cut_back_to_last_whole_line(path):
+    """Cut the bytes after the event file's last newline, which an append that stopped inside a
+    line leaves, so that the next line does not glue onto them. Raises OSError when they cannot
+    be cut."""
+    try:
+        with path.open("rb") as events:
+            end = events.seek(0, os.SEEK_END)
+            if end == 0:
+                return
+            events.seek(end - 1)
+            if events.read(1) == b"\n":
+                return
+            while end > 0:
+                start = max(0, end - 65536)
+                events.seek(start)
+                chunk = events.read(end - start)
+                newline = chunk.rfind(b"\n")
+                if newline >= 0:
+                    end = start + newline + 1
+                    break
+                end = start
+    except FileNotFoundError:
+        return
+    try:
+        os.truncate(path, end)
+    except OSError as error:
+        raise OSError(
+            f"the event file {path} ends inside a line after byte {end}, which could not be cut "
+            f"back ({error}), so this poll records nothing: cut the file to {end} bytes, its last "
+            f"whole line, and the next poll records again") from error
+
+
 def event_lines_append(path, lines, now):
     """Append the lines, each after the UTC time. Raises EventLinesAppendFailed when the append
-    fails after the file is opened, and OSError when it cannot be opened."""
+    fails after the file is opened, and OSError when it cannot be opened or ends inside a line
+    that cannot be cut back."""
     if not lines:
         return
+    # The caller's lock keeps other writers out, so bytes after the last newline are a failed
+    # append's.
+    event_file_cut_back_to_last_whole_line(path)
     stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     encoded = [f"{stamp} {redact_secrets(line)}\n".encode("utf-8", errors="replace") for line in lines]
     start = None
@@ -1047,19 +1083,8 @@ def event_lines_append(path, lines, now):
             raise EventLinesAppendFailed(
                 f"{error}; the event file {path} could not be read back, so it may hold any of "
                 f"this append's {len(lines)} lines", [], read_back=False) from error
-        # The bytes after the last whole line are this append's own, and the caller's lock keeps
-        # other writers out, so cutting them keeps the next append from gluing onto a cut line.
-        whole_end = start + sum(len(line) for line in encoded[:held])
-        cut = ""
-        try:
-            if path.stat().st_size > whole_end:
-                os.truncate(path, whole_end)
-        except OSError as cut_error:
-            cut = (f"; and a cut line of this append is left at byte offset {whole_end} of the "
-                   f"event file, which could not be cut back ({cut_error}): cut the file to "
-                   f"{whole_end} bytes")
         raise EventLinesAppendFailed(
-            f"{error}; the event file {path} holds {held} of this append's {len(lines)} lines{cut}",
+            f"{error}; the event file {path} holds {held} of this append's {len(lines)} lines",
             lines[:held], read_back=True) from error
 
 

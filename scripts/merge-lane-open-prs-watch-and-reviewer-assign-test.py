@@ -2273,9 +2273,9 @@ def run_poll_once_cases(scratch_root, token_file):
     machine.complete_tasks()
     second = machine.run()
     lines = machine.event_lines()
-    check("when the append stops inside the second REVIEW-ASSIGNED line, the run cuts the event "
-          "file back to its last whole line, so the next run writes a whole, readable line for the "
-          "put-back pull request",
+    check("when the append stops inside the second REVIEW-ASSIGNED line, the next run cuts the "
+          "event file back to its last whole line before it appends, so it writes a whole, readable "
+          "line for the put-back pull request",
           (first, second) == (1, 0)
           and [line.split()[2] for line in lines if " REVIEW-ASSIGNED " in line] == ["#1", "#2"]
           and machine.events_path.read_bytes().endswith(b"\n")
@@ -2287,11 +2287,30 @@ def run_poll_once_cases(scratch_root, token_file):
 
     machine, first, description = append_stopping_inside_second_line(
         "append-stops-inside-the-second-line-and-cannot-cut", truncate_fails)
-    check("when the cut line cannot be cut back, the failure task names its byte offset and says to "
-          "cut the file to that length",
-          first == 1 and "could not be cut back" in description and "cut the file to" in description
-          and "byte offset" in description,
-          f"{first} {description!r} {machine.errors}")
+    machine.complete_tasks()
+    before = machine.events_path.read_bytes()
+    real_truncate = watcher_module.os.truncate
+    watcher_module.os.truncate = truncate_fails
+    try:
+        second = machine.run()
+    finally:
+        watcher_module.os.truncate = real_truncate
+    after = machine.events_path.read_bytes()
+    description = machine.tasks_read()[-1]["description"] if machine.tasks_read() else ""
+    whole_end = before.rfind(b"\n") + 1
+    check("when the next run cannot cut the cut line back, it appends nothing, exits 1, and its "
+          "failure task says to cut the file to its last whole line",
+          first == 1 and second == 1 and after == before
+          and f"cut the file to {whole_end} bytes" in description,
+          f"{(first, second)} {before[-80:]!r} {after[-80:]!r} {description!r} {machine.errors}")
+    machine.complete_tasks()
+    third = machine.run()
+    lines = machine.event_lines()
+    check("once the cut works again, the next run cuts the cut line back and records the put-back "
+          "pull request on a whole line",
+          third == 0 and [line.split()[2] for line in lines if " REVIEW-ASSIGNED " in line] == ["#1", "#2"]
+          and all(len(re.findall(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", line)) == 1 for line in lines),
+          f"{third} {lines} {machine.errors}")
 
     machine = machine_for("append-fails-and-cannot-be-read-back")
     machine.assignments.write_text("", encoding="utf-8")
