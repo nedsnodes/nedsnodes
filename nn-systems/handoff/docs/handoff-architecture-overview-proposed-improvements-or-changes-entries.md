@@ -1187,3 +1187,29 @@ Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > The handoff-supervisor also reads the conversation-tail: handoff-supervisor.py:1410-1411 `with conversation_tail_path.open(encoding="utf-8", newline="") as conversation_tail: text = conversation_tail.read()`. It writes its last lines to a display file in the handoff directory (:1405-1406) for the MessageDisplay hook (.claude/settings.json:43). That display file appears in no Shared state row.
 State: open
+
+## E102 — possible problem: an assertion of the overview is contradicted
+
+Claim: The stop-typing hook (UserPromptSubmit), while the threshold hook's `<session>-handoff-asked` file exists, shows the user a stop-typing line once per such file. The line names the new agent-session by its claude.ai title, else by the stored Remote Control name, else by the agent-seat's name when none is stored or it cannot be read. The user's message goes through unchanged.
+Found by: the overview claim check of 2026-11-26 against commit c0f6e66318288d4d4d87acd0b81fef48eccbc7c9; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/91f1fea1399ebe46f0aa213a2a538c7ba15f9d2f-2026-11-26T01-26-12-983912Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> The fallback chain leaves out one case: a child agent-session with no title gets a line that names no session at all.
+> - nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:93-95 `agent_seat = launched_agent_seat_name(session_id)` / `if not agent_seat:` / `return ""`
+> - same file :14-16 `the handoff-supervisor launched the agent-session under, when this is that launched` / `agent-session and not a child started from its shell, and failing that, says` / `"this agent-seat's new session".`
+> - The rest of the sentence is supported: :116 `marker = threshold.handoff_asked_marker_path(session_id)`; :123 (once per marker file); :8 `not the agent. The message itself always goes through unchanged.`
+State: open
+
+## E103 — possible problem: an assertion of the overview is contradicted
+
+Claim: The three `NEDSNODES_HANDOFF_SUPERVISOR_*` variables have their names in the environment-variable-names common module, are set by the supervisor and read by the writer. The first is also read by the stop-typing hook. The rename hook and the walk-me-through hook read the first and third through the module's function, which returns the seat's name only for the launched session.
+Found by: the overview claim check of 2026-11-26 against commit c0f6e66318288d4d4d87acd0b81fef48eccbc7c9; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/91f1fea1399ebe46f0aa213a2a538c7ba15f9d2f-2026-11-26T01-26-12-983912Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> The stop-typing hook also reads the third: it calls the same function as the rename hook, not the first variable alone.
+> - nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:78-79 `return launched.handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session(` / `os.environ, session_id)`
+> - nn-systems/handoff/handoff-supervisor-launched-agent-session-environment-variable-names-common.py:17 `if not session_id or session_id != environment.get(HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE, ""):`
+> - The rest is supported: handoff-supervisor.py:2242-2244; handoff-write-and-check-supervisor.py:133-141; walk-me-through hook :222
+State: open
