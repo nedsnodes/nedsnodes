@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Carry out the user's A, AO, Aa, D, Z, O2 or O3 answer to the waiting item of an
 open approval-walk, or his A, AO or D answer to each part of it, or his moving on
-from an item that asks no decision: give each text
-the answer adds a cold-read-fast-read, then record the answer in the
-walk-minutes and set their `#next_to_present` line to the next item; or record
-the waiting item as settled without showing it to him.
+from an item that asks no decision: start in the background a
+cold-read-fast-read of each text the answer adds, record the answer in the
+walk-minutes and set their `#next_to_present` line to the next item, without
+waiting for those reads; or record the waiting item as settled without
+showing it to him.
 
 Usage, from the agent-session's checkout:
   walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py check
@@ -23,6 +24,9 @@ Usage, from the agent-session's checkout:
       [--after-fixes-reread-only-when-facts-change]
       [--possibly-stale-system-status-claims-rechecked WHAT_YOU_RAN_AND_WHEN]
       [--approval-walk-item-fresh-agent-rewrite-file FILE]
+  walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py approval-walk-item-after-waiting-item-page-build-ahead
+      [--approval-walk-item-page-built-ahead-artifact-link LINK
+       | --approval-walk-item-page-built-ahead-publish-failure-message-to-record WHAT]
 
 The answer is an approval, A, unless a flag says otherwise: --obvious for AO,
 --after-advisor for Aa, --disapproved for D, --deferred for Z, --option 2 or 3
@@ -184,18 +188,20 @@ and in the log-store's. Other records are not opened: the log-store holds
 thousands, and a text fast-read outside this program is read again. The log-store's
 cold-read-records directory is the path in cold-read-record-ship.py's
 LOG_STORE_RECORDS_DESTINATION, read on ned-box as it is and on the Mac through
-the Mac's mount of ned-box's home. For each text with none, it saves the text to
-a scratch file and runs cold-read-fast-read.py --target on that file with
---without-question-4, which this program passes on every fast read it runs,
-of a waiting item, read ahead or not, and of the texts an answer adds; the
-scratch file's directory is removed when the fast read ends, whatever ends it,
-SIGTERM and SIGHUP included, since the cold-read-record keeps its own copy. Then it
+the Mac's mount of ned-box's home. Then it
 writes the answer line, which names each part's answer in part number order
 when --part-answer is given, and one status line per text, naming its mark and
 its number, from 1 in the walk-document's order, among the item's texts with
 that mark, or "no proposed text
-marked", into the walk-minutes, and prints the status lines, the judgement the
-agent must make on new reports, and the close step to run. It appends one line
+marked", into the walk-minutes; then, for each text with no such record, it
+starts that text's background read, as BACKGROUND READS OF AN ANSWER'S TEXTS
+below says, and does not wait for it; and it prints the status lines, a line
+saying the reads it started run on after it, and the close step to run.
+Every fast read this program runs, of a waiting item, read ahead or not, and of
+the texts an answer adds, runs cold-read-fast-read.py --target on a scratch
+copy of the text with --without-question-4; the scratch file's directory is
+removed when the fast read ends, whatever ends it, SIGTERM and SIGHUP
+included, since the cold-read-record keeps its own copy. It appends one line
 of counts to
 walk-me-through-answer-added-texts-cold-read-fast-read-already-done-or-had-to-run-counts-per-check.tsv
 beside the log-store's cold-read-records directory. A deferral and a move on
@@ -206,19 +212,38 @@ answer, or its one set of part answers, for every item that line names; CHECK
 then tells the agent to add a `#next_to_present` line naming one of those items
 before each check run.
 
-A fast read that prints a line opening FAILED, or exits nonzero, ends CHECK
-before the walk-minutes are written: the program prints that line, or a FAILED
-line of its own, then says the item stays waiting and tells the agent to ask
-the user whether to run check again, and exits 1. The one exception is a fast
-read that names its report on stdout and exits 1 because its record did not
-reach the log-store, which its stderr says in a `record: FAILED` or
-`record: REFUSED` line: its report is used like any other. A fast read whose
-report is used but says on stderr that its record was not
-shipped, or that its target changed during the read, has that line added to its
-status line. An unshipped record, a log-store this machine cannot reach, and a
-counts line that cannot be written are each printed after the rest, saying the
-minutes record the answer, with exit 2; a changed target alone leaves the exit
-code 0, since the report was written.
+A log-store this machine cannot reach, and a counts line that cannot be
+written, are each printed after the rest of CHECK's output, saying the minutes
+record the answer, with exit 2.
+
+BACKGROUND READS OF AN ANSWER'S TEXTS. The read CHECK starts for a text is a
+detached worker of the same step as a read ahead, keeping its text, pid,
+outcome and output, by the text's key, in
+`docs/walk/<walk name>-user-answer-added-text-background-cold-read-fast-read-worker-state-per-text/`
+beside the walk-minutes, apart from the item reads, so that no such read is
+taken for a read of the item itself; a rerun of CHECK starts no second read of
+a text already started there. Each run of CHECK, CLOSE and the read step hands
+the agent each such read that has ended and was not handed over before, oldest
+first: its report, or the FAILED line of a read that failed, or the log of a
+worker that ended without writing an outcome, with the cold-read-fast-read.py
+command that reads the text again; then what to do with the findings: apply a
+finding that changes only how a text reads to the walk-document and to the
+work the answer started, and take a finding that would change what the user
+approved back to him as the walk-me-through skill says for an answer close
+has already recorded. It writes one line per read into the walk-minutes,
+`Background cold-read-fast-read of <item>'s `<mark>` text <number>: done,
+<report>.` or `...: failed, <the FAILED line>.`, and marks the read handed
+over, so that each is handed over once. A read that fails is not run again by
+the program. A fast read that names its report and exits 1 only because its
+record did not reach the log-store, as a `record: FAILED` or `record: REFUSED`
+line on its stderr says, counts as done; such a line, and one saying the
+target changed during the read, are added to the read's line, and an unshipped
+record is printed with the command that ships it, after the rest of the
+step's output in CHECK and CLOSE and before it in the read step, with exit 2
+when the step would have exited 0. CHECK prints its hand-over before its close
+line, CLOSE before the line naming the read step, and the read step before
+its own output. A CLOSE that writes `none, closed` first waits for each such
+read still running, since no later step would hand it over.
 
 Each run of CHECK, CLOSE and the waiting-item step first saves the open
 walk's walk-document, as it stands, to `walk-document-copies/<walk name>/` in
@@ -228,7 +253,9 @@ copy, so runs that change nothing do not push older versions out. A copy that ca
 with exit 2 if the step would have exited 0; the step itself still runs.
 
 CLOSE reads the last answer line CHECK wrote. When the `#next_to_present` line
-still names that line's items, it records the answer: that it took effect, or,
+still names that line's items, it records the answer: that it took effect,
+saying, when a status line says a text's read was started in the background,
+that it takes effect while those reads run, or,
 for answers to parts, a single line for the item naming each part's outcome,
 or, for --moved-on-no-decision, that the user moved on from an item asking
 no decision, or, for a deferral, that the item moves to just before the summary item, the item
@@ -370,6 +397,21 @@ CLOSE names item 1 only when the walk comes round to it again, so no read ahead
 covers item 1's first showing: the walk-me-through skill's cold-read-fast-read
 of the whole walk before item 1 covers it. Item 2's read is run by the step after item 1's close,
 since no read ahead was started while item 1 was shown.
+Close and the step also start a read ahead of each unshown item, an item
+added to the walk-document while another is shown included, so that its read
+is ready when check --bump or the walk order brings it up: each item without
+a running count but the summary item, once it holds its
+`#approval_walk_item_first_entered` line, which close and the step write
+before they read ahead, since writing it changes the text. An item rated
+none, which is settled without being shown, and one holding a `###`
+sub-step, which is read one sub-step at a time, are not read ahead. Such a
+read ahead reads the item's heading as it stands, with no running count, and
+is not started when a read ahead of the same text under any running count
+was. The step uses the read ahead of an unnumbered item whose text differs from the
+item's text as it stands only in the heading's running count, which close or
+check --bump writes when it numbers the item, as it uses a read of the
+same text, and keeps it as the read of the text as it stands. Every unshown item is
+read ahead at once, with no limit on how many reads run together.
 
 APPROVAL-WALK-WAITING-ITEM-COLD-READ-FAST-READ gives the item the
 `#next_to_present` line names its cold-read-fast-read, as its text stands: the
@@ -540,6 +582,32 @@ again from the new texts, and goes on as
 the step does for any item; a later refusal of the new text leaves it in
 place, to be fixed and read as any revision. A count file that cannot be read
 stops the step with exit 1, naming the file to delete.
+
+PAGE AHEAD. When the read step hands an item over and an item comes after it, it
+prints the APPROVAL-WALK-ITEM-AFTER-WAITING-ITEM-PAGE-BUILD-AHEAD command, to run
+once the agent's message has shown the item's text and before its closing line,
+so that the next item's page publishes while the user reads this one. That step
+finds the item after the waiting item as the read ahead does, numbered as close
+will number it, builds its page with
+walk-me-through-approval-walk-item-page-html-build-from-walk-document.py's
+build function, its Previous link the waiting item's page, writes it to
+`<key>-approval-walk-item-page-built-ahead.html` in the directory below, keyed
+by that item's text, and prints how to publish it with the Artifact tool, which
+only the agent has, and the commands that record the publish: with
+--approval-walk-item-page-built-ahead-artifact-link the link, with
+--approval-walk-item-page-built-ahead-publish-failure-message-to-record what
+the Artifact tool said, each in
+`<key>-approval-walk-item-page-built-ahead-artifact-publish-status.json`. A
+record for a text no page was built for, as when the item changed after the
+build, is refused, writing nothing, with the build command to run again. The
+link is not written as an `#item_page` line then, since that line says the
+user was shown the item. The read step that hands the item over writes it,
+when the minutes hold no `#item_page` line for the item: with a page published
+for the item's text as it stands, it says the item needs no page step; with
+one published for an earlier text of the item, found by the heading's title, it
+says to build the page again as version 2 and republish it to that link; either
+way it prints the page builder command that gives the item before its Next
+link to this one. A failed publish leaves the page step to the item's own turn.
 
 Each text read is kept in the directory
 `docs/walk/<walk name>-item-cold-read-fast-read-review-status-per-text-hash/`,
@@ -956,21 +1024,20 @@ PART_REPEATED = ("nothing written: --part-answer gives {parts} more than one ans
 
 NO_PROPOSED_TEXT = "no proposed text marked"
 STATUS_ALREADY_DONE = "`{mark}` text {number}, \"{excerpt}\": fast read already done ({record})."
-STATUS_HAD_TO_BE_RUN = "`{mark}` text {number}, \"{excerpt}\": fast read had to be run ({record})."
+STATUS_STARTED_IN_BACKGROUND_WORDS = "fast read started in the background"
+STATUS_STARTED_IN_BACKGROUND = ("`{mark}` text {number}, \"{excerpt}\": " + STATUS_STARTED_IN_BACKGROUND_WORDS
+                                + " ({copy}).")
 STATUS_FAST_READ_NOTE = " The fast read also said: {note}"
 # The fast read reports these on stderr after writing its report; an unshipped record also makes it exit 1.
 FAST_READ_RECORD_NOT_SHIPPED_MARKERS = ("cold-read-fast-read: record: FAILED",
                                         "cold-read-fast-read: record: REFUSED")
 FAST_READ_NOTE_MARKERS = FAST_READ_RECORD_NOT_SHIPPED_MARKERS + ("#cold_read_target_changed_during_run",)
 HOLD_ANSWER_FLAG = "--hold-answer-until-new-item-answered"
-CHECK_JUDGEMENT_LINES = (
-    "Read the fast-read report of each text above whose status line says \"fast read had to be run\".",
-    "If a finding holds and changes how a text is understood but not what the item decides, "
-    "apply it to that text's marked line in the walk-document {document}.",
-    "If a finding would change what the item decides, write that change as a new item right "
-    "after {item} in the walk-document, headed `## <the point>` with no number, and give the close step below "
-    "the flag `" + HOLD_ANSWER_FLAG + "`: it numbers the new item, holds {item}'s answer until the user answers "
-    "it, and says when to present it.",
+CHECK_BACKGROUND_LINES = (
+    "The fast read of each text above whose status line says \"fast read started in the background\" runs on "
+    "after this step ends: the answer takes effect at close, without waiting for it.",
+    "Each later run of this program's check, close and read steps hands you each such read's report once it is "
+    "written, with what to do with its findings, and records in the walk-minutes that it did.",
 )
 CHECK_CLOSE_LINE = "Then run `{command}` and do what it prints."
 BUMP_NOT_FOUND = (
@@ -1021,16 +1088,11 @@ WALK_DOCUMENT_COPIES_NOT_PRUNED = (
 LOG_STORE_UNREACHABLE = ("this machine reaches the log-store at neither {paths}, so its cold-read-records were "
                          "not searched either")
 RECORDS_NOT_SHIPPED = (
-    "The minutes record the answer, but the fast read of `{mark}` text {number} did not ship its record: {note}",
+    "The background fast read of {item}'s `{mark}` text {number} did not ship its record: {note}",
     "The record stays at {record}; once ned-box can be reached, run `{ship_command}`.",
-    "If the line above says REFUSED, first rename {record} with a -2 suffix, or the next number not taken, "
-    "and ship the renamed directory instead.",
-    "Include these lines in your next message to the user, and carry on as the lines above say.",
-)
-FAST_READ_FAILED_LINES = (
-    "The item stays waiting: the minutes do not record the answer.",
-    "Tell the user the line above, and ask whether to run `{command}` again or "
-    "answer the item another way.",
+    "If the first of these lines says REFUSED, first rename {record} with a -2 suffix, or the next number not "
+    "taken, and ship the renamed directory instead.",
+    "Include these four lines in your next message to the user, and carry on as they say.",
 )
 STOP_SIGNAL_SCRATCH_NOT_REMOVED_LINES = (
     "{program}: a {signal} stopped it while a cold-read-fast-read was running, and the scratch directory "
@@ -1038,12 +1100,12 @@ STOP_SIGNAL_SCRATCH_NOT_REMOVED_LINES = (
     "Run `chmod -R u+rwX {quoted_directory} && rm -rf {quoted_directory}`, because nothing else removes that "
     "directory, and the disk it is on can fill.\n"
     "{after_removal}")
-STOP_SIGNAL_CHECK_AFTER_REMOVAL = ("The walk-minutes do not record the user's answer: then run `{command}` again, "
-                                   "with the same answer, so that they record it.")
 STOP_SIGNAL_READ_STEP_AFTER_REMOVAL = ("{item} has had no cold-read-fast-read of its text as it stands: then run "
                                        "`{command}` again, and present {item} only after it.")
 STOP_SIGNAL_READ_AHEAD_AFTER_REMOVAL = ("The read step finds this read ended without an outcome, and runs the "
                                         "cold-read-fast-read itself.")
+STOP_SIGNAL_ANSWER_READ_AFTER_REMOVAL = ("The next check, close or read step finds this read ended without an "
+                                         "outcome, and says how to run the cold-read-fast-read again.")
 CHECK_MINUTES = ("{item}: the user answered {answered}{hashtag}{rating} ({date_and_time}){words}, which makes its change. "
                  "Fast reads:")
 CHECK_NOT_ASKED_MINUTES = ("{item}: settled without asking the user, {answered}{rating} ({date_and_time}), which makes "
@@ -1058,6 +1120,11 @@ CHECK_MOVED_ON_SHOWN_MINUTES = ("{item}: " + CHECK_MOVED_ON_SHOWN_PREFIX + " {an
                                 "which makes no change.")
 CLOSE_TOOK_EFFECT_MINUTES = "{item}: {answered}; every text the change adds has had a fast read. {outcome}"
 CLOSE_PARTS_TOOK_EFFECT_MINUTES = "{item}: {parts}; every text the change adds has had a fast read."
+CLOSE_TOOK_EFFECT_READS_IN_BACKGROUND_MINUTES = (
+    "{item}: {answered}; it takes effect now, while the fast reads of the texts the change adds run in the "
+    "background. {outcome}")
+CLOSE_PARTS_TOOK_EFFECT_READS_IN_BACKGROUND_MINUTES = (
+    "{item}: {parts}; they take effect now, while the fast reads of the texts the change adds run in the background.")
 CLOSE_DEFERRED_MINUTES = "{item}: deferred; it moves to just before the summary item. <open>"
 # No fast-read clause in these two: the one-time conversion of older walk-minutes writes them too, with no fast read.
 CLOSE_ALREADY_DECIDED_MINUTES = "{item}: already decided by {ruling}; the walk does not come back to it. {outcome}"
@@ -1177,9 +1244,10 @@ def after_the_items_pattern(template):
 
 DECIDING_LINES = tuple(after_the_items_pattern(template) for template in (
     CLOSE_TOOK_EFFECT_MINUTES, CLOSE_PARTS_TOOK_EFFECT_MINUTES, CLOSE_ALREADY_DECIDED_MINUTES, CLOSE_MOVED_ON_MINUTES,
-    CLOSE_MOVED_ON_NO_DECISION_MINUTES))
+    CLOSE_MOVED_ON_NO_DECISION_MINUTES, CLOSE_TOOK_EFFECT_READS_IN_BACKGROUND_MINUTES,
+    CLOSE_PARTS_TOOK_EFFECT_READS_IN_BACKGROUND_MINUTES))
 # The `#ruling_given` word of each of DECIDING_LINES; None where the line's outcome tag gives it.
-DECIDING_LINE_WORDS = (None, "part_answers", None, "moved_on", "moved_on")
+DECIDING_LINE_WORDS = (None, "part_answers", None, "moved_on", "moved_on", None, "part_answers")
 DEFERRING_LINES = tuple(after_the_items_pattern(template)
                         for template in (CLOSE_DEFERRED_MINUTES, CLOSE_DEFERRED_AGAIN_MINUTES))
 # One such line takes its items out of the walk, as two deferral lines do.
@@ -1511,6 +1579,7 @@ READ_AHEAD_WORKER_STEP = "approval-walk-item-cold-read-fast-read-review-backgrou
 AFTER_FIXES_FLAG = "--after-fixes-reread-only-when-facts-change"
 ITEM_READS_DIRECTORY_SUFFIX = "-item-cold-read-fast-read-review-status-per-text-hash"
 READ_DONE, READ_FAILED = "done", "failed"
+TEXT_KEY_NAME = re.compile(r"[0-9a-f]{64}")
 READ_POLL_SECONDS = 2
 FACT_LABELS = ("Recommendation:", "The alternative:")
 # Spelled as the short-answer hook's RECOMMENDATION, so the two programs agree on which items hold a recommendation.
@@ -1599,6 +1668,72 @@ WALK_ITEM_READ_OUTCOME_WITHDRAWN_VERSION_HEADING_TEXT_KEPT_UNDER_KEY = (
 # The same key as outcomes written before it was renamed spell it; read so that a text kept then is not kept twice.
 WALK_ITEM_READ_OUTCOME_WITHDRAWN_VERSION_HEADING_TEXT_KEPT_UNDER_OLD_KEY = "kept_as_withdrawn_version"
 ITEM_NUMBER_PREDICTED_FLAG = "--item-number-predicted"
+PAGE_AHEAD_STEP = "approval-walk-item-after-waiting-item-page-build-ahead"
+PAGE_AHEAD_LINK_FLAG = "--approval-walk-item-page-built-ahead-artifact-link"
+PAGE_AHEAD_FAILED_FLAG = "--approval-walk-item-page-built-ahead-publish-failure-message-to-record"
+PAGE_BUILDER_FILE = HERE / "walk-me-through-approval-walk-item-page-html-build-from-walk-document.py"
+PAGE_AHEAD_FILE_SUFFIX = "-approval-walk-item-page-built-ahead.html"
+PAGE_AHEAD_STATUS_SUFFIX = "-approval-walk-item-page-built-ahead-artifact-publish-status.json"
+PAGE_AHEAD_BUILT, PAGE_AHEAD_PUBLISHED, PAGE_AHEAD_PUBLISH_FAILED = "built", "published", "publish failed"
+PAGE_AHEAD_NONE = "No item comes after {item}, so no page is built ahead."
+PAGE_AHEAD_WRITTEN = (
+    "Built the page of {after}, the item the walk shows after {item}, ahead, in {page}; its title is \"{title}\".",
+    "Publish {page} with the Artifact tool as a new private page now, after {item}'s text in your message and before "
+    "its closing line, so that the user reads {item} while it publishes.",
+    "Then run `{link_command} <link>`, with the page's link in place of `<link>`, which records it, so that the read step of {after} writes its "
+    "`#item_page` line itself and {after} needs no page step when it comes.",
+    "If the publish fails, run `{failed_command} '<what the Artifact tool said>'` instead; {after}'s page is then "
+    "built and published when it comes, as the walk-me-through skill says.")
+PAGE_AHEAD_RECORDED = "Recorded that the page of {after} was {how}. End your message with {item}'s closing line."
+PAGE_AHEAD_RECORDED_LINK = "published to {link}, which the read step of {after} records as its page"
+PAGE_AHEAD_RECORDED_FAILED = ("not published: {failed}; {after}'s page is built and published when {after} comes, as "
+                              "the walk-me-through skill says")
+PAGE_AHEAD_NOT_BUILT = (
+    "nothing recorded: no page of {after}, as its text stands now, was built ahead in the walk's directory of item "
+    "reads {reads}, so there is no publish of it to record; {after}'s text, or which item comes after {item}, has "
+    "changed since the page was built.\n"
+    "Run `{build_command}`, which builds the page again, and do what it prints; publish what it builds as a new page, "
+    "and leave the page you published from the earlier build unused.")
+PAGE_AHEAD_NEXT = ("When your message has shown {item}'s text, and before its closing line, run `{command}` and do "
+                   "what it prints, which builds and publishes the page of the item after {item} ahead.")
+PAGE_AHEAD_USED = ("{item}'s page was published ahead to {link}, and the walk-minutes now record its `#item_page` line: "
+                   "it needs no page step; its closing line links to {link}.")
+PAGE_AHEAD_STALE = (
+    "{item}'s page was published ahead to {link}, and the walk-minutes now record its `#item_page` line, but {item} "
+    "has changed since that page was built: before the message that shows {item}, run `{command}` and publish the "
+    "file it writes to {link}, as the walk-me-through skill says for an item that changes.")
+PAGE_AHEAD_ITEM_BEFORE_NEXT_LINK = (
+    "Item {before}'s page, {link}, has no Next link to {item}'s page yet: after {item}'s text and before its closing "
+    "line, run `{command}` and publish the file it writes to {link}.")
+ITEM_PAGE_RECORD_LINE = "#item_page {item} {link}"
+ANSWER_TEXT_READ_FLAG = "--answer-added-text-read"
+ANSWER_READS_DIRECTORY_SUFFIX = "-user-answer-added-text-background-cold-read-fast-read-worker-state-per-text"
+ANSWER_READ_HANDED_OVER_SUFFIX = "-handed-over.json"
+ANSWER_READ_DONE = ("Background cold-read-fast-read of {item}'s `{mark}` text {number}, \"{excerpt}\", which the user's "
+                    "answer added: its report is {report}.{notes}")
+ANSWER_READ_FAILED = ("Background cold-read-fast-read of {item}'s `{mark}` text {number}, \"{excerpt}\", which the "
+                      "user's answer added: it failed, so that text has had no fast read: {failed}")
+ANSWER_READ_ENDED = ("Background cold-read-fast-read of {item}'s `{mark}` text {number}, \"{excerpt}\", which the "
+                     "user's answer added: its worker ended without writing an outcome, so that text has had no fast "
+                     "read; its output is in {log}.")
+ANSWER_READ_RUN_AGAIN = (
+    "The answer stands in the walk-minutes. Run `{command}` once, and handle its report as the last two lines of "
+    "this hand-over say; if it prints a line opening FAILED again, or ends without naming a report, tell the user "
+    "what it printed and ask whether to undo the work his answer started; a subagent asks the agent that "
+    "dispatched it.")
+ANSWER_READ_FINDINGS_LINES = (
+    "Read each report named above. A finding that does not hold: leave it. A finding that holds and changes only how "
+    "a text reads: apply it to that text in "
+    "the walk-document {document} and wherever the work the answer started uses the text, telling the subagent or "
+    "agent-seat doing that work.",
+    "A finding that would change what the user approved: do what the walk-me-through skill says for an item revised "
+    "after the close step recorded its answer: stop the work that answer started that is still running, and add the "
+    "changed recommendation as a new item, shown next, naming the item, the answer it replaces, what that work has "
+    "already done, and each item answered since whose answer builds on the approved text.",
+)
+ANSWER_READ_MINUTES = "Background cold-read-fast-read of {item}'s `{mark}` text {number}: {outcome}."
+ANSWER_READ_MINUTES_DONE = "done, {report}"
+ANSWER_READ_MINUTES_FAILED = "failed, {failed}"
 EARLIER_TEXT_KEPT = ("{item}: its earlier text, which the cold-read-fast-read {report} read, is now kept below its "
                      "live version in {document}, under `{heading}`; leave it there.")
 EARLIER_TEXT_KEPT_NOT_RECORDED = (
@@ -2723,7 +2858,7 @@ def check(arguments):
     record_directories = arguments.cold_read_records or (
         [top / RECORDS_DIRECTORY_NAME] + ([log_store_records] if log_store_records else []))
     walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
-    statuses, already_done, had_to_be_run, problems = [], 0, 0, []
+    statuses, already_done, had_to_be_run, problems, background = [], 0, 0, [], []
     counted = collections.Counter()
     for mark, text in texts:
         counted[mark] += 1
@@ -2734,25 +2869,11 @@ def check(arguments):
             statuses.append(STATUS_ALREADY_DONE.format(mark=mark, number=number, excerpt=excerpt(walk_finder, text),
                                                        record=record))
             continue
-        name = walk_fast_read_name(walk_name, item, mark, number)
-        try:
-            record, notes = run_fast_read(text, name, arguments.fast_read_program,
-                                          STOP_SIGNAL_CHECK_AFTER_REMOVAL.format(
-                                              command=check_command_with_cwd(top, *check_words(arguments))))
-        except FastReadFailed as failure:
-            print("\n".join([failure.args[0]] + [
-                line.format(command=check_command_with_cwd(top, *check_words(arguments)))
-                for line in FAST_READ_FAILED_LINES]))
-            return 1
         had_to_be_run += 1
-        statuses.append(STATUS_HAD_TO_BE_RUN.format(mark=mark, number=number, excerpt=excerpt(walk_finder, text),
-                                                    record=record)
-                        + "".join(STATUS_FAST_READ_NOTE.format(note=note) for note in notes))
-        for note in notes:
-            if note.startswith(FAST_READ_RECORD_NOT_SHIPPED_MARKERS):
-                problems += [line.format(mark=mark, number=number, note=note, record=record,
-                                         ship_command=shlex.join(["python3", str(RECORD_SHIPPER_FILE), str(record)]))
-                             for line in RECORDS_NOT_SHIPPED]
+        background.append((mark, number, text, walk_fast_read_name(walk_name, item, mark, number)))
+        statuses.append(STATUS_STARTED_IN_BACKGROUND.format(
+            mark=mark, number=number, excerpt=excerpt(walk_finder, text),
+            copy=answer_reads_directory(walk_finder, minutes) / f"{text_key(text)}.md"))
     if not texts:
         statuses.append(NO_PROPOSED_TEXT)
     now = datetime.datetime.now().astimezone()
@@ -2762,9 +2883,13 @@ def check(arguments):
                                                       hashtag=answer_hashtag(arguments), rating=rated,
                                                       words=in_his_words, date_and_time=minutes_time(now))]
                       + [STATUS_LINE_PREFIX + status for status in statuses])
+    # After the minutes record the answer, so no read runs for an answer they do not hold.
+    for mark, number, text, name in background:
+        start_read_ahead(answer_reads_directory(walk_finder, minutes), item, text, name, arguments.fast_read_program,
+                         top, answer_text={"mark": mark, "number": number})
     output = list(statuses)
     if had_to_be_run:
-        output += [line.format(document=document, item=item) for line in CHECK_JUDGEMENT_LINES]
+        output += list(CHECK_BACKGROUND_LINES)
     if arguments.not_asked is not None:
         unchecked = no_answer_case(arguments.not_asked).unchecked or NOT_ASKED_UNCHECKED.format(
             grounds=not_asked_grounds(arguments.not_asked))
@@ -2774,6 +2899,10 @@ def check(arguments):
             output.append(NOT_ASKED_WEAK_JUDGEMENT_LINE.format(item=item))
         if arguments.not_asked == DROPPED_PROPOSAL_VALUE:
             output.append(NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE.format(item=item))
+    handed_over, not_shipped = answer_added_text_background_reads_handed_over(walk_finder, minutes, document,
+                                                                              arguments.fast_read_program)
+    output += handed_over
+    problems += not_shipped
     output.append(CHECK_CLOSE_LINE.format(command=step_command_with_cwd(top, "close")))
     log = arguments.counts_log or (log_store_records.parent / COUNTS_LOG_FILE_NAME if log_store_records else None)
     try:
@@ -2864,16 +2993,63 @@ def read_ahead_worker(arguments):
     text = arguments.text_file.read_text(encoding="utf-8").rstrip("\n")
     record_read(reads, key, arguments.item, text,
                 fast_read_outcome(text, arguments.name, arguments.fast_read_program,
-                                  STOP_SIGNAL_READ_AHEAD_AFTER_REMOVAL),
+                                  STOP_SIGNAL_ANSWER_READ_AFTER_REMOVAL if arguments.answer_added_text_read
+                                  else STOP_SIGNAL_READ_AHEAD_AFTER_REMOVAL),
                 arguments.item_number_predicted)
     return 0
 
 
-def start_read_ahead(reads, item, text, name, fast_read_program, top, number_predicted=False):
+def item_text_without_running_count(walk_finder, text):
+    """An item's text with its heading line cut to the heading's title, so that the text of an unnumbered item and the
+    same text once close or check --bump has written any `Item K of M: ` into its heading compare equal."""
+    first, _, rest = text.partition("\n")
+    return heading_title(walk_finder, first) + "\n" + rest
+
+
+def read_ahead_of_same_text_under_another_running_count(walk_finder, reads, text):
+    """Return the key of a read ahead of an unnumbered item, started or done, whose text is text but for the running
+    count in its heading, or None."""
+    wanted = item_text_without_running_count(walk_finder, text)
+    for copy in sorted(reads.glob("*.md")) if reads.is_dir() else []:
+        key = copy.stem
+        if not TEXT_KEY_NAME.fullmatch(key):
+            continue
+        outcome = read_outcome(reads, key)
+        predicted = (outcome.get(NUMBER_PREDICTED) if outcome
+                     else (reads / f"{key}-started.json").is_file())
+        if predicted and item_text_without_running_count(
+                walk_finder, copy.read_text(encoding="utf-8").rstrip("\n")) == wanted:
+            return key
+    return None
+
+
+def read_ahead_moved_to_text_as_it_stands(reads, ahead_key, key, text, outcome, item):
+    """Move the read ahead at ahead_key, whose text differs from text only in its heading's running count, to key, the
+    key of text, as item's own read, and return its outcome: an AFTER_FIXES_FLAG read then compares later changes
+    with text, whose count is no change of the agent's."""
+    (reads / f"{key}.md").write_text(text + "\n", encoding="utf-8")
+    started = reads / f"{ahead_key}-started.json"
+    if started.is_file():
+        os.replace(started, reads / f"{key}-started.json")
+    if (reads / f"{ahead_key}.log").is_file():
+        os.replace(reads / f"{ahead_key}.log", reads / f"{key}.log")
+    moved = dict(outcome, item=item, **{NUMBER_PREDICTED: False})
+    write_json(reads / f"{key}-outcome.json", moved)
+    (reads / f"{ahead_key}-outcome.json").unlink()
+    (reads / f"{ahead_key}.md").unlink()
+    return moved
+
+
+def start_read_ahead(reads, item, text, name, fast_read_program, top, number_predicted=False, answer_text=None):
     """Start a detached read-ahead worker on the text, unless a read of the same text was started or written
-    before, whatever its outcome: a read ahead is never retried, so a failed one leaves the read to the read step."""
+    before, whatever its outcome, or, for an unnumbered item, a read ahead of its text under another running count:
+    a read ahead is never retried, so a failed one leaves the read to the read step. answer_text, the mark and the
+    number of a text an answer adds, makes the worker the background read of that text, which check starts in the
+    answer reads directory."""
     key = text_key(text)
     if (reads / f"{key}-outcome.json").is_file() or (reads / f"{key}-started.json").is_file():
+        return
+    if number_predicted and read_ahead_of_same_text_under_another_running_count(load_walk_finder(), reads, text):
         return
     reads.mkdir(exist_ok=True)
     text_file = reads / f"{key}.md"
@@ -2883,33 +3059,47 @@ def start_read_ahead(reads, item, text, name, fast_read_program, top, number_pre
         worker = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), READ_AHEAD_WORKER_STEP,
                                    "--text-file", str(text_file), "--item", item, "--name", name,
                                    "--fast-read-program", str(fast_read_program)]
-                                  + ([ITEM_NUMBER_PREDICTED_FLAG] if number_predicted else []),
+                                  + ([ITEM_NUMBER_PREDICTED_FLAG] if number_predicted else [])
+                                  + ([ANSWER_TEXT_READ_FLAG] if answer_text else []),
                                   stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=top, start_new_session=True)
-    write_json(reads / f"{key}-started.json", {"pid": worker.pid, "item": item})
+    write_json(reads / f"{key}-started.json", {"pid": worker.pid, "item": item, **(answer_text or {})})
+
+
+def item_after_waiting_items(walk_finder, top, minutes, parser, numbers, total):
+    """Return None when the walk presents no item after the items numbered, else (the item after as items_named names
+    it, its number, its text as the read step will read it, whether that number is only the one close expects to give
+    it, the walk-document's text with that item's heading numbered so). An unnumbered item is taken as close will
+    number it, with the number and M close would give it then. Raise Failure when the walk-document does not let it
+    be found."""
+    named = items_named(numbers, total)
+    count, order, summary, units, placing = walk_document_items(walk_finder, minutes, named, numbers, total,
+                                                                parser, WAITING_ITEM_READ_STEP, top)
+    after = next_item(walk_finder, minutes, parser, order, summary, numbers, numbers, placing, decided_now=numbers)
+    if not after:
+        return None
+    document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+    lines = document.read_text(encoding="utf-8").split("\n")
+    number_predicted = isinstance(after[0], int)  # pragma: no mutate, next_item is given the same numbers as answered and waiting, so it names at most one item and after[-1] is after[0]
+    if number_predicted:
+        number = walk_finder.approval_walk_next_unnumbered_item_number(units)
+        text = unnumbered_item_text_once_numbered(walk_finder, minutes, after[0], units, number, count)
+        lines[after[0]] = numbered_heading(lines[after[0]], number, count)
+        return items_named([number], count), number, text, True, "\n".join(lines)
+    after_named = items_named(after, total)
+    _, text = item_text(walk_finder, minutes, after_named, after, total, parser, named_by=f"the item after {named}")
+    return after_named, after[0], text, False, "\n".join(lines)
 
 
 def start_read_ahead_of_item_after(walk_finder, top, minutes, parser, numbers, total, fast_read_program):
-    """Start the read ahead of the item the walk would present after the items numbered, if there is one.
-    An unnumbered item is read as close will number it, with the number and M close would give it then.
-    Return None, or a line saying why no read ahead could be started: the read ahead is a guess, so its
-    failure never stops close or the read step."""
+    """Start the read ahead of the item the walk would present after the items numbered, if there is one, as
+    item_after_waiting_items finds it. Return None, or a line saying why no read ahead could be started: the read
+    ahead is a guess, so its failure never stops close or the read step."""
     named = items_named(numbers, total)
     try:
-        count, order, summary, units, placing = walk_document_items(walk_finder, minutes, named, numbers, total,
-                                                                    parser, WAITING_ITEM_READ_STEP, top)
-        after = next_item(walk_finder, minutes, parser, order, summary, numbers, numbers, placing,
-                          decided_now=numbers)
+        after = item_after_waiting_items(walk_finder, top, minutes, parser, numbers, total)
         if not after:
             return None
-        number_predicted = isinstance(after[0], int)  # pragma: no mutate, next_item is given the same numbers as answered and waiting, so it names at most one item and after[-1] is after[0]
-        if number_predicted:
-            number = walk_finder.approval_walk_next_unnumbered_item_number(units)
-            after_named = items_named([number], count)
-            text = unnumbered_item_text_once_numbered(walk_finder, minutes, after[0], units, number, count)
-        else:
-            after_named = items_named(after, total)
-            _, text = item_text(walk_finder, minutes, after_named, after, total, parser,
-                                named_by=f"the item after {named}")
+        after_named, _, text, number_predicted, _ = after
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
         start_read_ahead(item_reads_directory(walk_finder, minutes), after_named, text,
                          walk_fast_read_name(walk_name, after_named), fast_read_program, top,
@@ -2917,6 +3107,82 @@ def start_read_ahead_of_item_after(walk_finder, top, minutes, parser, numbers, t
     except Failure as problem:
         return READ_AHEAD_NOT_STARTED.format(item=named, problem=problem)
     return None
+
+
+def reads_ahead_started_for_unshown_items(walk_finder, top, minutes, parser, fast_read_program):
+    """Start a read ahead of each unshown item, as the docstring's READ AHEAD paragraph says, that has no read of its
+    text started or written under any running count. An item is passed over until it holds its
+    `#approval_walk_item_first_entered` line, which close and the read step write, since writing it changes the
+    text; so is an item rated none, which is settled without being shown, and one holding a `###` sub-step, which
+    is read one sub-step at a time."""
+    document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+    text = document.read_text(encoding="utf-8")
+    units = walk_finder.item_unit_spans(text, parser)
+    lines, prose = text.split("\n"), walk_finder.prose_lines(text, parser)
+    item = items_named([walk_finder.approval_walk_next_unnumbered_item_number(units)],
+                       walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units))
+    walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
+    for unit in unshown_units(walk_finder, units, lines):
+        body = prose[unit[3] + 1:unit[4]]
+        ratings = [CASE_AGAINST_RATING.match(match[1]) for match in map(CASE_AGAINST_LINE.match, body) if match]
+        if (not any(map(WALK_FIRST_ENTERED_LINE.match, body))
+                or (ratings and ratings[0] and ratings[0][1].lower() == NOT_ASKED_RATED_NONE)
+                or any(line.startswith(APPROVAL_WALK_ITEM_SUB_STEP_HEADING_MARKUP) for line in body)):
+            continue
+        start_read_ahead(item_reads_directory(walk_finder, minutes), item, "\n".join(lines[unit[3]:unit[4]]).strip(),
+                         walk_fast_read_name(walk_name, "unshown", heading_title(walk_finder, lines[unit[3]])[:60]),
+                         fast_read_program, top, number_predicted=True)
+
+
+def answer_reads_directory(walk_finder, minutes):
+    return minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ANSWER_READS_DIRECTORY_SUFFIX)
+
+
+def answer_added_text_background_reads_handed_over(walk_finder, minutes, document, fast_read_program, wait=False):
+    """Return (the lines that hand the agent each background read of a text an answer added that has ended and was
+    not handed over before, the lines saying which of those reads' records were not shipped), and record each in the
+    walk-minutes and with its handed-over file, so that each is handed over once. With wait, wait first for each read
+    still running, as the close that ends the walk does, since no later step runs to hand it over."""
+    reads = answer_reads_directory(walk_finder, minutes)
+    lines, not_shipped, recorded = [], [], []
+    started = sorted(reads.glob("*-started.json"), key=lambda path: path.stat().st_mtime) if reads.is_dir() else []
+    for path in started:
+        key = path.name[:-len("-started.json")]
+        if (reads / f"{key}{ANSWER_READ_HANDED_OVER_SUFFIX}").is_file():
+            continue
+        while wait and read_outcome(reads, key) is None and worker_alive(reads, key):
+            time.sleep(READ_POLL_SECONDS)
+        outcome = read_outcome(reads, key)
+        if outcome is None and worker_alive(reads, key):
+            continue
+        read = json.loads(path.read_text(encoding="utf-8"))
+        text = (reads / f"{key}.md").read_text(encoding="utf-8").rstrip("\n")
+        named = dict(item=read["item"], mark=read["mark"], number=read["number"], excerpt=excerpt(walk_finder, text))
+        if outcome and outcome["status"] == READ_DONE:
+            lines.append(ANSWER_READ_DONE.format(**named, report=outcome["report"], notes="".join(
+                STATUS_FAST_READ_NOTE.format(note=note) for note in outcome["notes"])))
+            record = Path(outcome["report"]).parent
+            not_shipped += [line.format(**named, note=note, record=record, ship_command=shlex.join(
+                ["python3", str(RECORD_SHIPPER_FILE), str(record)]))
+                for note in outcome["notes"] if note.startswith(FAST_READ_RECORD_NOT_SHIPPED_MARKERS)
+                for line in RECORDS_NOT_SHIPPED]
+            said = ANSWER_READ_MINUTES_DONE.format(report=outcome["report"])
+        else:
+            failed = outcome["failed"] if outcome else None
+            lines.append(ANSWER_READ_FAILED.format(**named, failed=failed) if outcome
+                         else ANSWER_READ_ENDED.format(**named, log=reads / f"{key}.log"))
+            lines.append(ANSWER_READ_RUN_AGAIN.format(command=shlex.join(
+                ["python3", str(fast_read_program), "--target", str(reads / f"{key}.md"),
+                 FAST_READ_WITHOUT_QUESTION_4_OPTION])))
+            said = ANSWER_READ_MINUTES_FAILED.format(failed=walk_finder.text_wrapped_as_markdown_code_span(
+                failed or ANSWER_READ_ENDED.format(**named, log=reads / f"{key}.log")))
+        recorded.append(ANSWER_READ_MINUTES.format(item=read["item"], mark=read["mark"], number=read["number"],
+                                                   outcome=said))
+        write_json(reads / f"{key}{ANSWER_READ_HANDED_OVER_SUFFIX}", {"handed_over": time.time()})
+    if recorded:
+        append_to_minutes(minutes, recorded)
+        lines += [line.format(document=document) for line in ANSWER_READ_FINDINGS_LINES]
+    return lines, not_shipped
 
 
 def tracked_names(top):
@@ -3737,6 +4003,20 @@ def title_search_cache_titles(cache):
         return None
 
 
+def waiting_item_read_after_background_reads_handed_over(arguments):
+    """The read step, after the lines that hand over each background read of a text an answer added that has ended:
+    exit 2 when the step would exit 0 but such a read's record was not shipped."""
+    walk_finder = load_walk_finder()
+    _, minutes, _, _ = the_open_walk(walk_finder, arguments.cwd)
+    lines, not_shipped = answer_added_text_background_reads_handed_over(
+        walk_finder, minutes, minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md"),
+        arguments.fast_read_program)
+    if lines or not_shipped:
+        print("\n".join(lines + not_shipped))
+    exit_code = waiting_item_read(arguments)
+    return exit_code or (2 if not_shipped else 0)
+
+
 def waiting_item_read(arguments, sub_step_of=None):
     """Give the item the `#next_to_present` line names its cold-read-fast-read, as its text stands.
 
@@ -3847,6 +4127,7 @@ def waiting_item_read(arguments, sub_step_of=None):
                                                  arguments.fast_read_program)
     if not_started:
         print(not_started)
+    reads_ahead_started_for_unshown_items(walk_finder, top, minutes, parser, arguments.fast_read_program)
     # Printed after the step's first line, which names the report, and before the closing lines the agent acts on.
     no_answer_rows = no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numbers, total, parser,
                                                            named, item)
@@ -3858,10 +4139,15 @@ def waiting_item_read(arguments, sub_step_of=None):
                         for line in [*RATED_NONE_NOT_SHOWN_LINES, *no_answer_rows]))
         return 0
     key = text_key(text)
-    while read_outcome(reads, key) is None and worker_alive(reads, key):
+    ahead_key = key
+    if not ((reads / f"{key}-outcome.json").is_file() or (reads / f"{key}-started.json").is_file()):
+        ahead_key = read_ahead_of_same_text_under_another_running_count(walk_finder, reads, text) or key
+    while read_outcome(reads, ahead_key) is None and worker_alive(reads, ahead_key):
         time.sleep(READ_POLL_SECONDS)
-    outcome, ahead = read_outcome(reads, key), (reads / f"{key}-started.json").is_file()
-    if outcome and outcome["status"] == READ_DONE and outcome.get(NUMBER_PREDICTED):
+    outcome, ahead = read_outcome(reads, ahead_key), (reads / f"{ahead_key}-started.json").is_file()
+    if outcome and outcome["status"] == READ_DONE and ahead_key != key:
+        outcome = read_ahead_moved_to_text_as_it_stands(reads, ahead_key, key, text, outcome, item)
+    elif outcome and outcome["status"] == READ_DONE and outcome.get(NUMBER_PREDICTED):
         outcome = read_ahead_bound_to_item(reads, key, outcome, item)
     why = ""
     if outcome and outcome["status"] == READ_DONE:
@@ -3869,7 +4155,7 @@ def waiting_item_read(arguments, sub_step_of=None):
     else:
         if ahead:
             why = (ITEM_READ_RUN_AHEAD_FAILED.format(line=outcome["failed"]) if outcome
-                   else ITEM_READ_RUN_AHEAD_ENDED.format(log=reads / f"{key}.log"))
+                   else ITEM_READ_RUN_AHEAD_ENDED.format(log=reads / f"{ahead_key}.log"))
         latest = latest_read(reads, item) if arguments.after_fixes_reread_only_when_facts_change else None
         if latest is not None:
             last_text = (reads / f"{latest[0]}.md").read_text(encoding="utf-8").rstrip("\n")
@@ -3880,8 +4166,10 @@ def waiting_item_read(arguments, sub_step_of=None):
                 withheld = item_read_findings_without_outcomes_lines(
                     item, latest[1]["report"], reads / f"{latest[0]}-outcome.json", arguments.fast_read_program,
                     command, command_reading_again)
-                rest = no_answer_rows + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
-                    item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
+                rest = no_answer_rows + (withheld or item_page_published_ahead_lines(
+                    walk_finder, top, minutes, parser, reads, numbers, total, item, text)
+                    + [ITEM_READ_NOT_RUN_NEXT.format(
+                        item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
                     + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))
                 lines_printed_with_title_search_saved_after(
                     ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"]), past_words, rest)
@@ -3907,6 +4195,8 @@ def waiting_item_read(arguments, sub_step_of=None):
                                                          arguments.fast_read_program, command,
                                                          command_reading_again)
     rest = (no_answer_rows
+            + ([] if withheld else item_page_published_ahead_lines(walk_finder, top, minutes, parser, reads, numbers,
+                                                                    total, item, text))
             + [line.format(item=item, document=document, command=command,
                            now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
                for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
@@ -4701,6 +4991,107 @@ def bump(arguments):
     return 0
 
 
+def page_ahead_status(reads, key):
+    path = reads / f"{key}{PAGE_AHEAD_STATUS_SUFFIX}"
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+def approval_walk_item_after_waiting_item_page_build_ahead(arguments):
+    """Build the page of the item the walk shows after the waiting item, as it would be shown now, and print how to
+    publish it; or, with PAGE_AHEAD_LINK_FLAG or PAGE_AHEAD_FAILED_FLAG, record that publish."""
+    walk_finder = load_walk_finder()
+    top, minutes, value, parser = the_open_walk(walk_finder, arguments.cwd)
+    named, numbers, total = waiting_items(walk_finder, value, minutes)
+    item = items_named(numbers, total or walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(
+        walk_finder.item_unit_spans(minutes.with_name(
+            minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md").read_text(encoding="utf-8"), parser)))
+    after = item_after_waiting_items(walk_finder, top, minutes, parser, numbers, total)
+    if not after:
+        print(PAGE_AHEAD_NONE.format(item=item))
+        return 0
+    after_named, number, text, _, numbered_document = after
+    reads = item_reads_directory(walk_finder, minutes)
+    key = text_key(text)
+    build_command = step_command_with_cwd(top, PAGE_AHEAD_STEP)
+    recorded_link, failed = arguments.approval_walk_item_page_built_ahead_artifact_link, \
+        arguments.approval_walk_item_page_built_ahead_publish_failure_message_to_record
+    if recorded_link is not None or failed is not None:
+        if page_ahead_status(reads, key) is None:
+            raise Failure(PAGE_AHEAD_NOT_BUILT.format(after=after_named, item=item, reads=reads,
+                                                      build_command=build_command))
+        status = page_ahead_status(reads, key)
+        status.update({"status": PAGE_AHEAD_PUBLISHED, "link": recorded_link} if recorded_link is not None
+                      else {"status": PAGE_AHEAD_PUBLISH_FAILED, "failed": failed})
+        write_json(reads / f"{key}{PAGE_AHEAD_STATUS_SUFFIX}", status)
+        print(PAGE_AHEAD_RECORDED.format(after=after_named, item=item, how=(
+            PAGE_AHEAD_RECORDED_LINK.format(link=recorded_link, after=after_named) if recorded_link is not None
+            else PAGE_AHEAD_RECORDED_FAILED.format(failed=failed, after=after_named))))
+        return 0
+    builder = load_module("walk_me_through_approval_walk_item_page_html_build_from_walk_document", PAGE_BUILDER_FILE)
+    document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+    links = builder.whole_item_links(walk_finder.approval_walk_item_page_link_lines_oldest_first_from_walk_minutes(
+        minutes.read_text(encoding="utf-8"), parser), walk_finder)
+    try:
+        page, title = builder.approval_walk_item_page_html_and_title_build_from_walk_document(
+            document, numbered_document, str(number), None, builder.neighbour_links(links, str(number))[0], None)
+    except builder.Refused as refusal:
+        raise Failure(str(refusal))
+    reads.mkdir(exist_ok=True)
+    (reads / f"{key}{PAGE_AHEAD_FILE_SUFFIX}").write_text(page, encoding="utf-8")
+    write_json(reads / f"{key}{PAGE_AHEAD_STATUS_SUFFIX}", {
+        "status": PAGE_AHEAD_BUILT, "item": after_named, "title": heading_title(walk_finder, text.split("\n", 1)[0])})
+    print("\n".join(line.format(after=after_named, item=item, page=reads / f"{key}{PAGE_AHEAD_FILE_SUFFIX}",
+                                # The flag last, so the value the agent writes after the command is the flag's.
+                                title=title, link_command=f"{build_command} {PAGE_AHEAD_LINK_FLAG}",
+                                failed_command=f"{build_command} {PAGE_AHEAD_FAILED_FLAG}")
+                     for line in PAGE_AHEAD_WRITTEN))
+    return 0
+
+
+def item_page_published_ahead_lines(walk_finder, top, minutes, parser, reads, numbers, total, item, text):
+    """The lines that hand over the item's page when it was published ahead: write its `#item_page` line, with the
+    link the page was published to, unless the minutes hold one for it already, and say whether that page shows the
+    item's text as it stands or must be built again; then, when the item after it can be found, the line that says
+    to build its page ahead. A page published ahead for an older text of the item is found by the item's title."""
+    lines = []
+    minutes_text = minutes.read_text(encoding="utf-8")
+    page_lines = walk_finder.approval_walk_item_page_link_lines_oldest_first_from_walk_minutes(minutes_text, parser)
+    if not numbers[1:] and not any(number == numbers[0] for number, _, _ in page_lines):
+        status, stale = page_ahead_status(reads, text_key(text)), False
+        if not (status and status["status"] == PAGE_AHEAD_PUBLISHED):
+            title = heading_title(walk_finder, text.split("\n", 1)[0])
+            status = next((each for each in (json.loads(path.read_text(encoding="utf-8")) for path in
+                                             sorted(reads.glob(f"*{PAGE_AHEAD_STATUS_SUFFIX}"),
+                                                    key=lambda path: path.stat().st_mtime, reverse=True))
+                           if each["status"] == PAGE_AHEAD_PUBLISHED and each["title"] == title), None)
+            stale = True
+        if status:
+            append_to_minutes(minutes, [ITEM_PAGE_RECORD_LINE.format(item=item, link=status["link"])])
+            builder = load_module("walk_me_through_approval_walk_item_page_html_build_from_walk_document",
+                                  PAGE_BUILDER_FILE)
+            page_lines = walk_finder.approval_walk_item_page_link_lines_oldest_first_from_walk_minutes(
+                minutes.read_text(encoding="utf-8"), parser)
+            document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+
+            def rebuild_command(number):
+                version = builder.next_version(page_lines, walk_finder, number)
+                return shlex.join(["python3", str(PAGE_BUILDER_FILE), str(document), str(number),
+                                   str(reads / f"item-{number}-version-{version}.html"), "--version", str(version)])
+            lines.append(PAGE_AHEAD_STALE.format(item=item, link=status["link"], command=rebuild_command(numbers[0]))
+                         if stale else PAGE_AHEAD_USED.format(item=item, link=status["link"]))
+            before = builder.neighbour_links(builder.whole_item_links(page_lines, walk_finder), numbers[0])[0]
+            if before is not None and "." not in numbers[0]:
+                lines.append(PAGE_AHEAD_ITEM_BEFORE_NEXT_LINK.format(before=before[0], link=before[1], item=item,
+                                                                     command=rebuild_command(before[0])))
+    try:
+        after = item_after_waiting_items(walk_finder, top, minutes, parser, numbers, total)
+    except Failure:
+        after = None  # The read ahead of the item after has said why already.
+    if after:
+        lines.append(PAGE_AHEAD_NEXT.format(item=item, command=step_command_with_cwd(top, PAGE_AHEAD_STEP)))
+    return lines
+
+
 def close(arguments):
     walk_finder = load_walk_finder()
     top, minutes, value, parser = the_open_walk(walk_finder, arguments.cwd)
@@ -4764,13 +5155,16 @@ def close(arguments):
                   + list(CLOSE_TOOK_EFFECT_NEXT))
     else:
         parts = PART_IN_ANSWER.findall(answered)
+        in_background = any(STATUS_STARTED_IN_BACKGROUND_WORDS in status for status in statuses)
         if parts:
-            recorded = CLOSE_PARTS_TOOK_EFFECT_MINUTES.format(item=item, parts=", ".join(
+            recorded = (CLOSE_PARTS_TOOK_EFFECT_READS_IN_BACKGROUND_MINUTES if in_background
+                        else CLOSE_PARTS_TOOK_EFFECT_MINUTES).format(item=item, parts=", ".join(
                 f"part {number} {word} {OUTCOMES[word]}" for number, word in parts))
             word = RULING_GIVEN_PART_ANSWERS
         else:
             held_outcome = OUTCOMES[DISAPPROVED if answered == DISAPPROVED else APPROVED]
-            recorded = CLOSE_TOOK_EFFECT_MINUTES.format(item=item, answered=answered, outcome=held_outcome)
+            recorded = (CLOSE_TOOK_EFFECT_READS_IN_BACKGROUND_MINUTES if in_background
+                        else CLOSE_TOOK_EFFECT_MINUTES).format(item=item, answered=answered, outcome=held_outcome)
         output = [line.format(item=item) for line in CLOSE_TOOK_EFFECT_LINES] + list(CLOSE_TOOK_EFFECT_NEXT)
     if answered != DEFERRED:
         deferred_item_heading_noted(walk_finder, minutes, answered_numbers, total, parser, noted=False)
@@ -4826,11 +5220,18 @@ def close(arguments):
                 walk_finder, units, minutes.read_text(encoding="utf-8"), parser), numbers[0])
         shown_total = unit[1] if unit is not None and unit[1] is not None else count
     named = items_named(numbers, shown_total)
+    # Before the `#next_to_present` line, which stays the minutes' last line. The close that ends the walk waits for
+    # the reads still running, since no later step would hand them over.
+    handed_over, not_shipped = answer_added_text_background_reads_handed_over(
+        walk_finder, minutes, minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md"),
+        arguments.fast_read_program, wait=not numbers)
     append_to_minutes(minutes, [NEXT_MARKER_LINE.format(value=named if numbers else CLOSED_MARKER_VALUE)])
     if numbers:
         not_started = start_read_ahead_of_item_after(walk_finder, top, minutes, parser, numbers, shown_total,
                                                      arguments.fast_read_program)
         output += [not_started] if not_started else []
+        reads_ahead_started_for_unshown_items(walk_finder, top, minutes, parser, arguments.fast_read_program)
+    output += handed_over
     output.append(CLOSE_READ_NEXT_ITEM.format(next_item=named, command=read_step_command_with_cwd(top))
                   if numbers else CLOSE_NO_NEXT_ITEM)
     # After the lines the agent must pass on to the user, so it is not passed on.
@@ -4838,14 +5239,15 @@ def close(arguments):
     # Last, so a gh that fails or hangs cannot keep the answer or the next item out of the minutes.
     ruling_lines, ruling_failed = ruling_given_comments_posted(
         minutes.name[:-len(walk_finder.MINUTES_SUFFIX)], rulings, top, arguments.gh_program, arguments.gh_timeout)
-    print("\n".join(output + ruling_lines))
-    return 2 if ruling_failed else 0
+    print("\n".join(output + ruling_lines + not_shipped))
+    return 2 if ruling_failed or not_shipped else 0
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], epilog=no_answer_table_text(),
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("step", choices=("check", "close", WAITING_ITEM_READ_STEP, READ_AHEAD_WORKER_STEP))
+    parser.add_argument("step", choices=("check", "close", WAITING_ITEM_READ_STEP, PAGE_AHEAD_STEP,
+                                         READ_AHEAD_WORKER_STEP))
     answer = parser.add_mutually_exclusive_group()
     answer.add_argument("--obvious", action="store_true", help="check: the answer was AO, approve as obvious")
     answer.add_argument("--after-advisor", action="store_true",
@@ -4894,10 +5296,16 @@ def main(argv=None):
                         help=f"{WAITING_ITEM_READ_STEP}: the file a fresh-agent wrote the waiting item's new text to, "
                              "from the brief this step printed when the item's proposed text had been revised three "
                              "times; it takes the place of the item's text and starts the count again")
+    parser.add_argument(PAGE_AHEAD_LINK_FLAG, metavar="LINK",
+                        help=f"{PAGE_AHEAD_STEP}: record LINK, the link you published the page built ahead to")
+    parser.add_argument(PAGE_AHEAD_FAILED_FLAG, metavar="WHAT",
+                        help=f"{PAGE_AHEAD_STEP}: record that the publish of the page built ahead failed, WHAT being "
+                             "what the Artifact tool said")
     parser.add_argument("--text-file", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--item", help=argparse.SUPPRESS)
     parser.add_argument("--name", help=argparse.SUPPRESS)
     parser.add_argument(ITEM_NUMBER_PREDICTED_FLAG, action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(ANSWER_TEXT_READ_FLAG, action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--cwd", default=os.getcwd(), help="a directory in the walk's checkout")
     parser.add_argument("--cold-read-records", type=Path, action="append",
                         help="a cold-read-records directory to search instead of the defaults; repeatable")
@@ -4909,7 +5317,9 @@ def main(argv=None):
     arguments = parser.parse_args(argv)
     copy_problem = None if arguments.step == READ_AHEAD_WORKER_STEP else walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
     try:
-        exit_code = {"check": check, "close": close, WAITING_ITEM_READ_STEP: waiting_item_read,
+        exit_code = {"check": check, "close": close,
+                     WAITING_ITEM_READ_STEP: waiting_item_read_after_background_reads_handed_over,
+                     PAGE_AHEAD_STEP: approval_walk_item_after_waiting_item_page_build_ahead,
                      READ_AHEAD_WORKER_STEP: read_ahead_worker}[arguments.step](arguments)
     except Failure as failure:
         print(f"{PROGRAM} {arguments.step}: {failure.args[0]}", file=sys.stderr)
