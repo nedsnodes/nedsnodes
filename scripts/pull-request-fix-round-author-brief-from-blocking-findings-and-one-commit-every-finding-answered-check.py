@@ -1137,7 +1137,9 @@ def print_brief(number, reviewer_login):
         "answers file or the unpushed commit as it says (git commit --amend is allowed before the "
         "push; first stage each changed file with git add <path>, never the answers file) and run the "
         "check again. Before the push, the check runs the nn-test-suites, which can "
-        "take many minutes, and refuses when one fails because of the round's change. Before the suites, "
+        "take many minutes, and refuses when one fails because of the round's change. Start the check as a "
+        "background command, because it can wait up to an hour for the machine's test lock and a foreground "
+        "command is stopped at your tool's time limit. Before the suites, "
         "it refuses when the round's commit adds shared names no agent has checked, or when an "
         f"nn-architecture-overview the pull request changes would make {merge_lane}'s review plan refuse the "
         "round's head; do what it prints.",
