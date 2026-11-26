@@ -75,8 +75,9 @@ UNUSABLE_WALK_MESSAGE = (
 ALERT_UNREADABLE_MESSAGE = (
     "the alert {alert_id} cannot be read from {path}, so no file was changed: {error}.\n"
     "{rerun_line}"
-    "Then, if {path} no longer exists, nothing more is needed for {alert_id}: it is either offered again on the "
-    "user's next prompt or already recorded in walk-minutes.\n"
+    "Then, if {path} no longer exists, nothing more is needed for {alert_id}: it is either already recorded in "
+    "walk-minutes or offered again on the user's next prompt in the agent-session of the agent-seat the alert names "
+    "(merge-lane-1's, when the alert names none).\n"
     "If {path} still exists, it holds no readable alert: tell the user its path, because nobody else will see "
     "it.")
 ALERT_UNREADABLE_RERUN_LINE = "Run again with the other alerts, leaving out {alert_id}: {rerun}\n"
@@ -215,9 +216,7 @@ def insert(cwd, alert_ids, now=None):
         date=date, count=len(alerts), whole=whole,
         titles="; ".join(map(walk_finder.text_wrapped_as_markdown_code_span, titles)))]
     minutes_lines += [f"#user_alert {alert.get('id')}" for alert in alerts]
-    existing = minutes.read_text(encoding="utf-8")
-    separator = "" if existing.endswith("\n") or not existing else "\n"
-    minutes.write_text(existing + separator + "\n".join(minutes_lines) + "\n", encoding="utf-8")
+    walk_finder.append_to_minutes(minutes, minutes_lines)
     output = [ADDED_LINE.format(title=title, document=document, whole=whole) for title in titles]
     category_tags = ", ".join(f"`{check_program.WALK_CATEGORY_TAG}{category}`"
                               for category in check_program.WALK_CATEGORIES)

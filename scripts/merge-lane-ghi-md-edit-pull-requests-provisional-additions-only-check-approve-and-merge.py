@@ -67,9 +67,10 @@ one message for merge-lane-2: a file
 needs-a-look/pr<number>-<first 12 characters of the nn-head-commit>.txt under
 the state directory, <merge-lane-worktrees-and-outputs-directory>/merge-lane-ghi-md-edit-pull-requests-check-approve-and-merge-hold-list-reported-heads-and-needs-a-look-messages,
 by default /home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/merge-lane-ghi-md-edit-pull-requests-check-approve-and-merge-hold-list-reported-heads-and-needs-a-look-messages.
-merge-lane-2's watcher, scripts/watch-open-pull-requests-hack.py, prints one
-event line for each file in needs-a-look/ at every start until the file is
-moved; the watcher loads this program by its path and calls its function
+merge-lane-2's watcher, scripts/merge-lane-open-prs-watch-and-reviewer-assign.py, reports one
+event line for each file in needs-a-look/: at every start until the file is
+moved, or, run from cron with --poll-once, once per version of the file, in
+its event file; the watcher loads this program by its path and calls its function
 needs_a_look_directory() for the directory. merge-lane-2 moves the file into
 needs-a-look/handled/ as soon as it has read it, and handles the pull
 request after. Whether a pull
@@ -171,7 +172,7 @@ EXIT_STOPPED = 2
 
 def needs_a_look_directory(
         merge_lane_worktrees_and_outputs_directory=common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY):
-    """Return the directory of merge-lane-2's messages, which watch-open-pull-requests-hack.py lists too."""
+    """Return the directory of merge-lane-2's messages, which merge-lane-open-prs-watch-and-reviewer-assign.py lists too."""
     return (Path(merge_lane_worktrees_and_outputs_directory) / STATE_DIRECTORY_NAME
             / MESSAGES_DIRECTORY_NAME)
 
@@ -256,6 +257,16 @@ def gh_bytes(environment, *arguments):
         raise Stopped(f"gh {' '.join(arguments[:3])} exited {completed.returncode}: "
                       f"{error_text or 'no error printed'}")
     return completed.stdout
+
+
+def merge_output_last_lines(output):
+    """The merge program's last lines, from its STOP line on when it printed one."""
+    lines = output.splitlines()
+    start = len(lines) - MERGE_OUTPUT_LINES_IN_MESSAGE
+    stops = [index for index, line in enumerate(lines) if line.startswith("STOP:")]
+    if stops:
+        start = min(start, stops[-1])
+    return "\n".join(lines[max(start, 0):])
 
 
 def gh_json(environment, *arguments):
@@ -512,7 +523,7 @@ class Invocation:
              *common.directory_options_argv(self.arguments)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             stdin=subprocess.DEVNULL, cwd=CHECKOUT)
-        last_lines = "\n".join(merge.stdout.splitlines()[-MERGE_OUTPUT_LINES_IN_MESSAGE:])
+        last_lines = merge_output_last_lines(merge.stdout)
         if merge.returncode == 0:
             say(f"pull request {number} ({path}) merged: "
                 f"{(merge.stdout.splitlines() or [''])[-1]}")

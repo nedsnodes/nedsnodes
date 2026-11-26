@@ -45,6 +45,10 @@ launcher's list holds the logged-out text alone, and a codex whose stderr
 carries the captured 401 line leaves the cell naming `cause: logged-out` in
 its own stderr, the line the grid lifts.
 
+The service tier is pinned for both cases: the deep tier asks codex for the
+Fast service tier, and the second-strongest-model tier asks for no service
+tier.
+
 Everything else about this cell — the model and effort pins, the memory store
 being off for the launch, the stray-write detector, the provenance stamp's
 fields — is NOT covered here; this file was written for the exit-code seam
@@ -126,6 +130,12 @@ if os.environ.get("COLD_READ_CODEX_CELL_TEST_STUB_ARGV_PATH"):
     with open(os.environ["COLD_READ_CODEX_CELL_TEST_STUB_ARGV_PATH"], "w",
               encoding="utf-8") as argv_handle:
         json.dump(sys.argv, argv_handle)
+if os.environ.get("COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"):
+    import json
+    with open(os.environ["COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"], "w",
+              encoding="utf-8") as tokens_handle:
+        json.dump([name for name in ("GH_TOKEN", "GITHUB_TOKEN") if name in os.environ],
+                  tokens_handle)
 report_path = os.environ["COLD_READ_CODEX_CELL_TEST_STUB_REPORT_PATH"]
 # A report outside the checkout is written into the directory the cell adds.
 if "--add-dir" in sys.argv:
@@ -165,7 +175,7 @@ def check(case_name, condition, detail=""):
 
 
 def run_cell(stub_directory, stub_body, report_path, *arguments, argv_path=None,
-             added_listing_path=None):
+             added_listing_path=None, caller_github_tokens=None, github_tokens_path=None):
     """Run the cell as a subprocess with a stub codex first on PATH.
 
     A subprocess, not an import of main(): the exit code is the subject
@@ -186,6 +196,12 @@ def run_cell(stub_directory, stub_body, report_path, *arguments, argv_path=None,
         environment["COLD_READ_CODEX_CELL_TEST_STUB_ARGV_PATH"] = str(argv_path)
     if added_listing_path is not None:
         environment["COLD_READ_CODEX_CELL_TEST_STUB_ADDED_LISTING_PATH"] = str(added_listing_path)
+    if caller_github_tokens is not None:
+        for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+            environment.pop(name, None)
+        environment.update(caller_github_tokens)
+    if github_tokens_path is not None:
+        environment["COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"] = str(github_tokens_path)
     return subprocess.run(
         [sys.executable, str(CELL_SCRIPT), "--report", str(report_path), *arguments],
         capture_output=True, text=True, check=False, env=environment,
@@ -337,6 +353,23 @@ with tempfile.TemporaryDirectory() as scratch:
           report_text.startswith("<!-- provenance: runtime=codex")
           and f"prompt_file={draft_prompt} " in report_text.splitlines()[0],
           repr(report_text[:300]))
+
+    # --- Codex is given no GitHub token from its caller --------------------
+    # An agent-seat's supervisor sets GH_TOKEN to the agent-seat's own token; each variable is
+    # set on its own so that a launcher still passing either one fails its own case.
+    for github_token_variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+        report.unlink(missing_ok=True)
+        tokens_dump = scratch / f"codex-received-{github_token_variable}.json"
+        result = run_cell(stubs, STUB_CODEX_WRITES_REPORT, report,
+                          "--cell", "defect-hunt", "--tier", "deep", "--target", str(target),
+                          caller_github_tokens={github_token_variable: "a-token-codex-must-not-see"},
+                          github_tokens_path=tokens_dump)
+        received_names = (json.loads(tokens_dump.read_text(encoding="utf-8"))
+                          if tokens_dump.is_file() else None)
+        check(f"a caller's {github_token_variable} does not reach codex",
+              result.returncode == 0 and received_names == [],
+              f"exit {result.returncode}; codex received {received_names!r}; "
+              f"stderr={result.stderr[-600:]!r}")
 
     # --- The successful path, which must keep working ----------------------
     report.unlink(missing_ok=True)
