@@ -1807,6 +1807,21 @@ check("the rule 2 judge and the re-check are given the user's rule for an announ
       all(ANNOUNCED_ACTION_BACKED in prompt and "A tool call marked failed did not do its action"
           in prompt for prompt in (rule_2_prompt, recheck_prompt)), rule_2_prompt[:1500])
 
+# The user's rule that a sentence called off or taken back in a text to the user is backed, which
+# both rule 2 judges must be given word for word.
+CALLED_OFF_OR_TAKEN_BACK_BACKED = (
+    "- Whatever its kind, a sentence is also backed when the agent-seat, in the same turn or a later "
+    "one, tells the user in a text message that it will not do it, takes it back, or is no longer "
+    "holding.")
+PUT_OFF_UNBACKED = (
+    'An announced action the agent-seat put off with nothing named that the action waits on, such as '
+    '"I\'ll do it later", is unbacked.')
+check("the rule 2 judge and the re-check are given the user's rule that a sentence called off or "
+      "taken back in a text to the user is backed, and no longer told a called-off action is unbacked",
+      all(CALLED_OFF_OR_TAKEN_BACK_BACKED in prompt and PUT_OFF_UNBACKED in prompt
+          and "called off" not in prompt for prompt in (rule_2_prompt, recheck_prompt)),
+      rule_2_prompt[:1800])
+
 # The first judge sees the agent-seat's text messages of the sentence's turn: one that already told
 # the user what the sentence announced can back it.
 TOLD_THE_USER = "The test failed: test_merge_gate exits 1 on an empty description."
