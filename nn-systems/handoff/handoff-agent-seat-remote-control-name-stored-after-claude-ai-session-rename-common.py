@@ -64,7 +64,8 @@ def handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_lau
         return []
     except UnicodeDecodeError as error:
         raise OSError(f"{path} is not UTF-8 text: {error}") from error
-    return [line.strip() for line in text.splitlines() if line.strip()]
+    # The writers end each name with "\n" alone; splitlines() would also split a title holding U+2028.
+    return [line.strip() for line in text.split("\n") if line.strip()]
 
 
 def handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat: str) -> str:
@@ -103,7 +104,9 @@ def handoff_remote_control_name_save_when_transcript_custom_title_changed_and_re
         agent_seat: str, transcript_path) -> Optional[RemoteControlRename]:
     """Store a title that differs from the stored name and return the rename, else return None.
 
-    Raise OSError when the transcript exists but cannot be read, or the name cannot be stored."""
+    Raise OSError when the transcript exists but cannot be read, or the name cannot be stored.
+    Not handled: when the record's append succeeds and the store then fails, the record keeps a
+    title that was never stored, and a later handoff may announce one spare, true line from it."""
     try:
         title = session_title_from_transcript(transcript_path)
     except FileNotFoundError:

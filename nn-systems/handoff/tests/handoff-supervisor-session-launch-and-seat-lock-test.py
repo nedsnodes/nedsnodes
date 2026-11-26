@@ -1463,6 +1463,18 @@ with tempfile.TemporaryDirectory() as rename_directory:
               and "several project directories" in errors.getvalue()
               and "The agent-seat seat-a is now --renamed in Remote Control" in kept,
               kept + " | " + errors.getvalue())
+        name_file.unlink()
+        name_file.mkdir()
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            kept = carry("", "seat-a")
+        check("when the transcript lookup and the stored-name read both fail, both errors reach the "
+              "console and the successor",
+              "several project directories" in kept and str(name_file) in kept
+              and "several project directories" in errors.getvalue() and str(name_file) in errors.getvalue(),
+              kept + " | " + errors.getvalue())
+        name_file.rmdir()
+        name_file.write_text("--renamed\n", encoding="utf-8")
         shutil.rmtree(second_project)
         common = supervisor.remote_control_name_common
         stop_hook_transcript = Path(rename_directory) / "stop-hook-transcript.jsonl"
@@ -1516,7 +1528,23 @@ with tempfile.TemporaryDirectory() as rename_directory:
               "so the hook's report that it was not stored holds and the next turn's end tries again",
               append_failure and name_file.read_text(encoding="utf-8").strip() == "--fourth",
               append_failure + " | " + name_file.read_text(encoding="utf-8"))
-        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a").rmdir()
+        names_record = common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a")
+        names_record.rmdir()
+        names_record.write_bytes(b"\xff\n")
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            notice = carry("", "seat-a")
+        check("a record of announced names that is not UTF-8 text is reported, naming the file, and the "
+              "launched name is still announced as old",
+              "is not UTF-8 text" in errors.getvalue() and str(names_record) in errors.getvalue()
+              and "The agent-seat seat-a is now --fourth in Remote Control" in notice,
+              notice + " | " + errors.getvalue())
+        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name("seat-a", "seat-a")
+        stop_hook_stores("first\u2028second")
+        recorded = common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_read("seat-a")
+        check("a title holding a character splitlines() breaks at, such as U+2028, is read back from "
+              "the record as one name",
+              recorded == ["seat-a", "first\u2028second"], str(recorded))
     finally:
         os.environ["HOME"] = real_home
         supervisor.PROJECTS_ROOT = real_projects_root
