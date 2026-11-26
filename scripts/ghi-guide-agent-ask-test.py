@@ -626,6 +626,68 @@ with tempfile.TemporaryDirectory() as temporary:
           answer is None and "budget was already spent" in error and not spent_calls,
           (answer, error, spent_calls))
 
+    # A saved session that claude no longer has is forgotten, so the next
+    # ask cold-starts instead of failing on the same --resume for ever.
+    seat13 = root / "seat13"
+    seat13.mkdir()
+    ghi_ask.save_state(seat13 / ghi_ask.STATE_FILE_NAME,
+                       {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-GONE",
+                        "closes_since_birth": 0, "recent_matches": []})
+    fake_refresh_queue([([], {}, None), ([1], {"1": issue(1)}, None)])
+    rejected_calls = fake_claude_queue([
+        (None, "claude exited 1: No conversation found with session ID: sess-GONE"),
+        ({"session_id": "sess-NEW", "result": "(ack)"}, None),
+        ({"session_id": "sess-NEW", "structured_output": reading_list(1)}, None),
+    ])
+    first_answer, _, first_error = ghi_ask.ask("q", False, seat13, "x/y", timeout_seconds=300)
+    after_first = ghi_ask.load_state(seat13 / ghi_ask.STATE_FILE_NAME)
+    second_answer, _, second_error = ghi_ask.ask("q", False, seat13, "x/y", timeout_seconds=300)
+    check("an ask whose saved session claude rejects as not found forgets it, "
+          "and the next ask cold-starts and answers",
+          first_answer is None and "No conversation found" in (first_error or "")
+          and after_first.get(ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY) is None
+          and [resume for _, resume in rejected_calls] == ["sess-GONE", None, "sess-NEW"]
+          and second_answer is not None and second_error is None,
+          (first_error, after_first, rejected_calls, second_error))
+
+    # Any other failure of the turn, such as a timeout, keeps the session.
+    seat14 = root / "seat14"
+    seat14.mkdir()
+    ghi_ask.save_state(seat14 / ghi_ask.STATE_FILE_NAME,
+                       {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-SLOW",
+                        "closes_since_birth": 0, "recent_matches": []})
+    fake_refresh_queue([([], {}, None)])
+    fake_claude_queue([(None, "claude was silent for 300s and was killed")])
+    timeout_answer, _, timeout_error = ghi_ask.ask("q", False, seat14, "x/y", timeout_seconds=300)
+    check("an ask whose turn times out keeps its saved session",
+          timeout_answer is None
+          and ghi_ask.load_state(seat14 / ghi_ask.STATE_FILE_NAME).get(
+              ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY) == "sess-SLOW",
+          timeout_error)
+
+    # A state file that cannot be written reaches the caller as its own
+    # OSError, not as the lock's "generator didn't stop after throw()".
+    seat15 = root / "seat15"
+    seat15.mkdir()
+    fake_refresh_queue([([], {}, None)])
+    fake_claude_queue([({"session_id": "sess-DISKFULL", "result": "(ack)"}, None)])
+    real_save_state = ghi_ask.save_state
+
+    def save_state_disk_full(state_path, state):
+        raise OSError(28, "No space left on device")
+    patch("save_state", save_state_disk_full)
+    try:
+        raised = None
+        try:
+            ghi_ask.ask("q", False, seat15, "x/y", timeout_seconds=300)
+        except Exception as error:  # the test inspects whatever escapes
+            raised = error
+    finally:
+        patch("save_state", real_save_state)
+    check("a failed state save inside the lock is reported as the OSError that caused it",
+          isinstance(raised, OSError) and "No space left on device" in str(raised),
+          repr(raised))
+
 
 # --- an unusable seat directory is one line, not a traceback ---------------
 # PR #143 review question: the module docstring promises "one line to stderr
