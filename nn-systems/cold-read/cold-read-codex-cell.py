@@ -218,15 +218,13 @@ def invocation_builder(effort: str, report_staging_directory: pathlib.Path = Non
 
 # The tracing logger may prefix a timestamp; the URL suffix varies.
 # Unrecognized quota failures remain exit-N until a captured CLI message defines a signature.
-def recognised_failure_texts_for_model(model: str) -> list:
-    del model
-    return [
-        common.RecognisedFailureText(
-            "logged-out",
-            "ERROR codex_api::endpoint::responses_websocket: failed to connect to "
-            "websocket: HTTP error: 401 Unauthorized",
-            common.DETAIL_IS_WHOLE_LINE),
-    ]
+RECOGNISED_FAILURE_TEXTS = (
+    common.RecognisedFailureText(
+        "logged-out",
+        "ERROR codex_api::endpoint::responses_websocket: failed to connect to "
+        "websocket: HTTP error: 401 Unauthorized",
+        common.DETAIL_IS_WHOLE_LINE),
+)
 
 
 def main() -> int:
@@ -236,7 +234,7 @@ def main() -> int:
         tier_to_model_chain=TIER_TO_CODEX_MODEL_CHAIN,
         tier_to_effort=TIER_TO_REASONING_EFFORT,
         invocation_builder=invocation_builder,
-        recognised_failure_texts_for_model=recognised_failure_texts_for_model,
+        recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
         stage_report_outside_checkout=True,
         child_environment={
             name: value for name, value in os.environ.items()

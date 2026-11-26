@@ -210,11 +210,10 @@ def agy_environment_copy_without_gemini_api_key_or_github_token(environment) -> 
             if name not in AGY_ENVIRONMENT_REMOVED_VARIABLES}
 
 
-def logged_out_failure_texts(model: str) -> list:
-    """Return the recognised failure text for agy without a Google login."""
-    return [common.RecognisedFailureText(
-        "logged-out", AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX,
-        AGY_LOGGED_OUT_CAUSE_DETAIL)]
+RECOGNISED_FAILURE_TEXTS = (
+    common.RecognisedFailureText(
+        "logged-out", AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, AGY_LOGGED_OUT_CAUSE_DETAIL),
+)
 
 
 def credential_sandbox_program(platform: str = sys.platform):
@@ -306,7 +305,7 @@ def main() -> int:
         tier_to_effort=TIER_TO_REASONING_EFFORT,
         invocation_builder=invocation_builder,
         recover_report_from_stdout=stdout_is_a_review,
-        recognised_failure_texts_for_model=logged_out_failure_texts,
+        recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
         child_environment=agy_environment_copy_without_gemini_api_key_or_github_token(os.environ),
         per_model_run_timeout_seconds=COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS,
         parse_agent_binary_final_result_from_stdout_line=agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none,

@@ -2164,7 +2164,7 @@ def main():
     # launchers: the launch is replaced under them. The texts are the
     # captured ones kept beside the cold-read cells
     # (nn-systems/cold-read/cold-read-claude-cell.py and
-    # cold-read-codex-cell.py, recognised_failure_texts_for_model).
+    # cold-read-codex-cell.py, RECOGNISED_FAILURE_TEXTS).
     runner_classes = load_runner()
     real_classes_run = agent_binary_launch_a_case_replaces(runner_classes)
     codex_logged_out = ("2026-09-18T19:37:41.140816Z ERROR codex_api::endpoint::"
@@ -2201,14 +2201,10 @@ def main():
         ("claude", "logged-out",
          cli_answering(1, "Not logged in · Please run /login\n", ""),
          "Not logged in · Please run /login", 2),
-        ("claude", "account-limit",
+        ("claude", "exit-1",
          cli_answering(1, "You've hit your session limit · resets 8:50pm "
                           "(America/Los_Angeles)\n", ""),
          "resets 8:50pm (America/Los_Angeles)", 2),
-        ("claude", "model-limit",
-         cli_answering(1, "You've reached your Opus limit. Switch to another "
-                          "model, or manage usage credits, to continue.\n", ""),
-         "Opus", 2),
         ("claude", "agent-binary-missing", cli_missing, "No such file or directory", 2),
     )
     try:
