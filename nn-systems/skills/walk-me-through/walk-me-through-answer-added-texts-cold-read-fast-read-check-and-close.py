@@ -1198,7 +1198,8 @@ WALK_FIRST_ENTERED_LINE = re.compile(LINE_OPENING_MARKERS + re.escape(WALK_FIRST
                                      + r"[*_`]*[:\s]*(.*?)[*_`\s]*$")
 # A marked text ends above the first of these lines, because this program reads each on its own; a line opening
 # with any other hashtag, such as a prose `#root_cause`, is part of the text.
-MARKER_LINES_READ_ON_THEIR_OWN = (load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN, CASE_AGAINST_LINE,
+MARKER_LINES_READ_ON_THEIR_OWN = (load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN,
+                                  load_walk_finder().APPROVAL_WALK_ITEM_PART_OPENING_LINE_PATTERN, CASE_AGAINST_LINE,
                                   EVIDENCE_LINE, WALK_CATEGORY_LINE, WALK_WAITS_ON_LINE, WALK_FIRST_ENTERED_LINE)
 WALK_ORDER_REFUSED = (
     "nothing written: {problem}\n"
@@ -2056,13 +2057,13 @@ def approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value,
                     left_out=" or ".join(f"`{opening}`" for opening in APPROVAL_WALK_ITEM_WORD_COUNT_LEFT_OUT_LINE_OPENINGS)))
 
 
-def proposed_texts(marks_found, marks):
+def proposed_texts(marks_found, marks, part_marks=None):
     """Return (mark, text) for each mark of new_marks' list that is one of marks, outside code and with a text,
-    in the document's order. The text is every line new_marks gives the mark, so it is the text that
-    unreadable_new_marks judged."""
+    in the document's order; a mark in a part that part_marks names must instead be one of that part's marks.
+    The text is every line new_marks gives the mark, so it is the text that unreadable_new_marks judged."""
     texts = []
     for mark in marks_found:
-        if mark.mark not in marks or mark.in_code:
+        if mark.mark not in (part_marks or {}).get(mark.part, marks) or mark.in_code:
             continue
         text = unquoted(lines_joined(mark.text_lines))
         if text:
@@ -2114,11 +2115,11 @@ def block_right_below(lines, first, end):
     return []
 
 
-NewMark = collections.namedtuple("NewMark", "mark number in_code comment_cut text_lines below")
+NewMark = collections.namedtuple("NewMark", "mark number in_code comment_cut text_lines below part")
 NewMark.__doc__ = """One `#new` or `#new_if_d` mark: mark, its 0-based line number, whether it is inside fenced or
 indented code, whether text was cut from its line as an HTML comment, text_lines, the mark's own text as written followed by every line its text runs onto, and below,
 for a mark in code or with no text, the lines it may have meant; lines below the mark's own line lose their
-quotation markers."""
+quotation markers; part is the number of the part whose opening `Part N.` the mark's line has, or None."""
 
 
 def new_marks(text, tokens, ranges, shown):
@@ -2149,23 +2150,24 @@ def new_marks(text, tokens, ranges, shown):
             match = new_text_mark_line.match(lines[number] if number in code else shown[number])
             if not match:
                 continue
+            part = int(match["part"]) if match["part"] else None
             if number in code:
                 below = lines_until_blank_or_fence(lines, number + 1, min(code[number], end))
-                marks.append(NewMark(match[1], number, True, False, [match[2]], below))
+                marks.append(NewMark(match["mark"], number, True, False, [match["text"]], below, part))
                 continue
             comment_cut = shown[number] != lines[number]
-            own_text = new_text_label.sub("", match[2])
+            own_text = new_text_label.sub("", match["text"])
             if not unquoted(own_text):
-                marks.append(NewMark(match[1], number, False, comment_cut, [own_text],
-                                     block_right_below(lines, number + 1, end)))
+                marks.append(NewMark(match["mark"], number, False, comment_cut, [own_text],
+                                     block_right_below(lines, number + 1, end), part))
                 continue
             paragraph_end = max((paragraph[1] for paragraph in paragraphs if paragraph[0] <= number < paragraph[1]),  # pragma: no mutate, paragraphs never overlap, so a paragraph starting above the one holding the line also ends above it and max picks the same end, and with no paragraph holding the line both give no line below it
                                 default=number + 1)
             text_end = next((below for below in range(number + 1, paragraph_end)
                              if any(marker.match(lines[below]) for marker in MARKER_LINES_READ_ON_THEIR_OWN)),
                             paragraph_end)
-            marks.append(NewMark(match[1], number, False, comment_cut,
-                                 [own_text] + unquoted_lines(lines[number + 1:min(text_end, end)]), []))
+            marks.append(NewMark(match["mark"], number, False, comment_cut,
+                                 [own_text] + unquoted_lines(lines[number + 1:min(text_end, end)]), [], part))
     return marks
 
 
@@ -2379,6 +2381,11 @@ def marks_the_answer_adds(arguments):
         letters = {letter for _, letter in arguments.part_answer}
         return {mark for mark, adds in ((NEW_MARK, letters != {"D"}), (NEW_IF_D_MARK, "D" in letters)) if adds}
     return {NEW_IF_D_MARK} if arguments.disapproved else {NEW_MARK}
+
+
+def marks_each_part_answer_adds(arguments):
+    """For answers to parts, the marks each part's answer adds, by part number: `#new_if_d` for D, else `#new`."""
+    return {number: {NEW_IF_D_MARK} if letter == "D" else {NEW_MARK} for number, letter in arguments.part_answer or []}
 
 
 def answer_hashtag(arguments):
@@ -2705,7 +2712,7 @@ def check(arguments):
                                                    document=document,
                                                    command=check_command_with_cwd(top, "--not-asked",
                                                                                   str(arguments.not_asked))))
-    texts = proposed_texts(marks, marks_the_answer_adds(arguments))
+    texts = proposed_texts(marks, marks_the_answer_adds(arguments), marks_each_part_answer_adds(arguments))
     log_store_records, tried = (None, []) if arguments.cold_read_records and arguments.counts_log \
         else reachable_log_store_records()
     record_directories = arguments.cold_read_records or (

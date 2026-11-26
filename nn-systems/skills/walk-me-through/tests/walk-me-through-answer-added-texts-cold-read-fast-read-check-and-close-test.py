@@ -742,6 +742,19 @@ def test_marks_whose_texts_are_read_whole_are_not_refused():
           "the line is not",
           result.returncode == 0 and "no proposed text marked" not in result.stdout
           and case.calls.read_text() == "Row one.\nRow two.\nRow three.\n", described(result))
+    case = Case(document=marks_document('Part 1. #new Keep rows.\nPart 2. Keep formatting.\n'))
+    result = case.run("check", "--part-answer", "1=A", "--part-answer", "2=A")
+    check("a marked part followed on the very next line by an unmarked part is not refused, and its text ends above "
+          "the next part's opening",
+          result.returncode == 0 and case.calls.read_text() == "Keep rows.\n", described(result))
+    case = Case(document=marks_document('Part 1. #new Keep rows.\n\nPart 2. #new Drop the old logs.\n'))
+    result = case.run("check", "--part-answer", "1=A", "--part-answer", "2=D")
+    check("on `1=A 2=D`, only the `#new` text of the approved part is read, not the disapproved part's",
+          result.returncode == 0 and case.calls.read_text() == "Keep rows.\n", described(result))
+    case = Case(document=marks_document('Part 1. #new Keep rows.\n\nPart 2. #new_if_d Drop the old logs.\n'))
+    result = case.run("check", "--part-answer", "1=D", "--part-answer", "2=D")
+    check("on `1=D 2=D`, only the `#new_if_d` text is read, though part 1 holds a `#new` text",
+          result.returncode == 0 and case.calls.read_text() == "Drop the old logs.\n", described(result))
     for body, read in (("#new > Keep the old logs.\n", "> Keep the old logs.\n"), ("#new >\n", ">\n")):
         case = Case(document=marks_document(body))
         result = case.run("check")
