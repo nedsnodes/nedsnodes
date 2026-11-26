@@ -52,6 +52,19 @@ check("the section is taken out of the report, and the rest is kept",
       repr(answer.report_text_without_answer))
 answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## Question 1: x\n\n## Words with a meaning of their own\n\n- none\n")
 check("`- none` lists no word and is no problem", answer.words == [] and answer.problems == [], repr(answer))
+answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## Question 1: x\n\n## Words with a meaning of their own\n\n")
+check("a section that holds no line, not even `- none`, is a problem, not a section that lists no word",
+      answer.words == [] and len(answer.problems) == 1 and "hold no line" in answer.problems[0], repr(answer))
+empty_section, empty_stderr = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
+    answer, whole_document=True, ask=lambda *_: (None, "unused"), known_words=lambda: set())
+check("an empty section is reported as not checked, never as listing no such word",
+      "listed no such word" not in empty_section and "Not checked" in empty_section
+      and "1 not checked" in empty_stderr[0], repr((empty_section, empty_stderr)))
+answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
+    "## Words with a meaning of their own\n\n- `alpha`: one\n\n# Second document\n\n## Words with a meaning of their own\n\n")
+check("when one of several sections is empty, its words are still read and the empty one is a problem",
+      answer.words == [("alpha", "one")] and len(answer.problems) == 1 and answer.problems[0].startswith("1 of"),
+      repr(answer))
 answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
     "## Words with a meaning of their own\n\n- `rider`: a meaning\n\n## Question 9: after\n\n1. kept\n")
 check("a heading after the section ends it",
@@ -175,7 +188,9 @@ STUB_LAUNCHER = """import pathlib, sys, time
 argv = sys.argv
 report = pathlib.Path(argv[argv.index("--report") + 1])
 behaviour = pathlib.Path(argv[argv.index("--target") + 1]).read_text(encoding="utf-8").strip()
-if behaviour == "`answer`":
+if behaviour in ("`answer`", "`warn`"):
+    if behaviour == "`warn`":
+        print("cold-read-agy-cell: stray write: a file outside the report changed")
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text("<!-- provenance: runtime=agy model=m -->\\n\\nMATCHES\\n", encoding="utf-8")
 elif behaviour == "`fail`":
@@ -198,6 +213,15 @@ with tempfile.TemporaryDirectory() as scratch_name:
         launcher, "new-word-meaning-guess", "{TARGET_PATH} {REPORT_PATH}", "`fail`\n", scratch / "b", later)
     check("a launcher that fails gives no answer, and its cause line is the cause",
           answer_text is None and "exited 1" in cause and "cause: model-limit" in cause, repr((answer_text, cause)))
+    import contextlib
+    import io
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured):
+        answer_text, cause = new_words.cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause(
+            launcher, "new-word-meaning-compare", "{TARGET_PATH} {REPORT_PATH}", "`warn`\n", scratch / "w", later)
+    check("a launcher that exits 0 after a warning gives its answer, and its warning reaches stderr",
+          (answer_text, cause) == ("MATCHES", "") and "stray write" in captured.getvalue(),
+          repr((answer_text, cause, captured.getvalue())))
     started = time.monotonic()
     answer_text, cause = new_words.cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_or_failure_cause(
         launcher, "new-word-meaning-guess", "{TARGET_PATH} {REPORT_PATH}", "`hang`\n", scratch / "c",

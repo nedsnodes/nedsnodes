@@ -104,18 +104,28 @@ def fast_clarify_cell_report_new_words_section_split_off_and_parse(report_text: 
     """Take every section headed NEW_WORDS_ANSWER_HEADING_TEXT out of the fast-clarify cell's report and read its lines. A report
     about several documents may give one section per document, so every section is read."""
     kept, answer_lines, fenced, inside, sections = [], [], False, False, 0
+    # Lines of each section, so that a section with no line at all, not even `- none`, is caught: the
+    # cell must say `- none` to say there is no such word.
+    lines_in_section = []
     for line in report_text.split("\n"):
         if CODE_FENCE.match(line):
             fenced = not fenced
         if not fenced and NEW_WORDS_ANSWER_HEADING.match(line):
             inside, sections = True, sections + 1
+            lines_in_section.append(0)
             continue
         if inside and not fenced and ANY_HEADING.match(line):
             inside = False
+        if inside and line.strip():
+            lines_in_section[-1] += 1
         (answer_lines if inside else kept).append(line)
     words, problems, seen = [], [], set()
     if not sections:
         problems.append(f"the fast-clarify cell's report has no `## {NEW_WORDS_ANSWER_HEADING_TEXT}` section")
+    empty_sections = lines_in_section.count(0)
+    if empty_sections:
+        problems.append(f"{empty_sections} of the fast-clarify cell's `## {NEW_WORDS_ANSWER_HEADING_TEXT}` sections "
+                        f"hold no line, not even `{NO_NEW_WORDS_LINE}`")
     for line in answer_lines:
         stripped = line.strip()
         if not stripped or stripped == NO_NEW_WORDS_LINE:
@@ -177,6 +187,9 @@ def cold_read_cell_launcher_call_with_one_prompt_on_fast_tier_returning_answer_o
         process.communicate()
         return None, (f"stopped at the time limit for checking new words, "
                       f"{NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS / 60:g} minutes")
+    # A launcher that exits 0 can still have warned, such as of a stray write, so its output always reaches stderr.
+    if output:
+        print(output, file=sys.stderr, end="" if output.endswith("\n") else "\n")
     if process.returncode != 0:
         lines = [line.strip() for line in output.splitlines() if line.strip()]
         causes = [line for line in lines if cell_common.CAUSE_PHRASE in line]
