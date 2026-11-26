@@ -1006,10 +1006,11 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
             return held_by_commit[first_failed]
         # Walked from first_failed, not from origin/main, which may hold the merge commit itself
         # by the time a reader acts on the STOP; along first parents only, so the commit named is
-        # one main's tip once was, not a topic commit main took in through a merge.
+        # one main's tip once was, not a topic commit main took in through a merge. ^{commit}
+        # makes git refuse a blob or tree, of which rev-list would list nothing, as if held.
         ancestor = subprocess.run(
-            ["git", "-C", str(worktree), "rev-list", "--first-parent", "--parents", first_failed,
-             f"^{merge_commit}"],
+            ["git", "-C", str(worktree), "rev-list", "--first-parent", "--parents",
+             f"{first_failed}^{{commit}}", f"^{merge_commit}"],
             capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
         if ancestor.returncode != 0:
             print(f"STOP: pull request {arguments.pull_request} merged into {base_branch!r}, but "
@@ -1018,7 +1019,7 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
                   f"program counts the failure of every test first failed there as "
                   f"{base_branch!r}'s own, not main's; the STOP this program prints last lists "
                   f"those failures among the ones that are not main's. `git rev-list "
-                  f"--first-parent --parents {first_failed} ^{merge_commit}`, where "
+                  f"--first-parent --parents {first_failed}^{{commit}} ^{merge_commit}`, where "
                   f"{merge_commit[:12]} is the merge commit on {base_branch!r}, said: "
                   f"{git_error(ancestor)}\n"
                   f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
@@ -1558,7 +1559,8 @@ def main(argv=None, wait=time.sleep):
             print(f"STOP: not merged: the merge queue is stopped, because {stop_file} says: "
                   f"{stop_reason}\n"
                   f"No merge may start until main is handled. If you are merge-lane-2, run: "
-                  f"python3 {queue_program} merge-batch-start\n"
+                  f"python3 {queue_program} --merge-program-outputs-directory "
+                  f"{shlex.quote(str(outputs))} merge-batch-start\n"
                   f"and do what its STOPPED line says, which covers a stop with or without a "
                   f"stopped notice. Otherwise tell merge-lane-2 this message, with Claude Code's "
                   f"SendMessage tool, naming pull request {arguments.pull_request}.")
