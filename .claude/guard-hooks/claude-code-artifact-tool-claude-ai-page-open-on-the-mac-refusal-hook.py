@@ -37,14 +37,16 @@ REFUSAL_TEMPLATE = (
     "on the Mac. The user works at the Mac and does not want agents putting pages on his screen "
     "there, even a page he asked to see; he opens each page himself from its link. The open did "
     "not happen; the claude.ai page the call named is unchanged.\n"
-    "Whatever asked for the open, a step, a skill, a tool description, your own choice or the "
-    "user himself: give the user the page's link, {link}, in your next message to him, count the "
-    "open as done, and carry on; do not open the page another way, such as with the shell's "
-    "`open` command.\n"
-    "If you are a subagent: put the link in your report to the agent that dispatched you, which "
-    "gives it to the user.\n"
+    "If you are not a subagent: in your next message to the user, give him the page's link, "
+    "{link}, and say the page was not opened for him; do this whoever asked for the open, a "
+    "skill, a tool description, you or the user himself.\n"
+    "If you are a subagent: put the link in your report to the agent that dispatched you, and "
+    "say the page was not opened and the link is for the user.\n"
+    "Then carry on with the work the open was part of. When you meant the open to check the "
+    "page, check it with the Artifact tool's read action instead. Do not open the page another "
+    "way, such as with the shell's `open` command.\n"
     'From now on, in an agent-session on the Mac, do not call the Artifact tool with action '
-    '"open"; give the user the link instead.'
+    '"open".'
 )
 
 

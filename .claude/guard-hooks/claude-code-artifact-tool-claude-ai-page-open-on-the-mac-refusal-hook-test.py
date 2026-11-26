@@ -71,18 +71,23 @@ check("the refusal says why: the user does not want pages put on his screen, eve
       "asked to see; he opens each page himself from its link." in reason, reason)
 check("the refusal says the open did not happen", reason is not None
       and "The open did not happen; the claude.ai page the call named is unchanged." in reason, reason)
-check("the refusal tells the agent, whatever asked for the open, to give the link and carry on",
-      reason is not None and "your own choice or the user himself: give the user the page's link, "
-      f"{PAGE_LINK}, in your next message to him, count the open as done, and carry on;" in reason, reason)
+check("the refusal tells the agent, whoever asked for the open, to give the user the link and say "
+      "the page was not opened", reason is not None
+      and "If you are not a subagent: in your next message to the user, give him the page's link, "
+      f"{PAGE_LINK}, and say the page was not opened for him; do this whoever asked for the open" in reason,
+      reason)
+check("the refusal tells a subagent to pass the link up, saying it is for the user", reason is not None
+      and "If you are a subagent: put the link in your report to the agent that dispatched you, and "
+      "say the page was not opened and the link is for the user." in reason, reason)
+check("the refusal tells the agent to carry on, checking a page by read", reason is not None
+      and "Then carry on with the work the open was part of. When you meant the open to check the page, "
+      "check it with the Artifact tool's read action instead." in reason, reason)
 check("the refusal tells the agent not to open the page another way", reason is not None
-      and "do not open the page another way, such as with the shell's `open` command." in reason, reason)
-check("the refusal tells a subagent to pass the link up", reason is not None
-      and "If you are a subagent: put the link in your report to the agent that dispatched you" in reason,
-      reason)
+      and "Do not open the page another way, such as with the shell's `open` command." in reason, reason)
 check("the refusal says what to do from now on", reason is not None
-      and 'do not call the Artifact tool with action "open"; give the user the link instead.' in reason,
-      reason)
-check("the refusal has its four lines", reason is not None and len(reason.splitlines()) == 4, reason)
+      and 'From now on, in an agent-session on the Mac, do not call the Artifact tool with action "open".'
+      in reason, reason)
+check("the refusal has its five lines", reason is not None and len(reason.splitlines()) == 5, reason)
 
 for case_name, tool_input in [
         ("an open with no url", {"action": "open"}),
@@ -90,7 +95,7 @@ for case_name, tool_input in [
         ("an open with a url that is not text", {"action": "open", "url": 7})]:
     reason = refusal(tool_input)
     check(f"on the Mac, {case_name} is refused, saying the call has no link", reason is not None
-          and f"the page's link, {hook.NO_LINK_TEXT}, in your next message to him" in reason, reason)
+          and f"give him the page's link, {hook.NO_LINK_TEXT}, and say" in reason, reason)
 
 check("on ned-box, an open is let through", refusal({"action": "open", "url": PAGE_LINK}, NED_BOX) is None,
       refusal({"action": "open", "url": PAGE_LINK}, NED_BOX))
