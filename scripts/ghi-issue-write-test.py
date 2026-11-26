@@ -3514,14 +3514,10 @@ def run_edit_cases(scratch: Path):
           reader.staged == staged, repr((reader.staged or "")[:140]))
 
     # --- What that issue line cites --------------------------------------
-    # The issue, by title, as the project's citation rule says to cite one. It was built from
-    # the file's first HEADING, which is the title only in `create`, where
-    # the issue is filed under the heading. Here the two part company on 25
-    # of the 26 filed GHI-MDs on main, and each of an issue's files would
-    # have cited it under that file's own heading — four different wrong
-    # names for issue 3. The case above passes either way: its heading
-    # changed and its issue has one file, so the title follows the heading
-    # and the two answers coincide. These three separate them.
+    # The issue, by the title it ends the run with, as the project's
+    # citation rule says to cite one: the heading where step 4 retitles the
+    # issue, and GitHub's title on an issue with several files, whose one
+    # title no single file's heading gives.
 
     citing = Reader({
         f"git show {MAIN_COMMIT}:{EDIT_RELATIVE}": Completed(FILE_TEXT),
@@ -3533,9 +3529,10 @@ def run_edit_cases(scratch: Path):
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
     })
     tool.edit(source, REPO, scratch, citing, quiet)
-    check("an edit that leaves the heading alone cites the issue by the "
-          "title GitHub holds, which is not that heading",
-          citing.staged == staged_form(title=ISSUE_TITLE_ON_GITHUB),
+    check("an edit of an issue's one file whose title is not its heading "
+          "cites the heading, the title the run leaves the issue with",
+          citing.staged == staged
+          and ran_with(citing, "gh issue edit", "--title", EDIT_TITLE),
           repr((citing.staged or "")[:160]))
     check("and the issue is read before the file is staged, that title "
           "being what the line carries",
@@ -3732,11 +3729,8 @@ def run_edit_cases(scratch: Path):
               for line in said_in_place), str(said_in_place))
 
     # --- A heading changed on a file the author also moved ---------------
-    # Main holds nothing at the author's path on a move, so a comparison
-    # against that path finds no heading to have changed — not on this run,
-    # and not on the rerun after the merge either, by which time main's copy
-    # is the changed file. The comparison is against main's copy at the path
-    # the file moved from.
+    # Main holds nothing at the author's path on a move; the document main
+    # held before the edit is its copy at the path the file moved from.
 
     moved_heading_source = filed_ghi_md(
         scratch, directory="nn-systems/statusline", text=MOVED_HEADING_TEXT)
@@ -3772,13 +3766,13 @@ def run_edit_cases(scratch: Path):
         f"git show {BASE_REVISION}:{EDIT_RELATIVE}": Completed(FILE_TEXT),
         "git ls-remote": Completed(""),
         "gh pr create": Completed("pr\n"),
-        "gh issue view": issue_json("A title nobody derived", one_link),
+        "gh issue view": issue_json(EDIT_TITLE, one_link),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
     })
     tool.edit(filed_ghi_md(scratch, directory="nn-systems/statusline"), REPO,
               scratch, moved_same_heading, quiet)
-    check("while a move that left the heading alone renames nothing, "
-          "however far the issue's title is from that heading",
+    check("while a move of a file whose heading is already the issue's "
+          "title renames nothing",
           not ran_with(moved_same_heading, "gh issue edit", "--title"),
           str(moved_same_heading.commands()))
 
@@ -4121,17 +4115,12 @@ def run_edit_cases(scratch: Path):
     # edit. Main's copy is compared to theirs before any of that.
 
     # Main's copy is what the earlier run landed, `issue:` line included,
-    # and that line cites the issue by the title GitHub holds — which on
-    # this file is nowhere near its heading, and stays where it is because
-    # the heading did not change. A fixture where main's copy cited the
-    # HEADING instead would be a state this tool cannot produce, and the
-    # rerun would read it as content of its own to land.
+    # and the issue is titled with the heading that run gave it.
     resumed = Recorder({
-        f"git show {MAIN_COMMIT}:{EDIT_RELATIVE}": Completed(
-            staged_form(title="Stale title")),
+        f"git show {MAIN_COMMIT}:{EDIT_RELATIVE}": Completed(staged),
         "git merge-base": Completed(BASE_REVISION + "\n"),
         f"git show {BASE_REVISION}:{EDIT_RELATIVE}": Completed("# Older\n"),
-        "gh issue view": issue_json("Stale title", one_link),
+        "gh issue view": issue_json(EDIT_TITLE, one_link),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
     })
     done, wrongly_refused = False, None
@@ -4148,12 +4137,44 @@ def run_edit_cases(scratch: Path):
           not resumed.ran("git worktree add")
           and not resumed.ran("gh pr create"), str(resumed.commands()))
 
-    check("a heading the edit did not change leaves the title alone, "
-          "however far the title is from it",
-          not ran_with(resumed, "gh issue edit", "--title"),
-          str(resumed.commands()))
     check("and the rerun does not spend a model call asking ghi-guide-agent again",
           not resumed.ran(ASK), str(resumed.commands()))
+
+    # GHI 670's case: the heading was changed by a commit made by hand on
+    # the edit's branch, so main already holds the new heading, while the
+    # issue and main's `issue:` line still carry the old title.
+    stale_title = "Stale title"
+    heading_already_on_main = Reader({
+        f"git show {MAIN_COMMIT}:{EDIT_RELATIVE}": Completed(
+            staged_form(title=stale_title)),
+        "git merge-base": Completed(BASE_REVISION + "\n"),
+        f"git show {BASE_REVISION}:{EDIT_RELATIVE}": Completed(
+            staged_form(title=stale_title)),
+        "git ls-remote": Completed(""),
+        "gh pr create": Completed("pr\n"),
+        "gh issue view": issue_json(stale_title, one_link),
+        "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
+    })
+    tool.edit(source, REPO, scratch, heading_already_on_main, quiet)
+    check("a heading main already holds retitles an issue whose title is "
+          "not that heading",
+          ran_with(heading_already_on_main, "gh issue edit", "--title",
+                   EDIT_TITLE), str(heading_already_on_main.commands()))
+    check("and the `issue:` line it lands cites the heading, the title the "
+          "issue ends the run with",
+          heading_already_on_main.staged == staged,
+          repr((heading_already_on_main.staged or "")[:160]))
+    after_that_merge = Recorder({
+        f"git show {MAIN_COMMIT}:{EDIT_RELATIVE}": Completed(staged),
+        "gh issue view": issue_json(EDIT_TITLE, one_link),
+        "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
+    })
+    tool.edit(source, REPO, scratch, after_that_merge, quiet)
+    check("and once that lands and the title is the heading, a rerun "
+          "retitles nothing and opens no pull request",
+          not ran_with(after_that_merge, "gh issue edit", "--title")
+          and not after_that_merge.ran("gh pr create"),
+          str(after_that_merge.commands()))
 
     # --- The pull request is already open --------------------------------
 
@@ -5205,9 +5226,11 @@ def run_landed_design_cases(scratch: Path):
     # lands, and the body is relinked to the file where it now sits.
     old_body = tool.links_body(
         REPO, ["docs/issues/120-crash-recovery-for-seats.tool.design.md"])
+    landed_heading = tool.first_heading(LANDED_TEXT)
     rerun = Recorder({
-        f"git show {MAIN_COMMIT}:{LANDED_DESIGN}": Completed(landed_form()),
-        "gh issue view": issue_json(LANDED_TITLE, old_body),
+        f"git show {MAIN_COMMIT}:{LANDED_DESIGN}": Completed(
+            landed_form(title=landed_heading)),
+        "gh issue view": issue_json(landed_heading, old_body),
         "git ls-tree": Completed(f"{LANDED_DESIGN}\0"),
     })
     _, done = tool.edit(design, REPO, scratch, rerun, quiet)

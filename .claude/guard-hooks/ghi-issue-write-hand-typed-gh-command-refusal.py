@@ -59,8 +59,8 @@ DECISIONS, and where they depart from the design of record:
   ghi-write-skill-link-only-rewalk-2026-09-28 (minutes:
   nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/ghi-write-skill-link-only-rewalk-2026-09-28-minutes.md).
   edit-GHI retitles an issue from its GHI-MD's first heading, so a title
-  changed by hand no longer matches the file, and the next edit-GHI run that
-  changes that heading sets the title from the file again; merge-lane-2
+  changed by hand no longer matches the file, and the next edit-GHI run sets
+  the title from the file again; merge-lane-2
   raised this in its review of this hook. Refusing `--title` leaves the
   title one source, the GHI-MD's first heading, and the refusal sends the
   agent there. A title edit that also carries a body flag gets the body
@@ -258,22 +258,20 @@ EDIT_BODY_REFUSAL = (
     "afterwards for the title's instructions.\n"
     "{record_line}"
 )
-# The GHI write tool retitles an issue only when the issue has one file on main
-# and the edit changes that file's first heading, so {title_line} stops the
-# agent wherever the tool could not retitle.
+# The GHI write tool retitles an issue only when the issue has one file on
+# main, so {title_line} stops the agent wherever the tool could not retitle.
 EDIT_TITLE_REFUSAL = (
     "[rule bash-guard-gh-issue-body-or-title-set-by-hand] Do not set this project's issue titles with gh issue edit: "
     "scripts/ghi-issue-write.py sets an issue's title from the first heading of the "
-    "issue's GHI-MD, when the issue has one file on main and an edit changes that "
+    "issue's GHI-MD, when the issue has one file on main and its title is not that "
     "heading.\n"
     + LABELS_ONLY_LINE + "\n"
     "{title_line}"
 )
 TITLE_LINES_ONE_FILE = (
-    "If the first heading of {path} already reads the title you want, stop and tell "
-    "the user.\n"
-    "Otherwise change that heading to the title you want, then open the edit's pull "
-    "request with: python3 scripts/ghi-issue-write.py edit {path}"
+    "If the first heading of {path} does not read the title you want, change it to "
+    "that title.\n"
+    "Then run: python3 scripts/ghi-issue-write.py edit {path}"
 )
 TITLE_LINE_SEVERAL_FILES = (
     "The issue's files on main are: {paths}. scripts/ghi-issue-write.py changes the "
@@ -281,11 +279,10 @@ TITLE_LINE_SEVERAL_FILES = (
 )
 TITLE_LINES_LOOKUP_FAILED = (
     "If the issue has no file or two or more files, counting files named "
-    "docs/issues/<number>-*.md and designs in a system's docs/ directory, or the first "
-    "heading of the issue's GHI-MD already reads the title you want, stop and tell the "
-    "user.\n"
-    "Otherwise change the first heading of the issue's GHI-MD to the title you want, "
-    "then open the edit's pull request with: python3 scripts/ghi-issue-write.py edit "
+    "docs/issues/<number>-*.md and designs in a system's docs/ directory, stop and "
+    "tell the user.\n"
+    "Otherwise, if the first heading of the issue's GHI-MD does not read the title you "
+    "want, change it to that title, then run: python3 scripts/ghi-issue-write.py edit "
     "<path>"
 )
 DELETE_REFUSAL = (

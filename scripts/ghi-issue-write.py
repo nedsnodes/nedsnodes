@@ -206,34 +206,22 @@ stopped the first run stopped every rerun, and the pushed branch stayed
 stranded with no pull request on it. Measured 2026-09-21, reviewing the
 same pull request; see `edit_landing_state`.
 
-THE TITLE FOLLOWS A CHANGE, NOT A MISMATCH. The design's trigger is "when
-the edit changes the file's first heading", and reading that as "make the
-title match the heading" would be a different tool. Measured 2026-09-21 over
-the filed corpus on main — the 26 files `ghi_md_paths_for_issue` returns, for
-the 21
-issues that have one: 25 of them have a heading that differs from their
-issue's title, so the matching rule renames most issues the first time
-anybody edits one. An issue with several filed GHI-MDs is left alone even
-when the heading did change — issue 3 has four files with four headings, and
-nothing in the pairing says which one names it — and the tool says so
-rather than guessing.
+THE TITLE IS THE HEADING, COMPARED WITH THE ISSUE'S TITLE ON GITHUB. Where
+the edited file is the issue's one filed GHI-MD, step 4 sets the issue's
+title to the file's first heading whenever the two differ. Compared with
+main's earlier copy of the file instead, a heading changed by a commit on
+the edit's branch is already on main by the rerun after the merge, so no
+run ever retitles the issue, and a hand-typed `gh issue edit --title` is
+refused by a guard hook. An issue with several filed GHI-MDs is left alone:
+nothing in the pairing says which one names it, and the tool says so rather
+than guessing. So is a file new to an issue that has another on main, since
+nothing says it replaces that one; `report_no_moved_from_match` says why.
 
-The change is measured against the document as main holds it before the
-edit, which on a moved file is main's copy at the path it moved from.
-Measured against the author's path instead, a moved file's heading never
-looks changed — main has nothing there to compare with on the first run,
-and by the rerun after the merge main's copy is the changed file itself —
-so a moved file's title would follow a heading change never.
-
-WHICH IS WHY THE FILE'S `issue:` LINE CITES GITHUB'S TITLE, NOT THE
-HEADING. That line cites the issue the way the project's citation rule says to cite one, by
-title and link. In `create` the heading IS the title, the issue being
-filed under it. In `edit` it is not, on 25 of the 26 filed GHI-MDs on main,
-and a run that cited the heading wrote each of an issue's files a
-different wrong name for it. So the line carries the title this run leaves
-the issue holding: the heading where step 4 sets it to that, and GitHub's
-title everywhere else. It is derived after main and the issue have been
-read, for that reason — see `issue_title_after_this_edit`.
+THE FILE'S `issue:` LINE CITES THE TITLE THE ISSUE ENDS THIS RUN WITH. That
+line cites the issue the way the project's citation rule says to cite one, by
+title and link: the heading where step 4 sets the title to it, and GitHub's
+title where step 4 leaves the title alone. It is derived after main and the
+issue have been read, for that reason — see `issue_title_after_this_edit`.
 
 THE CONFLICT THIS REFUSES ON IS THE FILE'S, NOT THE BODY'S. The user ruled
 on 2026-09-08 that a GHI edit checks for conflicts and refuses rather than
@@ -2644,7 +2632,7 @@ def report_no_moved_from_match(number: int, relative: str, paths, report):
     seat's file.
 
     The title is left alone for the same reason: with no predecessor named,
-    nothing says the heading changed.
+    nothing says this file replaces the issue's file on main.
 
     THE MESSAGE NAMES THE RENAME WITHOUT THE MOVE TOO. It read "if you
     renamed this file as well as moving it" until 2026-09-22, while the
@@ -2898,32 +2886,19 @@ def read_issue(repo: str, number: int, relative: str, runner,
     return issue
 
 
-def heading_changed_in_this_edit(document_before_this_edit,
-                                 heading: str) -> bool:
-    """Whether this edit changed the file's first heading, which is the
-    design's trigger for the title following it — a CHANGE, not a mismatch.
-    `sync_title_on_heading_change` holds what the comparison is made
-    against and why; `title_follows_heading_in_this_edit` asks this with
-    step 4's two other conditions."""
-    return (document_before_this_edit is not None
-            and first_heading(document_before_this_edit) != heading)
-
-
 def title_follows_heading_in_this_edit(document_before_this_edit,
                                       heading: str, paths, issue) -> bool:
-    """Whether step 4, `sync_title_on_heading_change`, will set the issue's
-    title to this heading: the heading changed in this edit, the issue has
-    at most one filed GHI-MD, and the title is not already the heading.
-    Step 4 itself, the heading check and `issue_title_after_this_edit`
-    all ask this one function, so the three cannot differ. They once did:
-    the heading check asked a copy of two of the conditions, and an edit
-    changing a heading to the title the issue already held was refused
-    although no rename followed (review of PR [GHI titles name the
-    work](https://github.com/nedsnodes/nedsnodes/pull/829)); step 4 and
-    the frontmatter title kept their own copies until the reviews of PR
-    [GHI heading check runs after the duplicate
-    refusals](https://github.com/nedsnodes/nedsnodes/pull/838)."""
-    return (heading_changed_in_this_edit(document_before_this_edit, heading)
+    """Whether step 4, `sync_title_to_heading`, will set the issue's title
+    to this heading: main holds this document before the edit, at this path
+    or the one it moved from; the issue has at most one filed GHI-MD; and
+    the issue's title on GitHub is not the heading. Step 4, the heading
+    check and `issue_title_after_this_edit` all ask this one function, so
+    the three cannot differ.
+
+    The title is compared with GitHub's, not with main's earlier heading:
+    a heading changed by a commit on the edit's branch is on main by the
+    rerun after the merge, and only GitHub still holds the old title."""
+    return (document_before_this_edit is not None
             and len(paths) <= 1
             and issue.get("title") != heading)
 
@@ -2931,73 +2906,29 @@ def title_follows_heading_in_this_edit(document_before_this_edit,
 def issue_title_after_this_edit(document_before_this_edit, heading: str,
                                 paths, issue) -> str:
     """The title the issue carries once this run is done, which is what the
-    file's `issue:` frontmatter line has to cite.
+    file's `issue:` frontmatter line cites.
 
-    THE ISSUE'S TITLE, NOT THE FILE'S HEADING. That line cites the issue
-    the way the project's citation rule says to cite one — by title, as a link — and it was
-    built from `first_heading` until the review of PR [Build the GHI write
-    tool's edit verb](https://github.com/nedsnodes/nedsnodes/pull/596).
-    In `create` the two are one thing: the issue is filed under the
-    heading. In `edit` they are not, and the docstring's own measurement
-    says how far apart — 2026-09-21, of the 26 filed GHI-MDs on main, 25
-    have a heading their issue's title does not match. An in-place edit of
-    docs/issues/3-slice-6-review-evidence-not-built.md landed an `issue:`
-    line naming issue 3 "Slice 6, the review-evidence check", which is that
-    file's heading; the issue is titled "main-gatekeeper — the single
-    check-in gate", and its four files would have carried four different
-    wrong names for it. One of the corpus's headings contains a markdown
-    link, which a heading-built line would have nested inside another.
-
-    AFTER THIS RUN, not as GitHub holds it now, because step 4 may change
-    it: where the heading did change and the issue has one filed GHI-MD, the
-    title follows the heading, and a line citing the old title would be
-    stale the moment this landed — and the next rerun would see a file
-    differing from main's copy and land a second edit to put it right.
-    Whether step 4 renames is `title_follows_heading_in_this_edit`'s
-    answer; where it does not, the title stays what GitHub holds, which is
-    the heading already when step 4's third condition is what declined."""
+    The issue's title, not the file's heading, because the line cites the
+    issue by title, and an issue with several files has one title and
+    several headings. After this run, not as GitHub holds it now, because
+    step 4 may change it, and a line citing the old title would be stale
+    the moment it landed."""
     if title_follows_heading_in_this_edit(document_before_this_edit,
                                           heading, paths, issue):
         return heading
     return issue.get("title") or heading
 
 
-def sync_title_on_heading_change(repo: str, number: int,
-                                 document_before_this_edit, title: str,
-                                 paths, issue, runner, report):
-    """Step 4. The design's trigger is a CHANGE — "when the edit changes the
-    file's first heading" — not a mismatch between the issue's title and the
-    file's heading, and the difference is not academic. Measured 2026-09-21
-    over the filed corpus on main, the 26 files `ghi_md_paths_for_issue`
-    returns: 25
-    of them have a heading that differs from their issue's title, so a tool
-    that made the title match a heading would rename most issues the first
-    time anybody edited one.
-
-    An issue with more than one filed GHI-MD is left alone even when the
-    heading did change: issue 3 has four files with four headings, and
-    nothing in the pairing says which of them names the issue. The design's
-    sentence was written for the common shape it also states — most issues
-    carry one file.
-
-    WHAT THE CHANGE IS MEASURED AGAINST is the document as main holds it
-    before this edit, which on a moved file is main's copy at the path it
-    moved from. Passed in for that reason rather than read from the author's
-    path here: main holds nothing at the author's path on a move, so a
-    comparison against that finds no heading to have changed — not on the
-    first run, and not on any rerun either, since once the move merges the
-    heading on main is the changed one. A moved file's title would follow a
-    heading change never.
-
-    Whether to rename is `title_follows_heading_in_this_edit`'s answer, the
-    one the heading check and the frontmatter title also ask. The
-    several-files case is asked again only to say why nothing was renamed."""
+def sync_title_to_heading(repo: str, number: int, document_before_this_edit,
+                          title: str, paths, issue, runner, report):
+    """Step 4: sets the issue's title to the file's first heading when
+    `title_follows_heading_in_this_edit` says to. The several-files case is
+    asked again only to say why nothing was renamed."""
     if not title_follows_heading_in_this_edit(document_before_this_edit,
                                               title, paths, issue):
-        if (heading_changed_in_this_edit(document_before_this_edit, title)
-                and len(paths) > 1):
-            report(f"the heading changed, but issue {number} has "
-                   f"{len(paths)} filed GHI-MDs and nothing "
+        if issue.get("title") != title and len(paths) > 1:
+            report(f"the heading is not the issue's title, but issue "
+                   f"{number} has {len(paths)} filed GHI-MDs and nothing "
                    "says which one names it, so the title is left alone")
         return
     runner(["gh", "issue", "edit", str(number), "--repo", repo,
@@ -3108,8 +3039,8 @@ def edit_saying_whether_this_run_opened_its_pull_request(
     # main's copy there. Asked only when main has nothing at the author's
     # path — where it does, this is an edit in place and a same-named file
     # elsewhere is another document. Resolved here rather than inside a
-    # step, because step 3 deletes that path and step 4 measures the
-    # heading change against that copy: one reading of main, two users.
+    # step, because step 3 deletes that path and step 4 asks whether main
+    # held this document before the edit: one reading of main, two users.
     moved_from = (moved_from_path_on_main(number, relative, main_commit,
                                           repository_root, runner)
                   if on_main is None else None)
@@ -3133,8 +3064,7 @@ def edit_saying_whether_this_run_opened_its_pull_request(
                                  else moved_from_on_main)
     # A heading becomes the title exactly when step 4 renames, so it is
     # judged here, before anything is landed, under step 4's own three
-    # conditions; an unchanged heading, or one the issue is already titled,
-    # is the title the issue already has.
+    # conditions; a heading the issue is already titled is not refused.
     if title_follows_heading_in_this_edit(document_before_this_edit, title,
                                           paths, issue):
         refuse_heading_with_date(title)
@@ -3173,8 +3103,8 @@ def edit_saying_whether_this_run_opened_its_pull_request(
         moved_from_on_main, state, branch, main_commit, repository_root, runner,
         report, why=why)
 
-    sync_title_on_heading_change(repo, number, document_before_this_edit,
-                                 title, paths, issue, runner, report)
+    sync_title_to_heading(repo, number, document_before_this_edit, title,
+                          paths, issue, runner, report)
     finished = relink_body_from_main(repo, number, relative, on_main, paths,
                                      issue, runner, report)
     if waiting:
