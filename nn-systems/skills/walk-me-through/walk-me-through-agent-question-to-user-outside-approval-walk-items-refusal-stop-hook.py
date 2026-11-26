@@ -315,8 +315,8 @@ REFUSAL_INSTRUCTIONS = (
     "must follow, a `--waits-on` with that item's heading without `## ` or `Item N of M: `, then do what it prints; "
     "do not show the new item now, since the walk shows it when its turn comes:\n{command}",
 )
-QUESTION_INSERT_COMMAND_TITLE_PLACEHOLDER = "<the point of the question>"
-QUESTION_INSERT_COMMAND_CATEGORY_PLACEHOLDER = "<category>"
+QUESTION_INSERT_COMMAND_TITLE_ARGUMENT_PLACEHOLDER = "<the point of the question>"
+QUESTION_INSERT_COMMAND_CATEGORY_ARGUMENT_PLACEHOLDER = "<category>"
 ONE_CLOSING_LINE_NAMED = "the waiting item's closing line"
 SEVERAL_CLOSING_LINES_NAMED = "each waiting item's closing line, on a line of its own"
 NO_PAGE_LINK = "<page link>"
@@ -789,8 +789,8 @@ def output_for(payload, environment, model=model_judgement):
     closing_no_item_added, without_page = closing_lines(pages, name, document_text, units, waiting_units, parser,
                                                         numbers, total)
     command = " ".join(["python3", shlex.quote(str(QUESTION_INSERT_PROGRAM)), "--cwd", shlex.quote(str(top)),
-                        "--title", shlex.quote(QUESTION_INSERT_COMMAND_TITLE_PLACEHOLDER),
-                        "--category", shlex.quote(QUESTION_INSERT_COMMAND_CATEGORY_PLACEHOLDER)]
+                        "--title", shlex.quote(QUESTION_INSERT_COMMAND_TITLE_ARGUMENT_PLACEHOLDER),
+                        "--category", shlex.quote(QUESTION_INSERT_COMMAND_CATEGORY_ARGUMENT_PLACEHOLDER)]
                        + [f"--flagged-line {shlex.quote(line)}" for line in checked[flagged][1]])
     values = {"walk": name, "sentence": sentence, "decided": decided, "waiting": waiting_label,
               "categories": ", ".join(f"`{category}`" for category in check_and_close.WALK_CATEGORIES),

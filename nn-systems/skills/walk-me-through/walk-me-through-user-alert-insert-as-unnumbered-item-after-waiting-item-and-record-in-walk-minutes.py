@@ -198,7 +198,7 @@ def insert(cwd, alert_ids, now=None):
                                 WALK_CHECK_PROGRAM)
     new_lines = [line for alert, title in zip(alerts, titles)
                  for line in item_lines(alert, title, check_program.WALK_FIRST_ENTERED_TAG)]
-    new_text = walk_finder.approval_walk_document_text_with_lines_added_after_whole_item(text, unit, new_lines, parser)
+    new_text = walk_finder.approval_walk_document_text_insert_lines_after_whole_item(text, unit, new_lines, parser)
     unnumbered = walk_finder.approval_walk_unit_is_unnumbered_item
     if (sum(map(unnumbered, walk_finder.item_unit_spans(new_text, parser)))
             != sum(map(unnumbered, walk_finder.item_unit_spans(text, parser))) + len(alerts)):

@@ -936,7 +936,7 @@ def approval_walk_document_new_item_insert_line_number_past_whole_item_sub_steps
     return next((each[3] for each in units if each[3] > last), line_count)
 
 
-def approval_walk_document_text_with_lines_added_after_whole_item(text, unit, new_lines, parser):
+def approval_walk_document_text_insert_lines_after_whole_item(text, unit, new_lines, parser):
     """text with new_lines put where an item added after unit's whole item goes, as
     approval_walk_document_new_item_insert_line_number_past_whole_item_sub_steps_and_withdrawn_versions says, above
     the blank lines that end that whole item, so new_lines, which open with their own blank line, keep one blank

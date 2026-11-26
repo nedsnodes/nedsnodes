@@ -358,8 +358,8 @@ def insert_command_from(reason, title="merge-lane-2's question about the merge",
     if line is None:
         return None
     arguments = shlex.split(line)
-    arguments[arguments.index(hook.QUESTION_INSERT_COMMAND_TITLE_PLACEHOLDER)] = title
-    arguments[arguments.index(hook.QUESTION_INSERT_COMMAND_CATEGORY_PLACEHOLDER)] = category
+    arguments[arguments.index(hook.QUESTION_INSERT_COMMAND_TITLE_ARGUMENT_PLACEHOLDER)] = title
+    arguments[arguments.index(hook.QUESTION_INSERT_COMMAND_CATEGORY_ARGUMENT_PLACEHOLDER)] = category
     for each in waits_on:
         arguments += ["--waits-on", each]
     arguments[0] = sys.executable
@@ -1458,11 +1458,11 @@ def test_the_closing_line_and_the_item_ending_are_the_walk_skills():
     command_spec.loader.exec_module(command)
     ending = "the recommendation stated as an action"
     check("the command's output ends the new item as SKILL.md's section \"Each item\" says",
-          "end it with " + ending in skill and ending in command.DONE_LINES[1], command.DONE_LINES[1])
+          "end it with " + ending in skill and ending in command.NEXT_STEPS_LINES[0], command.NEXT_STEPS_LINES[0])
     check("the command's output and SKILL.md's section \"Each item\" both open the alternative with "
-          "\"The alternative:\"", "`The alternative: " in command.DONE_LINES[1]
+          "\"The alternative:\"", "`The alternative: " in command.NEXT_STEPS_LINES[0]
           and "State the alternative just before the recommendation, as in \"The alternative: " in skill,
-          command.DONE_LINES[1])
+          command.NEXT_STEPS_LINES[0])
     check("SKILL.md's Style paragraph puts the strongest case against just before the alternative, where \"Each item\" "
           "puts the alternative", "Just before the alternative, state the strongest case against the recommendation"
           in skill)

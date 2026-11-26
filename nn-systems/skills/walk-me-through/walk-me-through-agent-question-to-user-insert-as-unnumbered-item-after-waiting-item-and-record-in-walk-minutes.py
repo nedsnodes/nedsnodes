@@ -10,7 +10,7 @@ prints this command, its --flagged-line arguments filled in, when it refuses a r
 something outside the walk's items. The command writes the parts of the item that need no judgment:
 - the walk-document gets `## <TITLE>` after the whole item holding the last waiting item, where the user alert
   program puts an alert, by the approval-walk finder's
-  approval_walk_document_text_with_lines_added_after_whole_item; under it the category line, one
+  approval_walk_document_text_insert_lines_after_whole_item; under it the category line, one
   `#approval_walk_item_waits_on` line per --waits-on, the `#approval_walk_item_first_entered` line giving today
   on this machine's clock, each --flagged-line on a line of its own, word for word, which is the form the
   question check reads back, and the line `#case_against <rating>: <the strongest case against your
@@ -61,8 +61,8 @@ NO_UNNUMBERED_ITEMS_MESSAGE = (
     "flagged line on a line of its own.")
 REPLANNED_MINUTES_LINE = ("- Re-planned {date}: added the unnumbered item {title} after the whole of item {whole}, "
                           "from a question the question check flagged.")
-DONE_LINES = (
-    "Added the unnumbered item `## {title}` to {document}, after the whole of item {whole}.",
+ADDED_LINE = "Added the unnumbered item `## {title}` to {document}, after the whole of item {whole}."
+NEXT_STEPS_LINES = (
     "In that item, put the rest of the question on lines of its own, if the flagged lines are not all of it; on the "
     "`#case_against` line, put in place of `<rating>` one of none, weak, medium, strong or very strong, and after "
     "the colon the strongest case against your recommendation; then add the line `The alternative: <what D does "
@@ -125,7 +125,7 @@ def insert(cwd, title, category, waits_on, flagged_lines, now=None):
                  + [f"{check_program.WALK_FIRST_ENTERED_TAG} {now.astimezone().date().isoformat()}", ""]
                  + [line for flagged in flagged_lines for line in (flagged, "")]
                  + [CASE_AGAINST_PLACEHOLDER, ""])
-    new_text = walk_finder.approval_walk_document_text_with_lines_added_after_whole_item(text, unit, new_lines, parser)
+    new_text = walk_finder.approval_walk_document_text_insert_lines_after_whole_item(text, unit, new_lines, parser)
     unnumbered = walk_finder.approval_walk_unit_is_unnumbered_item
     if (sum(map(unnumbered, walk_finder.item_unit_spans(new_text, parser)))
             != sum(map(unnumbered, walk_finder.item_unit_spans(text, parser))) + 1):
@@ -144,7 +144,7 @@ def insert(cwd, title, category, waits_on, flagged_lines, now=None):
               "closing_lines_named": (question_check.SEVERAL_CLOSING_LINES_NAMED if numbers[1:]
                                       else question_check.ONE_CLOSING_LINE_NAMED),
               "not_in_backticks": question_check.current_item_hook.NOT_IN_BACKTICKS}
-    return [line.format(**values) for line in DONE_LINES]
+    return [line.format(**values) for line in (ADDED_LINE, *NEXT_STEPS_LINES)]
 
 
 def main(argv=None):
