@@ -43,8 +43,9 @@ THE TEXT CHECKED is the reply, line by line, without:
   be told from the other items'. So is a reply line matching
   the answer line's first sentence, the walk-me-through skill's
   answer line without what the item adds after it, such as ` D: <the
-  alternative>`; and one showing a line of the item that opens with the
-  mark `#new` or `#new_if_d` as the agent shows it, the mark replaced by
+  alternative>`; and one showing a line of the item that opens, after any
+  list or quotation mark and a part's opening `Part N.`, with the mark
+  `#new` or `#new_if_d` as the agent shows it, the mark replaced by
   `If you approve, the new text:` or `If you disapprove, the new text:` and
   a `The new text:` just after the mark dropped; lines match when they are
   equal once markdown emphasis, heading and list marks, a hashtag marker

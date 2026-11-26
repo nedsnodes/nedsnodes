@@ -10,7 +10,7 @@ Usage, from the agent-session's checkout:
   walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py check
       [--obvious | --after-advisor | --disapproved | --deferred | --option N
        | --part-answer N=ANSWER ... | --moved-on-no-decision
-       | --not-asked KIND|none|weak-cost-only|weak-alters-earlier-approved-text-only
+       | --not-asked KIND|adds-nothing|none|weak-cost-only|weak-alters-earlier-approved-text-only
        | --already-decided USER_RULING | --now-over-later-already-decided
        | --moved-on REASON]
       --user-reply-as-typed REPLY    (every answer but --not-asked, --already-decided,
@@ -162,7 +162,8 @@ names each one's walk-minutes and says which to close and how to merge them,
 since an agent-seat keeps at most one approval-walk open.
 
 CHECK finds the texts the answer adds: the item's lines whose first word,
-after any list or quotation marker, outside fenced code, is a mark the answer adds;
+after any list or quotation marker and a part's opening `Part N.`, outside
+fenced code, is a mark the answer adds;
 the text is the rest of the line, without one pair of surrounding quotation
 marks. Before it reads them, CHECK refuses, writing nothing, for every answer but
 --deferred, --moved-on-no-decision and --moved-on, which add no text, when
@@ -641,7 +642,10 @@ TOUCHES, TEST, SOURCE, UNUSED, RENAME, GLOSSARY_TERM, ADDED_HASHTAG_MARKER, SEAR
                                       "search"))
 NotAskedEvidence = collections.namedtuple("NotAskedEvidence",
                                           "value rating found touched tests lines marks top item")
-NoAnswerCase = collections.namedtuple("NoAnswerCase", "value label meaning ratings needed checks evidence ground flag")
+# unchecked: what the agent judges after settling by the row, when it differs from NOT_ASKED_UNCHECKED.
+NoAnswerCase = collections.namedtuple("NoAnswerCase",
+                                      "value label meaning ratings needed checks evidence ground flag unchecked",
+                                      defaults=(None,))
 
 
 class MissingEvidenceLine(str):
@@ -778,6 +782,8 @@ def dropped_proposal_search_problems(found):
 
 NOT_ASKED_FLAG, ALREADY_DECIDED_FLAG = "--not-asked", "--already-decided"
 NOT_ASKED_ANY_RATING = (NOT_ASKED_RATED_NONE, NOT_ASKED_RATED_WEAK)
+NOT_ASKED_ADDS_NOTHING = "adds-nothing"
+NOT_ASKED_ADDS_NOTHING_LABEL = "adds nothing"
 EVERY_RATING = ("none", "weak", "medium", "strong", "very strong")
 DROPPED_PROPOSAL_VALUE = "proposed-check-dropped-search-found-no-case"
 DROPPED_PROPOSAL_GROUND = "that the problem the dropped proposal guarded against may still come, at any rating"
@@ -823,6 +829,15 @@ NO_ANSWER_CASES = (
                  (rating_and_needed_lines_problems, touched_files_exist_problems, system_glossary_problems),
                  "touches; every touched file is a `*-glossary.md` git tracks, other than the project glossary",
                  None, NOT_ASKED_FLAG),
+    NoAnswerCase(8, "kind 8", "a simplification or deletion that leaves unchanged what the text tells its reader to do, "
+                 "or what the code does",
+                 NOT_ASKED_ANY_RATING, (TOUCHES,), (rating_and_needed_lines_problems, touched_files_exist_problems),
+                 "touches; every touched file exists", None, NOT_ASKED_FLAG),
+    NoAnswerCase(NOT_ASKED_ADDS_NOTHING, NOT_ASKED_ADDS_NOTHING_LABEL,
+                 "an item whose recommendation adds and changes nothing, such as leaving out a definition, a check or "
+                 "a step that its alternative would add, whatever its case against is rated",
+                 EVERY_RATING, (), (), "none; any rating", None, NOT_ASKED_FLAG,
+                 "whether the item's recommendation adds and changes nothing"),
     NoAnswerCase(NOT_ASKED_RATED_NONE, "case against none",
                  "an item of none of these kinds whose case against is rated none, unless it adds words the user has "
                  "not approved to a file the instruction-file guard protects",
@@ -876,7 +891,7 @@ NO_ANSWER_TABLE_RULES = (
     "case against's rating, when a search of the last 30 days, of every place the problem would leave a trace, found "
     "no case of it.",
     "Every other item is shown, including any rated above none that adds a rule, instruction sentence, check, hook, "
-    "job, glossary term, design choice, setting or recurring expense, or that recommends doing nothing.",
+    "job, glossary term, design choice, setting or recurring expense.",
     "Before settling an item, run its row's command and ask the advisor whether a later ruling or another open item "
     "overtakes it; if the program refuses, the advisor objects or the advisor call fails, show the item.",
     "After settling an item of no kind, say in your next message that you settled it, so that he can have it reversed.",
@@ -1421,13 +1436,13 @@ NOT_ASKED_WHY = {
 NOT_ASKED_JUDGEMENT_LINES = (
     "{item} is recorded as settled without asking the user, {label}; the program checked only what code can.",
     "Before you run close, ask the advisor whether a later ruling or another open item overtakes {item}, and judge "
-    "what the program could not, such as whether the case against names nothing besides {grounds}, and whether a fix "
-    "matches its design.",
+    "what the program could not, such as {unchecked}.",
     "If the advisor objects, the advisor call fails, or your judgement is against settling, do not run close: "
     "present {item} to the user and run check with the flag for his answer, as `--help` lists it; that writes a new "
     "answer line, and close records only the last one, so this line is then set aside.",
 )
 # Code cannot see these in a change, so an item of no kind rated weak leaves them to the agent.
+NOT_ASKED_UNCHECKED = "whether the case against names nothing besides {grounds}, and whether a fix matches its design"
 # Code cannot tell from the item what was proposed, or where the problem would leave its trace.
 NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE = (
     "Judge also whether {item} proposes a check, test, guard, refusal or hook and recommends dropping it, and whether "
@@ -2323,8 +2338,8 @@ def not_asked_kind(value):
 
 
 def not_asked_label(kind):
-    """How the minutes and messages name a --not-asked value: `kind 3`, `case against none`, or the label of a
-    weak case against's ground, such as `case against weak, cost only`."""
+    """How the minutes and messages name a --not-asked value: `kind 3`, `adds nothing`, `case against none`, or the
+    label of a weak case against's ground, such as `case against weak, cost only`."""
     return no_answer_case(kind).label
 
 
@@ -2739,8 +2754,9 @@ def check(arguments):
     if had_to_be_run:
         output += [line.format(document=document, item=item) for line in CHECK_JUDGEMENT_LINES]
     if arguments.not_asked is not None:
-        output += [line.format(item=item, label=not_asked_label(arguments.not_asked),
-                               grounds=not_asked_grounds(arguments.not_asked))
+        unchecked = no_answer_case(arguments.not_asked).unchecked or NOT_ASKED_UNCHECKED.format(
+            grounds=not_asked_grounds(arguments.not_asked))
+        output += [line.format(item=item, label=not_asked_label(arguments.not_asked), unchecked=unchecked)
                    for line in NOT_ASKED_JUDGEMENT_LINES]
         if arguments.not_asked in NOT_ASKED_WEAK_GROUND_LABELS:
             output.append(NOT_ASKED_WEAK_JUDGEMENT_LINE.format(item=item))
