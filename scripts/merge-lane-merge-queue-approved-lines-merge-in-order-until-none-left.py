@@ -59,8 +59,10 @@ another process holds it. It makes passes over the queue file until a pass neith
 nor appends, then releases the lock and reads the file's size again, and makes another
 pass when a line was appended meanwhile. A pass chooses each next pull request from the
 queue file as it is once the next merge may start, so a HOLD- line appended during a merge
-holds that pull request. For each waiting pull request it reads GitHub:
-merged already gets a MERGED line; closed, or an nn-head-commit other than the queued one,
+holds that pull request; and it reads the queue file again just before the merge program
+starts, choosing again when the chosen line is no longer the pull request's last line, so a
+HOLD- line appended while it was chosen and checked holds it too. For each waiting pull
+request it reads GitHub: merged already gets a MERGED line; closed, or an nn-head-commit other than the queued one,
 gets a HELD line; a base branch other than main that is exactly one open pull request's
 branch is passed over until that pull request merges; any other base branch gets a HELD
 line. A HELD line is appended only while the line that was checked is still the pull
@@ -74,7 +76,8 @@ program's --merge-program-outputs-directory as its outputs directory.
 Before each merge, one function decides whether it may start. It stops the merge batch
 when the stop file, merge-queue-stopped.txt in the merge program's outputs directory,
 exists: the merge program writes it when it exits 3 or 4, whoever ran it, and this program
-writes it on each of its own stops. It waits, checking every 15 seconds, while any merge
+creates it on each of its own stops, never replacing one already there, which its STOPPED
+notice quotes instead. It waits, checking every 15 seconds, while any merge
 program holds merge-program.lock, which the merge program holds through its after-merge
 test run, so no merge starts while main's latest test run is still running.
 
@@ -230,6 +233,9 @@ class MergeQueuePullRequestMergeBatchRunner:
         # Set before each merge, from the count and the line as they are before it.
         self.prose_only_merges_in_a_row_after_this_merge = 0
         self.prose_only_by_merge_base_and_head = {}
+        # The in-progress file may be removed only while this is True, since without the lock
+        # it may be a running batch's.
+        self.holds_merge_batch_lock = False
 
     # The merge queue file
 
@@ -254,12 +260,7 @@ class MergeQueuePullRequestMergeBatchRunner:
         meanwhile is never put behind the outcome of a check of the line before it.
         """
         with self.queue_locked():
-            last = None
-            for queued in Path(self.arguments.merge_queue_file).read_text().splitlines():
-                match = APPROVED_LINE.match(queued) or DONE_LINE.match(queued) or HELD_LINE.match(queued)
-                if match and int(match["pr"]) == number:
-                    last = queued
-            if last != checked_line:
+            if self.last_line(number) != checked_line:
                 self.log(f"pull request {number} got a new line while it was checked, so "
                          f"{line!r} is not appended and the new line is read at once")
                 return False
@@ -267,6 +268,15 @@ class MergeQueuePullRequestMergeBatchRunner:
                 queue.write(line + "\n")
         self.log(f"appended to the merge queue file: {line}")
         return True
+
+    def last_line(self, number):
+        """Return pull request number's last line in the queue file; the caller holds its lock."""
+        last = None
+        for queued in Path(self.arguments.merge_queue_file).read_text().splitlines():
+            match = APPROVED_LINE.match(queued) or DONE_LINE.match(queued) or HELD_LINE.match(queued)
+            if match and int(match["pr"]) == number:
+                last = queued
+        return last
 
     def waiting(self, lines):
         """Return the waiting pull requests' approved lines, in the order of their last lines."""
@@ -426,25 +436,32 @@ class MergeQueuePullRequestMergeBatchRunner:
             "--merge-program-outputs-directory", str(self.arguments.merge_program_outputs_directory),
             "merge-batch-resume")) + " [--merge-only <pull request>]"
 
-    def stopped(self, reason, write_stop_file=True, holds_lock=True):
-        """Write the stop file and a STOPPED notice, each failure said in the log; return
-        whether every write succeeded.
+    def stopped(self, reason):
+        """Create the stop file and write a STOPPED notice, each failure said in the log;
+        return whether every write succeeded.
 
-        The in-progress file is removed only once the stop file exists and the notice is
-        written, so a start keeps reporting DIED MID-MERGE until both are, and only by a
-        process holding merge-batch.lock, since without it the file may be a running batch's.
+        A stop file already there is kept and quoted, since the merge program may have just
+        written its reason. The in-progress file is removed only once the stop file exists and
+        the notice is written, so a start keeps reporting DIED MID-MERGE until both are, and
+        only while this process holds merge-batch.lock.
         """
         written = True
         stop_text = f"{reason}, {now()}"
-        if write_stop_file:
+        kept = None
+        try:
+            self.stop_file.parent.mkdir(parents=True, exist_ok=True)
             try:
-                self.stop_file.parent.mkdir(parents=True, exist_ok=True)
-                self.stop_file.write_text(stop_text + "\n")
-            except OSError as error:
-                written = False
-                reason += (f"\nThe stop file {self.stop_file} could not be written ({error}), so "
-                           f"a later merge-batch-start may merge again: append a HOLD- line for "
-                           f"each waiting pull request until main is handled.")
+                with open(self.stop_file, "x") as stop:
+                    stop.write(stop_text + "\n")
+            except FileExistsError:
+                kept = self.stop_file.read_text().strip()
+        except OSError as error:
+            written = False
+            reason += (f"\nThe stop file {self.stop_file} could not be written ({error}), so "
+                       f"a later merge-batch-start may merge again: append a HOLD- line for "
+                       f"each waiting pull request until main is handled.")
+        if kept is not None:
+            reason += f"; {self.stop_file}, written outside this merge batch, says: {kept}"
         try:
             self.notice(f"stopped-{now()}.txt",
                         f"STOPPED {reason}\n"
@@ -460,7 +477,7 @@ class MergeQueuePullRequestMergeBatchRunner:
         except Stop as unwritable:
             written = False
             self.log(f"STOPPED, and {unwritable}")
-        if written and holds_lock and self.stop_file.exists():
+        if written and self.holds_merge_batch_lock and self.stop_file.exists():
             self.in_progress_file.unlink(missing_ok=True)
         self.log(f"STOPPED {reason}")
         return written
@@ -479,9 +496,9 @@ class MergeQueuePullRequestMergeBatchRunner:
             # The batch holding the lock reads the stop file before its next merge and ends.
             self.stopped(f"pull request {merge_only}, named by --merge-only to merge first, did "
                          f"not run: another merge batch held {MERGE_BATCH_LOCK_FILE_NAME} when "
-                         f"this one started, so the order --merge-only asked for was lost",
-                         holds_lock=False)
+                         f"this one started, so the order --merge-only asked for was lost")
             return 1
+        self.holds_merge_batch_lock = True
         try:
             if (written := self.died_mid_merge_stopped()) is not None:
                 return 0 if written else 1
@@ -491,6 +508,7 @@ class MergeQueuePullRequestMergeBatchRunner:
                     merge_only = None
                     size = os.path.getsize(self.arguments.merge_queue_file)
                 fcntl.flock(lock, fcntl.LOCK_UN)
+                self.holds_merge_batch_lock = False
                 if os.path.getsize(self.arguments.merge_queue_file) == size:
                     self.log("DONE: nothing left to merge")
                     return 0
@@ -498,19 +516,21 @@ class MergeQueuePullRequestMergeBatchRunner:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     return 0
+                self.holds_merge_batch_lock = True
                 # Another merge batch may have held the lock and died meanwhile.
                 if (written := self.died_mid_merge_stopped()) is not None:
                     return 0 if written else 1
         except StopFileFound as found:
             self.log(f"the stop file exists, so the merge batch ends: {found}")
-            return 0 if self.stopped(f"{self.stop_file}, written outside this merge batch, "
-                                     f"says: {found}", write_stop_file=False) else 1
+            return 0 if self.stopped("the stop file appeared during this merge batch, so it "
+                                     "ends before its next merge") else 1
         except (ReadOrWriteFailed, OSError) as failed:
             self.stopped(str(failed))
             return 1
         except Stop as stop:
             return 0 if self.stopped(str(stop)) else 1
         finally:
+            self.holds_merge_batch_lock = False
             lock.close()
 
     def died_mid_merge_stopped(self):
@@ -526,9 +546,6 @@ class MergeQueuePullRequestMergeBatchRunner:
         left = self.in_progress_file.read_text().strip()
         died = (f"a merge batch ended during a merge, so main is untested: "
                 f"{self.in_progress_file} says {left}")
-        if self.stop_file.exists():
-            return self.stopped(f"{died}; {self.stop_file} says: "
-                                f"{self.stop_file.read_text().strip()}", write_stop_file=False)
         return self.stopped(died)
 
     def one_pass(self, merge_only):
@@ -645,6 +662,12 @@ class MergeQueuePullRequestMergeBatchRunner:
         return True
 
     def merged(self, number, head, author, reviewed_since, checked_line):
+        with self.queue_locked():
+            if self.last_line(number) != checked_line:
+                self.log(f"pull request {number} got a new line while it was chosen and checked, "
+                         f"so it does not merge now and its new line is read at once")
+                self.outcome = READ_AGAIN_OUTCOME
+                return False
         output_file = self.directory / f"merge-{number}.out"
         self.in_progress_file.write_text(f"pull request {number}, started {now()}\n")
         self.log(f"merging pull request {number} at {head} with reviewed-since {reviewed_since}")
@@ -747,19 +770,23 @@ class MergeQueuePullRequestMergeBatchRunner:
                           f"will read any new line of {self.arguments.merge_queue_file} before it "
                           f"ends; nothing needs doing")
                 return 0
-            if self.in_progress_file.exists():
-                print(f"DIED MID-MERGE: {self.in_progress_file} was left by a merge batch that "
-                      f"ended during a merge, so that merge's outcome and main's after-merge test "
-                      f"run are unchecked; nothing was started.")
-                if self.died_mid_merge_stopped():
-                    print(f"The stop file and a stopped notice in {self.notices} now say that a "
-                          f"merge batch died mid-merge: handle that notice as it says.")
-                    return 0
-                print("FAILED: the stop file or the stopped notice could not be written, as the "
-                      "lines above say. Fix what they name, then run merge-batch-start again; "
-                      "until then the in-progress file is kept, so every merge-batch-start "
-                      "reports DIED MID-MERGE and starts nothing.")
-                return 1
+            self.holds_merge_batch_lock = True
+            try:
+                if self.in_progress_file.exists():
+                    print(f"DIED MID-MERGE: {self.in_progress_file} was left by a merge batch that "
+                          f"ended during a merge, so that merge's outcome and main's after-merge test "
+                          f"run are unchecked; nothing was started.")
+                    if self.died_mid_merge_stopped():
+                        print(f"The stop file and a stopped notice in {self.notices} now say that a "
+                              f"merge batch died mid-merge: handle that notice as it says.")
+                        return 0
+                    print("FAILED: the stop file or the stopped notice could not be written, as the "
+                          "lines above say. Fix what they name, then run merge-batch-start again; "
+                          "until then the in-progress file is kept, so every merge-batch-start "
+                          "reports DIED MID-MERGE and starts nothing.")
+                    return 1
+            finally:
+                self.holds_merge_batch_lock = False
         # Released before the merge batch starts, since that batch takes the lock itself.
         command = [sys.executable, str(Path(__file__).resolve()),
                    "--merge-queue-file", str(self.arguments.merge_queue_file),
