@@ -459,8 +459,8 @@ def test_the_command_writes_the_item_and_prints_the_closing_line_with_the_count_
                  case.run(model="yes"))
 
 
-# The line agent-instructions-editor wrote on 2026-11-26 after showing its waiting item 36 again, just before that
-# item's closing line, when it could not tell whether the user's "I would too. Yeah." answered the item.
+# A real line an agent wrote after showing its waiting item again, just before that item's closing line, when it
+# could not tell whether the user's "I would too. Yeah." answered the item.
 REAL_RE_ASK_LINE = ("I couldn't tell whether \"I would too. Yeah.\" answered this item, so nothing is recorded yet. "
                     "Reply A to send this version to merge-lane-2.")
 
