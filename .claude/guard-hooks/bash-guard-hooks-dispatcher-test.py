@@ -5,8 +5,10 @@ Each case writes small guard files of its own and a guard list naming them, pipe
 dispatcher as a real process, and reads what Claude Code would be given: two refusals combined, every
 listed guard run, and each failure the dispatcher handles caused for real (a guard that crashes, exits
 nonzero, is killed by a signal, runs past its timeout, cannot be compiled, or prints output that cannot
-be combined, and a guard list that cannot be read). One case checks that the guard list names exactly
-the Bash PreToolUse hooks in .claude/settings.json, with their timeouts.
+be combined, and a guard list that cannot be read). One case calls the dispatcher's function in this
+process instead, with an injected clock, for a guard that refuses and exits just before its deadline.
+One case checks that the guard list names exactly the Bash PreToolUse hooks in .claude/settings.json,
+with their timeouts.
 
 Run: python3 .claude/guard-hooks/bash-guard-hooks-dispatcher-test.py
 Prints one line per case and exits non-zero if any case fails.
@@ -14,7 +16,9 @@ Prints one line per case and exits non-zero if any case fails.
 
 import importlib.util
 import json
+import os
 import re
+import select
 import shutil
 import subprocess
 import sys
@@ -184,6 +188,40 @@ grandchild = guard("grandchild-holds-output", """
 took = failure_notice_check("a guard whose child keeps its output open past the timeout", grandchild,
                             "ran past its timeout of 1 seconds", timeout=1)
 check("a guard whose child keeps its output open is stopped at its timeout", took < 10, f"{took:.1f} s")
+go_file = SCRATCH / "refuse-just-before-deadline-go"
+refuses_on_go = guard("refuses-just-before-deadline", f"""
+    sys.stdin.read()
+    while not os.path.exists({str(go_file)!r}):
+        time.sleep(0.01)
+    print(json.dumps({{'hookSpecificOutput': {{'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
+                                              'permissionDecisionReason': 'REFUSED JUST BEFORE DEADLINE'}}}}))
+    """)
+# The forked guard inherits this pipe's write end, so its read end closes when the guard has exited.
+guard_exited_read, guard_exited_write = os.pipe()
+clock_calls = []
+
+
+def clock_reaching_deadline_as_guard_refuses_and_exits():
+    """0 at the start, the deadline at the next look, then past it once the guard has refused and exited."""
+    clock_calls.append(None)
+    if len(clock_calls) == 1:
+        os.close(guard_exited_write)
+        return 0.0
+    if len(clock_calls) == 2:
+        return 30.0
+    if len(clock_calls) == 3:
+        go_file.touch()
+        if select.select([guard_exited_read], [], [], 10)[0]:
+            os.read(guard_exited_read, 1)
+    return 100.0
+
+
+(result,) = dispatcher.bash_guard_hook_results_from_one_forked_child_each(
+    [(str(refuses_on_go), 30)], b"{}", str(REPOSITORY_ROOT), clock=clock_reaching_deadline_as_guard_refuses_and_exits)
+os.close(guard_exited_read)
+check("a guard that refuses and exits after the dispatcher's last look before its deadline has its refusal "
+      "returned, not a timeout", not result["timed_out"] and result["exit_status"] == 0
+      and "REFUSED JUST BEFORE DEADLINE" in result["stdout"], result)
 failure_notice_check("a guard that prints text that is not JSON", guard("prints-text", "print('hello')\n"),
                      "it printed output that is not PreToolUse hook JSON this dispatcher combines")
 failure_notice_check("a guard that prints JSON with a key the dispatcher does not combine",
