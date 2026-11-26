@@ -9,7 +9,7 @@ A change is the difference an agent's work makes, from before it starts to after
 - A change to what agent-instructions, a tool-message-to-agent or a prompt a program hands to an agent tells an agent to do, such as `CLAUDE.md`, a seat-brief, a skill and its prompts, a subagent definition in `.claude/agents/`, an `-instructions.md` or `-prompt.md` file, a prompt built in Python, or a hook's refusal.
 - A change to what a hook or a setting lets an agent do, or stops an agent doing.
 - Adding, removing or reordering a step that agent-instructions or a program tell agents to follow.
-- A change to what a document on main directs, decides or plans, including one a review finding asks for.
+- A change to what a document on main directs, decides or plans, including one a review finding asks for; in a design, only a change to a program's purpose, its scope, what the user sees or must do, or anything a user-ruling settled.
 - A change to code or data that makes a program do other than its design or a user-ruling says. A program's design is the design document on main it was built from, such as a GHI-MD that is a design; a program with none has no design for this purpose.
 - Choosing which term the project uses for a thing, coining a term, or adding, changing or removing a glossary entry.
 - Making a new system directory, whether for files moved into it or for new files.
