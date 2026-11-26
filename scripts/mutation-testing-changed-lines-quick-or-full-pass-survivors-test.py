@@ -900,6 +900,15 @@ def run_recorded_mutant_killed_check_cases():
          "replaced line and the branch changed it, exit 2",
          {"scripts/thing.py": "def double(x):\n    # doubled\n    return x + x\n"},
          could_not_be_judged_line, "so your branch changed them", 2),
+        ("origin/main still has the replaced line and the branch changed it: the verdict says to "
+         "edit the lines back, never to reset the whole file, exit 2",
+         {"scripts/thing.py": "def double(x):\n    # doubled\n    return x + x\n"},
+         could_not_be_judged_line,
+         "Otherwise, edit the lines the diff replaces back as origin/main has them, which git diff "
+         "origin/main -- scripts/thing.py shows, keep your test in another file, commit both, and "
+         "run this command again. Do not run git checkout origin/main -- scripts/thing.py: it "
+         "would also throw away every other change your branch and your uncommitted work made to "
+         "scripts/thing.py.", 2),
         ("origin/main renamed the file and kept the line, so it is not gone, exit 2",
          {"scripts/renamed-thing.py": HEAD_FILES["scripts/thing.py"]}, could_not_be_judged_line,
          "git blame follows a line it replaces to scripts/renamed-thing.py:2 on origin/main, so "
@@ -907,8 +916,11 @@ def run_recorded_mutant_killed_check_cases():
          "If your branch removed or changed that line on purpose: the mutant is gone from your "
          "branch; leave the survivor task that names this diff file open, and the nightly "
          "mutation pass rechecks it once your branch is merged.\n"
-         "If your branch changed that line by accident: run git checkout origin/main -- "
-         "scripts/renamed-thing.py, commit, and run this command again.\n"
+         "If your branch changed that line by accident: edit the line back as origin/main has "
+         "it at scripts/renamed-thing.py:2, which git diff origin/main -- scripts/renamed-thing.py "
+         "shows, commit, and run this command again. Do not run git checkout origin/main -- on "
+         "the file: it would also throw away every other change your branch and your "
+         "uncommitted work made to the file.\n"
          "Otherwise, make the diff's change by hand at scripts/renamed-thing.py:2, run that "
          "file's suites, and put the line back before you commit.\n"
          "If a suite fails: the mutant is killed, so no new test is needed; mark the survivor "

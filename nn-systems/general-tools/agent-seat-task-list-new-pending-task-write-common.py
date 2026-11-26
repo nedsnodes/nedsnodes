@@ -4,7 +4,7 @@ an agent-seat work.
 
 An agent-seat's task list is the directory `~/.claude/tasks/nedsnodes-<seat>-tasks/`; each task
 is `<id>.json` there, and `.highwatermark` holds the highest id Claude Code has used, deleted
-tasks included.
+tasks included. Every program that writes `.highwatermark` writes it with this module.
 
 Load it by path, under the snake_case form of its file name:
 
@@ -64,7 +64,24 @@ def agent_seat_task_list_new_pending_task_write(list_directory, subject, descrip
                 task_id += 1
     finally:
         partial_path.unlink(missing_ok=True)
-    mark_partial = list_directory / (TASK_HIGH_WATER_MARK_FILE_NAME + ".partial")
-    mark_partial.write_text(str(task_id), encoding="utf-8")
-    os.replace(mark_partial, mark_path)
+    agent_seat_task_list_high_water_mark_write(list_directory, task_id)
     return task_id
+
+
+def agent_seat_task_list_high_water_mark_write(list_directory, value):
+    """Replace the list's .highwatermark with value; raises OSError, leaving no partial file.
+
+    Each call writes through a partial file of its own, because writers on one list can run at
+    the same moment: the handoff writer's prune and a program handing the agent-seat a task.
+    """
+    list_directory = Path(list_directory)
+    descriptor, partial_name = tempfile.mkstemp(
+        dir=list_directory, prefix=TASK_HIGH_WATER_MARK_FILE_NAME + "-", suffix=".partial")
+    partial_path = Path(partial_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as partial:
+            partial.write(str(value))
+        os.replace(partial_path, list_directory / TASK_HIGH_WATER_MARK_FILE_NAME)
+    except OSError:
+        partial_path.unlink(missing_ok=True)
+        raise

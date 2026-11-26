@@ -71,8 +71,9 @@ CHECK_PROGRAM's check step, with --obvious for AO and --after-advisor for Aa.
 O asks the agent to show the item again with an "Option 2" and an "Option 3"
 paragraph; O2 and O3 approve one of them, through the check step with
 --option. M asks the agent to show MORE_RESPONSES_TEXT, the responses the
-closing line leaves out, or, with no approval-walk open, every response but
-M; it records nothing, so it takes no item number and gets no
+closing line leaves out, with each waiting item's closing line, or, with no
+approval-walk open, the entries of RESPONSE_LABELS but M, though the hook
+also accepts R, O2 and O3; it records nothing, so it takes no item number and gets no
 --user-reply-as-typed line.
 
 THE OPEN APPROVAL-WALK is found with WALK_FINDER_FILE, the module the
@@ -185,6 +186,7 @@ which Claude Code records as a non-blocking error.
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 """
+import collections
 import datetime
 import functools
 import importlib.util
@@ -442,6 +444,17 @@ REPEAT_UNPUBLISHED_LINES = (
     "Then reply with only the item's closing line, with the page's link in place of `<page link>`, or without "
     "the link if the publish failed, and wait for his answer: {closing_line}")
 NUMBERED_R_WAITING_ITEM_LINE = "Then end your message naming the item waiting for his answer, {item}."
+# The closing-line Stop hook wants each waiting item's own link, so M on several items hands over each closing line.
+MORE_RESPONSES_SEVERAL_ITEMS_LINE = (
+    "Reply with only the responses after this colon, word for word, then, each on a line of its own, the closing "
+    "lines this message gives next, and wait for the user's answer; record nothing in the walk-minutes: "
+    + MORE_RESPONSES_TEXT)
+MORE_RESPONSES_CLOSING_LINE = "{item}'s closing line: {closing_line}"
+MORE_RESPONSES_UNPUBLISHED_LINES = (
+    "The hook found no `#item_page` line for {item} in the walk-minutes{minutes}.",
+    *REPEAT_UNPUBLISHED_LINES[1:3],
+    "Then give this closing line for {item} in your reply, with the page's link in place of `<page link>`, or, if "
+    "the publish failed, with the link left out as the line above says: {closing_line}")
 # Check records one answer for every item the `#next_to_present` line names, and close moves that line on.
 ONE_ITEM_AT_A_TIME_LINE = (
     "Before each check run, if the minutes' last `#next_to_present` line does not name that item alone, add "
@@ -716,10 +729,7 @@ def read_walk(cwd):
     references = {}
     shown_text_parser(walk_finder).parse(text, references)
     spans = walk_finder.item_unit_spans(text, parser)
-    recommendations, problems, parts = recommendations_in(
-        walk_finder.prose_lines(text, parser, tokens), walk_finder.item_opening_lines(text, parser, tokens),
-        spans, walk_finder, part_starts(tokens))
-    shown_texts, shown_text_problem, no_decision_numbers = {}, None, set()
+    units, shown_texts, shown_text_problem, no_decision_numbers = [], {}, None, set()
     try:
         _, units = walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
         for number in numbers:
@@ -729,11 +739,24 @@ def read_walk(cwd):
             text, parser, units, numbers, spans)
     except walk_finder.UnusableRange as problem:
         shown_text_problem = f"the `#next_to_present` line, `{value}`, {problem}"
+    stated = item_numbers_each_unit_states(spans, units, numbers)
+    recommendations, problems, parts = recommendations_in(
+        walk_finder.prose_lines(text, parser, tokens), walk_finder.item_opening_lines(text, parser, tokens),
+        spans, walk_finder, part_starts(tokens), stated)
     if total is None:
         total = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(spans)
     return WalkState(name, count[0], numbers, total, recommendations, None, problems, parts, pages,
-                     heading_points(text.split("\n"), spans, parser), minutes, shown_texts, shown_text_problem,
+                     heading_points(text.split("\n"), [(own, *unit[1:]) for own, unit in zip(stated, spans)], parser),
+                     minutes, shown_texts, shown_text_problem,
                      document, references, no_decision_numbers)
+
+
+def item_numbers_each_unit_states(spans, waiting_units, waiting_numbers):
+    """For each of spans, the item numbers whose text it holds: those no other unit names, and a waiting item's number
+    in the unit waiting_item_units chose for it. A number two units name and none was chosen for is in neither list."""
+    naming = collections.Counter(number for unit in spans for number in unit[0])
+    return [[number for number in unit[0]
+             if naming[number] == 1 or (number in waiting_numbers and unit in waiting_units)] for unit in spans]
 
 
 def heading_points(lines, spans, parser):
@@ -819,17 +842,18 @@ def part_numbers(starts, first, end):
     return sorted(found) if 1 < len(found) <= MOST_PARTS and found == set(range(1, len(found) + 1)) else []
 
 
-def recommendations_in(lines, openings, spans, walk_finder, starts):
+def recommendations_in(lines, openings, spans, walk_finder, starts, stated):
     """Return ({item number: recommendation text or None} for every item of the walk-document, {item number:
     why its recommendation is None} for the items whose reason is not NO_RECOMMENDATION_PROBLEM, {item number:
     its part numbers} for the items that hold parts), from its prose_lines, item_opening_lines and
-    part_starts.
+    part_starts. stated is item_numbers_each_unit_states' list for spans: a unit gives only the items it states, so a
+    number two headings name gets one heading's recommendation or, when neither is chosen, None.
 
     Under a heading that names several items, every item's recommendation is None when any of them has no
     opening and either the heading holds more than one recommendation or that item's lines run over another
     item's opening, since an opening missed leaves the part before it running on into the next item's text."""
     found, problems, parts = {}, {}, {}
-    for numbers, unit_total, _, first, end in spans:
+    for (numbers, unit_total, _, first, end), own_numbers in zip(spans, stated):
         ranges = {number: walk_finder.approval_walk_item_line_range_within_heading_shared_by_several_items(
             openings, first, end, number, numbers, unit_total) for number in numbers}
         if len(numbers) > 1:
@@ -844,15 +868,17 @@ def recommendations_in(lines, openings, spans, walk_finder, starts):
             if missing and (overrun or len(walk_finder.RECOMMENDATION.findall(held_text)) > 1):
                 problem = PARTS_NOT_TOLD_APART_PROBLEM.format(
                     heading=lines[first].strip(), missing=", ".join(f"item {number}" for number in missing))
-                for number in numbers:
+                for number in own_numbers:
                     found[number], problems[number] = None, problem
                 continue
-        for number in numbers:
+        for number in own_numbers:
             part = lines[ranges[number][0]:ranges[number][1]]
             found[number] = walk_finder.approval_walk_item_last_recommendation_text_from_item_lines(part)
             numbered = part_numbers(starts, *ranges[number])
             if numbered:
                 parts[number] = numbered
+    # A waiting item with such a number never reaches its answer's lines: unseen_item_lines refuses the answer.
+    found.update({number: None for unit in spans for number in unit[0] if number not in found})
     return found, problems, parts
 
 
@@ -985,6 +1011,9 @@ def meaning_lines(answer, walk, in_walk):
                   recommended=f" ({recommendation})" if recommendation else "")
     if code == "R" and walk and numbers:
         return [repeat_line(values["word"], number, walk) for number in numbers]
+    if code == "M" and walk and len(numbers) > 1:
+        return [MEANINGS["M"][0][0].format(**values), MORE_RESPONSES_SEVERAL_ITEMS_LINE,
+                *(more_responses_closing_line(number, walk) for number in numbers)]
     lines = [line.format(**values) for line in MEANINGS[code][branch]]
     return lines + recommendation_unknown_lines(code, numbers, walk)
 
@@ -999,6 +1028,17 @@ def repeat_line(answer, number, walk):
             minutes=f" {walk.minutes}" if walk.minutes else "",
             closing_line=closing_line(number, walk, "<page link>"))
     return REPEAT_PAGE_LINE.format(answer=answer, item=item_name(number, walk), closing_line=line)
+
+
+def more_responses_closing_line(number, walk):
+    """The line giving an M answer the waiting item's closing line, or how to publish its page first."""
+    line = closing_line(number, walk)
+    if line is not None:
+        return MORE_RESPONSES_CLOSING_LINE.format(item=item_name(number, walk), closing_line=line)
+    return "\n".join(MORE_RESPONSES_UNPUBLISHED_LINES).format(
+        item=item_name(number, walk), item_count=item_count(number, walk),
+        minutes=f" {walk.minutes}" if walk.minutes else "",
+        closing_line=closing_line(number, walk, "<page link>"))
 
 
 def checked_item_numbers(answer, walk):
@@ -1043,12 +1083,16 @@ def shown_words(markdown, parser, env=None):
 
 def new_text_as_shown(line):
     """A `#new` or `#new_if_d` source line, as the walk check program reads its mark, as an agent shows it to the
-    user: its mark replaced by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text
-    without a `The new text:` label; None for any other line."""
-    mark = load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(line.strip())
+    user: a part's opening `Part N.` kept, its mark replaced by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK
+    gives its kind, and its text without a `The new text:` label; None for any other line."""
+    walk_finder = load_walk_finder()
+    mark = walk_finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(line.strip())
     if not mark:
         return None
-    return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1]}` line']} {NEW_TEXT_LABEL.sub('', mark[2])}"
+    part = re.match(rf"^{walk_finder.MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*(Part \d+)\.\s",
+                    line.strip())
+    lead_in = LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f"`{mark[1]}` line"]
+    return f"{f'{part[1]}. ' if part else ''}{lead_in} {NEW_TEXT_LABEL.sub('', mark[2])}"
 
 
 def shown_text_parser(walk_finder):

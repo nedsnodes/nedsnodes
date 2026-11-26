@@ -1,3 +1,7 @@
+---
+issue: "[main-gatekeeper — the single check-in gate (design: nn-systems/main-gatekeeper/main-gatekeeper-design.md)](https://github.com/nedsnodes/nedsnodes/issues/3)"
+---
+
 # Credential work — measured state and rulings, 2026-08-18
 
 Issue: issue [main-gatekeeper — the single check-in gate (design: nn-systems/main-gatekeeper/main-gatekeeper.system.design.md)](https://github.com/nedsnodes/nedsnodes/issues/3) · Specification: [`main-gatekeeper.system.design.md`](../../nn-systems/main-gatekeeper/main-gatekeeper.system.design.md) (normative; it has carried these measurements' consequences since commit `cfaa323`, same day — this document is the evidence record behind them and the journal of the rulings)

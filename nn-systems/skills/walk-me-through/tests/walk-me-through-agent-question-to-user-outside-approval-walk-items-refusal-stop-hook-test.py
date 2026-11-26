@@ -5,7 +5,8 @@ agent's stop when its reply asks the user something outside the walk's items.
 Most cases run the hook as a subprocess, its real stdin-to-stdout path, in a
 scratch checkout this suite made, with a transcript this suite wrote. The model
 call is never real: a fake `claude` first on PATH records each call and answers
-as the case sets it. The refusal log goes to a file in the scratch directory.
+as the case sets it. The refusal log and the log of the model's verdicts on each line go to files in the scratch
+directory.
 
 With LIVE_MODEL_FLAG, the suite does not run: instead each of REAL_CASES, and
 UNRELATED_ASK_CASE, runs
@@ -224,6 +225,7 @@ class Case:
         self.transcript = self.root / "transcript.jsonl"
         self.calls = self.root / "model-calls.jsonl"
         self.log = self.root / "refusals.jsonl"
+        self.verdict_log = self.root / "model-line-verdicts.jsonl"
 
     def records(self, *records):
         self.transcript.write_text("".join(json.dumps(record) + "\n" for record in records))
@@ -242,6 +244,7 @@ class Case:
         environment.update({"PATH": f"{bin_directory}{os.pathsep}{os.environ['PATH']}",
                             "FAKE_CLAUDE_CALLS": str(self.calls), "FAKE_CLAUDE_MODE": model,
                             hook.LOG_PATH_VARIABLE: str(self.log),
+                            hook.REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_PATH_VARIABLE: str(self.verdict_log),
                             # The machine's real emergency-stop folder must not decide a case.
                             "NEDSNODES_EMERGENCY_STOP_FOLDER": str(self.calls.parent / "no-emergency-stop")})
         environment.update(environment_extra or {})
@@ -258,6 +261,11 @@ class Case:
         if not self.log.exists():
             return []
         return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def verdicts_logged(self):
+        if not self.verdict_log.exists():
+            return []
+        return [json.loads(line) for line in self.verdict_log.read_text().splitlines()]
 
 
 def blocked_reason(result):
@@ -374,6 +382,16 @@ def test_the_item_the_block_message_asks_for_is_one_the_close_step_can_place():
           isinstance(placing, dict) and [key[0] for key, _ in placing.values()] == [1], placing)
 
 
+def test_the_closing_line_in_the_block_message_names_the_heading_its_of_m_picks():
+    case = Case(minutes="#item_page item 2 of 3 https://claude.ai/artifact/page2\n#next_to_present item 2 of 3",
+                document="# A walk\n\n## Item 2 of 3: keep it\n\nRecommendation: keep the filter.\n\n"
+                         "## Item 2 of 4: remove it\n\nRecommendation: remove the filter.\n")
+    case.reply("Should I merge the pull request now?")
+    reason = blocked_reason(case.run()) or ""
+    check("the block message's closing line has the point of the waiting item's own heading",
+          "Item 2 of" in reason and ", keep it]" in reason and ", remove it]" not in reason, reason)
+
+
 def test_the_block_message_says_what_to_do():
     case = Case()
     case.reply("Should I merge the pull request now?")
@@ -404,6 +422,8 @@ def test_the_block_message_says_what_to_do():
              "other lines of the item. This hook passes the question only when the item in the walk-document holds every flagged line "
              "that way, and refuses again until it does; it ignores a `>` quote mark or a list mark such as `-` or "
              "`1.` at the start of a line, bold, italic and code marks, and letter case, so you may add or drop those. "
+             "Just before the alternative, state the strongest case against the recommendation on one line that "
+             "opens with `#case_against` and a rating, none, weak, medium, strong or very strong. "
              "Give the item one recommendation and one alternative, and end it with the recommendation stated as "
              "an action, as in `Recommendation: <what you recommend doing>.` State the alternative before it, as in "
              "`The alternative: <what D does instead>.`"),
@@ -544,7 +564,8 @@ def test_a_question_about_something_other_than_the_waiting_item_still_blocks():
 
 
 def judgement(lines, **keywords):
-    return hook.model_judgement(lines, lines, "## Item 2 of 10", "human", "A", **keywords)
+    index, failure, _ = hook.model_judgement(lines, range(len(lines)), "## Item 2 of 10", "human", "A", **keywords)
+    return None if index is None else lines[index], failure
 
 
 def test_a_failed_model_check_blocks():
@@ -597,10 +618,11 @@ def test_a_failed_model_check_blocks():
         check("each question-like line is judged in a call of its own, numbered by its place",
               sorted((judged_entry(call)["id"], judged_line(call)) for call in calls)
               == [("L1", "a"), ("L2", "b"), ("L3", "c")], calls)
-        argv = calls[-1]["argv"] if calls else []
         check("each call is sent the labelling schema and system prompt",
-              json.loads(argv[argv.index("--json-schema") + 1]) == hook.MODEL_SCHEMA
-              and argv[argv.index("--system-prompt") + 1] == hook.MODEL_SYSTEM_PROMPT, argv)
+              len(calls) == 3 and all(
+                  json.loads(argv[argv.index("--json-schema") + 1]) == hook.MODEL_SCHEMA
+                  and argv[argv.index("--system-prompt") + 1] == hook.MODEL_SYSTEM_PROMPT
+                  for argv in (call["argv"] for call in calls)), calls)
         os.environ["FAKE_CLAUDE_MODE"] = "sleep:3"
         started = time.monotonic()
         line, failure = judgement(["a", "b", "c"], timeout_seconds=20)
@@ -927,6 +949,16 @@ def test_a_long_message_is_cut_around_the_line_as_the_benchmark_cut_it():
           and at == len("[...] ") + hook.AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE
           and len(message) - at - len(line) == hook.AGENT_MESSAGE_CHARACTERS_KEPT_AFTER_THE_LINE + len(" [...]"),
           (len(message), at))
+    shared_start = "The second part of the fix is ready, and every test for it passes"
+    case.reply(f"{shared_start}.\n{before}\n{shared_start}; should I merge it?\n{after}")
+    calls_before = len(case.model_calls())
+    case.run(model="no")
+    calls = case.model_calls()[calls_before:]
+    message = judged_entry(calls[0])["agent_message_holding_the_line"] if calls else ""
+    check("the window is cut around the judged line, not around an earlier line that starts with the same text",
+          len(calls) == 1 and message.startswith("[...] ")
+          and message.find(f"{shared_start}; should I merge it?")
+          == len("[...] ") + hook.AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE, (len(message), message[:80]))
 
 
 def test_the_shown_item_and_quotes_from_it_are_not_checked():
@@ -1094,7 +1126,10 @@ def test_a_new_text_line_shown_as_if_you_approve_the_new_text_is_the_items_own_t
              "If you approve, the new text: the hook waits for the list."),
             ("a `#new` line that opens with a quote mark passes shown after `If you approve, the new text:`",
              "> #new The new text: the hook waits for the quote.",
-             "If you approve, the new text: the hook waits for the quote.")):
+             "If you approve, the new text: the hook waits for the quote."),
+            ("a `#new` line after a part's `Part 1.` passes shown as `Part 1. If you approve, the new text:`",
+             "Part 1. #new The new text: the hook waits for the part.",
+             "Part 1. If you approve, the new text: the hook waits for the part.")):
         varied = Case(minutes="#next_to_present item 1.2 of 6",
                       document=document.replace(HANDOFF_WALK_ITEM_1_2_LINES[2], document_line))
         varied.reply(HANDOFF_WALK_ITEM_1_2_REPLY.replace(HANDOFF_WALK_ITEM_1_2_REPLY.split("\n\n")[4], shown_line))
@@ -1124,9 +1159,10 @@ def test_every_turn_is_checked_whoever_started_it():
     scheduled_prompt = opening_prompt("scheduled", "Hourly stall check.", isMeta=True, promptSource="system")
     case.records(USER_PROMPT, text_record("Should I open the pull request?"), scheduled_prompt,
                  text_record("The stall check found nothing. I recommend merging PR 1922 next."))
+    calls_before = len(case.model_calls())
     check_blocked("a scheduled turn after the user's turn is checked", case.run(model="yes"),
                   "I recommend merging PR 1922 next.")
-    calls = case.model_calls()[-1:]
+    calls = case.model_calls()[calls_before:]
     check("a scheduled turn's own opening prompt, not the user's earlier one, starts the turn the model is given, "
           "and the earlier turn's question is not judged again",
           [(judged_entry(call)["turn_started_by"], judged_entry(call)["message_that_started_the_turn"],
@@ -1174,6 +1210,61 @@ def test_the_refusal_log():
           path is None or path.name == hook.LOG_FILE_NAME and path.parent.name == "nedsnodes-logs", path)
 
 
+def test_every_line_sent_to_the_model_is_logged_with_its_verdict():
+    case = Case()
+    case.reply("The tests passed.\n\nShould I merge it now?\n\nShould I also tag it?")
+    check_silent("a reply whose lines the model calls no ask passes", case.run(model="no"))
+    rows = case.verdicts_logged()
+    check("each line sent to the model is logged once, with the entry it was sent and its verdict",
+          [(row["id"], row["line"], row["ask"], row["reason"], row["failure"]) for row in rows]
+          == [("L1", "Should I merge it now?", False, "the fake's answer", None),
+              ("L2", "Should I also tag it?", False, "the fake's answer", None)], rows)
+    check("a logged line carries the session, the walk, the model and the context the model was sent",
+          all(row["session"] == "test-session" and row["walk"] == "poem-page-2026-10-12" and row["model"] == hook.MODEL
+              and row["turn_started_by"] == "human" and row["message_that_started_the_turn"] == "A"
+              and "The tests passed." in row["agent_message_holding_the_line"]
+              and "## Item 2 of 10" in row["waiting_walk_item_text"] and row["time"] for row in rows), rows)
+    check_blocked("a reply whose second line the model calls an ask blocks", case.run(model="yes:2"),
+                  '"Should I also tag it?"')
+    check("when the hook blocks, every line it sent is logged, not only the flagged one",
+          [(row["id"], row["ask"]) for row in case.verdicts_logged()[2:]] == [("L1", False), ("L2", True)],
+          case.verdicts_logged())
+    case.run(model="fail:1")
+    failed = case.verdicts_logged()[4:]
+    check("a failed call is logged with no verdict and why it failed",
+          [(row["id"], row["ask"], row["reason"]) for row in failed] == [("L1", None, None), ("L2", False, "the fake's answer")]
+          and "claude exited 1" in (failed[0]["failure"] or ""), failed)
+    unread = Case()
+    unread.reply("The tests passed.")
+    check_silent("a reply with no question-like line passes", unread.run(model="yes"))
+    check("a reply with no question-like line logs nothing", unread.verdicts_logged() == [], unread.verdicts_logged())
+
+
+def test_a_line_verdict_log_that_cannot_be_written_never_changes_the_decision():
+    case = Case()
+    case.verdict_log.mkdir()
+    case.reply("Should I merge it now?")
+    passed = case.run(model="no")
+    check("a reply that passes still passes when its verdicts cannot be logged, exiting 1 with why on stderr",
+          passed.returncode == 1 and passed.stdout == "" and "the reply passed, but the model's verdicts on its lines "
+          "were not logged, because" in passed.stderr and str(case.verdict_log) in passed.stderr, passed)
+    check_blocked("a reply that blocks still blocks when its verdicts cannot be logged, and says so", case.run(model="yes"),
+                  "This hook's model's ask-or-not label for each line of this reply was not logged, because", str(case.verdict_log))
+    check("the block is still logged in the refusal log", [row["decided_by"] for row in case.logged()] == ["model"],
+          case.logged())
+    homes = SUITE_ROOT / "verdict-log-store-homes"
+    (homes / "ned-box-home" / hook.LOG_STORE_DIRECTORY_NAME).mkdir(parents=True)
+    path, problem = hook.reply_line_model_ask_or_not_label_log_path({}, [str(homes / "ned-box-home"), str(homes / "mac-mount")])
+    check("the line-verdict log sits at the top of the log-store, beside the refusal log",
+          (path, problem) == (homes / "ned-box-home" / hook.LOG_STORE_DIRECTORY_NAME
+                              / hook.REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_FILE_NAME, None), (path, problem))
+    path, problem = hook.reply_line_model_ask_or_not_label_log_path({}, [str(homes / "nowhere")])
+    check("an unreachable log-store is reported for the line-verdict log too",
+          path is None and "reachable at neither" in problem, problem)
+    path, _ = hook.reply_line_model_ask_or_not_label_log_path({hook.REPLY_LINE_MODEL_ASK_OR_NOT_LABEL_LOG_PATH_VARIABLE: "/x/y.jsonl"})
+    check("the line-verdict log's variable overrides its path", path == Path("/x/y.jsonl"), path)
+
+
 def test_which_line_is_flagged_and_how_lines_are_joined():
     case = Case()
     case.reply("Should I merge it now?\n\nShould I also tag it?")
@@ -1191,6 +1282,9 @@ def test_which_line_is_flagged_and_how_lines_are_joined():
     case.reply("Should I run one of these:\n- `delete-all.py`\n- **keep.py**")
     check_blocked("a flagged list is named as written, line by line, marks included", case.run(),
                   '"Should I run one of these:\n- `delete-all.py`\n- **keep.py**"')
+    case.reply("Should I run `delete-all.py`?\n\nShould I run `keep.py`?")
+    check_blocked("of two lines checked alike but written differently, the one the model flags is named as written",
+                  case.run(model="yes:2"), '"Should I run `keep.py`?"')
     case.reply("Should I merge the café page now?")
     case.run()
     check("the log keeps a sentence's letters as written", "café" in case.log.read_text(encoding="utf-8"),

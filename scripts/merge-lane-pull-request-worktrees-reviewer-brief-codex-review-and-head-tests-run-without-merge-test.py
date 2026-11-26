@@ -277,7 +277,8 @@ def main():
               [argv_of(calls, step) for step in STEPS] == [
                   ["7", head_commit, main_commit, *directory_options],
                   [str(filled_in_file), *directory_options],
-                  ["7", merge_base, "--expected-head-commit", head_commit, *directory_options],
+                  ["7", merge_base, "--expected-head-commit", head_commit, "--main-commit", main_commit,
+                   *directory_options],
                   ["7", "--head-commit", head_commit, "--main-commit", main_commit, *directory_options],
                   ["7", "7a", head_commit, *directory_options]], detail)
         filled_in = json.loads(filled_in_file.read_text()) if filled_in_file.exists() else None
@@ -322,7 +323,7 @@ def main():
               "full head commit, and abbreviated commits in the file and the option are accepted",
               completed.returncode == 0 and len(calls) == 5
               and argv_of(calls, STEPS[2]) == ["7", head_reviewed_before, "--expected-head-commit", head_commit,
-                                               *directory_options]
+                                               "--main-commit", main_commit, *directory_options]
               and "(nn-head-commit reviewed before)" in completed.stdout, detail)
         filled_in = json.loads(filled_in_file.read_text())
         check("a head named in the file is replaced by its full commit in the filled-in copy",
@@ -385,7 +386,7 @@ def main():
                   and all(other in completed.stdout for other in others)
                   and "never met the other steps" not in completed.stdout
                   and completed.stdout.count("nothing was merged.") == 1, detail)
-            expected_arguments = {3: ["7", merge_base, "--expected-head-commit", head_commit], 4: ["7", "--head-commit", head_commit, "--main-commit", main_commit],
+            expected_arguments = {3: ["7", merge_base, "--expected-head-commit", head_commit, "--main-commit", main_commit], 4: ["7", "--head-commit", head_commit, "--main-commit", main_commit],
                                   5: ["7", "7a", head_commit]}
             rerun_line = (f"  step {position}: "
                           + shlex.join([sys.executable, str(checkout / "scripts" / step),
