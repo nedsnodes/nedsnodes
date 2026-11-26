@@ -690,6 +690,11 @@ def has_new_text_problems(found):
     return [] if proposed_texts(found.marks, {NEW_MARK}) else [MissingEvidenceLine(NOT_ASKED_NO_NEW_TEXT_PROBLEM)]
 
 
+def adds_nothing_problems(found):
+    # A `#new_if_d` text is what the alternative would add, so it stays; a `#new` text is what approving adds.
+    return [NOT_ASKED_ADDS_NOTHING_NEW_TEXT_PROBLEM] if proposed_texts(found.marks, {NEW_MARK}) else []
+
+
 def touched_files_exist_problems(found):
     return [NOT_ASKED_MISSING_PATH_PROBLEM.format(marker=TOUCHES, path=path, top=found.top)
             for path in found.touched if not (found.top / path).exists()]
@@ -836,7 +841,7 @@ NO_ANSWER_CASES = (
     NoAnswerCase(NOT_ASKED_ADDS_NOTHING, NOT_ASKED_ADDS_NOTHING_LABEL,
                  "an item whose recommendation adds and changes nothing, such as leaving out a definition, a check or "
                  "a step that its alternative would add, whatever its case against is rated",
-                 EVERY_RATING, (), (), "none; any rating", None, NOT_ASKED_FLAG,
+                 EVERY_RATING, (), (adds_nothing_problems,), "no `#new` text; any rating", None, NOT_ASKED_FLAG,
                  "whether the item's recommendation adds and changes nothing"),
     NoAnswerCase(NOT_ASKED_RATED_NONE, "case against none",
                  "an item of none of these kinds whose case against is rated none, unless it adds words the user has "
@@ -1417,6 +1422,8 @@ NOT_ASKED_SEARCH_WINDOW_FUTURE_PROBLEM = ("- its `{marker}` line's search ends o
                                           "the last day actually searched.")
 NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM = ("- its `{marker}` line found {count} cases; a case found is the failure that "
                                         "has happened, so the proposal is shown to the user with those cases cited.")
+NOT_ASKED_ADDS_NOTHING_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add, so its recommendation adds "
+                                          "something and it is shown.")
 NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add; an item that drops a "
                                                "proposal adds no text, so it recommends something else and is shown.")
 # Fixed fields, not prose: a tally phrase such as `0 cases in total; will look in ...` holds an `in` that names no

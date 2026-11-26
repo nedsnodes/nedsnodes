@@ -4382,6 +4382,23 @@ def test_an_item_whose_recommendation_adds_nothing_settles_whatever_its_case_aga
           described(closed))
 
 
+def test_an_item_whose_recommendation_holds_a_new_text_is_refused_as_adding_nothing():
+    case = Case(next_to_present="item 1 of 3", document=RATED_NONE_DOCUMENT.replace(
+        "#case_against none.\n\nRecommendation: print it.",
+        "#new Print the total.\n\n#case_against strong: the total may mislead.\n\nRecommendation: print it.", 1))
+    before = case.minutes.read_text()
+    result = case.run("check", "--not-asked", "adds-nothing")
+    check("an item whose recommendation adds a `#new` text is refused as adding nothing, writing nothing",
+          result.returncode == 1 and "it has a `#new` line, which A would add" in result.stderr
+          and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
+    kept = Case(next_to_present="item 1 of 3", document=RATED_NONE_DOCUMENT.replace(
+        "#case_against none.\n\nRecommendation: print it.",
+        "#new_if_d Check the total.\n\n#case_against weak: a bad total gets through.\n\nThe alternative: check the "
+        "total.\n\nRecommendation: print it.", 1))
+    check("an item whose only marked text is the alternative's `#new_if_d` still settles as adding nothing",
+          (settled := kept.run("check", "--not-asked", "adds-nothing")).returncode == 0, described(settled))
+
+
 def test_an_item_of_no_kind_rated_none_settles_without_the_user_and_close_records_it_accepted():
     case = rated_none_case()
     result = case.run("check", "--not-asked", "none")
