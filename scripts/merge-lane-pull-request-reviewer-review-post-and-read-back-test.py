@@ -133,9 +133,9 @@ def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", 
     review, codex_runs lists the (head, exit code, report text or None) Codex run records it finds, by
     default one clean run on HEAD, and review_plan is the (exit code, stdout, stderr) of a stand-in review
     plan program, which by default fails, so that a case that should not read the plan shows it;
-    findings_record_match is likewise the (exit code, stdout, stderr) of a stand-in findings record match
-    program, which by default fails, and run.match_calls lists the (arguments, standard input as JSON) of each
-    of its runs."""
+    findings_record_match maps the subcommands match and add of a stand-in findings record program to the
+    (exit code, stdout, stderr) each gives, and each one not given fails; run.match_calls lists the
+    (arguments, standard input as JSON) of each of its runs."""
     case = Path(tempfile.mkdtemp(dir=scratch))
     home, state, fake_gh_directory = case / "home", case / "state", case / "fake-gh"
     for directory in (home, state, fake_gh_directory):
@@ -157,12 +157,14 @@ def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", 
         plan_program.write_text(f"import sys\nsys.stdout.write({plan_stdout!r})\nsys.stderr.write({plan_stderr!r})\n"
                                 f"sys.exit({plan_exit})\n")
         match_program = case / "stand-in-findings-record-match.py"
-        match_exit, match_stdout, match_stderr = findings_record_match or (
-            9, "", "the stand-in findings record match program was not expected to run")
+        replies = {"match": (9, "", "the stand-in findings record program's match was not expected to run"),
+                   "add": (9, "", "the stand-in findings record program's add was not expected to run"),
+                   **(findings_record_match or {})}
         match_program.write_text(
             f"import json, sys\nwith open({str(case / 'match-calls.jsonl')!r}, 'a') as log:\n"
             f"    log.write(json.dumps([sys.argv[1:], json.loads(sys.stdin.read())]) + '\\n')\n"
-            f"sys.stdout.write({match_stdout!r})\nsys.stderr.write({match_stderr!r})\nsys.exit({match_exit})\n")
+            f"code, out, err = {replies!r}[sys.argv[1]]\n"
+            f"sys.stdout.write(out)\nsys.stderr.write(err)\nsys.exit(code)\n")
         arguments = (*arguments, "--merge-lane-worktrees-and-outputs-directory", str(case / "helpers"),
                      "--pull-request-review-plan-program", str(plan_program),
                      "--findings-record-codex-finding-match-program", str(match_program))
@@ -367,74 +369,83 @@ def findings_record_cases(scratch):
     row = {"record_id": 17, "state": "decided-not-worth-fixing", "grade": "fix-in-maintenance",
            "decision": "the captures directory holds only captures"}
     pull_request_grade = {"finding": pull_request_id, "grade": "does-not-hold", "reason": "Unreachable."}
+    main_grade = {"finding": main_id, "grade": "file-for-later"}
+    main_comment = finding(2, "file-for-later", f"Delete only captures (Codex finding {main_id})")
 
-    def file(grades):
-        return json.dumps({"verdict": "APPROVE", "body": "The review body.", "comments": [],
+    def file(grades, comments=()):
+        return json.dumps({"verdict": "APPROVE", "body": "The review body.", "comments": list(comments),
                            "merge_lane_codex_review_finding_grades": grades})
 
-    same = json.dumps({main_id: {"answer": "SAME", "record": row, "possible_regression": False}})
-    result = run_program(scratch, file([pull_request_grade]), arguments=MERGE_LANE_ARGUMENTS,
-                         codex_runs=((HEAD, 0, report),), findings_record_match=(0, same, ""))
+    def posting(review_file, **replies):
+        return run_program(scratch, review_file, arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, report),),
+                           findings_record_match=replies)
+
+    same = (0, json.dumps({main_id: {"answer": "SAME", "record": row, "possible_regression": False}}), "")
+    result = posting(file([pull_request_grade]), match=same)
     sent = result.match_calls[0] if result.match_calls else None
-    check("a Codex finding that says main has it is sent to the findings record match program, and one that "
-          "does not is not", sent is not None
+    check("only a Codex finding that says main has it goes to the findings record program's match, with its "
+          "text and no grade", sent is not None
           and sent[0] == ["match", "--pull-request", "7", "--head-commit", HEAD]
           and [entry["finding_id"] for entry in sent[1]] == [main_id]
-          and sent[1][0]["heading"] == on_main and sent[1][0]["text"].startswith(f"- [Codex priority P1")
+          and sent[1][0]["heading"] == on_main and sent[1][0]["text"].startswith("- [Codex priority P1")
           and "grade" not in sent[1][0], result.detail)
-    check("a Codex finding the findings record already holds needs no grade, and the posted body quotes its "
-          "row's state, grade and decision",
-          result.code == 0 and f"- {main_id}: the same defect as findings record row 17, state "
-          "decided-not-worth-fixing, grade fix-in-maintenance, decision: the captures directory holds only "
-          "captures" in (result.posted or {}).get("body", "")
+    check("a Codex finding the findings record already holds needs no grade and is not added, and the posted body "
+          "quotes its row's state, grade and decision",
+          result.code == 0 and len(result.match_calls) == 1 and f"- {main_id}: the same defect as findings record "
+          "row 17, state decided-not-worth-fixing, grade fix-in-maintenance, decision: the captures directory "
+          "holds only captures" in (result.posted or {}).get("body", "")
           and "; findings record: 1 already held, 0 added" in result.stdout, result.detail)
 
-    fixed = json.dumps({main_id: {"answer": "SAME", "record": {**row, "state": "fixed", "decision": None},
-                                  "possible_regression": True}})
-    result = run_program(scratch, file([pull_request_grade]), arguments=MERGE_LANE_ARGUMENTS,
-                         codex_runs=((HEAD, 0, report),), findings_record_match=(0, fixed, ""))
+    fixed = (0, json.dumps({main_id: {"answer": "SAME", "record": {**row, "state": "fixed", "decision": None},
+                                      "possible_regression": True}}), "")
+    result = posting(file([pull_request_grade]), match=fixed)
     check("a match to a fixed row is reported as a possible regression in the body and the success line",
           result.code == 0 and "state fixed, grade fix-in-maintenance; a possible regression, since the row is "
           "fixed" in (result.posted or {}).get("body", "")
           and f"possible regression: {main_id} matches fixed row 17" in result.stdout, result.detail)
 
-    new = json.dumps({main_id: {"answer": "NEW", "record_id": 18, "possible_miss_of": [9]}})
-    main_grade = {"finding": main_id, "grade": "file-for-later"}
-    comment = finding(2, "file-for-later", f"Delete only captures (Codex finding {main_id})")
-    result = run_program(scratch, json.dumps({"verdict": "APPROVE", "body": "The review body.",
-                                              "comments": [comment],
-                                              "merge_lane_codex_review_finding_grades": [main_grade, pull_request_grade]}),
-                         arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, report),),
-                         findings_record_match=(0, new, ""))
-    sent = result.match_calls[0][1][0] if result.match_calls else {}
-    check("a graded Codex finding goes to the match program with its grade, and the success line names the row "
-          "it was added as and the possible miss",
-          result.code == 0 and sent.get("grade") == "file-for-later"
+    new = (0, json.dumps({main_id: {"answer": "NEW", "record_id": None}}), "")
+    result = posting(file([main_grade, pull_request_grade], [main_comment]), match=new,
+                     add=(0, json.dumps({main_id: {"record_id": 18, "possible_miss_of": [9]}}), ""))
+    sent = result.match_calls[1] if len(result.match_calls) == 2 else None
+    check("once the grades are accepted, a NEW finding goes to add with its grade, and the success line names "
+          "the row it was added as and the possible miss",
+          result.code == 0 and sent is not None and sent[0][0] == "add"
+          and [(entry["finding_id"], entry["grade"]) for entry in sent[1]] == [(main_id, "file-for-later")]
           and f"; findings record: 0 already held, 1 added ({main_id} as row 18); possible miss: {main_id} cites "
           "the same line as row(s) 9, logged for review" in result.stdout, result.detail)
-    result = run_program(scratch, file([{**pull_request_grade, "finding": pull_request_id}]),
-                         arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, report),),
-                         findings_record_match=(0, json.dumps(
-                             {main_id: {"answer": "NEW", "record_id": None, "possible_miss_of": []}}), ""))
-    check("a Codex finding the findings record does not hold still needs a grade",
-          result.code == 2 and result.posted is None and main_id in result.stderr
-          and "have no grade" in result.stderr, result.detail)
+    result = posting(file([main_grade, pull_request_grade]), match=new)
+    check("a NEW finding whose grade is refused, for lacking its comment, is not added",
+          result.code == 2 and result.posted is None and [call[0][0] for call in result.match_calls] == ["match"],
+          result.detail)
+    result = posting(file([pull_request_grade]), match=new)
+    check("a NEW finding with no grade is refused as before, and not added",
+          result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr
+          and [call[0][0] for call in result.match_calls] == ["match"], result.detail)
+    result = posting(file([{**main_grade, "grade": "does-not-hold", "reason": "Unreachable."}, pull_request_grade]),
+                     match=new, add=(0, json.dumps({main_id: {"record_id": 19, "possible_miss_of": []}}), ""))
+    sent = result.match_calls[1][1][0] if len(result.match_calls) == 2 else {}
+    check("a does-not-hold grade goes to add with its reason",
+          result.code == 0 and sent.get("grade") == "does-not-hold" and sent.get("reason") == "Unreachable.",
+          result.detail)
 
-    result = run_program(scratch, file([pull_request_grade]), arguments=MERGE_LANE_ARGUMENTS,
-                         codex_runs=((HEAD, 0, report),),
-                         findings_record_match=(1, "", "FAILED: the nn-shared-database service did not answer"))
-    check("a failing match program stops the post and passes on what it printed",
-          result.code == 2 and result.posted is None
-          and "findings record match program" in result.stderr and "exited 1" in result.stderr
-          and "FAILED: the nn-shared-database service did not answer" in result.stderr, result.detail)
-    for name, answer in (("not JSON", "not json"),
-                         ("an answer other than SAME or NEW", json.dumps({main_id: {"answer": "MAYBE"}})),
-                         ("an answer for another finding", json.dumps({"0123": {"answer": "NEW"}})),
-                         ("SAME without its row", json.dumps({main_id: {"answer": "SAME",
-                                                                        "possible_regression": False}}))):
-        result = run_program(scratch, file([pull_request_grade]), arguments=MERGE_LANE_ARGUMENTS,
-                             codex_runs=((HEAD, 0, report),), findings_record_match=(0, answer, ""))
-        check(f"a match program that prints {name} stops the post",
+    for subcommand, replies in (("match", {"match": (1, "", "FAILED: the nn-shared-database service did not answer")}),
+                                ("add", {"match": new, "add": (1, "", "FAILED: the nn-shared-database service did "
+                                                                      "not answer")})):
+        result = posting(file([main_grade, pull_request_grade], [main_comment]), **replies)
+        check(f"a failing {subcommand} stops the post and passes on what it printed",
+              result.code == 2 and result.posted is None and f"{subcommand} exited 1" in result.stderr
+              and "FAILED: the nn-shared-database service did not answer" in result.stderr, result.detail)
+    for name, replies in (
+            ("match answers with text that is not JSON", {"match": (0, "not json", "")}),
+            ("match answers other than SAME or NEW", {"match": (0, json.dumps({main_id: {"answer": "MAYBE"}}), "")}),
+            ("match answers for another finding", {"match": (0, json.dumps({"0123": {"answer": "NEW"}}), "")}),
+            ("match answers SAME without its row",
+             {"match": (0, json.dumps({main_id: {"answer": "SAME", "possible_regression": False}}), "")}),
+            ("add answers without a row id",
+             {"match": new, "add": (0, json.dumps({main_id: {"possible_miss_of": []}}), "")})):
+        result = posting(file([main_grade, pull_request_grade], [main_comment]), **replies)
+        check(f"the post stops when {name}",
               result.code == 2 and result.posted is None and "printed an answer this program cannot read"
               in result.stderr, result.detail)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the match and decide subcommands of scripts/findings-record-codex-finding-match-and-row-add-or-decide.py.
+"""Tests for the match, add and decide subcommands of scripts/findings-record-codex-finding-match-and-row-add-or-decide.py.
 
 Each case runs the program's main() in this process against a real nn-shared-database
 service started on a loopback port with a database under a temporary directory, a git
@@ -7,7 +7,7 @@ repository made for the test, and a fake `claude` that logs its command line and
 prompt and answers as FAKE_CLAUDE_REPLY and FAKE_CLAUDE_EXIT say. HOME is a scratch
 directory holding the service token.
 
-Run: python3 scripts/findings-record-codex-finding-match-and-row-add-or-decide-match-and-decide-subcommands-test.py
+Run: python3 scripts/findings-record-codex-finding-match-and-row-add-or-decide-match-add-and-decide-subcommands-test.py
 """
 
 import contextlib
@@ -104,24 +104,25 @@ def run(arguments, stdin=""):
     return code, out.getvalue(), err.getvalue()
 
 
-def match(findings, number=4034, head=HEAD, service_url=SERVICE_URL, claude=str(fake_claude), log=miss_log):
+def match(findings, number=4034, head=HEAD, service_url=SERVICE_URL, claude=str(fake_claude)):
     code, out, err = run(["--service-url", service_url, "match", "--pull-request", str(number), "--head-commit", head,
-                          "--repository", str(repository), "--claude-program", claude,
-                          *(["--possible-miss-log", str(log)] if log else [])], json.dumps(findings))
+                          "--repository", str(repository), "--claude-program", claude], json.dumps(findings))
     return code, (json.loads(out) if code == 0 else None), err
 
 
-def finding(finding_id, title, body, line=4, grade=None, reason=None):
+def add(findings, number=4034, head=HEAD, service_url=SERVICE_URL, log=miss_log):
+    code, out, err = run(["--service-url", service_url, "add", "--pull-request", str(number), "--head-commit", head,
+                          "--repository", str(repository), *(["--possible-miss-log", str(log)] if log else [])],
+                         json.dumps(findings))
+    return code, (json.loads(out) if code == 0 else None), err
+
+
+def finding(finding_id, title, body, line=4):
     heading = f"{title} — scripts/thing.py:{line}-{line}"
-    text = (f"- [Codex priority P1 (P0 highest)] {heading}\n  {body}\n  Main has it: yes\n"
+    text = (f"- [Codex priority P1 (P0 highest)] {heading}\n  {body}\n  - `Main has it:` `yes`\n"
             f"  This pull request makes it happen: no\n  Reports success on failure: no\n"
             f"  Shown by: judged from the code only")
-    entry = {"finding_id": finding_id, "priority": "P1", "heading": heading, "text": text}
-    if grade:
-        entry["grade"] = grade
-    if reason:
-        entry["reason"] = reason
-    return entry
+    return {"finding_id": finding_id, "priority": "P1", "heading": heading, "text": text}
 
 
 def count(table):
@@ -132,23 +133,30 @@ capture = "The cleanup sorts every file in the capture directory and unlinks old
 first = finding("aaaa00000001", "Filter terminal captures before deleting", capture)
 
 code, answers, err = match([first])
-check("a finding the findings record holds nothing like is NEW with no judgment and, with no grade, adds no row",
-      code == 0 and answers == {"aaaa00000001": {"answer": "NEW", "record_id": None, "possible_miss_of": []}}
+check("a finding the findings record holds nothing like is NEW with no judgment, and match adds no row",
+      code == 0 and answers == {"aaaa00000001": {"answer": "NEW", "record_id": None}}
       and claude_calls() == [] and count("findings_record_row") == 0, (code, answers, err))
 
 graded = {**first, "grade": "fix-next"}
-code, answers, err = match([graded])
-record_id = (answers or {}).get("aaaa00000001", {}).get("record_id")
+code, added, err = add([graded])
+record_id = (added or {}).get("aaaa00000001", {}).get("record_id")
 row = db.execute("SELECT path, line, line_text, line_commit, main_has_it, this_pull_request_makes_it_happen, "
                  "shown_by, grade, state, statement FROM findings_record_row").fetchall()
-check("a graded NEW finding is added as a row in state new, with its line's text at the head commit and its "
-      "four labelled lines", code == 0 and isinstance(record_id, int) and row == [(
+check("add makes a graded finding a row in state new, with its line's text at the head commit and its four "
+      "labelled lines without their code marks", code == 0 and isinstance(record_id, int) and row == [(
           "scripts/thing.py", 4, "    os.unlink(name)", HEAD, "yes", "no", "judged from the code only", "fix-next",
-          "new", graded["heading"])], (code, answers, err, row))
-code, again, err = match([graded])
-check("running the same match again adds no second row or sighting and asks no judgment",
-      code == 0 and again == answers and count("findings_record_row") == 1
-      and count("findings_record_row_sighting") == 1 and claude_calls() == [], (code, again, err))
+          "new", graded["heading"])], (code, added, err, row))
+code, again, err = add([graded])
+check("running the same add again adds no second row or sighting",
+      code == 0 and again == added and count("findings_record_row") == 1
+      and count("findings_record_row_sighting") == 1, (code, again, err))
+code, answers, err = match([first])
+check("matching a finding after its own row was added at this head commit answers NEW with that row, with no "
+      "judgment", code == 0 and answers == {"aaaa00000001": {"answer": "NEW", "record_id": record_id}}
+      and claude_calls() == [], (code, answers, err))
+code, out, err = run(["--service-url", SERVICE_URL, "add", "--pull-request", "1", "--head-commit", HEAD],
+                     json.dumps([first]))
+check("add refuses a finding with no grade, with exit 2", code == 2 and "grade" in err, err)
 
 reworded = finding("bbbb00000002", "Restrict deletion to terminal capture files",
                    "The job sorts every regular file in the capture directory and can delete the newest capture.")
@@ -165,7 +173,7 @@ check("on SAME the answer carries the row and records the finding as a sighting 
       and answers["bbbb00000002"]["possible_regression"] is False
       and db.execute("SELECT record_id, pull_request FROM findings_record_row_sighting WHERE finding_id = ?",
                      ("bbbb00000002",)).fetchall() == [(record_id, 4076)], (code, answers, err))
-code, again, err = match([reworded], number=4019, head=HEAD)
+code, again, err = match([reworded], number=4019)
 check("a finding already sighted is SAME again with no judgment", code == 0
       and again["bbbb00000002"]["answer"] == "SAME" and len(claude_calls()) == 1, (code, again, err))
 
@@ -181,18 +189,21 @@ code, out, err = run(["--service-url", SERVICE_URL, "decide", str(record_id), "-
                       "--decision", "x"])
 check("decide refuses a state that is not a findings record row state", code == 2, (code, out, err))
 
-other_defect = finding("cccc00000003", "Prune mixed-case capture names",
-                       "Lowercase capture names are ignored on the Mac, so they never expire.", grade="file-for-later")
-claude_says("NEW")
-code, answers, err = match([other_defect], number=4353)
+other_defect = {**finding("cccc00000003", "Prune mixed-case capture names",
+                          "Lowercase capture names are ignored on the Mac, so they never expire."),
+                "grade": "does-not-hold", "reason": "The Mac writes one spelling."}
+code, added, err = add([other_defect], number=4353)
 logged = [json.loads(line) for line in miss_log.read_text().splitlines()] if miss_log.exists() else []
-check("a NEW finding on the same path and line text as a row is added, and logged as a possible miss",
-      code == 0 and answers["cccc00000003"]["possible_miss_of"] == [record_id]
-      and logged and logged[-1]["same_path_and_line_text_as"] == [record_id]
-      and logged[-1]["record_id"] == answers["cccc00000003"]["record_id"], (code, answers, err, logged))
+new_id = (added or {}).get("cccc00000003", {}).get("record_id")
+check("a finding added on the same path and line text as a row is logged as a possible miss, and a "
+      "does-not-hold reason becomes its decision",
+      code == 0 and added["cccc00000003"]["possible_miss_of"] == [record_id]
+      and logged and logged[-1]["same_path_and_line_text_as"] == [record_id] and logged[-1]["finding_id"] == "cccc00000003"
+      and db.execute("SELECT grade, decision FROM findings_record_row WHERE record_id = ?", (new_id,)).fetchall()
+      == [("does-not-hold", "The Mac writes one spelling.")], (code, added, err, logged))
 
 before = (count("findings_record_row"), count("findings_record_row_sighting"))
-fresh = finding("dddd00000004", "Filter capture names", capture, grade="fix-next")
+fresh = finding("dddd00000004", "Filter capture names", capture)
 for name, reply in (("a record id it was not given", dict(answer="SAME 99999")),
                     ("a word outside its output states", dict(answer="SAME-ish")),
                     ("text around its answer", dict(answer=f"I think SAME {record_id}")),
@@ -202,7 +213,7 @@ for name, reply in (("a record id it was not given", dict(answer="SAME 99999")),
     claude_says(**reply)
     code, answers, err = match([fresh])
     check(f"a judgment step that answers with {name} fails the match, records nothing, and says why",
-          code == 1 and "FAILED: the findings record match stopped at finding dddd00000004" in err
+          code == 1 and "FAILED: the findings record match, " in err and "stopped at finding dddd00000004" in err
           and "the judgment step" in err
           and (count("findings_record_row"), count("findings_record_row_sighting")) == before, (code, err))
 code, answers, err = match([fresh], claude=str(scratch / "no-such-claude"))
@@ -224,22 +235,29 @@ code, answers, err = match([{**fresh, "heading": "No place cited"}])
 check("a heading that cites no path and line fails the match", code == 1 and "cites no `<path>:<line>`" in err,
       (code, err))
 code, answers, err = match([fresh], service_url="http://127.0.0.1:9")
-check("a service that cannot be reached fails the match with the service call's own message",
-      code == 1 and "cannot be reached" in err, (code, err))
+check("a service that cannot be reached fails the match with the service call's own message, and says to post "
+      "no review of the pull request until the user answers if a second try fails",
+      code == 1 and "cannot be reached" in err and "post no review of pull request 4034 until he answers" in err,
+      (code, err))
+code, added, err = add([{**fresh, "grade": "fix-next"}], service_url="http://127.0.0.1:9")
+check("a service that cannot be reached fails the add", code == 1
+      and "FAILED: the findings record add, " in err and "stopped at finding dddd00000004" in err and "cannot be reached" in err,
+      (code, err))
 code, out, err = run(["--service-url", "http://127.0.0.1:9", "decide", str(record_id), "--state", "fixed",
                       "--decision", "x"])
 check("decide fails when the service cannot be reached", code == 1 and "cannot be reached" in err, (code, err))
 
-same_line = finding("eeee00000005", "Another defect on that line", "Unrelated words entirely.", grade="fix-next")
-claude_says("NEW")
-code, answers, err = match([same_line], log=scratch)
-check("a possible-miss log that cannot be written fails the match", code == 1
+same_line = {**finding("eeee00000005", "Another defect on that line", "Unrelated words entirely."),
+             "grade": "fix-next"}
+rows_before = count("findings_record_row")
+code, added, err = add([same_line], log=scratch)
+check("a possible-miss log that cannot be written fails the add before the row is added", code == 1 and count("findings_record_row") == rows_before
       and "possible-miss log" in err and "could not be written" in err, (code, err))
 homes = (program.path_constants.NED_BOX_HOME, program.path_constants.MAC_MOUNT_OF_NED_BOX_HOME)
 program.path_constants.NED_BOX_HOME = program.path_constants.MAC_MOUNT_OF_NED_BOX_HOME = str(scratch / "none")
-code, answers, err = match([{**same_line, "finding_id": "ffff00000006"}], log=None)
+code, added, err = add([{**same_line, "finding_id": "ffff00000006"}], log=None)
 program.path_constants.NED_BOX_HOME, program.path_constants.MAC_MOUNT_OF_NED_BOX_HOME = homes
-check("a possible miss with no log-store reachable fails the match", code == 1 and "log-store" in err, (code, err))
+check("a possible miss with no log-store reachable fails the add", code == 1 and "log-store" in err, (code, err))
 
 code, out, err = run(["--service-url", SERVICE_URL, "match", "--pull-request", "1", "--head-commit", HEAD],
                      json.dumps([{"finding_id": "x"}]))

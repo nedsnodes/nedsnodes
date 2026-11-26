@@ -6,34 +6,38 @@ defect a reviewer found on main, reached through the nn-shared-database service.
 
 Usage:
   scripts/findings-record-codex-finding-match-and-row-add-or-decide.py match
+      --pull-request N --head-commit SHA [--repository DIR] [--claude-program PATH]
+      [--service-url URL] < findings.json
+  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py add
       --pull-request N --head-commit SHA [--repository DIR] [--possible-miss-log PATH]
-      [--claude-program PATH] [--service-url URL]
-      < findings.json
+      [--service-url URL] < graded-findings.json
   scripts/findings-record-codex-finding-match-and-row-add-or-decide.py decide
       RECORD_ID --state STATE --decision TEXT [--filed-where TEXT]
       [--owning-agent-seat NAME] [--service-url URL]
 
-match reads a JSON list of findings, each {"finding_id", "priority", "heading", "text"},
-with "grade", and for does-not-hold "reason", once merge-lane-2 has graded it: the
-heading is the Codex heading's text, "<title> — <path>:<line>[-<line>]", and the text
-the whole finding from its heading line on. For each finding, code:
-  - asks the service for the row a sighting of finding_id is on, the three rows FTS5
-    ranks best for the text, and the rows citing the same path and line text, the line's
-    text read from the head commit with git in --repository;
-  - when the held row was added from this finding at this head commit, answers NEW with
-    that row, so a second run adds nothing; when another held row exists, answers SAME
-    with it, with no judgment;
-  - otherwise, when the search gives candidates, has one judgment step, a headless
-    `claude -p` with no tools, answer exactly `SAME <record id>` of a candidate, or `NEW`;
-  - on SAME, records the finding as a sighting of the row;
-  - on NEW, when the finding has a grade, adds a row in state new holding the finding, its
-    four labelled lines and its grade, a does-not-hold reason as its decision; and when a
-    row already cites the same path and line text, appends one JSON line to the
-    possible-miss log, by default findings-record/findings-record-possible-misses.jsonl in
-    the log-store.
-It prints one JSON object, by finding id: {"answer": "SAME", "record": <the row>,
-"possible_regression": <whether the row is fixed>} or {"answer": "NEW", "record_id": <the
-row added, or null when the finding has no grade yet>, "possible_miss_of": [<record ids>]}.
+match and add read a JSON list of findings, each {"finding_id", "priority", "heading",
+"text"}, and for add also "grade", and for does-not-hold "reason": the heading is the
+Codex heading's text, "<title> — <path>:<line>[-<line>]", and the text the whole finding
+from its heading line on. --repository, by default this checkout, is where git reads
+the cited line's text at the head commit. For each finding, code asks the service for
+the row a sighting of finding_id is on, the three rows FTS5 ranks best for the text, and
+the rows citing the same path and line text.
+
+match records only sightings. When the held row was added from this finding at this head
+commit, it answers NEW with that row's id; when another row holds the finding, SAME with
+that row, with no judgment; otherwise, when the search gives candidates, one judgment
+step, a headless `claude -p` with no tools, must answer exactly `SAME <record id>` of a
+candidate, or `NEW`. On SAME it records the finding as a sighting of the row. It prints
+one JSON object, by finding id: {"answer": "SAME", "record": <the row>,
+"possible_regression": <whether the row is fixed>} or {"answer": "NEW", "record_id":
+<the row already added from it, or null>}.
+
+add, run once merge-lane-2's grades are accepted, adds each finding no row holds as a row
+in state new holding the finding, its four labelled lines and its grade, a does-not-hold
+reason as its decision; when a row already cites the same path and line text, it appends
+one JSON line to the possible-miss log, by default
+findings-record/findings-record-possible-misses.jsonl in the log-store. It prints one
+JSON object, by finding id: {"record_id": <the row>, "possible_miss_of": [<record ids>]}.
 
 decide records a decision on a row: its state, one of the service's
 FINDINGS_RECORD_ROW_STATES, and its decision, a link or a reason.
@@ -102,12 +106,18 @@ MATCH_JUDGMENT_SYSTEM_PROMPT = (
 
 # Messages follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 FAILED_MESSAGE = (
-    "FAILED: the findings record match stopped at finding {finding_id} of pull request {number}: {reason}\n"
-    "Rows and sightings recorded before this finding stay, and running the same command again records "
-    "nothing twice.\n"
-    "If the reason above gives a step, such as a command to run, do it, then run the same command again.\n"
-    "If the same command fails the same way again, tell the user: \"The findings record match for pull "
-    "request {number} fails: {reason}\", and leave the step that needs it until he answers.\n"
+    "FAILED: the findings record {command}, scripts/findings-record-codex-finding-match-and-row-add-or-decide.py "
+    "{command}, stopped at finding {finding_id} of pull request {number}: {reason}\n"
+    "Rows and sightings recorded before this finding stay, and running the same command line again, with the "
+    "same input, records none of them twice.\n"
+    "If the reason above is a FAILED message of the nn-shared-database service call, follow that message's own "
+    "instructions, not the two lines below.\n"
+    "Otherwise, do the step the reason gives, if it gives one, and then, whether or not it gave one, run once "
+    "more the command line that printed this message, whether the review-posting command or this program's own.\n"
+    "If that one rerun fails on the findings record again, at any finding, tell the user: \"The findings record "
+    "{command} for pull request "
+    "{number} fails: {reason}\", and post no review of pull request {number} until he answers; go on with other "
+    "work meanwhile.\n"
     "If you are a subagent, send those words to the agent that dispatched you instead.")
 JUDGMENT_ANSWER_UNLISTED_REASON = (
     "the judgment step answered {answer!r}, which is neither NEW nor SAME with one of the record ids it was "
@@ -129,7 +139,8 @@ def utc_now():
 def fact_line_answers(text):
     answers = dict.fromkeys(FINDING_FACT_LINE_FIELDS.values())
     for label, answer in FINDING_FACT_LINE.findall(text):
-        answers[FINDING_FACT_LINE_FIELDS[label]] = answers[FINDING_FACT_LINE_FIELDS[label]] or answer.strip()
+        answers[FINDING_FACT_LINE_FIELDS[label]] = (answers[FINDING_FACT_LINE_FIELDS[label]]
+                                                    or answer.strip().strip("`*_ \t") or None)
     return answers
 
 
@@ -198,60 +209,77 @@ def possible_miss_log_append(log_path, entry):
         raise MatchStepFailed(f"the possible-miss log {log_path} could not be written: {error}")
 
 
-def match_one(finding, arguments, call):
-    number, head = arguments.pull_request, arguments.head_commit
+def search_one(finding, arguments, call):
+    """Return (path, line, line text, the service's search answer) for one finding."""
     cited = CODEX_HEADING_PATH_AND_LINE.search(finding["heading"])
     if not cited:
         raise MatchStepFailed(f"its heading {finding['heading']!r} cites no `<path>:<line>` after ` — `, "
                               f"so the row would have no place in the code")
     path, line = cited[1], int(cited[2])
-    line_text = line_text_at_head(arguments.repository, head, path, line, number)
-    found = call("/findings-record-rows/search", {"finding_id": finding["finding_id"], "finding_text": finding["text"],
-                                             "path": path, "line_text": line_text})
+    line_text = line_text_at_head(arguments.repository, arguments.head_commit, path, line, arguments.pull_request)
+    found = call("/findings-record-rows/search", {"finding_id": finding["finding_id"],
+                                                  "finding_text": finding["text"], "path": path,
+                                                  "line_text": line_text})
+    return path, line, line_text, found
+
+
+def added_from_this_finding(held, finding, head):
+    return held is not None and held["added_from_finding_id"] == finding["finding_id"] and held["line_commit"] == head
+
+
+def match_one(finding, arguments, call):
+    number, head = arguments.pull_request, arguments.head_commit
+    _, _, _, found = search_one(finding, arguments, call)
     held, candidates = found["held"], found["candidates"]
-    if held is not None and held["added_from_finding_id"] == finding["finding_id"] and held["line_commit"] == head:
-        return {"answer": "NEW", "record_id": held["record_id"], "possible_miss_of": []}
+    if added_from_this_finding(held, finding, head):
+        return {"answer": "NEW", "record_id": held["record_id"]}
     if held is not None:
         same = held
     else:
         same_id = match_judgment(finding, candidates, arguments.claude_program) if candidates else None
         same = next((row for row in candidates if row["record_id"] == same_id), None)
-    if same is not None:
-        call("/events", service_call.nn_shared_database_event_body(
-            "findings-record-row-sighted", None,
-            {"record_id": same["record_id"], "finding_id": finding["finding_id"], "pull_request": number,
-             "head_commit": head},
-            event_id=f"findings-record-row-sighted-{finding['finding_id']}-{head}"))
-        return {"answer": "SAME", "record": same, "possible_regression": same["state"] == "fixed"}
-    if "grade" not in finding:
-        return {"answer": "NEW", "record_id": None, "possible_miss_of": []}
-    answers = fact_line_answers(finding["text"])
+    if same is None:
+        return {"answer": "NEW", "record_id": None}
+    call("/events", service_call.nn_shared_database_event_body(
+        "findings-record-row-sighted", None,
+        {"record_id": same["record_id"], "finding_id": finding["finding_id"], "pull_request": number,
+         "head_commit": head},
+        event_id=f"findings-record-row-sighted-{finding['finding_id']}-{head}"))
+    return {"answer": "SAME", "record": same, "possible_regression": same["state"] == "fixed"}
+
+
+def add_one(finding, arguments, call):
+    number, head = arguments.pull_request, arguments.head_commit
+    path, line, line_text, found = search_one(finding, arguments, call)
+    if found["held"] is not None:
+        return {"record_id": found["held"]["record_id"], "possible_miss_of": []}
+    # Logged before the row is added, since a rerun finds the row held and would log nothing.
+    misses = found["same_line_record_ids"]
+    if misses:
+        possible_miss_log_append(arguments.possible_miss_log, {
+            "at": utc_now(), "finding_id": finding["finding_id"], "same_path_and_line_text_as": misses,
+            "pull_request": number, "head_commit": head, "path": path, "line_text": line_text})
     added = call("/events", service_call.nn_shared_database_event_body(
         "findings-record-row-added", None,
         {"finding_id": finding["finding_id"], "pull_request": number, "head_commit": head, "path": path,
          "line": line, "line_text": line_text, "outside_program": None,
-         "statement": finding["heading"], "finding_text": finding["text"], **answers,
+         "statement": finding["heading"], "finding_text": finding["text"], **fact_line_answers(finding["text"]),
          "grade": finding["grade"],
          "decision": finding.get("reason") if finding["grade"] == DOES_NOT_HOLD_GRADE else None,
          "filed_where": None, "owning_agent_seat": None},
         event_id=f"findings-record-row-added-{finding['finding_id']}"))
-    misses = found["same_line_record_ids"]
-    if misses:
-        possible_miss_log_append(arguments.possible_miss_log, {
-            "at": utc_now(), "record_id": added["sequence"], "same_path_and_line_text_as": misses,
-            "pull_request": number, "head_commit": head, "finding_id": finding["finding_id"], "path": path,
-            "line_text": line_text})
-    return {"answer": "NEW", "record_id": added["sequence"], "possible_miss_of": misses}
+    return {"record_id": added["sequence"], "possible_miss_of": misses}
 
 
-def findings_read(text):
+def findings_read(text, graded):
     findings = json.loads(text)
-    keys = {"finding_id", "priority", "heading", "text"}
+    keys = {"finding_id", "priority", "heading", "text"} | ({"grade"} if graded else set())
     if not isinstance(findings, list) or not all(
-            isinstance(finding, dict) and keys <= set(finding) <= keys | {"grade", "reason"}
+            isinstance(finding, dict)
+            and (set(finding) == keys or graded and set(finding) == keys | {"reason"})
             and all(isinstance(value, str) for value in finding.values()) for finding in findings):
-        raise ValueError("not a list of objects with text finding_id, priority, heading and text, and an "
-                         "optional text grade and reason")
+        raise ValueError("not a list of objects with exactly a text finding_id, priority, heading and text"
+                         + (", and grade, and for a does-not-hold grade a reason" if graded else ""))
     return findings
 
 
@@ -263,8 +291,12 @@ def main(argv=None):
     match.add_argument("--pull-request", type=int, required=True)
     match.add_argument("--head-commit", required=True)
     match.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
-    match.add_argument("--possible-miss-log", type=Path)
     match.add_argument("--claude-program", default=command_line_prefix.CLAUDE_CODE_PROGRAM)
+    add = commands.add_parser("add")
+    add.add_argument("--pull-request", type=int, required=True)
+    add.add_argument("--head-commit", required=True)
+    add.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
+    add.add_argument("--possible-miss-log", type=Path)
     decide = commands.add_parser("decide")
     decide.add_argument("record_id", type=int)
     decide.add_argument("--state", choices=FINDINGS_RECORD_ROW_STATES, required=True)
@@ -289,7 +321,7 @@ def main(argv=None):
         print(f"findings record row {arguments.record_id} is now {arguments.state}: {arguments.decision}")
         return 0
     try:
-        findings = findings_read(sys.stdin.read())
+        findings = findings_read(sys.stdin.read(), graded=arguments.command == "add")
     except ValueError as error:
         print(f"FAILED: the findings on standard input are {error}; give the JSON list this program's "
               f"docstring describes.", file=sys.stderr)
@@ -297,9 +329,11 @@ def main(argv=None):
     answers = {}
     for finding in findings:
         try:
-            answers[finding["finding_id"]] = match_one(finding, arguments, call)
+            answers[finding["finding_id"]] = (add_one if arguments.command == "add" else match_one)(
+                finding, arguments, call)
         except (MatchStepFailed, service_call.NnSharedDatabaseServiceCallFailed) as error:
-            print(FAILED_MESSAGE.format(finding_id=finding["finding_id"], number=arguments.pull_request,
+            print(FAILED_MESSAGE.format(command=arguments.command, finding_id=finding["finding_id"],
+                                        number=arguments.pull_request,
                                         reason=error), file=sys.stderr)
             return 1
     print(json.dumps(answers, ensure_ascii=False))
