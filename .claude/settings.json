@@ -256,11 +256,6 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/claude-code-artifact-tool-claude-ai-page-delete-refusal-hook.py",
             "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/claude-code-artifact-tool-claude-ai-page-open-on-the-mac-refusal-hook.py",
-            "timeout": 30
           }
         ]
       }
