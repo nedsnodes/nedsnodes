@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Carry out the user's A, AO, Aa, D, Z, O2 or O3 answer to the waiting item of an
-open approval-walk, or his A, AO or D answer to each part of it, or his moving on
+"""Carry out the user's A, AO, Aa, N, C, Z, O2 or O3 answer to the waiting item of an
+open approval-walk, or his A, AO or N answer to each part of it, or his moving on
 from an item that asks no decision: give each text
 the answer adds a cold-read-fast-read, then record the answer in the
 walk-minutes and set their `#next_to_present` line to the next item; or record
@@ -605,7 +605,7 @@ def load_walk_finder():
                        WALK_FINDER_FILE)
 
 
-NEW_MARK, NEW_IF_D_MARK = "#new", "#new_if_d"
+NEW_MARK, NEW_IF_D_MARK, NEW_IF_C_MARK = "#new", "#new_if_d", "#new_if_c"
 QUOTE_PAIRS = (('"', '"'), ("“", "”"), ("'", "'"))
 FENCE_DELIMITER = re.compile(r"^\s*(?:>\s?)*\s*(?:`{3,}|~{3,})")
 QUOTATION_LINE = re.compile(r"^\s*>")
@@ -918,14 +918,16 @@ STATUS_LINE_PREFIX = "- "
 OBVIOUS_HASHTAG = " #approved_obvious"
 AFTER_ADVISOR_HASHTAG = " #approved_after_advisor"
 APPROVED, DISAPPROVED, DEFERRED, MOVED_ON = "approved", "disapproved", "deferred", "moved on, no decision"
+# C approves the item's creative-alternative line; the walk-minutes write it with the outcome of an approval, as O2.
+APPROVED_CREATIVE_ALTERNATIVE = f"{APPROVED} creative alternative"
 ALREADY_DECIDED_PREFIX, MOVED_ON_PREFIX = "already decided by ", "moved on, no decision: "
-NAVIGATION_WORD_ALONE = re.compile(r"^(?:next|n|continue|go)[.!]*$", re.I)
+NAVIGATION_WORD_ALONE = re.compile(r"^(?:next|g|go on|continue|go)[.!]*$", re.I)
 OUTCOMES = {APPROVED: "<accepted>", DISAPPROVED: "<rejected>"}
-PART_WORDS = {"A": APPROVED, "AO": APPROVED + OBVIOUS_HASHTAG, "D": DISAPPROVED}
-PART_ARGUMENT = re.compile(r"^(\d+)=(ao|a|d)$", re.I)
+PART_WORDS = {"A": APPROVED, "AO": APPROVED + OBVIOUS_HASHTAG, "N": DISAPPROVED}
+PART_ARGUMENT = re.compile(r"^(\d+)=(ao|a|n|d)$", re.I)
 # ANSWER_LINE's `answered` loses a last part's hashtag, so close reads each part's word on its own.
 PART_IN_ANSWER = re.compile(r"\bpart (\d+) ((?:dis)?approved)\b")
-PART_ARGUMENT_PROBLEM = ("`{value}` is not a part's answer: give the part's number, `=`, then A, AO or D, as in "
+PART_ARGUMENT_PROBLEM = ("`{value}` is not a part's answer: give the part's number, `=`, then A, AO or N, as in "
                          "`1=A`; a part takes no Z, so a deferral is given to the whole item with --deferred")
 PART_REPEATED = ("nothing written: --part-answer gives {parts} more than one answer.\n"
                  "Run check again giving each part's number once, with the letter the user gave that part.")
@@ -1132,7 +1134,8 @@ def _one_of(values):
 _PART_VALUE = r"part \d+ " + _one_of(f"{word} {outcome}" for word, outcome in OUTCOMES.items())
 # The values close fills each placeholder with; {ruling} and {reason} carry the agent's own words, so any text.
 PLACEHOLDER_VALUES = {
-    "answered": _one_of([APPROVED, DISAPPROVED] + [f"{APPROVED} option {number}" for number in OPTION_NUMBERS]
+    "answered": _one_of([APPROVED, DISAPPROVED, APPROVED_CREATIVE_ALTERNATIVE]
+                        + [f"{APPROVED} option {number}" for number in OPTION_NUMBERS]
                         + [f"not asked, {case.label}" for case in NO_ANSWER_CASES if case.flag == NOT_ASKED_FLAG]),
     "outcome": _one_of(OUTCOMES.values()),
     "parts": rf"{_PART_VALUE}(?:, {_PART_VALUE})*",
@@ -1291,14 +1294,14 @@ MOVED_ON_NO_DECISION_HIDDEN_RECOMMENDATION = (
     "If the recommendation is a hidden note: put it inside a comment that opens with `<!--` outside any tag and "
     "closes with `-->`, then run `{command}` again.")
 MOVED_ON_NO_DECISION_ANSWER_COMMANDS = (
-    ("A", ()), ("AO", ("--obvious",)), ("Aa", ("--after-advisor",)), ("D", ("--disapproved",)),
-    ("Z", ("--deferred",)))
+    ("A", ()), ("AO", ("--obvious",)), ("Aa", ("--after-advisor",)), ("N", ("--do-nothing",)),
+    ("C, for an item with a creative-alternative line", ("--creative-alternative",)), ("Z", ("--deferred",)))
 MOVED_ON_NO_DECISION_ANSWER_LINE = "{answer}: {command} --user-reply-as-typed REPLY"
 MOVED_ON_NO_DECISION_OPTION_LINE = ("O{number}, for an item with an \"Option {number}\" paragraph: {command} "
                                     "--user-reply-as-typed REPLY")
 MOVED_ON_NO_DECISION_PART_LINE = ("An answer to each part of an item with parts, one flag per part: {command} "
                                   "--user-reply-as-typed REPLY")
-MOVED_ON_NO_DECISION_PART_EXAMPLE = ("--part-answer", "1=A", "--part-answer", "2=D")
+MOVED_ON_NO_DECISION_PART_EXAMPLE = ("--part-answer", "1=A", "--part-answer", "2=N")
 UNREADABLE_NEW_MARKS = (
     "nothing written: {item} in the walk-document {document} has `#new` or `#new_if_d` marks whose text this "
     "program would not read whole, so an answer that adds such a text would be recorded without that text's "
@@ -1487,7 +1490,8 @@ AFTER_FIXES_FLAG = "--after-fixes-reread-only-when-facts-change"
 ITEM_READS_DIRECTORY_SUFFIX = "-item-cold-read-fast-read-review-status-per-text-hash"
 READ_DONE, READ_FAILED = "done", "failed"
 READ_POLL_SECONDS = 2
-FACT_LABELS = ("Recommendation:", "The alternative:")
+FACT_LABELS = ("Recommendation:", "The alternative:", "#approval_walk_item_recommendation#",
+               "#approval_walk_item_do_nothing#", "#approval_walk_item_creative_alternative#")
 # Spelled as the short-answer hook's RECOMMENDATION, so the two programs agree on which items hold a recommendation.
 AUTOLINK = r"<[A-Za-z][A-Za-z0-9+.-]*:[^>\s]*>"
 # A backquoted span, a Markdown link, an autolink, or any other run of non-space characters.
@@ -2304,11 +2308,13 @@ def append_to_minutes(minutes, lines):
 
 
 def part_answer(value):
-    """Return (part number, A, AO or D) from a --part-answer value such as `2=ao`."""
+    """Return (part number, A, AO or N) from a --part-answer value such as `2=ao`; D, the do-nothing letter before
+    N, reads as N."""
     match = PART_ARGUMENT.match(value)
     if not match:
         raise argparse.ArgumentTypeError(PART_ARGUMENT_PROBLEM.format(value=value))
-    return int(match[1]), match[2].upper()
+    letter = match[2].upper()
+    return int(match[1]), "N" if letter == "D" else letter
 
 
 def not_asked_kind(value):
@@ -2348,6 +2354,8 @@ def answered_word(arguments, walk_finder):
         return MOVED_ON
     if arguments.option is not None:
         return f"{APPROVED} option {arguments.option}"
+    if arguments.creative_alternative:
+        return APPROVED_CREATIVE_ALTERNATIVE
     if arguments.not_asked is not None:
         return f"not asked, {not_asked_label(arguments.not_asked)}"
     if arguments.already_decided is not None:
@@ -2358,11 +2366,13 @@ def answered_word(arguments, walk_finder):
 
 
 def marks_the_answer_adds(arguments):
-    """The marks of the texts the answer adds: `#new_if_d` for D, `#new` for any other answer, and for
-    answers to parts, the marks of the parts' answers."""
+    """The marks of the texts the answer adds: `#new_if_d` for N, `#new_if_c` for C, `#new` for any other answer,
+    and for answers to parts, the marks of the parts' answers."""
     if arguments.part_answer:
         letters = {letter for _, letter in arguments.part_answer}
-        return {mark for mark, adds in ((NEW_MARK, letters != {"D"}), (NEW_IF_D_MARK, "D" in letters)) if adds}
+        return {mark for mark, adds in ((NEW_MARK, letters != {"N"}), (NEW_IF_D_MARK, "N" in letters)) if adds}
+    if arguments.creative_alternative:
+        return {NEW_IF_C_MARK}
     return {NEW_IF_D_MARK} if arguments.disapproved else {NEW_MARK}
 
 
@@ -2413,7 +2423,9 @@ def check_words(arguments):
     if arguments.after_advisor:
         words.append("--after-advisor")
     if arguments.disapproved:
-        words.append("--disapproved")
+        words.append(f"--{arguments.disapproved}")
+    if arguments.creative_alternative:
+        words.append("--creative-alternative")
     if arguments.deferred:
         words.append("--deferred")
     if arguments.moved_on_no_decision:
@@ -2610,6 +2622,35 @@ def now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
                       for problem, numbers in found.items() if numbers]
 
 
+OPTION_LINES_NOT_WRITTEN_BY_WRITER = (
+    "nothing written: {item} in the walk-document {document} has option lines the option-lines writer did not write: "
+    "{problem}.\n"
+    "An item's `#approval_walk_item_...#` lines are written only by {writer}, so that no agent types or changes them "
+    "by hand.\n"
+    "Run it on the item, giving every option's text again:\n"
+    "python3 {writer} {document} --item-title '<the heading of the item, without ## and any Item N of M:>' "
+    "--do-nothing '<what N does>' --recommendation '<what A does>' "
+    "[--creative-alternative '<what C does, only when there is one>']\n"
+    "Then run this command again: {command}")
+CREATIVE_ALTERNATIVE_MISSING = (
+    "nothing written: --creative-alternative records the user's C, but {item} in the walk-document {document} has no "
+    "`#approval_walk_item_creative_alternative#` line for C to approve.\n"
+    "If the user typed C, ask him which option he meant, since the item offers no creative alternative.\n"
+    "If he meant another answer, run check with that answer's flag instead: {commands}")
+OPTION_LINES_WRITER_FILE = Path(__file__).resolve().parent / "walk-me-through-approval-walk-item-option-lines-write.py"
+
+
+def approval_walk_item_option_lines_not_written_by_writer_refused(walk_finder, minutes, value, numbers, total, parser,
+                                                                  item, command):
+    """Raise Failure when the item's option lines were typed or changed by hand, as the finder judges them."""
+    document, text = item_text(walk_finder, minutes, value, numbers, total, parser)
+    problem = walk_finder.approval_walk_item_option_lines_problem(text.split("\n"))
+    if problem:
+        raise Failure(OPTION_LINES_NOT_WRITTEN_BY_WRITER.format(
+            item=item, document=document, problem=problem, writer=OPTION_LINES_WRITER_FILE, command=command))
+    return document, text
+
+
 def check(arguments):
     if arguments.bump is not None:
         return bump(arguments)
@@ -2647,6 +2688,13 @@ def check(arguments):
     in_his_words = USER_WORDS.format(words=walk_finder.text_wrapped_as_markdown_code_span(words)) if words else ""
     document, lines, marks, unreadable, tag_comments_kept = item_lines(walk_finder, minutes, value, numbers, total,
                                                                        parser)
+    _, raw_text = approval_walk_item_option_lines_not_written_by_writer_refused(
+        walk_finder, minutes, value, numbers, total, parser, item, check_command_with_cwd(top, *check_words(arguments)))
+    if arguments.creative_alternative and not any(
+            line.lstrip().startswith(walk_finder.APPROVAL_WALK_ITEM_CREATIVE_ALTERNATIVE_HASHTAG)
+            for line in raw_text.split("\n")):
+        raise Failure(CREATIVE_ALTERNATIVE_MISSING.format(item=item, document=document,
+                                                          commands=answer_check_commands(top)))
     rating = case_against_rating(lines, item, document, arguments, top)
     rated = CASE_AGAINST_HASHTAG.format(rating=rating.replace(" ", "_")) if rating else ""
     recommendation = walk_finder.approval_walk_item_last_recommendation_text_from_item_lines(lines)
@@ -3729,6 +3777,8 @@ def waiting_item_read(arguments, sub_step_of=None):
     command_reading_again = read_step_command_with_cwd(top, *rechecked_words)
     document, text = item_text(walk_finder, minutes, value, numbers, total, parser,
                                refused_unless_marks_read=(item, command))
+    approval_walk_item_option_lines_not_written_by_writer_refused(walk_finder, minutes, value, numbers, total, parser,
+                                                                  item, command)
     rewrite_file = arguments.approval_walk_item_fresh_agent_rewrite_file
     # Before the kept versions are written, so a refused item's document is left as it was. With a rewrite, the
     # rewrite's own text is checked once it is in place: a rerun after an over-limit rewrite whose count reset failed
@@ -4792,7 +4842,14 @@ def main(argv=None):
     answer.add_argument("--obvious", action="store_true", help="check: the answer was AO, approve as obvious")
     answer.add_argument("--after-advisor", action="store_true",
                         help="check: the answer was Aa, approve after an advisor check")
-    answer.add_argument("--disapproved", action="store_true", help="check: the answer was D, disapprove; reads only the `#new_if_d` texts")
+    # Both flags set `disapproved` to the flag's own name, so a rerun command repeats the flag the agent gave.
+    answer.add_argument("--do-nothing", dest="disapproved", action="store_const", const="do-nothing",
+                        help="check: the answer was N, do nothing; reads only the `#new_if_d` texts")
+    answer.add_argument("--disapproved", dest="disapproved", action="store_const", const="disapproved",
+                        help="check: the answer was D, on a walk whose items still offer it; the same as --do-nothing")
+    answer.add_argument("--creative-alternative", action="store_true",
+                        help="check: the answer was C, approving the item's creative-alternative line; reads only "
+                             "the `#new_if_c` texts")
     answer.add_argument("--deferred", action="store_true", help="check: the answer was Z, defer")
     answer.add_argument("--moved-on-no-decision", action="store_true",
                         help="check: the user's reply moved on from an item that asks no decision, such as a "
@@ -4812,7 +4869,7 @@ def main(argv=None):
                         help="check: the walk moves on from the item with no decision, for REASON; recorded as "
                              "shown to the user when the minutes hold an `#item_page` line for it, else as not shown")
     answer.add_argument("--part-answer", type=part_answer, action="append", metavar="N=ANSWER",
-                        help="check: part N of the item was answered ANSWER, A, AO or D; give it once for each part")
+                        help="check: part N of the item was answered ANSWER, A, AO or N; give it once for each part")
     answer.add_argument("--bump", metavar="ITEM",
                         help="check: the user said bump and named ITEM, an item not yet shown, by its heading's title; "
                              "show it next, before the waiting item")

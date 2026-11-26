@@ -34,7 +34,8 @@ order, each line once, so a sub-step's lines that item 12's own already hold are
 
 The text is rendered with the shared
 CommonMark parser, each line break kept, as the walk-document shows it. A paragraph that opens with
-`Recommendation:` gets the class `rec`, and one that opens with `#approval_walk` gets the class `tag`.
+`Recommendation:` or `#approval_walk_item_recommendation#` gets the class `rec`, and any other that opens with
+`#approval_walk` gets the class `tag`.
 
 LINKS BETWEEN PAGES. The walk-minutes, the walk-document's sibling `<walk name>-minutes.md`, record each page's link
 on an `#item_page` line, read through the walk finder's approval_walk_item_page_link_lines_oldest_first_from_walk_minutes. Above its heading,
@@ -194,7 +195,7 @@ def rendered_item_html(parser, heading, body):
     for index, token in enumerate(tokens):
         if token.type == "paragraph_open" and token.level == 0 and index + 1 < len(tokens):
             content = tokens[index + 1].content
-            if content.startswith("Recommendation:"):
+            if content.startswith(("Recommendation:", "#approval_walk_item_recommendation#")):
                 token.attrSet("class", RECOMMENDATION_CLASS)
             elif content.startswith("#approval_walk"):
                 token.attrSet("class", TAG_CLASS)

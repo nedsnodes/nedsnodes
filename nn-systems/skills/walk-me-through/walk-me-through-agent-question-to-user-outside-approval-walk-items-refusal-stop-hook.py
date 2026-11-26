@@ -69,7 +69,7 @@ THE TEXT CHECKED is the reply, line by line, without:
   outside the link but the answer letters, such as a list mark, bold marks or
   a sentence, or that names another item, is checked;
 - the line a sub-step that asks for no decision ends with, `[No decision
-  here; type N or next to continue.](<page link>)` or the same line without
+  here; type G or go on to continue.](<page link>)` or the same line without
   its link, alone on its line, whatever item waits: it only tells the user
   how to move on, and whether it may end this message is the current-item
   Stop hook's check, which refuses it for an item without a dotted number
@@ -222,13 +222,13 @@ WAITING_REMINDER = re.compile(
 NO_FOLLOWED_BY_HYPHEN_THAT_ASKS_NOTHING = r"no-(?:decision|op)\b"
 ASK_PHRASE = re.compile(
     # The letter A is matched in capitals only, because a lowercase `a` there is the article, as in `answer a finding`.
-    r"\b(?:say|reply|answer|type)\s+(?!" + NO_FOLLOWED_BY_HYPHEN_THAT_ASKS_NOTHING + r")(?:yes|no|y|n|ao|d|(?-i:A))\b"
+    r"\b(?:say|reply|answer|type)\s+(?!" + NO_FOLLOWED_BY_HYPHEN_THAT_ASKS_NOTHING + r")(?:yes|no|y|n|ao|d|c|g|(?-i:A))\b"
     r"|\bon\s+(?:a|your)\s+(?!" + NO_FOLLOWED_BY_HYPHEN_THAT_ASKS_NOTHING + r")(?:yes|no)\b"
     r"|\byour\s+yes\s+or\s+no\b|\bdo\s+you\s+(?:want|agree)\b|\bshould\s+I\b|\bshall\s+I\b|\bwant\s+me\s+to\b"
     r"|\bwould\s+you\s+like\b|\bwaiting\s+(?:on|for)\s+your\s+(?:answer|word|decision|ruling|approval|go-ahead|yes)\b"
     r"|\bneeds?\s+your\s+(?:answer|decision|ruling|approval|word|go-ahead|yes)\b"
     r"|\b(?:tell\s+me|let\s+me\s+know)\s+(?:if|whether|which)\b|\bplease\s+(?:confirm|approve|decide|choose|pick|rule)\b"
-    r"|\brecommend|^\W*recommendation:|\bI\s+suggest\b|\blet\s+me\s+know\b|\btell\s+me\b|\basking\s+you\b"
+    r"|\brecommend|^\W*recommendation:|#approval_walk_item_recommendation#|\bI\s+suggest\b|\blet\s+me\s+know\b|\btell\s+me\b|\basking\s+you\b"
     r"|\bwaiting\s+(?:on|for)\s+(?:you|your)\b|\bstill\s+open\b|\bneeds?\s+(?:you|your)\b|\bwhether\s+(?:I|to|we)\b"
     r"|\bA\s+or\s+D\b|\bY\s+or\s+N\b|\brule\s+once\b|\byou(?:'d|\s+would|\s+must|\s+need\s+to)?\s+rule\s+on\b"
     r"|\byour\s+(?:yes|word|call|go-ahead|approval|decision|choice|pick|ruling)\b"
@@ -310,9 +310,12 @@ REFUSAL_INSTRUCTIONS = (
     "question only when the item in the walk-document holds every flagged line that way, and refuses again until "
     "it does; it ignores a `>` quote mark or a list mark such as `-` or `1.` at the start of a line, bold, italic "
     "and code marks, and letter case, so you may add or drop those. "
-    "Give the item one recommendation and one alternative, and end it with the recommendation stated as an "
-    "action, as in `Recommendation: <what you recommend doing>.` State the alternative before it, as in "
-    "`The alternative: <what D does instead>.`",
+    "End the item with its option lines, which you never type: run `python3 "
+    "nn-systems/skills/walk-me-through/walk-me-through-approval-walk-item-option-lines-write.py {document} "
+    "--item-title '<the heading of the item, without ##>' --do-nothing '<what N leaves as it is>' --recommendation "
+    "'<what you recommend doing, stated as an action>'`, adding `--creative-alternative '<what C does>'` only when an "
+    "option solves the problem in a fundamentally different, simpler or more powerful way, as the walk-me-through "
+    "skill's section \"Each item\" says.",
     "2. Do not show the new item now: the walk shows it when its turn comes.",
     "3. The flagged text has already reached the user, so leave it. End the message you write next with the line "
     "`I added the question to the walk as a new item.` and then {closing_lines_named}, as the "

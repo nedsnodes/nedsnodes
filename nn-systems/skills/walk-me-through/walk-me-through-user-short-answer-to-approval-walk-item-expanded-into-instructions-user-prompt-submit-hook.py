@@ -31,7 +31,7 @@ letters of AO, O2 and O3 (`A-O`, `a - o`, `O-2`):
               title, which shows that item next and the waiting item after it;
               with no walk open, the hook prints nothing.
 Every other prompt is a reply in the user's own words: Y and C are not answers,
-and N, like next, is a navigation word the agent reads.
+and G, like go on or next, is a navigation word the agent reads.
 
 A REPLY THAT MAY FOLLOW A SETTLED DISCUSSION. While an item waits, the text
 carries WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE, which holds the
@@ -130,7 +130,7 @@ asks to see the item again. When a part gets more than one letter, the answer
 is refused whole; when a part is left unanswered, the item stays open and the
 agent records nothing yet. When every part gets the same letter, the text
 gives that letter's lines for the whole item. When the letters differ and are
-each A, AO or D, the text says what each does for its part and gives the
+each A, AO or N, the text says what each does for its part and gives the
 CHECK_PROGRAM check command with one `--part-answer N=ANSWER` flag per part. When
 they differ and one is Z, it says check cannot record a part deferred while
 others are answered, and tells the agent to record nothing and ask the user to
@@ -203,17 +203,19 @@ TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude-code-session-transcript-
 EXPLAIN_SKILL = CHECKOUT / ".claude" / "skills" / "explain" / "SKILL.md"
 
 # Longer forms first, so `ao` is not read as `a` and `approve as obvious` not as `approve`.
-WORDS = {"approve as obvious": "AO", "approved": "A", "approve": "A", "disapproved": "D",
-         "disapprove": "D", "defer": "Z", "later": "Z", "repeat": "R", "more responses": "M"}
+# D and disapprove were the do-nothing answer before N; they still read as N, for walks whose items offer them.
+WORDS = {"approve as obvious": "AO", "approved": "A", "approve": "A", "do nothing": "N", "disapproved": "N",
+         "disapprove": "N", "creative alternative": "C", "defer": "Z", "later": "Z", "repeat": "R",
+         "more responses": "M"}
 NUMBER = r"\d+(?:\.\d+)*"
 JOINER = r"(?:\s*-\s*)?"
 AO = rf"a{JOINER}o"
-LETTER = rf"aa|{AO}|o{JOINER}[23]|[adzreom]"
+LETTER = rf"aa|{AO}|o{JOINER}[23]|[adnczreom]"
 SINGLE_LETTER = re.compile(rf"^(?:{LETTER})$", re.I)
 WORD = "|".join(word.replace(" ", r"\s+") for word in WORDS)
 ANSWER = rf"(?P<answer>{WORD}|{LETTER})"
 ALL = re.compile(rf"^(?:all\s+(?P<first>{AO}|a)|(?P<last>{AO}|a)\s+to\s+all)$", re.I)
-PAIR = rf"(?:items?\s*)?({NUMBER})\s*(?:[-:=)]\s*)?({AO}|[adzr])(?![a-z])"
+PAIR = rf"(?:items?\s*)?({NUMBER})\s*(?:[-:=)]\s*)?({AO}|[adnzr])(?![a-z])"
 NUMBERED = re.compile(rf"^(?:{PAIR}(?:[\s,;]+|$))+$", re.I)
 PAIRS = re.compile(PAIR, re.I)
 # M records nothing, and a check run with no flag records an A, so M never takes item numbers.
@@ -231,9 +233,10 @@ MOST_PARTS = 5
 HEADING_POINT = re.compile(r"^[#\s*]*items?\s[^:]*:\s*(.*?)[\s*]*$", re.I)
 # Each response the user can give an item, with its label, in the order the walk shows them.
 RESPONSE_LABELS = (("A", "approve"), ("AO", "approve as obvious"), ("Aa", "approve after an advisor check"),
-                   ("D", "disapprove"), ("Z", "defer"), ("E", "explain"), ("O", "other options"),
+                   ("N", "do nothing"), ("C", "creative alternative, when the item has one"), ("Z", "defer"),
+                   ("E", "explain"), ("O", "other options"),
                    ("M", "more responses"))
-CLOSING_LINE_RESPONSES = ("A", "D", "M")
+CLOSING_LINE_RESPONSES = ("A", "N", "M")
 # The walk-me-through skill's closing line after its link, word for word; the hook's test checks SKILL.md holds it.
 ANSWER_LETTERS_TEXT = " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS
                                  if code in CLOSING_LINE_RESPONSES)
@@ -248,7 +251,7 @@ PARTS_NOT_TOLD_APART_PROBLEM = (
     "top-level list item that starts with the item's label in bold, the number followed by `:`, `.` or `,` "
     "inside or right after the bold, as in `**Item 5: the label.**` or `- **Item 5, step 1.**`, or on the "
     "first line of a top-level paragraph that starts `Item 5:`, `Item 5.` or the full count `Item 5 of 9`")
-CHANGE_MAKING_ANSWERS = ("A", "AO", "AA", "D")
+CHANGE_MAKING_ANSWERS = ("A", "AO", "AA", "N", "C")
 # How an answer code is written to the agent: Aa's second letter is lower case.
 CODE_NAMES = {"AA": "Aa"}
 
@@ -265,7 +268,7 @@ APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_NOT_RECORDED_LINES = (
     "[rule walk-me-through-short-answer-not-recorded-because-sub-step-asks-for-no-decision-hook-message-rule] The user answered \"{answer}\" while {item} of approval-walk {walk} waits. That sub-step asks "
     "for no decision, so his answer approves, disapproves and records nothing.",
     "Do not run the walk's check or close step for this answer, because check would record it as his decision.",
-    "Tell him in one sentence that his only choice here is N or next, then end your message with the closing line "
+    "Tell him in one sentence that his only choice here is G or go on, then end your message with the closing line "
     "below, word for word, and wait for his answer.\n{closing_lines}",
 )
 APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE = "He also wrote: \"{added}\". Act on those words first."
@@ -361,16 +364,24 @@ MEANINGS = {
             "If the advisor finds something that would change your recommendation, put the changed recommendation "
             "to the user instead of acting on it; if the call fails, say so, and act only when he answers again.",
             "Otherwise act exactly as for A.")),
-    "D": (("{word} means disapprove: the user disagrees with the recommendation of {item}{recommended}.",
-           "If the item gives no single alternative, ask the user what he wants done instead, and act on "
-           "nothing yet.",
-           "Otherwise do the item's alternative; whether or not it makes a change, first run "
-           "`python3 {checkout}/nn-systems/skills/walk-me-through/{program} check --disapproved`, "
+    "N": (("{word} means do nothing: the user turns down the recommendation of {item}{recommended} and takes its "
+           "do-nothing line, the `#approval_walk_item_do_nothing#` line, or, on an item written before that line "
+           "existed, its `The alternative:` line.",
+           "If the item has neither line, ask the user what he wants done, and act on nothing yet.",
+           "Otherwise do what that line says, which is usually to keep things as they are; whether or not it makes a "
+           "change, first run `python3 {checkout}/nn-systems/skills/walk-me-through/{program} check --do-nothing`, "
            "then the close command it prints, and do what close prints; write nothing in the minutes by hand."),
-          ("{word} means disapprove: the user disagrees with your last recommendation or proposal. Do not "
-           "act on it.",
+          ("{word} means do nothing: the user turns down your last recommendation or proposal. Do not act on it.",
            "If he has said what he wants instead, do that, with a fast read first of any text it adds, as "
            "for an approval; otherwise ask him.")),
+    "C": (("C means the user approves the creative alternative of {item}: its `#approval_walk_item_creative_"
+           "alternative#` line, not your recommendation. Do what that line says.",
+           "If the item has no such line, ask the user what he means, and act on nothing yet.",
+           "Whether or not it makes a change, first run "
+           "`python3 {checkout}/nn-systems/skills/walk-me-through/{program} check --creative-alternative`, then "
+           "the close command it prints, and do what close prints; write nothing in the minutes by hand."),
+          ("C means the user approves the creative alternative you offered beside your last recommendation; do "
+           "what it says, and if you offered none, ask him what he means.",)),
     "O": (("O asks for other options: the user is not answering {item} yet, and wants to see it again with two "
            "other options beside your recommendation.",
            "Write two paragraphs into the item in the walk-document, below its recommendation: one opening "
@@ -466,7 +477,7 @@ ALL_LINES = {
 NUMBERED_LINES = (
     ("The answer gives each item it names its own letter: {pairs}.",
      "A agrees with the item's recommendation; AO does the same and marks the approval as obvious, with the "
-     "flag --obvious; D disagrees with it, so D does the item's alternative, with the flag --disapproved; Z "
+     "flag --obvious; N turns it down, so N does the item's do-nothing line, with the flag --do-nothing; Z "
      "defers the item, with the flag --deferred; R shows the item again.",
      "Record the answers one item at a time, in the order given: for each, run the check step with that "
      "answer's flag, then close, and do what close prints, before the next.",
@@ -508,21 +519,21 @@ PARTS_SAME_LETTER_LINE = (
     "lines below say.")
 PARTS_DIFFERENT_LETTERS_LINES = (
     "Each part's letter does for that part what it does for a whole item: A approves the part's recommendation, "
-    "so do what it says; AO does the same and marks the approval as obvious; D disapproves it, so do the "
-    "part's alternative.",
-    "If a part answered D gives no single alternative, ask the user what he wants done instead, and act on "
+    "so do what it says; AO does the same and marks the approval as obvious; N turns it down, so do the "
+    "part's do-nothing line.",
+    "If a part answered N gives no do-nothing line, ask the user what he wants done instead, and act on "
     "nothing yet.",
     "Otherwise, whether or not the parts make a change, first run "
     "`python3 {checkout}/nn-systems/skills/walk-me-through/{program} check {flags}`, which records each part's "
     "answer, then the close command it prints, and do what close prints; write nothing in the minutes by hand.",
 )
 PARTS_NOT_RECORDABLE_LINES = (
-    "The check step cannot record this answer: `{program} check --part-answer` takes A, AO or D for a part, because "
+    "The check step cannot record this answer: `{program} check --part-answer` takes A, AO or N for a part, because "
     "the walk-me-through skill does not say where an item goes in the walk when one of its parts is deferred "
     "and the others are answered.",
     "Record nothing and act on none of the parts.",
     "Tell the user that the walk-me-through check program cannot record a deferred part beside answered ones, "
-    "and ask him to answer every part of {item} with A, AO or D, to answer Z to the whole item, or to say how "
+    "and ask him to answer every part of {item} with A, AO or N, to answer Z to the whole item, or to say how "
     "else to go on.",
 )
 PARTS_UNANSWERED_LINES = (
@@ -625,7 +636,8 @@ def answer_code(answer):
     """The answer's code, A, AO, AA for Aa, D, Z, R, E, O, O2, O3 or M, from a letter or a word in any case and
     spacing, with any hyphen between the letters dropped."""
     lowered = " ".join(answer.lower().split())
-    return WORDS.get(lowered) or re.sub(r"[\s-]", "", lowered).upper()
+    code = WORDS.get(lowered) or re.sub(r"[\s-]", "", lowered).upper()
+    return "N" if code == "D" else code
 
 
 def parsed_answer(prompt):
@@ -665,7 +677,7 @@ class WalkState:
                  parts=None, pages=None, points=None, minutes=None, shown_texts=None, shown_text_problem=None,
                  document=None, references=None, no_decision_numbers=None):
         self.name, self.item, self.numbers, self.total = name, item, numbers, total
-        # the waiting sub-steps that ask for no decision, whose closing line offers only N or next
+        # the waiting sub-steps that ask for no decision, whose closing line offers only G or go on
         self.no_decision_numbers = no_decision_numbers or set()
         # item number -> the item's text as approval_walk_item_text_as_shown_to_user gives it, for each waiting item
         self.shown_texts = shown_texts or {}
@@ -780,7 +792,7 @@ def without_links(markdown, parser):
 def closing_line(number, walk, link=None):
     """The walk-me-through skill's closing line for the item, with link in place of its page's, or None when the
     minutes record no page for it and no link is given; without its link when the minutes record a failed
-    publish. A sub-step that asks for no decision gets the no-decision line, which offers only N or next."""
+    publish. A sub-step that asks for no decision gets the no-decision line, which offers only G or go on."""
     link = link or walk.pages.get(number)
     if link is None:
         return None

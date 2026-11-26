@@ -2083,7 +2083,7 @@ def test_a_failed_fast_read_stops_the_check():
           case.minutes.read_text())
     check("after a FAILED fast read the scratch directory is removed",
           not case.left_in_temporary_directory(), case.left_in_temporary_directory())
-    for flags in (("--after-advisor",), ("--disapproved",), ("--option", "2"), ("--part-answer", "1=A", "--part-answer", "2=D")):
+    for flags in (("--after-advisor",), ("--do-nothing",), ("--option", "2"), ("--part-answer", "1=A", "--part-answer", "2=N")):
         case = Case()
         result = case.run("check", *flags, mode="failed")
         check(f"after a FAILED fast read, the rerun command keeps {' '.join(flags)}",
@@ -4117,7 +4117,7 @@ def test_a_part_answer_other_than_a_ao_or_d_or_combined_with_another_answer_flag
         check(f"check {' '.join(flags)} is refused as usage, saying what a part's answer is, writing nothing",
               result.returncode == 2 and "usage:" in result.stderr
               and f"argument --part-answer: `{flags[1]}` is not a part's answer: give the part's number, `=`, then A, AO or "
-                  "D" in result.stderr
+                  "N" in result.stderr
               and "the user answered" not in case.minutes.read_text(), described(result))
     for flags in (("--part-answer", "1=A", "--obvious"), ("--deferred", "--part-answer", "1=A"), ("--part-answer", "1=A", "--option", "2")):
         case = Case(next_to_present="item 4 of 9")
@@ -5356,7 +5356,7 @@ Recommendation: change the sentence.
 
 
 def test_a_navigation_word_alone_is_refused_as_an_answer_writing_nothing():
-    for reply in ("next", "Next.", "N", "continue", "go!", "  NEXT  "):
+    for reply in ("next", "Next.", "G", "go on", "continue", "go!", "  NEXT  "):
         for flags in ((), ("--obvious",), ("--after-advisor",), ("--disapproved",), ("--deferred",),
                       ("--option", "2"), ("--part-answer", "1=A")):
             case = Case(next_to_present="item 4 of 9")
@@ -5407,7 +5407,7 @@ SUB_STEPS_DOCUMENT = """# A walk
 
 ### Item 1.1 of 2: what the sentence says now
 
-The sentence names one poem. No decision here; type N or next to continue.
+The sentence names one poem. No decision here; type G or go on to continue.
 
 ### Item 1.2 of 2: the change
 
@@ -5436,10 +5436,12 @@ def test_moving_on_is_refused_writing_nothing_while_the_item_holds_a_recommendat
               and "If it does not, ask him to answer item 3 of 3" in checked.stderr
               and all(f"{answer}: {check_command_for(case, *flags)} --user-reply-as-typed REPLY" in checked.stderr
                       for answer, flags in (("A", ()), ("AO", ("--obvious",)), ("Aa", ("--after-advisor",)),
-                                            ("D", ("--disapproved",)), ("Z", ("--deferred",))))
+                                            ("N", ("--do-nothing",)),
+                                            ("C, for an item with a creative-alternative line",
+                                             ("--creative-alternative",)), ("Z", ("--deferred",))))
               and f"{check_command_for(case, '--option', '2')} --user-reply-as-typed REPLY" in checked.stderr
               and f"{check_command_for(case, '--option', '3')} --user-reply-as-typed REPLY" in checked.stderr
-              and f"{check_command_for(case, '--part-answer', '1=A', '--part-answer', '2=D')} --user-reply-as-typed "
+              and f"{check_command_for(case, '--part-answer', '1=A', '--part-answer', '2=N')} --user-reply-as-typed "
                   "REPLY" in checked.stderr,
               described(checked))
 
@@ -5582,7 +5584,8 @@ def test_a_check_without_the_users_reply_is_refused_writing_nothing():
 # Each answer flag that takes a reply, with the values it is given. --not-asked, --already-decided,
 # --now-over-later-already-decided and --moved-on take no reply, so no refusal that asks for one repeats them;
 # --bump records no answer and runs none of the refusals that print a rerun command.
-ANSWER_FLAGS_TAKING_A_REPLY = {"--obvious": (), "--after-advisor": (), "--disapproved": (), "--deferred": (),
+ANSWER_FLAGS_TAKING_A_REPLY = {"--obvious": (), "--after-advisor": (), "--disapproved": (), "--do-nothing": (),
+                               "--deferred": (),
                                "--moved-on-no-decision": (), "--option": ("2",), "--part-answer": ("1=A",)}
 
 
@@ -5687,7 +5690,7 @@ def test_every_answer_flag_is_covered_by_the_rerun_command_cases():
     flags = set(re.findall(r"--[\w-]+", group[1])) if group else set()
     check("the rerun command cases cover every answer flag of check's --help",
           usage.returncode == 0 and flags == {*ANSWER_FLAGS_TAKING_A_REPLY, "--not-asked", "--already-decided", NOW_OVER_LATER,
-                                                         "--moved-on", "--bump"},
+                                                         "--moved-on", "--bump", "--creative-alternative"},
           f"--help answer flags {sorted(flags)}, {described(usage)}")
 
 
@@ -7346,7 +7349,7 @@ def test_a_bumped_item_decided_through_its_last_sub_step_gives_way_to_the_item_i
     path = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     path.write_text(walk_document(case).replace("## Summary", unshown_item("three", f"{CATEGORY_TAG}must_fix_now")
                                                 + f"## four\n\n{CATEGORY_TAG}fix_next\n\n### the first part\n\n"
-                                                "No decision here; type N or next to continue.\n\n### the second part"
+                                                "No decision here; type G or go on to continue.\n\n### the second part"
                                                 "\n\n#case_against none.\n\nRecommendation: approve.\n\n## Summary"))
     bumped = case.run("check", "--bump", "four", reply="bump four")
     bumped_item = re.search(r"#next_to_present item (\d+) of (\d+)", marker(case))
@@ -8679,6 +8682,90 @@ def test_an_earlier_text_whose_source_matches_a_kept_version_is_not_kept_again()
     after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["\nSet `x` 1.\r\n"])
     check("an earlier text whose source equals the kept version's but for line endings and blank lines is not kept "
           "again", "Withdrawn version 2" not in after, after)
+
+
+WRITER_FILE = Path(__file__).resolve().parents[1] / "walk-me-through-approval-walk-item-option-lines-write.py"
+
+
+def written_by_writer(document, title, *arguments):
+    """The document with the option-lines writer run on the item titled title, as an agent would run it."""
+    SUITE_ROOT.mkdir(parents=True, exist_ok=True)
+    path = SUITE_ROOT / f"writer-input-{Case.counter}.md"
+    path.write_text(document)
+    subprocess.run([sys.executable, str(WRITER_FILE), str(path), "--item-title", title, *arguments], check=True,
+                   capture_output=True)
+    return path.read_text()
+
+
+WRITTEN_ITEM_DOCUMENT = ("# A walk\n\n## Item 3 of 9: the opening sentence\n\nThe sentence changes.\n\n"
+                         "#new \"The page lists one poem per job.\"\n\n#new_if_c \"Each poem has its own page.\"\n\n"
+                         "#case_against weak: the page grows by one line.\n")
+
+
+def test_check_and_the_read_step_refuse_option_lines_the_writer_did_not_write():
+    typed = (WRITTEN_ITEM_DOCUMENT + "\n#approval_walk_item_do_nothing# leave the sentence.\n\n"
+             "#approval_walk_item_recommendation# change the sentence.\n")
+    for step in ("check", WAITING_ITEM_READ_STEP_NAME):
+        case = Case(document=typed)
+        before = case.minutes.read_text()
+        result = case.run(step, reply="a" if step == "check" else None)
+        check(f"{step} refuses option lines typed by hand, naming the writer, and writes nothing",
+              result.returncode == 1 and "has option lines the option-lines writer did not write: its option lines "
+              "have no stamp from the option-lines writer" in result.stderr
+              and "walk-me-through-approval-walk-item-option-lines-write.py" in result.stderr
+              and case.minutes.read_text() == before, described(result))
+    written = written_by_writer(WRITTEN_ITEM_DOCUMENT, "the opening sentence", "--do-nothing", "leave the sentence.",
+                                "--recommendation", "change the sentence.")
+    case = Case(document=written)
+    result = case.run("check")
+    check("check passes option lines the writer wrote", result.returncode == 0, described(result))
+    case = Case(document=written.replace("change the sentence.", "change it."))
+    result = case.run("check")
+    check("check refuses option lines changed by hand after the writer wrote them",
+          result.returncode == 1 and "typed or changed by hand" in result.stderr, described(result))
+
+
+def test_c_approves_the_creative_alternative_and_reads_only_its_texts():
+    written = written_by_writer(WRITTEN_ITEM_DOCUMENT, "the opening sentence", "--do-nothing", "leave the sentence.",
+                                "--recommendation", "change the sentence.", "--creative-alternative",
+                                "give each poem its own page.")
+    case = Case(document=written)
+    result = case.run("check", "--creative-alternative", reply="c")
+    check("C fast-reads only the `#new_if_c` texts",
+          result.returncode == 0 and case.calls.read_text() == "Each poem has its own page.\n", described(result))
+    result = case.run("close")
+    check("close records C as an approval of the creative alternative",
+          result.returncode == 0 and "the user answered approved creative alternative" in case.minutes.read_text(),
+          described(result) + case.minutes.read_text())
+    without = written_by_writer(WRITTEN_ITEM_DOCUMENT, "the opening sentence", "--do-nothing", "leave the sentence.",
+                                "--recommendation", "change the sentence.")
+    case = Case(document=without)
+    before = case.minutes.read_text()
+    result = case.run("check", "--creative-alternative", reply="c")
+    check("C on an item with no creative-alternative line is refused, naming the answers it could be, and writes "
+          "nothing", result.returncode == 1
+          and "has no `#approval_walk_item_creative_alternative#` line" in result.stderr
+          and "N: " in result.stderr and case.minutes.read_text() == before, described(result))
+
+
+def test_n_is_the_do_nothing_answer_and_d_still_reads_as_n():
+    for flag in ("--do-nothing", "--disapproved"):
+        case = Case()
+        result = case.run("check", flag, reply="n")
+        check(f"check {flag} fast-reads only the `#new_if_d` texts",
+              result.returncode == 0 and case.calls.read_text() == NEW_IF_D_TEXT, described(result))
+    case = Case()
+    result = case.run("check", "--part-answer", "1=N", "--part-answer", "2=D")
+    check("a part's N and a part's D both read as do nothing",
+          result.returncode == 0 and case.calls.read_text() == NEW_IF_D_TEXT, described(result))
+    case = Case()
+    result = case.run("check", "--moved-on-no-decision", reply="g")
+    check("G is a navigation word: check refuses moving on from an item with a recommendation",
+          result.returncode == 1 and "change the sentence" in result.stderr, described(result))
+    case = Case()
+    result = case.run("check", reply="n")
+    check("N alone is no longer refused as a navigation word", "navigation" not in result.stderr.lower()
+          or result.returncode == 0, described(result))
 
 
 def main():

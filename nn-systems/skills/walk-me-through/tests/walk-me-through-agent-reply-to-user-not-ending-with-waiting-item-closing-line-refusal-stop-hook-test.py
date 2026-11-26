@@ -108,7 +108,7 @@ The poem page goes in the wiki, next to the glossary and the style guide, so tha
 **The strongest case for N:** a page in the wiki is one more document agents must be told to read. **Recommendation: Y.**"""
 
 # The closing line's answer letters; the answer hook's suite checks that the walk-me-through skill writes the same.
-LETTERS = "A approve · D disapprove · M more responses"
+LETTERS = "A approve · N do nothing · M more responses"
 COUNT_IN_DOCUMENT = re.compile(r"Items?\s+(\d+(?:\.\d+)*(?:\s*(?:,|and|to|-)\s*\d+(?:\.\d+)*)*)\s+of\s+(\d+)")
 
 
@@ -410,7 +410,7 @@ def test_headings_whose_m_the_close_step_has_since_counted_differently_still_wor
 
 
 def no_decision_line(link):
-    return f"[No decision here; type N or next to continue.]({link})"
+    return f"[No decision here; type G or go on to continue.]({link})"
 
 
 def test_a_no_decision_line_linked_to_the_waiting_sub_steps_page_names_it():
@@ -425,7 +425,7 @@ def test_a_no_decision_line_linked_to_the_waiting_sub_steps_page_names_it():
             ("a no-decision line with other text on its line is sent back",
              "Recorded. " + no_decision_line("https://claude.ai/artifact/p41"))):
         case.reply(reply)
-        check_reminded(case_name, case.run(), "`Item 4.1 of 9`", "No decision here; type N or next to continue.")
+        check_reminded(case_name, case.run(), "`Item 4.1 of 9`", "No decision here; type G or go on to continue.")
     no_page = Case()
     no_page.walk_files(minutes="#next_to_present item 4.1 of 9.")
     no_page.reply(no_decision_line("https://claude.ai/artifact/p41"))
@@ -442,7 +442,7 @@ def test_a_no_decision_line_linked_to_the_waiting_sub_steps_page_names_it():
 
 
 def test_a_no_decision_line_without_its_link_names_a_sub_step_whose_publish_failed():
-    bare = "No decision here; type N or next to continue."
+    bare = "No decision here; type G or go on to continue."
     case = Case()
     case.walk_files(minutes="#next_to_present item 4.1 of 9.",
                     pages="#item_page item 4.1 of 9 publish failed: the Artifact tool timed out\n")
@@ -520,7 +520,7 @@ def test_a_plain_text_line_that_reads_as_a_closing_line_only_once_rendered_is_no
 def test_the_no_decision_line_is_the_walk_skills():
     skill = (Path(__file__).resolve().parents[4] / ".claude" / "skills" / "walk-me-through" / "SKILL.md").read_text()
     check("SKILL.md ends a no-decision sub-step with the line the hook reads",
-          'ends with the line "No decision here; type N or next to continue."' in skill, "no such sentence")
+          'ends with the line "No decision here; type G or go on to continue."' in skill, "no such sentence")
 
 
 def test_item_holding_original_and_proposed_sections():
@@ -1404,7 +1404,7 @@ NO_DECISION_SUB_STEP_DOCUMENT = """# A walk
 
 A filter hides old rows.
 
-[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)
+[No decision here; type G or go on to continue.](https://claude.ai/artifact/p41)
 
 ### Item 4.2 of 9: The choice
 
@@ -1414,7 +1414,7 @@ Recommendation: leave the filter out.
 
 Recommendation: do the next thing.
 """
-NO_DECISION_LINE = "[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)"
+NO_DECISION_LINE = "[No decision here; type G or go on to continue.](https://claude.ai/artifact/p41)"
 NO_DECISION_PAGES = ("#item_page item 4.1 of 9 https://claude.ai/artifact/p41\n"
                      "#item_page item 4.2 of 9 https://claude.ai/artifact/p42\n")
 
@@ -1436,13 +1436,13 @@ def test_a_no_decision_sub_step_gets_only_the_next_line():
     failed.reply("Recorded.")
     reason = blocked_reason(failed.run()) or ""
     check("a no-decision sub-step whose publish failed is given the line without a link",
-          "\nNo decision here; type N or next to continue." in reason and "A approve" not in reason, reason)
+          "\nNo decision here; type G or go on to continue." in reason and "A approve" not in reason, reason)
     unpublished = Case()
     unpublished.walk_files(minutes="#next_to_present item 4.1 of 9.", document=NO_DECISION_SUB_STEP_DOCUMENT, pages="")
     unpublished.reply("Recorded.")
     reason = blocked_reason(unpublished.run()) or ""
     check("an unpublished no-decision sub-step is given the line with a place for its link",
-          "[No decision here; type N or next to continue.](<page link>)" in reason and "A approve" not in reason, reason)
+          "[No decision here; type G or go on to continue.](<page link>)" in reason and "A approve" not in reason, reason)
 
 
 def test_a_sub_step_that_asks_a_decision_keeps_a_d_and_m():

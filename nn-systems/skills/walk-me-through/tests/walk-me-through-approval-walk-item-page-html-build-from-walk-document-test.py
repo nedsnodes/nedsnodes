@@ -200,7 +200,7 @@ Recommendation: refresh, from withdrawn two.
 
 Current 45.1: the first ruling has you answer 31 items one by one.
 
-No decision here; type N or next to continue.
+No decision here; type G or go on to continue.
 
 #### Withdrawn version 1 of item 45.1
 
