@@ -2202,7 +2202,7 @@ check("a skill's prompt is in the class",
       class_of(root / ".claude/skills/cold-read/prompts/terminology-prompt.md")
       == "a skill or a skill's prompt")
 check("a file under docs/agents/ is in the class",
-      class_of(root / "docs/agents/pr-reviewer-instructions.md") == "a file under docs/agents/")
+      class_of(root / "docs/agents/pr-reviewer.prompt.md") == "a file under docs/agents/")
 check("so is one in its queue, which becomes such a file",
       class_of(root / "docs/agents/queue/some-agent-instructions.md")
       == "a file under docs/agents/")

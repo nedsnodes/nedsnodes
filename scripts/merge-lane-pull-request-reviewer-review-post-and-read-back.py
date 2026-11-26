@@ -126,7 +126,7 @@ The body starts with a line APPROVE or REQUEST_CHANGES, so the verdict shows
 even when the review is posted as a comment.
 
 For a review with a verdict, the success line also counts the reviewer's findings
-that lack, or leave unanswered, one of the labelled lines docs/agents/pr-reviewer-instructions.md asks
+that lack, or leave unanswered, one of the labelled lines docs/agents/pr-reviewer.prompt.md asks
 each finding on code to end with, FINDING_FACT_LINE_LABELS, and names each such finding and the labels it
 lacks: the comments of the
 Claude reviewer's file, and for merge-lane-2's review, the Codex findings on the
@@ -197,7 +197,7 @@ CODEX_FINDING_WORKTREE_PATH = re.compile(r"\S*/pr\d+-head/")
 CODEX_REPORT_PROVENANCE_COMMENT = re.compile(r"\A<!--.*?-->\n?", re.DOTALL)
 CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX = re.compile(r'"findings"\s*:\s*\[\s*\{')
 CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
-# docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these labelled lines.
+# docs/agents/pr-reviewer.prompt.md asks a reviewer to end each finding on code with these labelled lines.
 FINDING_FACT_LINE_LABELS = ("Main has it:", "This pull request makes it happen:", "Reports success on failure:",
                             "Shown by:")
 # A label may open a list item of any kind, and its colon may sit inside or outside its code or bold marks.

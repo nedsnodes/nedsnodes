@@ -188,7 +188,7 @@ def main():
                     COMPOSER.read_text(), "composer")
         commit_file(repository, FOLLOW_UP_REQUEST_PROGRAM_PATH, FOLLOW_UP_REQUEST_PROGRAM_STAND_IN,
                     "follow-up request program stand-in")
-        main_commit = commit_file(repository, "docs/agents/pr-reviewer-instructions.md",
+        main_commit = commit_file(repository, "docs/agents/pr-reviewer.prompt.md",
                                   INSTRUCTIONS, "instructions")
         git(repository, "checkout", "-q", "-b", "topic")
         first_head = commit_file(repository, "scripts/thing.py", "one\ntwo\n", "first head")

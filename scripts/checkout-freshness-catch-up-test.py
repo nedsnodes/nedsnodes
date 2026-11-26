@@ -2027,7 +2027,7 @@ with tempfile.TemporaryDirectory() as notes_scratch:
 
     origin_repo, notes_seat = notes_fixture()
     commit_file(origin_repo, ".claude/skills/walk-me-through/SKILL.md", "steps\n", "a skill changes")
-    commit_file(origin_repo, "docs/agents/pr-reviewer-instructions.md", "rules\n", "instructions change")
+    commit_file(origin_repo, "docs/agents/pr-reviewer.prompt.md", "rules\n", "instructions change")
     commit_file(origin_repo, "nn-systems/cold-read/cold-read-fast-clarify-prompt.md", "p\n", "a prompt")
     commit_file(origin_repo, ".claude/skills/walk-me-through/reference.md", "r\n", "not a SKILL.md")
     commit_file(origin_repo, "scripts/tool.py", "t\n", "a script")
@@ -2040,7 +2040,7 @@ with tempfile.TemporaryDirectory() as notes_scratch:
           "following the walk-me-through skill, invoke it again before its next step, so that "
           "its new text loads." in told, told)
     check("a changed -instructions.md and -prompt.md are told as standing instructions",
-          "main changed docs/agents/pr-reviewer-instructions.md, a file of standing instructions."
+          "main changed docs/agents/pr-reviewer.prompt.md, a file of standing instructions."
           in told and "main changed nn-systems/cold-read/cold-read-fast-clarify-prompt.md, a file"
           in told, told)
     check("a skill's other files and scripts are not told",
