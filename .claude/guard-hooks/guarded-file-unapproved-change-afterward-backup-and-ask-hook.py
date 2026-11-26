@@ -203,6 +203,16 @@ STORE_FAILED = (
     "checked against the versions the user approved: {reason}.\n"
     "Tell the user what failed, with this remedy: {remedy}\n"
     "Once the store can be reached, the next tool call checks the files again.")
+# find-deleted-path-across-backups.py copies only the newest Timeshift hit and only prints a copy command for
+# Time Machine, so a message must not let the agent call a version lost from the saved folder alone.
+FINDER_COPIES_NOT_ALL_CHECKED = (
+    "The search copies most hits into a folder it names, but not all: for Timeshift it copies only the newest "
+    "snapshot's file and lists the older snapshots that also hold it, and for Time Machine it prints a command "
+    "that copies the file instead of copying it. A copy holds version {blob} when "
+    "`git hash-object -- <copy>` prints {blob}. An older Timeshift snapshot it lists, or a Time Machine hit whose "
+    "command you have not run, is unchecked: copy that file out, from the Mac with scp from nedlern@ned-box for "
+    "Timeshift and by running the printed command for Time Machine, and hash it, before you count {blob} as "
+    "found nowhere.\n")
 FIRST_RUN_VERSION_LOST = (
     "[rule guarded-file-changed-without-approval-ask-user-afterward] "
     "The guarded-file backup could not approve version {blob} of {path}, the version this "
@@ -216,9 +226,7 @@ FIRST_RUN_VERSION_LOST = (
     "this hook's message about that change says, search for it: python3 {finder} --repo "
     "{checkout} {quoted_path}\n"
     "The search looks for {path} in the Mac's local snapshots, git and its reflog, the "
-    "log-store, agent transcripts, Timeshift on ned-box and Time Machine, and saves every copy "
-    "it finds in a folder it names; a copy is the version when `git hash-object -- <copy>` "
-    "prints {blob}.\n"
+    "log-store, agent transcripts, Timeshift on ned-box and Time Machine. " + FINDER_COPIES_NOT_ALL_CHECKED +
     "If a copy is the version, tell the user first: \"Git pruned the approved version of "
     "{path}, but a backup holds it at <copy>.\"\n"
     "If a copy is the version and he declines the change, put that copy back with: "
@@ -241,8 +249,7 @@ APPROVED_VERSION_KEPT_NOWHERE = (
     "The first searches git, the guarded-file store, and the Timeshift (ned-box) or Time Machine "
     "(Mac) snapshot taken after this hook first saw the version; the second searches for {path} "
     "in the Mac's local snapshots, git and its reflog, the log-store, agent transcripts, "
-    "Timeshift and Time Machine. Each saves every copy it finds in a folder it names; a copy is "
-    "the approved version when `git hash-object -- <copy>` prints {blob}.\n"
+    "Timeshift and Time Machine. " + FINDER_COPIES_NOT_ALL_CHECKED +
     "If a copy is the approved version, put it back with: cp -- <copy> {quoted_path}\n"
     "If no copy is the approved version, including when the searches find only other versions, "
     "tell the user that the approved version of {path} is in none of the places the searches "
