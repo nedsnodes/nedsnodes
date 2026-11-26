@@ -42,8 +42,11 @@ read, which the log says. The count of prose-only merges in a row is kept in
 merge-batch-prose-only-merges-in-a-row.txt in the merge batches directory, so it carries from
 one merge batch to the next. Every merge this program makes counts, whichever rule or
 --merge-only chose it: a prose-only merge adds 1, past 3 when no code line waits, and a code
-merge sets the count to 0. A missing file counts 0; a file that holds no count stops the
-merge batch.
+merge sets the count to 0. Whether a pull request is prose-only is read before it merges,
+since once it has merged its head is an ancestor of main and nothing seems changed. The count
+is read before each merge: a missing file counts 0, and a file that holds no count stops the
+merge batch before the merge. A count that cannot be written after a merge stops the merge
+batch, after the merge's MERGED notice, or with that merge's notice in the stop.
 
 merge-batch-run-in-queue-order takes merge-batch.lock without waiting, and exits 0 when
 another process holds it. It makes passes over the queue file until a pass neither merges
@@ -135,7 +138,7 @@ PROSE_ONLY_MERGES_IN_A_ROW_FILE_NAME = "merge-batch-prose-only-merges-in-a-row.t
 PROSE_ONLY_MERGES_IN_A_ROW_BEFORE_A_CODE_MERGE = 3
 HIGH_PRIORITY_LABEL = "high-priority"
 # The checkout whose git objects the prose-only check reads, fetching any commit missing.
-PROSE_ONLY_CHECK_REPOSITORY = SCRIPTS.parent
+REPOSITORY_ROOT = common.REPOSITORY_ROOT
 MERGE_IN_PROGRESS_FILE_NAME = "merge-batch-merge-in-progress.txt"
 MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME = "merge-batch-outcome-notices-for-merge-lane-2"
 NEXT_MERGE_STARTS, NEXT_MERGE_WAITS, NEXT_MERGE_STOPS = "STARTS", "WAITS", "STOPS"
@@ -209,6 +212,8 @@ class MergeQueuePullRequestMergeBatchRunner:
         self.prose_only_merges_in_a_row_file = self.directory / PROSE_ONLY_MERGES_IN_A_ROW_FILE_NAME
         self.merged_cleanly = None
         self.outcome = None
+        # Set before each merge, from the count and the line as they are before it.
+        self.prose_only_merges_in_a_row_after_this_merge = 0
         self.prose_only_by_merge_base_and_head = {}
 
     # The merge queue file
@@ -325,7 +330,7 @@ class MergeQueuePullRequestMergeBatchRunner:
             return False
 
     def changes_only_docs_prose(self, merge_base, head):
-        repository = PROSE_ONLY_CHECK_REPOSITORY
+        repository = REPOSITORY_ROOT
         missing = [commit for commit in (merge_base, head) if review_plan.run_git_in_repository(
             repository, "cat-file", "-e", f"{commit}^{{commit}}").returncode]
         if missing:
@@ -354,28 +359,35 @@ class MergeQueuePullRequestMergeBatchRunner:
                        f"starts again from 0, then run: {RESUME_COMMAND}")
         return int(text)
 
-    def next_in_merge_order(self, waiting):
-        """Return the line to merge next from the waiting lines, given oldest first."""
+    def next_in_merge_order(self, waiting, in_a_row):
+        """Return the line to merge next from the waiting lines, given oldest first, and
+        whether it is prose-only."""
         high_priority = self.high_priority_pull_requests()
         for line in waiting:
             if int(line["pr"]) in high_priority:
                 self.log(f"next: pull request {line['pr']}, the oldest labeled {HIGH_PRIORITY_LABEL}")
-                return line
-        in_a_row = self.prose_only_merges_in_a_row()
+                return line, self.prose_only(line)
         wants_prose_only = in_a_row < PROSE_ONLY_MERGES_IN_A_ROW_BEFORE_A_CODE_MERGE
         wanted = "prose-only" if wants_prose_only else "code"
         line = next((line for line in waiting if self.prose_only(line) == wants_prose_only), None)
         if line is None:
             self.log(f"next: pull request {waiting[0]['pr']}, the oldest, since after {in_a_row} "
                      f"prose-only merges in a row a {wanted} one goes next and none waits")
-            return waiting[0]
+            return waiting[0], not wants_prose_only
         self.log(f"next: pull request {line['pr']}, the oldest {wanted} one, after {in_a_row} "
                  f"prose-only merges in a row")
-        return line
+        return line, wants_prose_only
 
-    def prose_only_merge_counted(self, line):
-        in_a_row = self.prose_only_merges_in_a_row() + 1 if self.prose_only(line) else 0
-        self.prose_only_merges_in_a_row_file.write_text(f"{in_a_row}\n")
+    def prose_only_merge_counted(self):
+        """Write the count the merge just made leaves; return what failed, or None."""
+        count = self.prose_only_merges_in_a_row_after_this_merge
+        try:
+            self.prose_only_merges_in_a_row_file.write_text(f"{count}\n")
+        except OSError as error:
+            return (f"the count of prose-only merges in a row, {count}, could not be written to "
+                    f"{self.prose_only_merges_in_a_row_file} ({error}), so the next pull request "
+                    f"cannot be chosen. Write {count} into that file, then run: {RESUME_COMMAND}")
+        return None
 
     # Files for merge-lane-2
 
@@ -499,7 +511,12 @@ class MergeQueuePullRequestMergeBatchRunner:
                 waiting = first
             if not waiting:
                 return appended
-            line = waiting[0] if len(waiting) == 1 else self.next_in_merge_order(waiting)
+            in_a_row = self.prose_only_merges_in_a_row()
+            if len(waiting) == 1:
+                line, prose_only = waiting[0], self.prose_only(waiting[0])
+            else:
+                line, prose_only = self.next_in_merge_order(waiting, in_a_row)
+            self.prose_only_merges_in_a_row_after_this_merge = in_a_row + 1 if prose_only else 0
             number = int(line["pr"])
             tried.add(number)
             self.merged_cleanly = None
@@ -606,13 +623,17 @@ class MergeQueuePullRequestMergeBatchRunner:
         if on_github:
             self.append(f"MERGED {number} {merge_commit}")
             self.outcome = f"MERGED {number} {merge_commit}"
-            self.prose_only_merge_counted({"pr": number, "head": head})
         if exit_code == 0 and on_github:
             self.merged_cleanly = number
             self.in_progress_file.unlink(missing_ok=True)
             self.notice(f"merged-{number}-{merge_commit[:12]}.txt",
                         f"MERGED {number} {merge_commit} {author}\n"
                         f"{self.follow_up_request(number)}")
+            # Written after the MERGED notice, so a failed write cannot cost the author it.
+            count_failure = self.prose_only_merge_counted()
+            if count_failure:
+                raise ReadOrWriteFailed(f"pull request {number} merged as {merge_commit} and its "
+                                        f"MERGED notice is written, but {count_failure}")
             return True
         if exit_code == 1 and not on_github:
             self.in_progress_file.unlink(missing_ok=True)
@@ -633,11 +654,13 @@ class MergeQueuePullRequestMergeBatchRunner:
                             f"for a MERGED notice, with Claude Code's SendMessage tool: the merge "
                             f"commit, and this follow-up request:\n"
                             f"{self.follow_up_request(number)}")
-        raise Stop(f"pull request {number}: the merge program exited {exit_code} and GitHub "
-                   f"says {merged_state.get('state')}: "
-                   f"{MERGE_PROGRAM_EXIT_MEANINGS.get(exit_code, 'an exit code it does not document')}"
-                   f"; its output is {output_file}" + (f"\n{report}" if report else "")
-                   + merge_notice)
+        count_failure = self.prose_only_merge_counted() if on_github else None
+        raise (ReadOrWriteFailed if count_failure else Stop)(
+            f"pull request {number}: the merge program exited {exit_code} and GitHub "
+            f"says {merged_state.get('state')}: "
+            f"{MERGE_PROGRAM_EXIT_MEANINGS.get(exit_code, 'an exit code it does not document')}"
+            f"; its output is {output_file}" + (f"\n{report}" if report else "")
+            + merge_notice + (f"\nAlso, {count_failure}" if count_failure else ""))
 
     def follow_up_request(self, number):
         completed = subprocess.run(

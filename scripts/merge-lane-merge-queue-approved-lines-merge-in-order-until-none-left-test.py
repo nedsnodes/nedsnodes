@@ -66,9 +66,14 @@ elif argv[:2] == ["pr", "list"]:
     print(json.dumps([{"number": n} for n in state.get("branches", {}).get(branch, [])]))
 elif argv[0] == "api" and "/compare/main..." in argv[1]:
     head = argv[1].split("...")[-1]
-    if head not in state.get("merge_bases", {}):
+    # As on GitHub: once merged with a merge commit, a head is its own merge base with main.
+    if any(entry["headRefOid"] == head and entry["state"] == "MERGED"
+           for entry in state["prs"].values()):
+        print(head)
+    elif head not in state.get("merge_bases", {}):
         sys.stderr.write("HTTP 404: no common ancestor\n"); sys.exit(1)
-    print(state["merge_bases"][head])
+    else:
+        print(state["merge_bases"][head])
 elif argv[0] == "api":
     number = argv[1].split("/")[-2]
     print(json.dumps([state.get("reviews", {}).get(number, [])]))
@@ -168,8 +173,10 @@ class Case:
         runner = program.MergeQueuePullRequestMergeBatchRunner
         real_check = getattr(runner, "changes_only_docs_prose", None)
         if self.prose_only_heads is not None:
+            # As the real check: from a head to itself nothing changes, so it reads prose-only.
             runner.changes_only_docs_prose = (
-                lambda queue, merge_base, head: head in self.prose_only_heads)
+                lambda queue, merge_base, head: head in self.prose_only_heads
+                or merge_base == head)
         try:
             with contextlib.redirect_stdout(output):
                 exit_code = program.main(self.argv(*subcommand))
@@ -466,6 +473,69 @@ def merge_order_cases(scratch):
           and "merge-batch-prose-only-merges-in-a-row.txt" in case.stop_text(),
           f"{case.merge_calls()}\n{case.stop_text()}")
 
+    case = Case(scratch, "count-file-malformed-one-line-waiting", [approved(10, A)],
+                {"10": pr(A)}, prose_only_heads={A})
+    case.batches.mkdir()
+    (case.batches / "merge-batch-prose-only-merges-in-a-row.txt").write_text("three\n")
+    case.run("merge-batch-run-in-queue-order")
+    check("a count file that holds no count stops the merge batch before the merge, also when "
+          "one line waits and no choice is made",
+          case.merge_calls() == [] and "not a count of 0 or more" in (case.stop_text() or ""),
+          f"{case.merge_calls()}\n{case.stop_text()}")
+
+    numbers = [10, 11, 12, 13, 14]
+    case = Case(scratch, "code-merges-count-as-code-once-merged",
+                [approved(n, head(n)) for n in (10, 11, 12)],
+                {str(n): pr(head(n)) for n in numbers}, prose_only_heads={head(13)})
+    case.run("merge-batch-run-in-queue-order")
+    with open(case.queue, "a") as queue:
+        queue.write(approved(13, head(13)) + "\n" + approved(14, head(14)) + "\n")
+    case.run("merge-batch-run-in-queue-order")
+    check("whether a line is prose-only is read before it merges, so three code merges leave a "
+          "count of 0 and the next prose-only line goes before the next code line",
+          merged_order(case) == [10, 11, 12, 13, 14]
+          and (case.batches / "merge-batch-prose-only-merges-in-a-row.txt").read_text() == "0\n",
+          merged_order(case))
+
+    case = Case(scratch, "count-file-unwritable-after-a-merge", [approved(10, A)],
+                {"10": pr(A)}, prose_only_heads={A})
+    case.batches.mkdir()
+    count_file = case.batches / "merge-batch-prose-only-merges-in-a-row.txt"
+    count_file.write_text("0\n")
+    count_file.chmod(0o444)
+    try:
+        exit_code, output = case.run("merge-batch-run-in-queue-order")
+    finally:
+        count_file.chmod(0o644)
+    notices = case.notices()
+    merge_commit = "10".rjust(40, "e")
+    check("a count that cannot be written after a merge stops the merge batch after the MERGED "
+          "notice is written, and the stop says the pull request merged",
+          exit_code == 1 and f"merged-10-{merge_commit[:12]}.txt" in notices
+          and f"pull request 10 merged as {merge_commit} and its MERGED notice is written, but "
+              f"the count of prose-only merges in a row, 1, could not be written" in (
+              case.stop_text() or ""),
+          f"{exit_code}\n{sorted(notices)}\n{case.stop_text()}")
+
+    case = Case(scratch, "count-file-unwritable-after-a-merge-that-stops",
+                [approved(10, A)], {"10": pr(A)}, prose_only_heads={A},
+                merge_outcomes={"10": {"exit": 3, "merged": True}})
+    case.batches.mkdir()
+    count_file = case.batches / "merge-batch-prose-only-merges-in-a-row.txt"
+    count_file.write_text("0\n")
+    count_file.chmod(0o444)
+    try:
+        exit_code, output = case.run("merge-batch-run-in-queue-order")
+    finally:
+        count_file.chmod(0o644)
+    stopped = "".join(text for name, text in case.notices().items() if name.startswith("stopped-"))
+    check("when the merge program stops after the merge and the count cannot be written, the "
+          "stop keeps the merge notice and adds the count's failure",
+          exit_code == 1 and f"Pull request 10 merged as {merge_commit}" in stopped
+          and "#follow_up_request pull request 10" in stopped
+          and "Also, the count of prose-only merges in a row, 1, could not be written" in stopped,
+          f"{exit_code}\n{stopped}")
+
     case = Case(scratch, "label-read-fails", [approved(10, A), approved(11, B)],
                 {"10": pr(A), "11": pr(B)}, gh_fails=["pr list --repo nedsnodes/nedsnodes --label"])
     case.run("merge-batch-run-in-queue-order")
@@ -481,6 +551,17 @@ def merge_order_cases(scratch):
           merged_order(case) == [10, 11]
           and f"pull request 11: whether {B} is prose-only could not be read, so it counts as "
               f"code: gh api repos/nedsnodes/nedsnodes/compare/main...{B} --jq exited 1: HTTP 502" in output,
+          f"{merged_order(case)}\n{output}")
+
+    case = Case(scratch, "prose-only-merge-base-garbled", [approved(10, A), approved(11, B)],
+                {"10": pr(A), "11": pr(B)}, prose_only_heads={B},
+                gh_garbles=[f"api repos/nedsnodes/nedsnodes/compare/main...{B}"])
+    exit_code, output = case.run("merge-batch-run-in-queue-order")
+    check("a merge base GitHub gives that is not a commit makes the line count as code, and the "
+          "log says what GitHub gave",
+          merged_order(case) == [10, 11]
+          and f"pull request 11: whether {B} is prose-only could not be read, so it counts as "
+              f"code: GitHub gave '<html>502</html>' as its merge base with main" in output,
           f"{merged_order(case)}\n{output}")
 
     repository = scratch / "prose-only-check-repository"
@@ -514,16 +595,50 @@ def merge_order_cases(scratch):
                 [approved(number, commit) for number, commit in lines],
                 {str(number): pr(commit) for number, commit in lines},
                 merge_bases={commit: base for _, commit in lines})
-    real_repository = getattr(program, "PROSE_ONLY_CHECK_REPOSITORY", None)
-    program.PROSE_ONLY_CHECK_REPOSITORY = repository
+    real_repository = getattr(program, "REPOSITORY_ROOT", None)
+    program.REPOSITORY_ROOT = repository
     try:
         case.run("merge-batch-run-in-queue-order")
     finally:
-        program.PROSE_ONLY_CHECK_REPOSITORY = real_repository
+        program.REPOSITORY_ROOT = real_repository
     check("prose-only is read from the queued commit: only Markdown under docs/ changed outside "
           "fenced code is prose-only, and a fenced-code change, Markdown outside docs/ and any "
           "other file under docs/ are code", merged_order(case) == [13, 10, 11, 12],
           merged_order(case))
+
+    # A commit that only the classification checkout's origin holds is fetched, by commit and
+    # without FETCH_HEAD; one that no repository holds counts as code, with git's error logged.
+    origin = scratch / "prose-only-check-origin"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repository), str(origin)], check=True)
+    elsewhere = scratch / "prose-only-check-elsewhere"
+    subprocess.run(["git", "clone", "-q", "--no-checkout", str(origin), str(elsewhere)], check=True)
+    subprocess.run(["git", "-C", str(elsewhere), "checkout", "-q", "--detach", base], check=True)
+    (elsewhere / "docs" / "page.md").write_text(page.replace("Prose.", "Prose fetched."))
+    subprocess.run(["git", "-C", str(elsewhere), "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-q", "-am", "only in origin"], check=True)
+    only_in_origin = subprocess.run(["git", "-C", str(elsewhere), "rev-parse", "HEAD"], check=True,
+                                    capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "-C", str(elsewhere), "push", "-q", "origin",
+                    f"{only_in_origin}:refs/heads/only-in-origin"], check=True)
+    git("remote", "add", "origin", str(origin))
+    nowhere = "f" * 40
+    lines = [(20, outside_docs), (21, nowhere), (22, only_in_origin)]
+    case = Case(scratch, "prose-only-fetches-a-missing-commit",
+                [approved(number, commit) for number, commit in lines],
+                {str(number): pr(commit) for number, commit in lines},
+                merge_bases={commit: base for _, commit in lines})
+    program.REPOSITORY_ROOT = repository
+    try:
+        exit_code, output = case.run("merge-batch-run-in-queue-order")
+    finally:
+        program.REPOSITORY_ROOT = real_repository
+    check("a queued commit missing from the classification checkout is fetched from its origin "
+          "and classed, and the fetch writes no FETCH_HEAD",
+          merged_order(case)[:1] == [22] and not (repository / ".git" / "FETCH_HEAD").exists(),
+          f"{merged_order(case)}\n{output}")
+    check("a queued commit no repository holds counts as code, and the log names the failed fetch",
+          f"pull request 21: whether {nowhere} is prose-only could not be read, so it counts as "
+          f"code: git fetch of {nowhere} in {repository} exited" in output, output)
 
 
 def stopping_cases(scratch):
