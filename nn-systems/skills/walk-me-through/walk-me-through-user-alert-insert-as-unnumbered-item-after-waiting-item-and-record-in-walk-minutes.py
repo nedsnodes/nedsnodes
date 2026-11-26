@@ -193,17 +193,12 @@ def insert(cwd, alert_ids, now=None):
     whole = waiting.split(".")[0]
     unit = next(unit for unit in units if waiting in unit[0])
     text = document.read_text(encoding="utf-8")
-    lines = text.split("\n")
     titles = [heading_title(str(alert.get("title")), walk_finder, parser) for alert in alerts]
     check_program = load_module("walk_me_through_answer_added_texts_cold_read_fast_read_check_and_close",
                                 WALK_CHECK_PROGRAM)
     new_lines = [line for alert, title in zip(alerts, titles)
                  for line in item_lines(alert, title, check_program.WALK_FIRST_ENTERED_TAG)]
-    insert_line = walk_finder.approval_walk_document_new_item_insert_line_number_past_whole_item_sub_steps_and_withdrawn_versions
-    end = insert_line(walk_finder.item_unit_spans(text, parser), unit, len(lines))
-    while end > unit[3] + 1 and not lines[end - 1].strip():
-        end -= 1
-    new_text = "\n".join(lines[:end] + new_lines + lines[end:])
+    new_text = walk_finder.approval_walk_document_text_with_lines_added_after_whole_item(text, unit, new_lines, parser)
     unnumbered = walk_finder.approval_walk_unit_is_unnumbered_item
     if (sum(map(unnumbered, walk_finder.item_unit_spans(new_text, parser)))
             != sum(map(unnumbered, walk_finder.item_unit_spans(text, parser))) + len(alerts)):

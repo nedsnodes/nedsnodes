@@ -17,8 +17,10 @@ for the closing line's answer letters, ANSWER_LETTERS_TEXT, and for its
 closing_line, which builds the closing lines the refusal gives; and,
 when it refuses, the walk check program,
 walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py, for
-the category and waits-on tags the refusal's step 1 names, which that
-program's close step reads to choose when the new item is shown.
+the categories the refusal names, which that program's close step reads to
+choose when the new item is shown. The refusal gives the command
+QUESTION_INSERT_PROGRAM, its flagged lines filled in, which adds the question
+as an interruption item.
 
 EVERY TURN is checked, whoever started it: the user, another agent-seat, a
 background-task notice, a scheduled prompt. THE REPLY is the text of every
@@ -92,6 +94,12 @@ that ask nothing, such as a question the agent answers itself, the
 walk-me-through skill's answer line, or `nothing here needs your answer`.
 Every other line passes, and a reply with no question-like line never waits
 for the model.
+
+A RE-ASK OF THE WAITING ITEM: when the agent's last message ends with a
+waiting item's closing line, as THE TEXT CHECKED reads one, a sentence that
+opens with an answer cue and a capital answer letter, as in `Reply A to send
+this version.`, and holds neither a `?` nor, after that cue, an ask phrase, does
+not make its line question-like: the letter it asks for answers that item.
 When some lines are question-like, each goes to the model MODEL in a headless
 `claude -p` call of its own, the calls running at the same time, with
 QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT: the line, the reply's text
@@ -111,8 +119,8 @@ AN INTERRUPTION ITEM'S TEXT is not checked either: a line of the text
 checked, a list joined to its lead-in included, is left out when the
 walk-document, as it stands when the hook runs, holds each line of it, as
 the agent wrote it, as a whole line of one interruption item: an unnumbered
-item, as the approval-walk finder reads one, which the refusal's step 1 has
-the agent add, or, in a walk opened before items were added unnumbered, one
+item, as the approval-walk finder reads one, which the refusal's command
+adds, or, in a walk opened before items were added unnumbered, one
 numbered `W.n` after a waiting item W and not itself waiting, whatever its M.
 Lines are compared whole and equal once `normalized` has dropped their marks,
 so a leading `>` or list mark, a hashtag marker opening the line, bold,
@@ -123,9 +131,9 @@ side: a line that
 is only part of an item's line, or that holds more than it, is not held. The
 lines are compared as the agent wrote them, before the removals above,
 because the item holds the question as its asker wrote it, code spans and
-quotations included; the refusal names them as written, and its step 1 tells
-the agent to copy each into the item as a line of its own, refusing until
-the item holds them so. An item's lines run from its opening,
+quotations included; the refusal's command writes each into the item, as
+written, as a line of its own, and the hook refuses until the item holds them
+so. An item's lines run from its opening,
 as the approval-walk finder reads openings, when it has one, to the next
 item's opening, a Withdrawn heading or its unit's end, and are otherwise its whole unit; but an
 item without an opening under a heading shared by several items holds no
@@ -182,6 +190,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -193,6 +202,8 @@ WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-docume
 WALK_CHECK_PROGRAM = HERE / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py"
 ANSWER_HOOK_FILE = (HERE / "walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-"
                     "user-prompt-submit-hook.py")
+QUESTION_INSERT_PROGRAM = (HERE / "walk-me-through-agent-question-to-user-insert-as-unnumbered-item-after-waiting-item-"
+                           "and-record-in-walk-minutes.py")
 REPOSITORY_TOP = HERE.parents[2]
 EMERGENCY_STOP_READER_FILE = (Path(__file__).resolve().parent.parent / "emergency-stop"
                               / "emergency-stop-file-in-force-read-common.py")
@@ -236,6 +247,10 @@ ASK_PHRASE = re.compile(
     r"|\b(?:yes|no)\s+(?:adds|means|keeps|drops|leaves)\b|\bif\s+you\s+(?:agree|prefer|want|approve|'d\s+rather)\b"
     r"|\bunless\s+you\b|\b(?:would|could|can)\s+you\b|\bup\s+to\s+you\b",
     re.I)
+# A sentence that asks only for an answer letter, as in `Reply A to send this version.`; in a message that ends with
+# the waiting item's closing line, the letter it asks for answers that item. Capital letters only, as in ASK_PHRASE.
+WAITING_ITEM_ANSWER_LETTER_REQUEST = re.compile(r"^\W*(?:say|reply|answer|type)\s+(?-i:A|AO|Aa|D|Z|E|R|M)\b(?P<rest>.*)$",
+                                                re.I | re.S)
 # A sentence ends at its stop, or just after a closing quote, bracket or bold mark that follows the stop.
 SENTENCE_END = re.compile(r"(?:(?<=[.?!])|(?<=[.?!][\"'\u201d\u2019)*_]))\s+")
 TRAILING_MARKS = "*_ )\"'”’"
@@ -285,46 +300,23 @@ QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT = (
 )
 
 REFUSAL_OPENING_TEMPLATE = (
-    "[rule walk-me-through-agent-question-to-user-outside-walk-items-refused] approval-walk question check: this hook refused to end your turn on purpose, because your reply seems to "
-    "ask the user something outside an item of the open approval-walk {walk} ({decided}). The flagged text: "
-    "\"{sentence}\". While a walk is open the user's answer goes to the waiting item, item {waiting}, so a "
-    "question asked in prose leaves him unable to tell which question his letter answers.")
+    "[rule walk-me-through-agent-question-to-user-outside-walk-items-refused] approval-walk question check: this "
+    "hook refused to end your turn, because a line of your reply seems to ask the user something outside the items "
+    "of the open approval-walk {walk} ({decided}): \"{sentence}\". His next letter answers only the waiting item, "
+    "item {waiting}, so he could not tell which question it answers.")
 DECIDED_BY_MODEL_NOTICE = "the model judged that it asks him something"
 MODEL_CHECK_FAILED_NOTICE = ("the hook's `claude -p` call that has the model judge this question-like text failed, "
                              "{failure}, so the hook treats the text as a question")
 REFUSAL_INSTRUCTIONS = (
-    "If the flagged text asks the user to decide or answer something, do these three steps:",
-    "1. Add it to the walk-document {document} as an interruption item headed `## <the point of the question>`, "
-    "with no number. In the file, place it right after the whole of item {waiting_whole_item}: past that item's "
-    "sub-steps and `#### Withdrawn version` sections, and before the next item below those sub-steps and sections, or, when no item follows, at the end of the file, below any text after those sub-steps and sections. Under the heading, "
-    "give it a line of its own naming "
-    "its category, the one for how soon its work must happen, one of {category_tags}, and a line "
-    "`{waits_on_tag} <title>` for each item it must follow, as the walk-me-through skill's section "
-    "\"Re-planning\" says. Do not number it yourself: the close step of "
-    "nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py "
-    "chooses when the user sees it, among the items not yet shown, by the items it waits on, its category and the "
-    "day it first entered a walk, so he may see it later than items placed below it in the file, and writes its "
-    "number into this heading then. "
-    "Quote the question whole "
-    "in the item, as its asker wrote it, whether you or another agent, giving each line of the flagged text a "
-    "line of its own, word for word, and putting the rest of the question on other lines of the item. This hook passes the "
-    "question only when the item in the walk-document holds every flagged line that way, and refuses again until "
-    "it does; it ignores a `>` quote mark or a list mark such as `-` or `1.` at the start of a line, bold, italic "
-    "and code marks, and letter case, so you may add or drop those. "
-    "Just before the alternative, state the strongest case against the recommendation on one line that opens with "
-    "`#case_against` and a rating, none, weak, medium, strong or very strong. "
-    "Give the item one recommendation and one alternative, and end it with the recommendation stated as an "
-    "action, as in `Recommendation: <what you recommend doing>.` State the alternative before it, as in "
-    "`The alternative: <what D does instead>.`",
-    "2. Do not show the new item now: the walk shows it when its turn comes.",
-    "3. The flagged text has already reached the user, so leave it. End the message you write next with the line "
-    "`I added the question to the walk as a new item.` and then {closing_lines_named}, as the "
-    "walk-me-through skill writes it, as the last text of that message. {not_in_backticks}\n{closing_lines}",
-    "If the flagged text does not ask the user anything, end the turn with only the waiting item's closing line, "
-    "printed below. {not_in_backticks}\n{closing_lines_no_item_added}{no_page}",
-    "From now on, while an approval-walk is open, put every question for the user, yours or another "
-    "agent's, into the walk as an item instead of asking it in prose.",
+    "If the line asks him nothing, or only asks again for his answer to item {waiting}, end your turn with "
+    "{closing_lines_named} below and nothing after it. {not_in_backticks}\n{closing_lines_no_item_added}{no_page}",
+    "Otherwise run this command, with the question's point as its title, the category for how soon its work must "
+    "happen, one of {categories}, as the walk-me-through skill's section \"Re-planning\" says, and, for each item it "
+    "must follow, a `--waits-on` with that item's heading without `## ` or `Item N of M: `, then do what it prints; "
+    "do not show the new item now, since the walk shows it when its turn comes:\n{command}",
 )
+QUESTION_INSERT_COMMAND_TITLE_PLACEHOLDER = "<the point of the question>"
+QUESTION_INSERT_COMMAND_CATEGORY_PLACEHOLDER = "<category>"
 ONE_CLOSING_LINE_NAMED = "the waiting item's closing line"
 SEVERAL_CLOSING_LINES_NAMED = "each waiting item's closing line, on a line of its own"
 NO_PAGE_LINK = "<page link>"
@@ -558,6 +550,25 @@ def is_question_like(line):
     return "?" in line or ASK_PHRASE.search(line) is not None
 
 
+def without_waiting_item_answer_letter_requests(line):
+    """line without each sentence that asks only for an answer letter, as the module docstring's A RE-ASK OF THE
+    WAITING ITEM says: one that opens with an answer cue and a capital answer letter and holds neither a `?` nor,
+    after that cue, an ask phrase."""
+    kept = []
+    for sentence in SENTENCE_END.split(line.strip()):
+        request = WAITING_ITEM_ANSWER_LETTER_REQUEST.match(sentence)
+        if not (request and "?" not in sentence and not is_question_like(request["rest"])):
+            kept.append(sentence)
+    return " ".join(kept)
+
+
+def message_ends_with_waiting_item_closing_line(message, waiting_numbers, pages):
+    """Whether the last non-empty prose line of message is a closing line of waiting items, as is_closing_line
+    reads one."""
+    lines = [line for line in walk_finder.prose_lines(message, closing_line_parser()) if line.strip()]
+    return bool(lines) and is_closing_line(lines[-1], waiting_numbers, pages)
+
+
 def model_judgement(message_lines, question_like_indexes, waiting_items_text, turn_started_by, turn_start_text,
                     timeout_seconds=MODEL_TIMEOUT_SECONDS):
     """Return (the index in message_lines of the first question-like line the model calls an ask or whose call
@@ -751,7 +762,10 @@ def output_for(payload, environment, model=model_judgement):
     pages = walk_finder.newest_item_page_link_per_item_from_walk_minutes(minutes.read_text(encoding="utf-8"), parser)
     checked = checked_lines(reply, document_text, units, parser, numbers, pages)
     lines = [line for line, _ in checked]
-    question_like = [index for index, line in enumerate(lines) if is_question_like(line)]
+    last_message = final_message or (texts[-1] if texts else "")
+    re_ask_allowed = message_ends_with_waiting_item_closing_line(last_message, numbers, pages)
+    question_like = [index for index, line in enumerate(lines) if is_question_like(
+        without_waiting_item_answer_letter_requests(line) if re_ask_allowed else line)]
     if not question_like:
         return None
     document_lines = document_text.split("\n")
@@ -767,24 +781,22 @@ def output_for(payload, environment, model=model_judgement):
         decided, decided_by = DECIDED_BY_MODEL_NOTICE, "model"
     # The agent copies the flagged text into the item, so it is named as written, not as checked.
     sentence = "\n".join(checked[flagged][1])
-    waiting = numbers[-1]
     waiting_label = " and ".join(numbers)
-    new_total = str(int(total) + 1)
     # Loaded only here, on the way to a refusal, so a reply that passes does not pay for it.
     check_and_close = load_module("walk_me_through_answer_added_texts_cold_read_fast_read_check_and_close",
                                   WALK_CHECK_PROGRAM)
-    closing, without_page = closing_lines(pages, name, document_text, units, waiting_units, parser, numbers,
-                                          new_total)
-    # No item is added when the flagged text asks nothing, so that branch's closing line keeps the walk's count.
-    closing_no_item_added, _ = closing_lines(pages, name, document_text, units, waiting_units, parser, numbers,
-                                             total)
-    values = {"walk": name, "waiting_whole_item": waiting.split(".")[0], "sentence": sentence, "decided": decided,
-              "waiting": waiting_label,
-              "document": document, "waits_on_tag": check_and_close.WALK_WAITS_ON_TAG,
-              "category_tags": ", ".join(f"`{check_and_close.WALK_CATEGORY_TAG}{category}`"
-                                         for category in check_and_close.WALK_CATEGORIES),
+    # The refusal's command prints the closing line with the walk's count raised, once it has added the item.
+    closing_no_item_added, without_page = closing_lines(pages, name, document_text, units, waiting_units, parser,
+                                                        numbers, total)
+    command = " ".join(["python3", shlex.quote(str(QUESTION_INSERT_PROGRAM)), "--cwd", shlex.quote(str(top)),
+                        "--title", shlex.quote(QUESTION_INSERT_COMMAND_TITLE_PLACEHOLDER),
+                        "--category", shlex.quote(QUESTION_INSERT_COMMAND_CATEGORY_PLACEHOLDER)]
+                       + [f"--flagged-line {shlex.quote(line)}" for line in checked[flagged][1]])
+    values = {"walk": name, "sentence": sentence, "decided": decided, "waiting": waiting_label,
+              "categories": ", ".join(f"`{category}`" for category in check_and_close.WALK_CATEGORIES),
+              "command": command,
               "closing_lines_named": SEVERAL_CLOSING_LINES_NAMED if numbers[1:] else ONE_CLOSING_LINE_NAMED,
-              "closing_lines": "\n".join(closing), "not_in_backticks": current_item_hook.NOT_IN_BACKTICKS,
+              "not_in_backticks": current_item_hook.NOT_IN_BACKTICKS,
               "closing_lines_no_item_added": "\n".join(closing_no_item_added), "no_page": NO_PAGE_TEMPLATE.format(
                   items=("items " if without_page[1:] else "item ") + " and ".join(without_page),
                   minutes=minutes) if without_page else ""}

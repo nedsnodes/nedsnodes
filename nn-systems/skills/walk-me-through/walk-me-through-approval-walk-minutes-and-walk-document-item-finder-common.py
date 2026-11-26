@@ -936,6 +936,19 @@ def approval_walk_document_new_item_insert_line_number_past_whole_item_sub_steps
     return next((each[3] for each in units if each[3] > last), line_count)
 
 
+def approval_walk_document_text_with_lines_added_after_whole_item(text, unit, new_lines, parser):
+    """text with new_lines put where an item added after unit's whole item goes, as
+    approval_walk_document_new_item_insert_line_number_past_whole_item_sub_steps_and_withdrawn_versions says, above
+    the blank lines that end that whole item, so new_lines, which open with their own blank line, keep one blank
+    line before them."""
+    lines = text.split("\n")
+    end = approval_walk_document_new_item_insert_line_number_past_whole_item_sub_steps_and_withdrawn_versions(
+        item_unit_spans(text, parser), unit, len(lines))
+    while end > unit[3] + 1 and not lines[end - 1].strip():
+        end -= 1
+    return "\n".join(lines[:end] + list(new_lines) + lines[end:])
+
+
 def approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units):
     """M, as a string: the whole numbers the numbered items of units hold, a dotted number such as 6.1 counting
     as its item 6, plus the unnumbered items; so it counts the items shown and the items waiting."""
