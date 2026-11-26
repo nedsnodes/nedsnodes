@@ -1244,6 +1244,27 @@ def test_the_waiting_item_read_step_does_not_refuse_a_status_claim_in_an_item_se
           described(result))
 
 
+# Written out rather than read from the program, because the user approved this sentence word for word.
+ONE_TIME_WORK_RULE = ("A case against that names only one-time work, time, cost, effort or other one-time changes "
+                      "rates none; one that also names a cost that recurs, or a risk, is rated by that cost or risk "
+                      "alone.")
+
+
+def test_the_waiting_item_read_step_prints_the_one_time_work_rule_for_an_item_rated_weak_and_one_rated_none():
+    for rating, body, case_against in (
+            ("weak", "The tests are still running.\n", "#case_against weak: the page grows."),
+            ("none", "The page lists one poem.\n#not_asked_touches\n", "#case_against none.")):
+        case = Case(document=marks_document(body).replace("#case_against weak: the page grows.", case_against))
+        result = case.run(WAITING_ITEM_READ_STEP_NAME)
+        check(f"the read step prints the user's one-time-work rule word for word, and how to re-rate a line that "
+              f"breaks it, for an item rated {rating}",
+              result.returncode == 0 and f"\n{ONE_TIME_WORK_RULE}\n" in result.stdout
+              and "If item 3 of 9's `#case_against` line in " in result.stdout
+              and "does not follow this rule, re-rate that line, then run `" in result.stdout
+              and ("item 3 of 9 is not to be shown to the user" in result.stdout) == (rating == "none"),
+              described(result))
+
+
 def test_the_waiting_item_read_step_still_stops_an_item_rated_none_when_an_earlier_item_has_the_unclosed_settling():
     case = Case(document=marks_document("cold-read-research is offline.\n#not_asked_touches\n")
                 .replace("#case_against weak: the page grows.", "#case_against none."))

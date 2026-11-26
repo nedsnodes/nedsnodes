@@ -404,7 +404,10 @@ costs at most the wait for one more read, and never lets the item be shown
 unread. A read the step runs itself that fails prints its FAILED line, says not
 to present the item yet and how to run the step again, and exits 1.
 
-For a waiting item that asks a decision, the step first prints the rows of the
+For every waiting item, the step prints the user's rule for rating a case
+against, CASE_AGAINST_ONE_TIME_WORK_RULE, and tells the agent to re-rate a
+`#case_against` line that does not follow it and run the step again.
+For a waiting item that asks a decision, the step then prints the rows of the
 no-answer table the item could settle by, each offered only at the ratings of
 the case against that its row of the table allows: each row
 whose evidence passes, with its command, and each row that fails only because an
@@ -1265,7 +1268,7 @@ CASE_AGAINST_MISSING = (
     "case-against rating beside it in the minutes, so the ratings can later be compared with the user's answers.\n"
     "Add one line to {item}, just before its recommendation, that opens with `#case_against` and your rating of "
     "its strongest case against, none, weak, medium, strong or very strong, as in "
-    "`#case_against weak: the fix costs an hour of fast reads.` or `#case_against none.`; the rating is yours, so "
+    "`#case_against weak: a check at every added task costs a little each time.` or `#case_against none.`; the rating is yours, so "
     "the user need not see the item again for it.\n"
     "Then run `{command}` again.\n"
     "From now on, write the `#case_against` line into each item before you show it.")
@@ -1273,7 +1276,7 @@ CASE_AGAINST_UNRATED = (
     "nothing written: the `#case_against` line of {item} in {document}, `{line}`, does not open with a rating, "
     "so no rating can be recorded beside the answer.\n"
     "Change that line so that `#case_against` is followed by one of none, weak, medium, strong or very strong, "
-    "as in `#case_against weak: the fix costs an hour of fast reads.`, then run `{command}` again.")
+    "as in `#case_against weak: a check at every added task costs a little each time.`, then run `{command}` again.")
 USER_WORDS_MISSING = (
     "nothing written: check was given no --user-reply-as-typed, so the walk-minutes would record the answer "
     "without the reply it came from, and the walk-me-through skill records the user's own words beside the answer "
@@ -3476,6 +3479,15 @@ def settling_left_unclosed(walk_finder, minutes, parser, named):
     return bool(match and match["item"].lower() == named.lower() and match["answered"] in settled)
 
 
+CASE_AGAINST_ONE_TIME_WORK_RULE = (
+    "A case against that names only one-time work, time, cost, effort or other one-time changes rates none; one that "
+    "also names a cost that recurs, or a risk, is rated by that cost or risk alone.")
+CASE_AGAINST_ONE_TIME_WORK_RULE_LINES = (
+    "The user's rule for rating a case against, which decides whether {item} is shown to him:",
+    CASE_AGAINST_ONE_TIME_WORK_RULE,
+    "If {item}'s `#case_against` line in {document} does not follow this rule, re-rate that line, then run "
+    "`{read_command}` again.",
+)
 NO_ANSWER_ROWS_HEADING = ("Rows of the no-answer table {item} could settle by; if a row's meaning fits {item}, do "
                           "what its line says instead of presenting it; if none fits, present it:")
 NO_ANSWER_ROW_PASSES = "- {label}: {meaning}. Its evidence passes: run `{command}` and do what it prints."
@@ -3841,8 +3853,9 @@ def waiting_item_read(arguments, sub_step_of=None):
     if not_started:
         print(not_started)
     # Printed after the step's first line, which names the report, and before the closing lines the agent acts on.
-    no_answer_rows = no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numbers, total, parser,
-                                                           named, item)
+    no_answer_rows = [line.format(item=item, document=document, read_command=command_reading_again)
+                      for line in CASE_AGAINST_ONE_TIME_WORK_RULE_LINES] + no_answer_rows_for_waiting_item_lines(
+        walk_finder, top, minutes, value, numbers, total, parser, named, item)
     not_shown = rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named)
     if not_shown is not None:
         settle = check_command_with_cwd(top, "--not-asked", NOT_ASKED_RATED_NONE)
