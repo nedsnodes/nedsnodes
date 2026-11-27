@@ -203,7 +203,7 @@ Item 7 of 9 drops a sentence.
 
 #new "A changed decision."
 
-**#case_against very strong:** it undoes a ruling.
+**#case_against strong:** it undoes a ruling.
 """
 
 
@@ -4334,13 +4334,28 @@ def test_a_case_against_line_with_no_rating_is_refused_writing_nothing():
 def test_the_rating_is_written_beside_every_answer_and_close_still_reads_it():
     case = Case(next_to_present="item 5 of 9")
     result = case.run("check", "--disapproved")
-    check("a bold `#case_against very strong:` line is read, and its rating written as one hashtag word",
-          result.returncode == 0 and "the user answered disapproved #case_against_very_strong (" in case.minutes.read_text(),
+    check("a bold `#case_against strong:` line is read, and its rating written as a hashtag",
+          result.returncode == 0 and "the user answered disapproved #case_against_strong (" in case.minutes.read_text(),
           described(result))
+    # Minutes written before `very strong` was dropped still hold its two-word hashtag.
+    case.minutes.write_text(case.minutes.read_text().replace("#case_against_strong (", "#case_against_very_strong ("))
     closed = case.run("close")
-    check("close reads an answer line that carries a rating, and records the answer's outcome",
+    check("close reads an answer line that carries a rating, one of two words included, and records the answer's "
+          "outcome",
           closed.returncode == 0 and "\nitem 5 of 9: disapproved; every text the change adds has had a fast read. "
           "<rejected>\n" in case.minutes.read_text(), described(closed))
+
+
+def test_a_case_against_rated_very_strong_is_refused_writing_nothing():
+    case = Case(next_to_present="item 5 of 9",
+                document=WALK_DOCUMENT.replace("**#case_against strong:**", "**#case_against very strong:**"))
+    before = case.minutes.read_text()
+    result = case.run("check", "--disapproved")
+    check("a `#case_against very strong:` line is refused as opening with no rating, naming the four ratings, "
+          "writing nothing",
+          result.returncode == 1 and "`**#case_against very strong:** it undoes a ruling.`, does not open with a "
+          "rating" in result.stderr and "one of none, weak, medium or strong," in result.stderr
+          and case.minutes.read_text() == before, described(result))
 
 
 # Items written as an agent drafts one to settle without the user: each kind with the evidence lines it needs.
@@ -4718,7 +4733,7 @@ def refused_as_dropped(case, *problems):
 
 def test_an_item_dropping_a_proposed_check_settles_at_any_rating_when_its_search_found_no_case():
     for rating in ("none.", "medium: the counter could still print a wrong total some day.",
-                   "very strong: the total feeds the bill."):
+                   "strong: the total feeds the bill."):
         case = dropped_proposal_case(rating=rating)
         result = case.run("check", "--not-asked", DROPPED)
         minutes = case.minutes.read_text()
