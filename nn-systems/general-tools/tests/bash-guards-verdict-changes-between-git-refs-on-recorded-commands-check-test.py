@@ -782,9 +782,9 @@ try:
           status == 0 and "NO VERDICT CHANGED" in out and pre_move_force_push_guard not in out + err,
           f"status {status}\n{out}\n{err}")
 
-    search_file_guard_modes = [mode for mode, *_ in replay.replay_modes(replay.GUARDS, ["pair"])]
+    search_file_guard_modes = [mode for mode, *_ in replay.bash_guards_replay_command_reading_modes_to_run_chosen_from_guards_and_pairs(replay.GUARDS, ["pair"])]
     without_search_file_guard_modes = [
-        mode for mode, *_ in replay.replay_modes(
+        mode for mode, *_ in replay.bash_guards_replay_command_reading_modes_to_run_chosen_from_guards_and_pairs(
             {path: read for path, read in replay.GUARDS.items() if path != replay.SEARCH_FILE_GUARD}, ["pair"])]
     check("the replay runs search-file main() only while GUARDS holds the search-file guard, so removing that "
           "guard by the refusal's recipe also removes its mode",

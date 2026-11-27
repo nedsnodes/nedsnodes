@@ -689,7 +689,7 @@ GUARDS = {
 SEARCH_FILE_GUARD = ".claude/guard-hooks/search-file-argument-read-as-option-guard-hook.py"
 
 
-def replay_modes(guards, new_process_pairs):
+def bash_guards_replay_command_reading_modes_to_run_chosen_from_guards_and_pairs(guards, new_process_pairs):
     """Return the (mode, pairs file, new process, search-file main()) modes the replay runs: search-file
     main() only while guards holds the search-file guard, so removing that guard from GUARDS removes its mode."""
     modes = [("in-process", "pairs.json", False, False)]
@@ -1332,7 +1332,7 @@ def replay_with_sigterm_handled(arguments):
         added_guards, base_guard_files = guards_added_at_head(checkouts)
         print(f"guards the head adds, read at the head only: {added_guards or 'none'}")
 
-        modes = replay_modes(GUARDS, new_process_pairs)
+        modes = bash_guards_replay_command_reading_modes_to_run_chosen_from_guards_and_pairs(GUARDS, new_process_pairs)
         verdict_changed = False
         added_guard_refused = False
         refusals_by_mode = []
