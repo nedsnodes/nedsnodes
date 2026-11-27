@@ -807,7 +807,7 @@ def _slug_cut_within(joined: str, limit: int) -> str:
 def placeholder_body(key: str, repo: str) -> str:
     return (f"Filing in progress, pairing key {key}. This body becomes the "
             "links to this issue's files once they land on main. If it still "
-            f"reads this way, rerun `{create_rerun_command(repo)}` on the "
+            f"reads this way, rerun `{ghi_issue_write_command("create", repo)}` on the "
             "file and it will continue from where it stopped. If that file is "
             f"gone, rerun it on this issue's file under {GHI_MD_DIRECTORY}/.")
 
@@ -1877,7 +1877,7 @@ def land_file(repo: str, number: int, title: str, source: Path,
     path the issue's file has, or will have once step 4's pull request
     merges: main's file for the issue when it is already this file, or,
     when a resumed filing's pull request merged, the first of main's files
-    for the issue, or,
+    for the issue, or None when main holds none, or,
     when the branch was already pushed, the file that branch holds
     (`ghi_md_path_on_pushed_filing_branch`), or else the destination.
 
@@ -1905,8 +1905,13 @@ def land_file(repo: str, number: int, title: str, source: Path,
     if resumed and filing_pull_request_merged_into_main(repo, branch, runner):
         report(f"step 4 already done: the filing pull request on {branch} "
                "has merged")
+        if not on_main:
+            report(f"step 5 not done: main holds no file for issue {number}, "
+                   "though its filing pull request merged, so its body keeps "
+                   "the placeholder and no rerun can link it.")
+            return None
         # Any of main's files for the issue resumes a rerun at step 5.
-        return on_main[0] if on_main else destination
+        return on_main[0]
 
     on_remote = runner(
         ["git", "ls-remote", "--heads", "origin", branch],
@@ -1971,13 +1976,13 @@ def land_file(repo: str, number: int, title: str, source: Path,
     return destination
 
 
-def create_rerun_command(repo: str, source=None) -> str:
-    """The create command a stopped filing tells the agent to rerun, quoted
-    for the shell and carrying the run's --repo, so the rerun files into the
-    same repository. Without a source, the text around it names the file."""
-    arguments = ["scripts/ghi-issue-write.py", "create"]
-    if source is not None:
-        arguments.append(str(source))
+def ghi_issue_write_command(operation: str, repo: str, path=None) -> str:
+    """The command a run tells the agent to run next, quoted for the shell
+    and carrying the run's --repo, so it acts on the same repository.
+    Without a path, the text around it names the file."""
+    arguments = ["scripts/ghi-issue-write.py", operation]
+    if path is not None:
+        arguments.append(str(path))
     if repo != DEFAULT_REPO:
         arguments += ["--repo", repo]
     return shlex.join(arguments)
@@ -2014,7 +2019,7 @@ def ghi_md_path_on_pushed_filing_branch(repo: str, number: int, branch: str,
             f"Tell the user two facts: branch {branch} holds {held} for "
             f"issue {number}; and filing issue {number} stays stopped until "
             "the branch holds exactly one file for it, after which "
-            f"`{create_rerun_command(repo, source)}` continues it. "
+            f"`{ghi_issue_write_command("create", repo, source)}` continues it. "
             "Then leave this filing until the user answers.\n"
             "If you are a subagent, pass those two facts to the agent that "
             "dispatched you instead.", 1)
@@ -2198,7 +2203,7 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
         report(f"step 5 not done: no file for issue {number} is on main yet, "
                "so its body keeps the placeholder.")
         report("Once the pull request from step 4 merges, pull main and "
-               f"rerun: {create_rerun_command(repo, rerun_on)}")
+               f"rerun: {ghi_issue_write_command("create", repo, rerun_on)}")
         return False
     # The title goes in the same call as the body: the body edit removes
     # the pairing key, after which no rerun can come back to set it.
@@ -2216,7 +2221,7 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
         report(f"step 5 not done: origin/main moved from {main_commit} to "
                f"{tip} while this run read issue {number}'s files, so its "
                "body keeps the placeholder.")
-        report(f"Rerun: {create_rerun_command(repo, rerun_on)}")
+        report(f"Rerun: {ghi_issue_write_command("create", repo, rerun_on)}")
         return False
     command = ["gh", "issue", "edit", str(number), "--repo", repo,
                "--body", links_body(repo, paths)]
@@ -2230,8 +2235,8 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
         report(f"title left as it is: main's first heading of {dated.path} "
                f"carries the date {dated.date}, and a title carries no date.")
         report(f"Remove {dated.date} from that heading with "
-               f"`scripts/ghi-issue-write.py edit {dated.path}`; that edit "
-               "sets the title to the new heading.")
+               f"`{ghi_issue_write_command('edit', repo, dated.path)}`; that "
+               "edit sets the title to the new heading.")
     return True
 
 
@@ -2293,10 +2298,15 @@ def create(path: Path, repo: str, repository_root: Path, runner, report):
 
     destination = land_file(repo, number, title, path, repository_root,
                             runner, report, resumed=bool(existing))
-    finished = link_body(repo, number, repository_root, runner, report,
-                         destination)
+    finished = destination is not None and link_body(
+        repo, number, repository_root, runner, report, destination)
+    # Named from this run's source, not from `destination`, which on a
+    # resumed filing is whichever of main's files for the issue is listed
+    # first.
+    landed_name = Path(create_ghi_landing_path_for_ghi_md(
+        number, title, path.name)).name
     report_open_ruling_questions(
-        number, "filed", ghi_guide_agent_prefixes(Path(destination).name, number),
+        number, "filed", ghi_guide_agent_prefixes(landed_name, number),
         runner, report)
     return number, finished
 
