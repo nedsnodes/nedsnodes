@@ -168,6 +168,13 @@ _branch_lock_spec = importlib.util.spec_from_file_location(
 branch_lock = importlib.util.module_from_spec(_branch_lock_spec)
 _branch_lock_spec.loader.exec_module(branch_lock)
 
+_frozen_heads_record_spec = importlib.util.spec_from_file_location(
+    "pr_fix_round_briefed_frozen_heads_record_write_and_read_in_topic_worktree_own_git_directory_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "pr-fix-round-briefed-frozen-heads-record-write-and-read-in-topic-worktree-own-git-directory-common.py")
+frozen_heads_record = importlib.util.module_from_spec(_frozen_heads_record_spec)
+_frozen_heads_record_spec.loader.exec_module(frozen_heads_record)
+
 # Well under the Stop hook's 60-second default, which the fetch before it also spends. A turn end
 # that cannot take the lock leaves the checkout as it is; the next turn end catches it up.
 CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = 20
@@ -1228,6 +1235,10 @@ def merges_from_main(checkout: Path):
 
     A merge of another nn-topic-branch is not the banned thing, so the second
     parent is tested for being on main rather than every merge being flagged.
+    Nor is a fix-round's merge of origin/main into its frozen-head, which the
+    fix-round check confirms git made without a conflict: a merge whose first
+    parent is a frozen-head the fix-round brief recorded in this checkout's git
+    directory is left out.
     A branch that carries older catch-up merges is flagged once, which is
     correct: those merges are real and the agent has not been told of them.
 
@@ -1262,6 +1273,10 @@ def merges_from_main(checkout: Path):
     merges = run_git(["rev-list", "--merges", "origin/main..HEAD"], checkout, timeout=30)
     if merges.returncode != 0:
         return None
+    git_directory = run_git_or_raise(["rev-parse", "--absolute-git-dir"], checkout, timeout=15).stdout.strip()
+    # A fix-round's clean merge of origin/main into its frozen-head is allowed, and the fix-round check confirms
+    # it; the fix-round brief records the frozen-head in this checkout's git directory.
+    fix_round_frozen_heads = frozen_heads_record.pull_request_fix_round_frozen_head_record_read_all(Path(git_directory))
     flagged = []
     for sha in merges.stdout.split():
         second = run_git_or_raise(["rev-parse", "--verify", "--quiet", f"{sha}^2"], checkout,
@@ -1274,6 +1289,8 @@ def merges_from_main(checkout: Path):
         if on_main.returncode == 1:
             continue
         first = run_git(["rev-parse", "--verify", "--quiet", f"{sha}^1"], checkout, timeout=15)
+        if first.returncode == 0 and first.stdout.strip() in fix_round_frozen_heads:
+            continue
         # A first parent that does not resolve cannot be re-merged, so the merge
         # is reported: an error is not an answer.
         if first.returncode == 0 and merge_parents_conflict(checkout, first.stdout.strip(),
