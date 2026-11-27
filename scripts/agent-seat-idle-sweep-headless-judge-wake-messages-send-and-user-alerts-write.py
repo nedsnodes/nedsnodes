@@ -884,11 +884,13 @@ def list_agents_tool_entry_ref_of_running_agent_session_id(session_id):
     The digest is the SHA-256 of "session:" and the agent-session's messaging socket path, as
     Claude Code 2.1.330 computes it; the ref is its first 6 digits, or more when two refs share
     those. A killed process leaves its record behind, and resuming its session writes another, so
-    the record with the latest startedAt is the running one. Should Claude Code change the
-    formula, no entry has the ref, so the sender sends nothing and the send is reported as failed;
+    the record with the latest startedAt is the running one, and it has no ref when it names no
+    socket. Should Claude Code change the formula, no entry has the ref, so the sender sends
+    nothing and the send is reported as failed;
     scripts/agent-seat-idle-sweep-list-agents-ref-formula-matches-installed-claude-code-test.py
-    reports the change at the next full test run, since a selective run does not see a Claude
-    Code update."""
+    reports the change at the first full test run that finds an agent-session the new version
+    started, since it compares only the refs of agent-sessions on the machine and a selective run
+    does not see a Claude Code update."""
     matching = []
     for path in sorted((Path.home() / SESSION_RECORDS_DIRECTORY_UNDER_HOME).glob("*.json")):
         try:
@@ -897,13 +899,14 @@ def list_agents_tool_entry_ref_of_running_agent_session_id(session_id):
             # Claude Code rewrites a record while its agent-session runs and deletes it when the
             # agent-session exits, either of which can happen mid-read.
             continue
-        if (isinstance(record, dict) and session_id and record.get("sessionId") == session_id
-                and isinstance(record.get("messagingSocketPath"), str)):
+        if isinstance(record, dict) and session_id and record.get("sessionId") == session_id:
             matching.append(record)
     if not matching:
         return None
     newest = max(matching, key=lambda record: record.get("startedAt")
                  if isinstance(record.get("startedAt"), (int, float)) else 0)
+    if not isinstance(newest.get("messagingSocketPath"), str):
+        return None
     return hashlib.sha256(f"session:{newest['messagingSocketPath']}".encode()).hexdigest()
 
 
@@ -1187,8 +1190,10 @@ class Sweep:
     # --- The account ---
 
     def account_change(self, verdicts, verdict_read_again):
-        """verdict_read_again(seat) reads seat's verdict afresh: a session-handoff since the first
-        read would otherwise lose the notice, because account_seen is logged only once."""
+        """verdict_read_again(seat) reads seat's verdict afresh, and each seat's is read again
+        before the notice is aimed: a session-handoff since the first read would otherwise aim it
+        at the retiring agent-session, whose session record a killed process leaves behind, and
+        account_seen is logged only once."""
         try:
             account = verdicts_print.logged_in_account(self.paths.claude_json)
         except verdicts_print.ReadFailure as error:
@@ -1208,14 +1213,11 @@ class Sweep:
                      "agent_seats": seats})
         refs = {}
         for seat in seats:
+            fresh = verdict_read_again(seat)
+            if fresh.get(fields.SESSION_ID) not in (None, verdicts[seat][fields.SESSION_ID]):
+                verdicts[seat] = fresh
             ref = list_agents_tool_entry_ref_of_running_agent_session_id(
                 verdicts[seat][fields.SESSION_ID])
-            if ref is None:
-                fresh = verdict_read_again(seat)
-                if fresh.get(fields.SESSION_ID) not in (None, verdicts[seat][fields.SESSION_ID]):
-                    verdicts[seat] = fresh
-                    ref = list_agents_tool_entry_ref_of_running_agent_session_id(
-                        fresh[fields.SESSION_ID])
             if ref is None:
                 self.entry_not_found(seat, "send the account-change notice",
                                      verdicts[seat][fields.SESSION_ID])
@@ -1998,6 +2000,17 @@ def sweep(arguments, now):
         return {record_uuid for record_uuid, woken_at in log.limit_wakes(seat).items()
                 if seconds_between(woken_at, now) >= LIMIT_WAKE_GRACE_SECONDS}
 
+    def budget_skips_record(seat, budget_skips):
+        if budget_skips:
+            run.record({"event": fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, "agent_seat": seat,
+                        "conditions": list(budget_skips)})
+
+    def verdict_read_again(seat):
+        verdict = verdicts_print.verdict_for_seat(seat, paths, now, None, checker, parser,
+                                                  limit_records_to_skip(seat))
+        budget_skips_record(seat, verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, []))
+        return verdict
+
     for seat in seats:
         check = log.last_check(seat)
         skipped = limit_records_to_skip(seat)
@@ -2017,11 +2030,8 @@ def sweep(arguments, now):
                              in verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, [])
                              if condition not in budget_skips]
         verdicts[seat] = verdict
-        if budget_skips:
-            run.record({"event": fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, "agent_seat": seat,
-                        "conditions": budget_skips})
-    run.account_change(verdicts, lambda seat: verdicts_print.verdict_for_seat(
-        seat, paths, now, None, checker, parser, limit_records_to_skip(seat)))
+        budget_skips_record(seat, budget_skips)
+    run.account_change(verdicts, verdict_read_again)
     run.delivery_checks(verdicts)
     for seat, verdict in verdicts.items():
         for error in verdict.get(fields.ERRORS, []):

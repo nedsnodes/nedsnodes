@@ -2420,7 +2420,12 @@ for case, breaks in (
         ("no session record", lambda machine: (
             machine.home / ".claude" / "sessions" / "alpha.json").unlink()),
         ("its session record gives no socket path",
-         lambda machine: machine.session_record("alpha", "s-1", None))):
+         lambda machine: machine.session_record("alpha", "s-1", None)),
+        ("its newest session record gives no socket path, while a killed process's older one does",
+         lambda machine: (
+             machine.session_record("alpha", "s-1", None, startedAt=2_000),
+             machine.session_record("killed", "s-1", "/run/user/1000/cc-socks/killed.sock",
+                                    startedAt=1_000)))):
     machine = Machine()
     machine.seat("alpha", DONE_TURN)
     machine.handoff_put_off()
@@ -2501,6 +2506,79 @@ check("a session-handoff between the verdict and the account check: the notice g
       [event["session_id"] for event in sent] == ["s-2"]
       and sent[0]["transcript_path"] == str(successor_transcript)
       and not machine.events("agent_seat_entry_not_found"), (code, output, machine.events()))
+
+# The same session-handoff, with the predecessor killed by SIGKILL: its session record is left
+# behind, so its session id still resolves to a ref.
+HANDOFF_AFTER_FIRST_VERDICT_PREDECESSOR_RECORD_LEFT = """
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("sweep", sys.argv[1])
+sweep = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sweep)
+read = sweep.verdicts_print.verdict_for_seat
+reads = []
+def read_then_hand_off(*arguments):
+    verdict = read(*arguments)
+    if not reads:
+        reads.append(1)
+        Path(state).write_text(json.dumps({"launched_session_id": "s-2"}))
+        Path(record).with_name("alpha-successor.json").write_text(json.dumps(
+            {"pid": 2, "sessionId": "s-2", "kind": "interactive",
+             "messagingSocketPath": successor_socket}))
+    return verdict
+sweep.verdicts_print.verdict_for_seat = read_then_hand_off
+sys.exit(sweep.main(sys.argv[2:]))
+"""
+
+machine = Machine()
+first_transcript = machine.seat("alpha", DONE_TURN)
+machine.run(0)
+successor_transcript = first_transcript.with_name("s-2.jsonl")
+successor_transcript.write_text("".join(json.dumps(record) + "\n" for record in DONE_TURN))
+machine.account("account-2")
+machine.script({"sends": [{"to": f"alpha [{listed_ref(SUCCESSOR_SOCKET)}]",
+                           "message": "@prompt-text"}], "answer": {"sent": True, "reason": "sent"}})
+code, output = machine.run(1, runner_source=(
+    f"state = {str(machine.handoffs / 'alpha-supervisor-state.json')!r}\n"
+    f"record = {str(machine.home / '.claude' / 'sessions' / 'alpha.json')!r}\n"
+    f"successor_socket = {SUCCESSOR_SOCKET!r}\n"
+    + HANDOFF_AFTER_FIRST_VERDICT_PREDECESSOR_RECORD_LEFT))
+sent = machine.events("message_sent")
+check("a session-handoff between the verdict and the account check, with the predecessor's session "
+      "record left behind: the notice goes to the successor, and the delivery check reads the "
+      "successor's transcript",
+      [event["session_id"] for event in sent] == ["s-2"]
+      and sent[0]["transcript_path"] == str(successor_transcript)
+      and full_digest(SUCCESSOR_SOCKET) in machine.claude_calls()[0]["prompt"],
+      (code, output, machine.events()))
+
+# The account-change reread is the only read that skips a prerequisite for the GitHub budget.
+REREAD_ONLY_BUDGET_SKIP_RUNNER = r'''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("sweep", sys.argv[1])
+sweep = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sweep)
+verdict_for_seat = sweep.verdicts_print.verdict_for_seat
+def reread_skips(seat, paths, now, since, *rest):
+    verdict = verdict_for_seat(seat, paths, now, since, *rest)
+    if since is None:
+        verdict[sweep.fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET] = [
+            {"kind": "pr_merged", "number": 50}]
+    return verdict
+sweep.verdicts_print.verdict_for_seat = reread_skips
+sys.exit(sweep.main(sys.argv[2:]))
+'''
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.run(0)
+machine.account("account-2")
+machine.script(sent_ok())
+code, output = machine.run(1, runner_source=REREAD_ONLY_BUDGET_SKIP_RUNNER)
+check("a budget skip only the account-change reread found: logged",
+      [(event["agent_seat"], event["conditions"]) for event in
+       machine.events("github_conditions_skipped_for_budget")]
+      == [("alpha", [{"kind": "pr_merged", "number": 50}])], (code, output, machine.events()))
 
 # --- headless agent-sessions that fail --------------------------------------------------------------
 FAILURES = (
@@ -2746,13 +2824,13 @@ machine.script(sent_ok())
 machine.run(0)
 machine.append("alpha", cross_session("You promised", at(0.5)), assistant(SECOND_PROMISE, at(9)),
                turn_end(at(9)))
-machine.script(rechecked(False), usage_limit_exit_with_transcript(RESET_IN_AN_HOUR), sent_ok())
+machine.script(rechecked(False, False), usage_limit_exit_with_transcript(RESET_IN_AN_HOUR),
+               sent_ok())
 code, _ = machine.run(16)
 check("an escalation sender at a usage limit with a reset time ahead: a pause, no task, and the "
       "promise message due in the same step is not sent",
       len(machine.events("headless_usage_limit_pause")) == 1
-      and not any("send its escalate message" in task["description"]
-                  for task in machine.owner_tasks())
+      and machine.owner_task_subjects() in ([], [DELIVERY_TASK_SUBJECT])
       and len(machine.claude_calls()) == 2
       and [event["step"] for event in machine.events("message_sent")] == ["nudge"],
       (code, machine.events("headless_usage_limit_pause"), machine.owner_tasks(),
