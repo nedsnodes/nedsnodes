@@ -38,15 +38,16 @@ CommonMark parser, each line break kept, as the walk-document shows it. A paragr
 
 LINKS BETWEEN PAGES. The walk-minutes, the walk-document's sibling `<walk name>-minutes.md`, record each page's link
 on an `#item_page` line, read through the walk finder's approval_walk_item_page_link_lines_oldest_first_from_walk_minutes. Above its heading,
-a page gets a "Previous" link to the page of the item before, when there is one: the whole item with the highest
-number below this item's whole number whose newest `#item_page` line with a link gives that link. It gets a "Next"
-link to the page of the item after, the lowest such number above it, when there is one. Both lead to whole items' pages only, so a sub-step's page, such as
-4.1's, links the pages of items 3 and 5 when both have such a line, and neither a sub-step's `#item_page` line nor a failed publish's line becomes
-a Previous or Next link. When there is no Previous link, such as when the walk-minutes are missing, the
-program prints why.
+a page gets a "Previous" link to the page of the item before, when there is one: the item or sub-step with the
+highest number below this one's, in number order, so 4.2 before 4.10, whose newest `#item_page` line with a link
+gives that link. It gets a "Next" link to the page of the item after, the lowest such number above it, when there is
+one. So the links chain every page of its own: 4, 4.1, 4.2 … 4.10, then 5. A sub-step whose newest link is the page
+of an item numbered below it, as when its line records its item's page, shares that page and stays out of the chain,
+and a failed publish's line is no link. When there is no Previous link, such as when the walk-minutes are missing,
+the program prints why.
 
 The item after has no link yet when this item's first page is built, so that page cannot be given its Next link in the
-same invocation of the program. On a whole item's first page, built without --version, when that page has a Previous
+same invocation of the program. On an item's or a sub-step's first page, built without --version, when that page has a Previous
 link, the program prints the command that rebuilds the earlier item's page, the one the Previous link opens, with --version
 set to that item's next version, to run once this item's page is published and its `#item_page` line recorded; the earlier
 item's page then gets its Next link to this one. An item's `#item_page`
@@ -104,7 +105,7 @@ WRITTEN_REPUBLISH = ("Wrote {output}: publish it with the Artifact tool to {link
                      "its title is \"{title}\".")
 NO_PREVIOUS_LINK = "The page has no Previous link: {reason}."
 NO_MINUTES = "the walk-minutes {minutes} do not exist"
-NO_ITEM_BEFORE = "no whole item numbered below {number} has an `#item_page` line with a link in {minutes}"
+NO_ITEM_BEFORE = "no item or sub-step numbered below {number} has an `#item_page` line with a page of its own in {minutes}"
 ITEM_BEFORE_NEXT_LINK = (
     "Item {before}'s page, {link}, has no Next link to this page yet, because this page has no link until it is published.\n"
     "Once you have published {output} and recorded its `#item_page` line in {minutes}, run\n"
@@ -153,14 +154,25 @@ def item_lines_and_count(walk_finder, document, text, number, parser):
     return body, heading, unit[1]
 
 
-def whole_item_links(item_page_lines, walk_finder):
-    """Return {whole item number: the link of its newest `#item_page` line that has one}."""
-    return {int(number): link for number, link, _ in item_page_lines
-            if "." not in number and link != walk_finder.ITEM_PAGE_PUBLISH_FAILED}
+def number_order(number):
+    """Return the sort key that puts item numbers in number order, 4.2 before 4.10."""
+    return tuple(int(part) for part in number.split("."))
+
+
+def own_page_links_in_number_order(item_page_lines, walk_finder):
+    """Return [(number, link)] of each item or sub-step whose newest `#item_page` link is a page of its own,
+    in number order."""
+    newest = {number: link for number, link, _ in item_page_lines if link != walk_finder.ITEM_PAGE_PUBLISH_FAILED}
+    links, seen = [], set()
+    for number in sorted(newest, key=number_order):
+        if newest[number] not in seen:
+            links.append((number, newest[number]))
+            seen.add(newest[number])
+    return links
 
 
 def next_version(item_page_lines, walk_finder, number):
-    """Return the version the next republish of whole item number's page gets, as the module docstring says."""
+    """Return the version the next republish of item number's page gets, as the module docstring says."""
     version = 0
     for each, link, stated in item_page_lines:
         if each == str(number) and link != walk_finder.ITEM_PAGE_PUBLISH_FAILED:
@@ -169,12 +181,10 @@ def next_version(item_page_lines, walk_finder, number):
 
 
 def neighbour_links(links, number):
-    """Return ((number, link) of the item before, or None, (number, link) of the item after, or None)."""
-    whole = int(number.split(".")[0])
-    before = max((each for each in links if each < whole), default=None)
-    after = min((each for each in links if each > whole), default=None)
-    return ((before, links[before]) if before is not None else None,
-            (after, links[after]) if after is not None else None)
+    """Return ((number, link) of the page before, or None, (number, link) of the page after, or None)."""
+    own = number_order(number)
+    return (next((each for each in reversed(links) if number_order(each[0]) < own), None),
+            next((each for each in links if number_order(each[0]) > own), None))
 
 
 def navigation_html(before, after):
@@ -268,14 +278,12 @@ def main(argv):
             notes.append(NO_PREVIOUS_LINK.format(reason=NO_MINUTES.format(minutes=minutes)))
         else:
             walk_finder, item_page_lines = found
-            before, after = neighbour_links(whole_item_links(item_page_lines, walk_finder), arguments.item)
+            before, after = neighbour_links(own_page_links_in_number_order(item_page_lines, walk_finder), arguments.item)
             link = next((each for number, each, _ in reversed(item_page_lines) if number == arguments.item
                          and each != walk_finder.ITEM_PAGE_PUBLISH_FAILED), None)
             if before is None:
-                notes.append(NO_PREVIOUS_LINK.format(reason=NO_ITEM_BEFORE.format(
-                    number=arguments.item.split(".")[0], minutes=minutes)))
-            # Next links open whole items' pages only, so a sub-step's page gives the item before nothing to rebuild.
-            elif arguments.version is None and "." not in arguments.item:
+                notes.append(NO_PREVIOUS_LINK.format(reason=NO_ITEM_BEFORE.format(number=arguments.item, minutes=minutes)))
+            elif arguments.version is None:
                 before_version = next_version(item_page_lines, walk_finder, before[0])
                 before_output = Path(arguments.output).with_name(f"item-{before[0]}-version-{before_version}.html")
                 command = shlex.join(["python3", str(Path(__file__).resolve()), str(document), str(before[0]), str(before_output),

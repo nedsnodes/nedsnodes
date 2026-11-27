@@ -3058,8 +3058,9 @@ def start_read_ahead_of_item_after(walk_finder, top, minutes, parser, numbers, t
         number_predicted = isinstance(after[0], int)  # pragma: no mutate, next_item is given the same numbers as answered and waiting, so it names at most one item and after[-1] is after[0]
         if number_predicted:
             number = walk_finder.approval_walk_next_unnumbered_item_number(units)
-            after_named = items_named([number], count)
-            text = unnumbered_item_text_once_numbered(walk_finder, minutes, after[0], units, number, count)
+            once_numbered = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)
+            after_named = items_named([number], once_numbered)
+            text = unnumbered_item_text_once_numbered(walk_finder, minutes, after[0], units, number, once_numbered)
         else:
             after_named = items_named(after, total)
             _, text = item_text(walk_finder, minutes, after_named, after, total, parser,
@@ -4042,9 +4043,10 @@ def waiting_item_read(arguments, sub_step_of=None):
     not_shown = rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named)
     if not_shown is not None:
         settle = check_command_with_cwd(top, "--not-asked", NOT_ASKED_RATED_NONE)
-        print("\n".join(line.format(item=item, document=not_shown, command=settle,
-                                    read_command=command_reading_again)
-                        for line in [*RATED_NONE_NOT_SHOWN_LINES, *no_answer_rows]))
+        # The rows are already formatted, and may hold braces from a path or a title.
+        print("\n".join([*(line.format(item=item, document=not_shown, command=settle,
+                                        read_command=command_reading_again)
+                            for line in RATED_NONE_NOT_SHOWN_LINES), *no_answer_rows]))
         return 0
     now_over_later_clause = ("." if unclosed_last_answer(walk_finder, minutes, parser)
                              else PRESENT_UNLESS_NOW_OVER_LATER_CLAUSE.format(
@@ -5020,6 +5022,7 @@ def close(arguments):
         if first in placing:  # Not the summary item, which stays where it is.
             first, units = unshown_items_gathered_behind_chosen(walk_finder, minutes, first, units, placing, parser,
                                                                 answered_numbers, total)
+        count = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)
         numbers = [unnumbered_item_numbered(walk_finder, minutes, first, units)]
     # A number several headings name, such as 3 in `3 of 9` and `3 of 12`, takes its heading's M, so the read step
     # can tell which heading the line names.

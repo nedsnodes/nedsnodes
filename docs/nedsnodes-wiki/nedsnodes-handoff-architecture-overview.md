@@ -133,7 +133,6 @@ Unless named otherwise, files are in `~/.claude/handoffs/` on the agent-seat's m
 - GHI [Queue drain procedure — the review process that empties the wiki queue, the pair queue, nn-queue, the drafts directory and the queue-drain-candidate-label issue queue](https://github.com/nedsnodes/nedsnodes/issues/24)
 - GHI [Console text-insertion + stuck/waiting-state detection (operator tooling; captured from the comms backlog)](https://github.com/nedsnodes/nedsnodes/issues/27)
 - GHI [Run named agents on the Ubuntu box, reachable from iTerm2 by name: launch-claude with tmux attach-or-create, and the migration it requires](https://github.com/nedsnodes/nedsnodes/issues/45)
-- GHI [Fleet survives a machine restart without losing seat context: detect, hand off on notice, relaunch at boot, resume from transcript](https://github.com/nedsnodes/nedsnodes/issues/116)
 - GHI [Rationalize the repository layout: group components by owning system under nn-systems/](https://github.com/nedsnodes/nedsnodes/issues/224)
 - GHI [Before a seat is retired, report what still cites the paths the retirement removes](https://github.com/nedsnodes/nedsnodes/issues/226)
 - GHI [recover-crashed-seats.py: the six changes ruled 2026-09-02 — exit record, process-identity liveness, parking marker, verified restart, by-hand resume, window](https://github.com/nedsnodes/nedsnodes/issues/242)
@@ -152,6 +151,5 @@ Unless named otherwise, files are in `~/.claude/handoffs/` on the agent-seat's m
 - GHI [Restore and discard commands in `nn-systems/handoff/uncommitted-work-snapshots.py` replace the restore steps an agent runs by hand](https://github.com/nedsnodes/nedsnodes/issues/2539)
 - GHI [The agent-crash-watcher puts a handoff-supervisor back on an unsupervised agent-seat whose session-handoff is waiting](https://github.com/nedsnodes/nedsnodes/issues/2541)
 - GHI [The handoff-supervisor writes the memory review's started mark when it puts the memory-review reminder into the initial-agent-instructions](https://github.com/nedsnodes/nedsnodes/issues/2545)
-- GHI [Agent-seats run on a last known good commit of main, while main's newest commit is tested as the release candidate up to four times a day](https://github.com/nedsnodes/nedsnodes/issues/2636)
 
 **Checked against:** commit [e7edd94f5843954efff3a7152e777e463d5e0d67](https://github.com/nedsnodes/nedsnodes/commit/e7edd94f5843954efff3a7152e777e463d5e0d67)

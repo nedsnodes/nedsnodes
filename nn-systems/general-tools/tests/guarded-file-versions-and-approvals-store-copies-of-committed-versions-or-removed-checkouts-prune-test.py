@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Tests for nn-systems/general-tools/guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.py.
+"""Tests for nn-systems/general-tools/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py.
 
 Each case builds a scratch store and scratch checkouts in a temporary directory, never the real
 store, and runs the program on them as ned-box.
 
-Run: python3 nn-systems/general-tools/tests/guarded-file-versions-and-approvals-store-removed-checkout-copies-prune-test.py
+Run: python3 nn-systems/general-tools/tests/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune-test.py
 Prints one line per case and exits non-zero if any case fails.
 """
 
@@ -31,7 +31,7 @@ _git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
 _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 
 PROGRAM = (Path(__file__).resolve().parents[1]
-           / "guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.py")
+           / "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py")
 HOOK_PATH = (REPOSITORY_ROOT / ".claude" / "guard-hooks"
              / "guarded-file-unapproved-change-afterward-backup-and-ask-hook.py")
 _specification = importlib.util.spec_from_file_location("guarded_file_hook", HOOK_PATH)
