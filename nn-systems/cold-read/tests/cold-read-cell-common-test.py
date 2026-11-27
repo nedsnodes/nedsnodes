@@ -214,8 +214,9 @@ CONCURRENT_RUN_REVIEW_TEXT = (
 # agent-binary's own words on each stream, "dump_prompt" is a path to write the
 # prompt the stub received to -- the whole of stdin on the Claude leg, which
 # is how a case reads what the cell composed -- "dump_argv" is a path to
-# write the argv the cell built, as JSON, and "exit" is the code to
-# exit with.
+# write the argv the cell built, as JSON, "dump_environment" a path to write
+# the environment the stub was started with, as JSON, and "exit" is the code
+# to exit with.
 # The report path arrives by environment rather than by parsing the prompt,
 # so a change to the prompt templates cannot silently unhook the stub.
 STUB_MODEL_RUNTIME = """#!/usr/bin/env python3
@@ -295,6 +296,8 @@ if "dump_argv" in step:
     # Bash are one pair, and a joined string could not tell that from a
     # single argument that happens to contain both.
     pathlib.Path(step["dump_argv"]).write_text(json.dumps(argv), encoding="utf-8")
+if "dump_environment" in step:
+    pathlib.Path(step["dump_environment"]).write_text(json.dumps(dict(os.environ)), encoding="utf-8")
 if "dump_record_directory_descriptor_count" in step:
     # How many of the stub's descriptors are open on the record directory: one when the cell passed
     # its being-written lock on to the reviewer program, none when the cell closed it.
@@ -1615,6 +1618,7 @@ with tempfile.TemporaryDirectory() as scratch:
     repository = build_scratch_repository(scratch)
     report = report_path_for(repository, "claude-denies-bash", "claude")
     received_argv_path = scratch / "claude-denies-bash-argv.json"
+    received_environment_path = scratch / "claude-denies-bash-environment.json"
     # HOME is a scratch home, so the login-file rules below name paths in it
     # and no real login path reaches a failure line.
     claude_scratch_home = scratch / "claude-scratch-home"
@@ -1622,10 +1626,13 @@ with tempfile.TemporaryDirectory() as scratch:
     result = run_claude_cell(
         repository, stubs,
         {"*": {"report": "STUB REVIEW: one finding\n",
-               "dump_argv": str(received_argv_path)}},
-        report, environment_overrides={"HOME": str(claude_scratch_home)},
+               "dump_argv": str(received_argv_path),
+               "dump_environment": str(received_environment_path)}},
+        report, environment_overrides={"HOME": str(claude_scratch_home),
+                                       "CLAUDE_CODE_TASK_LIST_ID": "launching-agent-seat-task-list"},
     )
     claude_argv = json.loads(received_argv_path.read_text(encoding="utf-8"))
+    claude_environment = json.loads(received_environment_path.read_text(encoding="utf-8"))
     check("a Claude cell's run reaches the runtime at all",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     # Monitor runs shell commands too, so it is denied beside Bash
@@ -1645,16 +1652,28 @@ with tempfile.TemporaryDirectory() as scratch:
     # Every hook off, for the reviewer's session only (user-ruled
     # 2026-09-18): the project's write guard refused a reviewer's report and
     # its Stop hook rebased the author's branch mid-run, both on 2026-09-16.
-    # Hooks only: CLAUDE.md must still load, so --setting-sources, which
-    # would drop it along with the hooks, must not be passed.
     passed_settings = (claude_argv[claude_argv.index("--settings") + 1]
                        if "--settings" in claude_argv else "")
     check("the Claude cell switches every hook off by --settings",
           passed_settings.startswith("{")
           and json.loads(passed_settings).get("disableAllHooks") is True,
           repr(claude_argv))
-    check("the Claude cell keeps CLAUDE.md: no --setting-sources",
-          "--setting-sources" not in claude_argv, repr(claude_argv))
+    # A cell knows only CLAUDE.md, the glossaries and the text: user,project
+    # leaves out the local source, which carries the launching agent-seat's
+    # CLAUDE.local.md, and still loads CLAUDE.md.
+    check("the Claude cell loads only the user and project setting sources, so CLAUDE.md still loads",
+          "--setting-sources" in claude_argv
+          and claude_argv[claude_argv.index("--setting-sources") + 1] == "user,project",
+          repr(claude_argv))
+    check("the Claude cell is offered no slash commands or skill listing",
+          "--disable-slash-commands" in claude_argv, repr(claude_argv))
+    check("the Claude cell is offered only the five tools it is allowed",
+          "--tools" in claude_argv
+          and claude_argv[claude_argv.index("--tools") + 1] == "Read,Grep,Glob,Write,WebFetch",
+          repr(claude_argv))
+    check("the Claude cell starts without the launching agent-seat's task list",
+          "CLAUDE_CODE_TASK_LIST_ID" not in claude_environment,
+          claude_environment.get("CLAUDE_CODE_TASK_LIST_ID"))
 
     # No credential file is readable (user-ruled 2026-09-28): Claude Code's
     # own deny rules, in the absolute `//` form -- a rule without it is
