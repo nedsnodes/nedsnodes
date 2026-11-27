@@ -2585,8 +2585,8 @@ def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_
 OWN_WORDS_RULE_OPENING = "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
 APPROVED_SENTENCE = (
     "When the discussion of an item settles on any option but its recommendation, even its alternative, rewrite the "
-    "item's recommendation as that option and its alternative as the old recommendation, show the revised item, and "
-    "record only an answer given to the revised item.")
+    "item's recommendation as that option, its alternative as the old recommendation and its heading as what A does "
+    "under the new recommendation, show the revised item, and record only an answer given to the revised item.")
 
 
 def context_lines(result):

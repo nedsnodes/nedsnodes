@@ -293,8 +293,8 @@ AA_SKILL_TEXT = (
 # The walk-me-through skill's sentence, word for word; the hook's test checks SKILL.md still holds it.
 DISCUSSION_SETTLED_SKILL_TEXT = (
     "When the discussion of an item settles on any option but its recommendation, even its alternative, rewrite the "
-    "item's recommendation as that option and its alternative as the old recommendation, show the revised item, and "
-    "record only an answer given to the revised item."
+    "item's recommendation as that option, its alternative as the old recommendation and its heading as what A does "
+    "under the new recommendation, show the revised item, and record only an answer given to the revised item."
 )
 WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE = (
     "Act on this line only if the discussion of the waiting approval-walk item settled on an option other than its "
