@@ -48,7 +48,7 @@ def updated_input(completed):
 
 
 def stop_message(minutes, kind):
-    return hook.STOP_MESSAGE.format(minutes=minutes, kind=kind)
+    return hook.BACKGROUND_COMMAND_KIND_BOUND_TIMEOUT_STOP_MESSAGE.format(minutes=minutes, kind=kind)
 
 
 class HookRewritesBackgroundCommands(unittest.TestCase):

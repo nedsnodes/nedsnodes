@@ -278,8 +278,8 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/style-guide-word-checker-markdown-edit-hook-hack.py", "MORE_HITS_LINE"): LATER_PART,
     ("scripts/uncommitted-work-snapshot-hook.py", "NOT_PROTECTED_MESSAGE"): HOOK_FAILED,
     ("nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py", "BRANCHES_NOT_FULLY_ON_GITHUB_NEXT_STEP_MESSAGE"): LATER_PART,
-    ("scripts/background-bash-command-kind-bound-timeout-wrap-hook.py", "STOP_MESSAGE"): WRAPPED_COMMAND_PRINTS_IT,
-    ("scripts/background-bash-command-kind-bound-timeout-wrap-hook.py", "PULL_REQUEST_WAIT_MESSAGE"): WRAPPED_COMMAND_PRINTS_IT,
+    ("scripts/background-bash-command-kind-bound-timeout-wrap-hook.py", "BACKGROUND_COMMAND_KIND_BOUND_TIMEOUT_STOP_MESSAGE"): WRAPPED_COMMAND_PRINTS_IT,
+    ("scripts/background-bash-command-kind-bound-timeout-wrap-hook.py", "PULL_REQUEST_WAIT_AS_TASK_PREREQUISITE_INSTEAD_OF_POLLING_INSTRUCTION"): WRAPPED_COMMAND_PRINTS_IT,
     ("scripts/background-bash-command-kind-bound-timeout-wrap-hook.py", "TIMEOUT_PROGRAM_MISSING_MESSAGE"): HOOK_FAILED,
 }
 

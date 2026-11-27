@@ -29,10 +29,10 @@ PROGRAMS_THAT_ENFORCE_THEIR_OWN_TIME_LIMITS = (
     "nn-systems/cold-read/cold-read-grid.py",
 )
 UNMATCHED_KIND_NAME = "unmatched"
-STOP_MESSAGE = (
+BACKGROUND_COMMAND_KIND_BOUND_TIMEOUT_STOP_MESSAGE = (
     "This background command was stopped after {minutes} minutes, its bound for kind {kind}. "
     "It is stuck or slower than its kind allows; find why before you run it again.")
-PULL_REQUEST_WAIT_MESSAGE = (
+PULL_REQUEST_WAIT_AS_TASK_PREREQUISITE_INSTEAD_OF_POLLING_INSTRUCTION = (
     "To wait for a pull request, use TaskUpdate to give the task on your task list that waits "
     'for it the metadata {{"prerequisites": [{{"pr_merged": {number}}}]}} instead.')
 GH_PR_VIEW_NUMBER_PATTERN = re.compile(r"\bgh[ \t]+pr[ \t]+view[ \t]+#?(\d+)\b")
@@ -55,10 +55,10 @@ def background_bash_command_text_wrapped_in_kind_bound_timeout_with_stop_message
                                                           kind: str) -> str:
     """Return the shell command that runs `command` under `timeout` at bound_minutes and, when the
     bound stops it, prints the stop message; it keeps the command's exit status."""
-    lines = [STOP_MESSAGE.format(minutes=f"{bound_minutes:g}", kind=kind)]
+    lines = [BACKGROUND_COMMAND_KIND_BOUND_TIMEOUT_STOP_MESSAGE.format(minutes=f"{bound_minutes:g}", kind=kind)]
     pull_request = GH_PR_VIEW_NUMBER_PATTERN.search(command)
     if pull_request:
-        lines.append(PULL_REQUEST_WAIT_MESSAGE.format(number=pull_request.group(1)))
+        lines.append(PULL_REQUEST_WAIT_AS_TASK_PREREQUISITE_INSTEAD_OF_POLLING_INSTRUCTION.format(number=pull_request.group(1)))
     printed = " ".join(shlex.quote(line) for line in lines)
     # `(exit ...)`, not `exit`: the shell that runs this may have more to run after it.
     return (f"timeout {bound_minutes * 60:g}s bash -c {shlex.quote(command)}"
