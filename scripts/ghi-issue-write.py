@@ -1116,9 +1116,11 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     Not handled: a too-similar verdict naming a number the ask's mirror does
     not hold as a closed GHI, such as the edited issue while the mirror shows
     it open, even after GitHub has closed it, or a pull request's number that
-    a recheck kept. The ask's closed-GHI check passes such a number, the
-    edited issue is dropped here, and the refusal sends the author to that
-    number; the author's reconsider path in RECONSIDER_LINE passes the write.
+    a recheck kept. The ask's closed-GHI check passes such a number. A
+    verdict naming only the edited issue skips the adjudication here; a
+    remaining number, such as a pull request's, leads to the refusal, which
+    sends the author to that number, and the author's reconsider path in
+    RECONSIDER_LINE passes the write.
     A number the mirror holds as a closed GHI makes the ask recheck the
     verdict before it reaches here, and a failed or repeated recheck skips
     the adjudication instead."""
