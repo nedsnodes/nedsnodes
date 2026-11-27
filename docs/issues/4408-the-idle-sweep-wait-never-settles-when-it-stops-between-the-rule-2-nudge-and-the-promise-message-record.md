@@ -25,7 +25,7 @@ The sweep logs the wait's opening at line 1039 and the `promise_message` event a
 
 ## Relation to other work
 
-[Idle sweep settles and reports a failed promise message correctly](https://github.com/nedsnodes/nedsnodes/pull/4372), open at head c84a03041c5d, changes how a promise is recorded. mac-claude, reviewing that head, reproduced this same outcome there, so that pull request does not fix it.
+[Idle sweep settles and reports a failed promise message correctly](https://github.com/nedsnodes/nedsnodes/pull/4372) changed how a promise is recorded; mac-claude, reviewing its head c84a03041c5d, reproduced this same outcome there, and it closed unmerged on 2026-11-23. ned-box-helper's new pull request, which rebuilds how the sweep keeps a promise, waits on the user's ruling on the item "Rebuild how the idle sweep keeps a promise, so a stopped sweep does not lose it" of ned-box-helper's approval-walk ned-box-helper-open-items-approval-walk-2026-11-22.
 
 ## What to do
 
