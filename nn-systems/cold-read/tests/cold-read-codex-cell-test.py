@@ -353,7 +353,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and f"prompt_file={draft_prompt} " in report_text.splitlines()[0],
           repr(report_text[:300]))
 
-    # --- Codex is given no GitHub token from its caller --------------------
+    # --- Codex is given neither GH_TOKEN nor GITHUB_TOKEN from its caller ---
     # An agent-seat's supervisor sets GH_TOKEN to the agent-seat's own token; each variable is
     # set on its own so that a launcher still passing either one fails its own case.
     for github_token_variable in ("GH_TOKEN", "GITHUB_TOKEN"):
