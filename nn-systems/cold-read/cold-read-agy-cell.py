@@ -117,11 +117,10 @@ GEMINI_API_KEY from agy's environment, so that a key the caller holds cannot
 move agy's calls onto per-call billing. It also removes every name in
 AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES of cold-read-cell-common.py,
 GH_TOKEN and GITHUB_TOKEN among them, which an agent-seat's supervisor sets to
-the agent-seat's own GitHub token, and gives agy the read-only GitHub token in
-their place, as
-process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token
-there says. How gh behaves inside the Mac sandbox is said once, beside
-CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py. When agy finds no login, it prints
+the agent-seat's own GitHub token, and, unlike the Gemini task program, puts no
+read-only token in their place. How gh behaves
+inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py. When agy finds no login, it prints
 a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
 minute for a login that cannot come headless, and exits 1; the cell's cause
 line is then logged-out, saying how to log agy in.
@@ -318,10 +317,6 @@ def main() -> int:
               f"{PROGRAM}: if you cannot install it, run this cold read on the Mac.",
               file=sys.stderr)
         return common.EXIT_BAD_INVOCATION
-    environment, token_note = common.process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token(
-        agy_environment_copy_without_gemini_api_key_or_github_token(os.environ))
-    if token_note:
-        print(f"{PROGRAM}: {token_note}", file=sys.stderr)
     return common.run_cell(
         program=PROGRAM, runtime="agy", description=__doc__,
         model_help="explicit Antigravity model id (effort suffix included, "
@@ -331,7 +326,7 @@ def main() -> int:
         invocation_builder=invocation_builder,
         recover_report_from_stdout=stdout_is_a_review,
         recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
-        child_environment=environment,
+        child_environment=agy_environment_copy_without_gemini_api_key_or_github_token(os.environ),
         per_model_run_timeout_seconds_from_parsed_arguments_getter=per_model_run_kill_after_seconds,
         cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
         parse_agent_binary_final_result_from_stdout_line=agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none,

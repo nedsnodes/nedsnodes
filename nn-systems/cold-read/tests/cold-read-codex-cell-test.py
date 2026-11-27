@@ -131,12 +131,15 @@ if os.environ.get("COLD_READ_CODEX_CELL_TEST_STUB_ARGV_PATH"):
         json.dump(sys.argv, argv_handle)
     with open(os.environ["COLD_READ_CODEX_CELL_TEST_STUB_ARGV_PATH"] + ".github-tokens", "w",
               encoding="utf-8") as tokens_handle:
-        json.dump([os.environ.get("GH_TOKEN"), os.environ.get("GITHUB_TOKEN")], tokens_handle)
+        json.dump([os.environ.get(name) for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN",
+                                                     "GITHUB_ENTERPRISE_TOKEN", "GH_CONFIG_DIR")],
+                  tokens_handle)
 if os.environ.get("COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"):
     import json
     with open(os.environ["COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"], "w",
               encoding="utf-8") as tokens_handle:
-        json.dump([name for name in ("GH_TOKEN", "GITHUB_TOKEN") if name in os.environ],
+        json.dump([name for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+                   if name in os.environ],
                   tokens_handle)
 report_path = os.environ["COLD_READ_CODEX_CELL_TEST_STUB_REPORT_PATH"]
 # A report outside the checkout is written into the directory the cell adds.
@@ -361,7 +364,7 @@ with tempfile.TemporaryDirectory() as scratch:
     # --- Codex is given no GitHub token from its caller --------------------
     # An agent-seat's supervisor sets GH_TOKEN to the agent-seat's own token; each variable is
     # set on its own so that a launcher still passing either one fails its own case.
-    for github_token_variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+    for github_token_variable in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
         report.unlink(missing_ok=True)
         tokens_dump = scratch / f"codex-received-{github_token_variable}.json"
         result = run_cell(stubs, STUB_CODEX_WRITES_REPORT, report,
@@ -379,18 +382,24 @@ with tempfile.TemporaryDirectory() as scratch:
     report.unlink(missing_ok=True)
     argv_dump = scratch / "successful-cell-argv.json"
     added_listing_dump = scratch / "successful-cell-added-directory-listing.json"
+    # The read-only token file is there, as on ned-box, so a cell that handed it on would show it.
+    read_only_token_file = (stubs.parent / "scratch-home" / ".config" / "nedsnodes-sandboxed-models"
+                            / "github-public-repositories-read-only-token")
+    read_only_token_file.parent.mkdir(parents=True, exist_ok=True)
+    read_only_token_file.write_text("read-only-token\n", encoding="utf-8")
     result = run_cell(stubs, STUB_CODEX_WRITES_REPORT, report,
                       "--cell", "defect-hunt", "--tier", "deep", "--target", str(target),
                       argv_path=argv_dump, added_listing_path=added_listing_dump)
     check("a cell whose codex succeeds exits 0",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     tokens_dump = Path(f"{argv_dump}.github-tokens")
-    check("codex is given none of the agent-seat's GitHub tokens, and stderr says it has no "
-          "read-only one",
-          tokens_dump.is_file()
-          and json.loads(tokens_dump.read_text(encoding="utf-8")) == [None, None]
-          and "cold-read-codex-cell: no read-only GitHub token (" in result.stderr,
-          f"stderr={result.stderr!r}")
+    read_only_token_file.unlink()
+    received_tokens = (json.loads(tokens_dump.read_text(encoding="utf-8"))
+                       if tokens_dump.is_file() else "NOT RUN")
+    check("codex gets no GitHub token: none of the agent-seat's, nor the read-only one, "
+          "nor GH_CONFIG_DIR",
+          received_tokens == [None] * 5 and "GitHub token" not in result.stderr,
+          f"tokens={received_tokens!r}; stderr={result.stderr!r}")
     report_text = report.read_text(encoding="utf-8") if report.is_file() else ""
     check("the report is written to --report under its provenance stamp",
           report_text.startswith("<!-- provenance: runtime=codex")
@@ -549,20 +558,6 @@ with tempfile.TemporaryDirectory() as scratch:
           f"exit {result.returncode}; stderr={result.stderr[-600:]!r}")
     leftover = sorted(path.name for path in copied_temporary_directory.iterdir())
     check("a refusal leaves no staging directory behind", leftover == [], repr(leftover))
-
-    # A Codex run whose gh was refused the read-only token still writes its review.
-    gh_refused_report = scratch / "gh-refused-report.md"
-    result = run_cell(stubs, STUB_CODEX_WRITES_REPORT.replace(
-                          "sys.exit(0)\n",
-                          "sys.stderr.write('HTTP 401: Bad credentials "
-                          "(https://api.github.com/graphql)\\n')\nsys.exit(0)\n"),
-                      gh_refused_report, "--cell", "defect-hunt", "--tier", "deep",
-                      "--target", str(target))
-    check("a gh HTTP 401 in Codex's output is reported as the read-only token refused, and "
-          "the cell still exits 0",
-          result.returncode == 0
-          and "cold-read-codex-cell: read-only GitHub token refused" in result.stderr,
-          f"exit {result.returncode}; stderr={result.stderr[-800:]!r}")
 
 print()
 if failures:

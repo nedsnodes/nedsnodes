@@ -127,17 +127,14 @@ Codex cold read on Linux can leave empty `.codex` and `.agents` directories
 at the checkout's root (seen once, in the scratch repository, not in the
 checkout); git ignores empty directories, and nothing reads them.
 
-CODEX GETS NO GITHUB TOKEN FROM ITS CALLER. This program removes every name
-in AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES of cold-read-cell-common.py,
+CODEX GETS NO GITHUB TOKEN. This program removes every name in
+AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES of cold-read-cell-common.py,
 GH_TOKEN and GITHUB_TOKEN among them, from the environment it starts codex
 with; an agent-seat's supervisor sets GH_TOKEN to the agent-seat's own GitHub
-token. In their place codex gets the read-only GitHub token, as
-process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token
-there says. Without that token, and with the gh login file denied, the
-reviewer reaches GitHub on ned-box as an anonymous visitor: it can read public
-pages, within GitHub's limits on unauthenticated requests, and cannot read a
-private repository. How gh behaves
-inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
+token. Unlike the task programs, it puts no read-only token in their place.
+With the gh login file denied, the reviewer reaches GitHub on ned-box as an anonymous visitor: it can
+read public pages, within GitHub's limits on unauthenticated requests, and
+cannot read a private repository. How gh behaves inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
 nn-systems/cold-read/cold-read-cell-common.py. This program has no fallback for
 either machine.
 
@@ -234,9 +231,6 @@ RECOGNISED_FAILURE_TEXTS = (
 
 
 def main() -> int:
-    environment, token_note = common.process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token(os.environ)
-    if token_note:
-        print(f"{PROGRAM}: {token_note}", file=sys.stderr)
     return common.run_cell(
         program=PROGRAM, runtime="codex", description=__doc__,
         model_help="explicit Codex model id; overrides the tier mapping",
@@ -245,7 +239,7 @@ def main() -> int:
         invocation_builder=invocation_builder,
         recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
         stage_report_outside_checkout=True,
-        child_environment=environment,
+        child_environment=common.process_environment_copy_without_agent_seat_github_tokens(os.environ),
         pass_cold_read_tier_to_invocation_builder=True,
     )
 

@@ -119,6 +119,13 @@ AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES = (
     "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
 
 
+def process_environment_copy_without_agent_seat_github_tokens(environment) -> dict:
+    """Return a copy of environment without AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES,
+    with no GitHub token in their place."""
+    return {name: value for name, value in environment.items()
+            if name not in AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES}
+
+
 def process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token(
         environment, token_file: pathlib.Path = None) -> tuple:
     """Return (environment copy for a sandboxed model, note or None).
@@ -130,8 +137,7 @@ def process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only
     note says why the model reads GitHub unauthenticated.
     """
     token_file = token_file or SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE
-    copy = {name: value for name, value in environment.items()
-            if name not in AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES}
+    copy = process_environment_copy_without_agent_seat_github_tokens(environment)
     try:
         token = token_file.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeError) as error:
@@ -963,10 +969,6 @@ def run_model_chain(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
                 start_error=str(error))), file=sys.stderr)
             continue
-        # Only the Codex and agy cells give the model the read-only token and its environment.
-        if child_environment is not None:
-            sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(
-                program, completed.stdout, completed.stderr)
         if completed.stderr:
             print(completed.stderr, file=sys.stderr, end="")
         if isinstance(completed, ReviewerRunEndedByResultLine):

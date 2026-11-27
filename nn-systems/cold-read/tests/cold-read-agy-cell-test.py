@@ -74,7 +74,7 @@ WHAT IS PINNED HERE.
     launcher refuses, exit 64, and never starts agy.
 
   - The Google login. A GEMINI_API_KEY the caller set never reaches agy,
-    nor does a GH_TOKEN or GITHUB_TOKEN,
+    nor does any GitHub token: neither the agent-seat's nor the read-only one,
     and a key file at .config/nedsnodes/gemini-api.key in the scratch home
     is not read. When agy prints what the real agy prints with no login, the
     cell exits 1 and its cause line is logged-out, saying how to log agy in.
@@ -223,7 +223,9 @@ if "dump_key" in step:
         json.dumps("GEMINI_API_KEY" in os.environ), encoding="utf-8")
 if "dump_github_tokens" in step:
     pathlib.Path(step["dump_github_tokens"]).write_text(json.dumps(
-        [os.environ.get("GH_TOKEN"), os.environ.get("GITHUB_TOKEN")]), encoding="utf-8")
+        [os.environ.get(name) for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN",
+                                           "GITHUB_ENTERPRISE_TOKEN", "GH_CONFIG_DIR")]),
+        encoding="utf-8")
 if "dump_record_directory_descriptor_count" in step:
     record_directory = os.stat(report_path.parent)
     count = 0
@@ -350,7 +352,7 @@ def run_agy_cell(repository, stub_directory, plan, report_path, *arguments,
     environment.pop("GEMINI_API_KEY", None)
     if gemini_api_key is not None:
         environment["GEMINI_API_KEY"] = gemini_api_key
-    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
         environment.pop(name, None)
         if github_token is not None:
             environment[name] = github_token
@@ -772,28 +774,14 @@ with tempfile.TemporaryDirectory() as scratch:
               f"stderr={result.stderr!r}")
     gemini_api_key_file.unlink()
 
-    repository = build_scratch_repository(scratch)
-    report = report_path_for(repository, "agent-seat-github-tokens")
-    tokens_dump = scratch / "agent-seat-github-tokens.json"
-    result = run_agy_cell(repository, stubs,
-                          {"*": {"report": "STUB AGY REVIEW\n",
-                                 "dump_github_tokens": str(tokens_dump)}},
-                          report, github_token="agent-seat-token")
-    received_tokens = (json.loads(tokens_dump.read_text(encoding="utf-8"))
-                       if tokens_dump.is_file() else "NOT RUN")
-    check("agy is given none of the agent-seat's GitHub tokens, and stderr says it has no "
-          "read-only one",
-          result.returncode == 0 and received_tokens == [None, None]
-          and "cold-read-agy-cell: no read-only GitHub token (" in result.stderr,
-          f"exit {result.returncode}; tokens={received_tokens!r}; stderr={result.stderr!r}")
-
+    # The read-only token file is there, as on ned-box, so a cell that handed it on would show it.
     read_only_token_file = (scratch_home_for(stubs) / ".config" / "nedsnodes-sandboxed-models"
                             / "github-public-repositories-read-only-token")
     read_only_token_file.parent.mkdir(parents=True, exist_ok=True)
     read_only_token_file.write_text("read-only-token\n", encoding="utf-8")
     repository = build_scratch_repository(scratch)
-    report = report_path_for(repository, "read-only-github-token")
-    tokens_dump = scratch / "read-only-github-token.json"
+    report = report_path_for(repository, "no-github-token")
+    tokens_dump = scratch / "no-github-token.json"
     try:
         result = run_agy_cell(repository, stubs,
                               {"*": {"report": "STUB AGY REVIEW\n",
@@ -803,21 +791,11 @@ with tempfile.TemporaryDirectory() as scratch:
         read_only_token_file.unlink()
     received_tokens = (json.loads(tokens_dump.read_text(encoding="utf-8"))
                        if tokens_dump.is_file() else "NOT RUN")
-    check("with a read-only GitHub token file, agy's GH_TOKEN is that token, not the "
-          "agent-seat's, and it has no GITHUB_TOKEN",
-          result.returncode == 0 and received_tokens == ["read-only-token", None]
-          and "no read-only GitHub token" not in result.stderr,
+    check("agy gets no GitHub token: none of the agent-seat's four, nor the read-only one, "
+          "nor GH_CONFIG_DIR",
+          result.returncode == 0 and received_tokens == [None] * 5
+          and "GitHub token" not in result.stderr,
           f"exit {result.returncode}; tokens={received_tokens!r}; stderr={result.stderr!r}")
-
-    repository = build_scratch_repository(scratch)
-    report = report_path_for(repository, "gh-read-only-token-refused")
-    result = run_agy_cell(repository, stubs,
-                          {"*": {"report": "STUB AGY REVIEW\n", "stdout": 'HTTP 401: Bad credentials (https://api.github.com/graphql)\n'}}, report)
-    check("a gh HTTP 401 in agy's output is reported as the read-only token refused, and the "
-          "cell still exits 0",
-          result.returncode == 0
-          and "cold-read-agy-cell: read-only GitHub token refused" in result.stderr,
-          f"exit {result.returncode}; stderr={result.stderr!r}")
 
     # What the real agy 1.4.7 printed on ned-box with ~/.gemini hidden; the URL is shortened.
     agy_logged_out_stderr = (
