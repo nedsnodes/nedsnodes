@@ -181,8 +181,8 @@ the one-turn window.
 
 **R4. Stale base — absorbed (ruled 2026-08-17).** The original rule
 (block first write on a stale base; warn when main moves mid-task; harden
-at push) is superseded by R15's catch-up hook plus the Claude Code
-runtime's own refusal to edit files changed since last read. Residues
+at push) is superseded by R15's catch-up hook plus Claude Code's
+own refusal to edit files changed since last read. Residues
 assigned: starting-stale rides R3's ruling; push-time hardening rides the
 gatekeeper permanently.
 
@@ -403,7 +403,7 @@ real accumulation surfacing — then its first version reports and never
 deletes. Unpromoted work is protected by exactly one net: commit it.
 
 **R23. Agent scratch lives in the scratchpad — satisfied by a Claude Code
-runtime default (ruled 2026-08-17).** The runtime names a per-session
+default (ruled 2026-08-17).** Claude Code names a per-session
 scratchpad outside the repository in every system prompt. A remind-tier
 hook on scratch-shaped writes stays a recorded candidate sharing R26's
 hook-plus-config pattern.
@@ -466,7 +466,7 @@ rulings; listed here to keep the numbering complete.
 | R20 | Handoff preserves structure | default | built, PR [handoff: a multi-line next step survives the channel end to end (R20)](https://github.com/nedsnodes/nedsnodes/pull/108) |
 | R21 | Worktrees reaped when safe | detect + remind | built-live, PR [clean-worktrees: mechanical reaper for finished session worktrees, reporting at every seat launch](https://github.com/nedsnodes/nedsnodes/pull/73); vacancy proven, PR [worktree reaper: prove vacancy before reaping, instead of assuming it](https://github.com/nedsnodes/nedsnodes/pull/100) |
 | R22 | Junk ignored by pattern | default | ruled closed; issue [Worktree file hygiene: classify untracked files so junk is ignored rather than accumulating in search results](https://github.com/nedsnodes/nedsnodes/issues/50) closed |
-| R23 | Scratch lives in the scratchpad | default | satisfied by runtime default |
+| R23 | Scratch lives in the scratchpad | default | satisfied by a Claude Code default |
 | R24 | Surveys fetch before concluding | default + text | mostly encoded: the checkout-freshness Stop hook fetches origin each turn; exact surveys still fetch first |
 | R25 | Dead registrations surfaced | remind (report) | built, PR [clean-worktrees: one report line names dead registrations and the prune command (R25)](https://github.com/nedsnodes/nedsnodes/pull/112) |
 | R26 | New MDs land in canonical locations | remind | ruled-unbuilt, issue [MD-placement guidance as symmetric pre-tool remind hooks on both runtimes (boss-directed design, build deferred)](https://github.com/nedsnodes/nedsnodes/issues/11) |

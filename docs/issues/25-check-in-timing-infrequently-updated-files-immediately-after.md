@@ -4,6 +4,18 @@ issue: "[Check-in timing: infrequently-updated files immediately after update; a
 
 # Check-in timing: infrequently-updated files immediately after update; append-type logs at logical breakpoints
 
+## Outcome: closed as superseded (2026-11-24)
+
+The user approved closing this GHI as superseded in item 23 of 29 of approval-walk claude-md-lines-already-covered-by-hooks-and-skills-approval-walk-2026-11-21. The enforcement this GHI waited for was not built, and three rules now govern these files:
+
+- Specs, docs and code reach main in a pull request, which merge-lane-2 reviews and merges ([CLAUDE.md](https://github.com/nedsnodes/nedsnodes/blob/main/CLAUDE.md)).
+- A session-handoff file stays on its agent-seat's machine and is never committed ([the glossary's session-handoff entry](https://github.com/nedsnodes/nedsnodes/blob/main/docs/nedsnodes-wiki/nedsnodes-glossary.md)).
+- Logs go in the log-store on ned-box, never in the repository ([CLAUDE.md](https://github.com/nedsnodes/nedsnodes/blob/main/CLAUDE.md)).
+
+One gap stays open: no rule on main now says when to commit a spec or code. The GHI-MD on when to push, which the user approved on 2026-10-14 and which is not yet filed, covers pushing only.
+
+The two designs cited below, `fast-handoff-design.md` and `comms-bridge-spec.md`, are no longer on main.
+
 ## Ruling (boss, 2026-07-24)
 
 Check-in through the git-gatekeeper is fast, safe, and reversible, so nothing waits without a reason. Two file classes, two timings:
