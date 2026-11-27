@@ -340,7 +340,10 @@ heading, with today's date, into each such item that has none. Both steps
 refuse, writing nothing, when such an item has no category tag on a line that
 opens with one, more than one, or one not in WALK_CATEGORIES; a waits-on title
 no other item heading has; a first-entered date not written YYYY-MM-DD; or
-when such items wait on each other in a circle. Only a line CLOSE
+when such items wait on each other in a circle. Before it places them, the
+APPROVAL-WALK-WAITING-ITEM-COLD-READ-FAST-READ step rewrites a waits-on line
+naming a title the waiting item's heading had when it was read, and that no
+heading has now, to the heading's title now. Only a line CLOSE
 writes records anything: a line for an answer that took effect, for answers to
 parts, for --moved-on-no-decision, for --already-decided or for --moved-on
 decides its items; a line for a
@@ -1273,6 +1276,9 @@ CATEGORY_DOUBLED = "{item} has more than one category tag: {tags}."
 CATEGORY_UNKNOWN = "{item} has the category tag `{tag}`, which is not one of the four categories."
 WAITS_ON_UNKNOWN = "{item} waits on `{title}`, which is the title of no other item heading."
 WAITS_ON_CIRCLE = "the items {items} wait on each other in a circle, so none of them can come first."
+WAITS_ON_LINE_RENAMED = (
+    "The waiting item's heading title changed from `{old}` to `{new}`, so this step rewrote line {line} of "
+    "{document}, which waited on the old title, to `{waiting}`.")
 FIRST_ENTERED_UNREADABLE = (
     "{item} has the line `{line}`, whose date is not a date written YYYY-MM-DD. This program writes a line "
     f"`{WALK_FIRST_ENTERED_TAG} YYYY-MM-DD` on the day it first finds the item; write in it the day the item first "
@@ -3950,6 +3956,12 @@ def waiting_item_read(arguments, sub_step_of=None):
         top, *([AFTER_FIXES_FLAG] if arguments.after_fixes_reread_only_when_facts_change else []), *rechecked_words)
     # Before walk_document_items, which can write: a missing copy refuses with nothing written.
     earlier = earlier_read_texts_of_item(walk_finder, minutes, value, numbers, total, parser, reads, rerun)
+    document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+    if document.is_file():
+        # Before walk_document_items, which refuses a waits-on line naming a title no heading has.
+        for line in waits_on_lines_renamed_to_rewritten_heading(
+                walk_finder, parser, document, value, numbers, total, earlier):
+            print(line)
     count, _, _, _, _ = walk_document_items(walk_finder, minutes, value, numbers, total, parser,
                                                 WAITING_ITEM_READ_STEP, top)
     total = total or count
@@ -4236,6 +4248,39 @@ def heading_title(walk_finder, line):
     title = re.sub(r"^[*_\s]*items?\s+[\d.]+(?:\s*(?:,|&|\band\b|\bto\b|-|–)\s*[\d.]+)*\s+of\s+\d+\b"
                    r"[*_\s:.\-–—]*", "", title, flags=re.I)
     return squeezed(title.strip(" *_")).lower()
+
+
+def waits_on_lines_renamed_to_rewritten_heading(walk_finder, parser, document, value, numbers, total, earlier):
+    """Rewrite in document each `#approval_walk_item_waits_on` line naming a title that the waiting item's heading
+    had in one of earlier, as earlier_read_texts_of_item returns them, and that no item heading has now, to the
+    heading's title now; return WAITS_ON_LINE_RENAMED for each line rewritten. Without this, rewriting the heading,
+    as when a discussion settles on another option, leaves every item that waits on it unplaceable."""
+    if not earlier:
+        return []
+    text = document.read_text(encoding="utf-8")
+    units = walk_finder.item_unit_spans(text, parser)
+    try:
+        unit = walk_finder.waiting_item_units(document, value, numbers, total, parser, units)[1][0]
+    except walk_finder.UnusableRange:
+        return []  # walk_document_items gives the refusal, naming the minutes' line.
+    lines = text.split("\n")
+    new = item_title(walk_finder, lines[unit[3]])
+    now = {heading_title(walk_finder, lines[other[3]]) for other in units}
+    old = {heading_title(walk_finder, copied.split("\n", 1)[0]): item_title(walk_finder, copied.split("\n", 1)[0])
+           for _, _, copied in earlier}
+    gone = {title: written for title, written in old.items() if title not in now}
+    renamed = []
+    for index, line in enumerate(walk_finder.prose_lines(text, parser)):
+        match = WALK_WAITS_ON_LINE.match(line)
+        if not match or heading_title(walk_finder, "## " + match[1].lstrip("# ")) not in gone:
+            continue
+        lines[index] = lines[index][:match.start(1)] + new + lines[index][match.end(1):]
+        renamed.append(WAITS_ON_LINE_RENAMED.format(
+            old=gone[heading_title(walk_finder, "## " + match[1].lstrip("# "))], new=new,
+            line=index + 1, document=document, waiting=lines[index].strip()))
+    if renamed:
+        document.write_text("\n".join(lines), encoding="utf-8")
+    return renamed
 
 
 def unshown_items_first_entered_stamped(walk_finder, text, units, parser, today):
