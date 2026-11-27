@@ -2584,9 +2584,9 @@ def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_
 
 OWN_WORDS_RULE_OPENING = "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
 APPROVED_SENTENCE = (
-    "When the discussion of an item settles on any option but its recommendation, even its alternative, rewrite the "
-    "item's recommendation as that option and its alternative as the old recommendation, show the revised item, and "
-    "record only an answer given to the revised item.")
+    "When the discussion of an item finds a better way than its recommendation, whether its alternative or an idea "
+    "the item does not name, rewrite the item's recommendation as that way and its alternative as the old "
+    "recommendation, show the revised item, and record only an answer given to the revised item.")
 
 
 def context_lines(result):
@@ -2596,8 +2596,8 @@ def context_lines(result):
 
 def test_settled_line_holds_the_sentence_the_skill_holds_word_for_word():
     check("the hook's line is the condition, then the approved sentence",
-          SETTLED_LINE == ("Act on this line only if the discussion of the waiting approval-walk item settled on an "
-                           "option other than its recommendation: " + APPROVED_SENTENCE), SETTLED_LINE)
+          SETTLED_LINE == ("Act on this line only if the discussion of the waiting approval-walk item found a better "
+                           "way than its recommendation: " + APPROVED_SENTENCE), SETTLED_LINE)
     check("the skill's section Advancing holds the approved sentence, right after its sentence on answers in the "
           "user's own words",
           "ask as the list below says for an unclear reply. " + APPROVED_SENTENCE + " An answer that makes a change"

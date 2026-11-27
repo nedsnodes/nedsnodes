@@ -292,12 +292,12 @@ AA_SKILL_TEXT = (
 )
 # The walk-me-through skill's sentence, word for word; the hook's test checks SKILL.md still holds it.
 DISCUSSION_SETTLED_SKILL_TEXT = (
-    "When the discussion of an item settles on any option but its recommendation, even its alternative, rewrite the "
-    "item's recommendation as that option and its alternative as the old recommendation, show the revised item, and "
-    "record only an answer given to the revised item."
+    "When the discussion of an item finds a better way than its recommendation, whether its alternative or an idea "
+    "the item does not name, rewrite the item's recommendation as that way and its alternative as the old "
+    "recommendation, show the revised item, and record only an answer given to the revised item."
 )
 WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE = (
-    "Act on this line only if the discussion of the waiting approval-walk item settled on an option other than its "
+    "Act on this line only if the discussion of the waiting approval-walk item found a better way than its "
     "recommendation: " + DISCUSSION_SETTLED_SKILL_TEXT)
 WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE = (
     "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
