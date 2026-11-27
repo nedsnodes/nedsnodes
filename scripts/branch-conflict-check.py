@@ -12,16 +12,20 @@ CONFLICTING verdict takes precedence. UNKNOWN is not evidence of a clean merge.
 A CONFLICT report names, for each conflicting file, each commit on the base
 that changed it since the branch forked, the commit's author, which the
 launchers set to the agent-seat that wrote it, and the pull request whose merge
-brought the commit in. It then says how the conflict is cleared. A branch with
-an open pull request has that pull request replaced by a new pull request:
---pull-request names it; otherwise `gh pr list` is asked about --branch, or,
-with neither --head nor --branch, about the current branch. A branch with no
+brought the commit in. It then says how the conflict is cleared. The open
+pull request of a branch is the one --pull-request names; otherwise `gh pr list`
+is asked about --branch, or, with neither --head nor --branch, about the current
+branch. An open pull request that is a draft has the base merged into its
+branch at once. One marked ready has the base merged in only in its next
+fix-round, which the fix-round program starts, so that no push moves its
+frozen-head under a running review. Either is replaced by a new pull request
+only when the merge cannot make both changes work. A branch with no
 open pull request is rebased onto the base when `git ls-remote` finds it
 missing from --fetch-remote, and has the base merged into it when the remote
 has it. A branch missing from the remote whose commits a remote branch already
 holds, such as one cut at a pull request's pushed head, is never rebased: when
 a --fetch-remote branch holding its newest pushed commit has an open pull
-request, that pull request is replaced; otherwise the base is merged into it. Every merge and rebase step acts on
+request, the conflict is cleared as for that pull request; otherwise the base is merged into it. Every merge and rebase step acts on
 HEAD, so when the checked commit is not HEAD, as for a branch pushed while
 another is checked out, the steps first say where to stand: the worktree that
 has the commit's local branch checked out, the pushed branch preferred, else
@@ -606,8 +610,21 @@ def remote_branches_holding_own_commits(base_hash, head_hash, runner=run):
     return [ref for ref in out.split() if not ref.endswith("/HEAD")]
 
 
-def replace_lines(answer_line, pull_request, base, understand, caveat=()):
-    return [answer_line] + list(caveat) + [
+def open_pull_request_draft_state_and_branch(pull_request, runner=run):
+    """Return (whether the open pull request is a draft, its branch, None), or
+    (None, None, why) when gh cannot answer."""
+    status, out = runner(["gh", "pr", "view", str(pull_request), "--json", "isDraft,headRefName"])
+    if status != 0:
+        return None, None, "gh pr view exited %d" % status
+    try:
+        facts = json.loads(out)
+        return bool(facts["isDraft"]), facts["headRefName"], None
+    except (ValueError, KeyError, TypeError):
+        return None, None, "gh pr view printed what this run could not read"
+
+
+def replace_steps(pull_request, base, understand):
+    return [
         "If %s already holds this branch's work, close pull request #%s with a "
         "comment naming the commit or pull request on %s that holds it, and stop."
         % (base, pull_request, base),
@@ -620,6 +637,66 @@ def replace_lines(answer_line, pull_request, base, understand, caveat=()):
         "followed by pull request #%s's URL, then close pull request #%s with a "
         "comment naming the new one." % (pull_request, pull_request),
     ]
+
+
+def give_up_lines(command, base):
+    return [
+        "If you cannot make both changes work, run git %s --abort, which puts the "
+        "branch back as it was, and ask the agent-seat the MAIN'S SIDE line names, "
+        "with SendMessage, naming the file and what you could not reconcile."
+        % command,
+        "Run python3 scripts/run-all-test-suites.py "
+        "--only-suites-whose-recorded-inputs-changed-since %s." % base,
+        "If a suite fails, fix the branch until every suite passes; do not push "
+        "it before then.",
+    ]
+
+
+def open_pull_request_lines(pull_request, base, remote, head_hash, understand,
+                            caveat=(), runner=run):
+    """Return the lines that clear the conflict of an open pull request: a draft's
+    hand-merge now, a ready one's in its next fix-round, a replacement only when
+    the merge cannot make both changes work."""
+    is_draft, pull_request_branch, why = open_pull_request_draft_state_and_branch(
+        pull_request, runner)
+    if is_draft is None:
+        return [
+            "ANSWER: none -- pull request #%s is open, but whether it is a draft "
+            "could not be looked up (%s), so this run cannot say whether %s is "
+            "merged into it now or in its next fix-round." % (pull_request, why, base),
+            "If gh is logged out or cannot reach GitHub, fix that, then rerun.",
+        ]
+    replace = ["If even after asking you cannot make both changes work, replace "
+               "pull request #%s instead:" % pull_request] + replace_steps(
+                   pull_request, base, understand)
+    if not is_draft:
+        return [
+            "ANSWER: merge-main-at-next-fix-round -- pull request #%s is marked ready, so %s is merged "
+            "into it only in its next fix-round, as that round's first commit, so "
+            "that no push moves its frozen-head under a running review."
+            % (pull_request, base),
+        ] + list(caveat) + [
+            "Push nothing to its branch %s outside that round." % pull_request_branch,
+            "The fix-round program, python3 scripts/pull-request-fix-round-author-"
+            "brief-from-blocking-findings-and-one-commit-every-finding-answered-"
+            "check.py %s, starts that merge once a merge-lane's review of the "
+            "pull request requests changes, which its review does for this "
+            "conflict even when it finds nothing else." % pull_request,
+            "If the pull request is already approved, ask merge-lane-2 with "
+            "SendMessage for a review of its head that requests changes for this "
+            "conflict.",
+        ] + replace
+    return [
+        "ANSWER: merge -- pull request #%s is a draft, so %s is merged into its "
+        "branch %s at once; the branch is never rebased or force-pushed."
+        % (pull_request, base, pull_request_branch),
+    ] + list(caveat) + checked_commit_not_head_worktree_or_git_switch_instruction_lines(
+        head_hash, pull_request_branch, runner) + understand + [
+        "Run git merge %s, resolving each conflict so that both changes work." % base,
+    ] + give_up_lines("merge", base) + [
+        "Push it with git push %s HEAD:%s, without --force, then carry on with "
+        "what you were doing." % (remote, pull_request_branch),
+    ] + replace
 
 
 def checked_commit_not_head_worktree_or_git_switch_instruction_lines(
@@ -673,8 +750,7 @@ def clearing_lines(pull_request, branch, head, base, remote, head_hash, base_has
         if branch is None:
             return [
                 "ANSWER: none -- this run was given no branch to look up an open pull "
-                "request for, so it cannot say whether the branch is rebased or its "
-                "pull request replaced.",
+                "request for, so it cannot say how the conflict is cleared.",
                 "Rerun with --pull-request <number> if the branch has an open pull "
                 "request, or with --branch <branch name> otherwise.",
             ]
@@ -682,8 +758,8 @@ def clearing_lines(pull_request, branch, head, base, remote, head_hash, base_has
         if pull_request is None:
             return [
                 "ANSWER: none -- whether branch %s has an open pull request could not "
-                "be looked up (%s), so this run cannot say whether it is rebased or "
-                "its pull request replaced." % (branch, why),
+                "be looked up (%s), so this run cannot say how the conflict is "
+                "cleared." % (branch, why),
                 "If gh is logged out or cannot reach GitHub, fix that, then rerun.",
             ]
     understand = [
@@ -694,10 +770,8 @@ def clearing_lines(pull_request, branch, head, base, remote, head_hash, base_has
         "pull request on that line." % base,
     ]
     if pull_request is not False:
-        return replace_lines(
-            "ANSWER: replace -- pull request #%s is open, so it is replaced by a new "
-            "pull request; its branch is never rebased, merged into or force-pushed."
-            % pull_request, pull_request, base, understand)
+        return open_pull_request_lines(pull_request, base, remote, head_hash,
+                                       understand, runner=runner)
     on_origin, why = branch_on_remote(branch, remote, runner)
     if on_origin is None:
         return [
@@ -734,30 +808,19 @@ def clearing_lines(pull_request, branch, head, base, remote, head_hash, base_has
                     "If gh is logged out or cannot reach GitHub, fix that, then rerun.",
                 ]
             if holder_pull_request is not False:
-                return replace_lines(
-                    "ANSWER: replace -- branch %s has no open pull request, but its "
-                    "commits are already on %s's branch %s, whose pull request #%s "
-                    "is open, so pull request #%s is replaced by a new pull request; "
-                    "neither branch is rebased, merged into or force-pushed."
-                    % (branch, remote, holder_branch, holder_pull_request,
-                       holder_pull_request),
-                    holder_pull_request, base, understand, [
+                return open_pull_request_lines(
+                    holder_pull_request, base, remote, head_hash, understand, [
+                        "Branch %s has no open pull request, but its commits are "
+                        "already on %s's branch %s, whose pull request #%s is open, "
+                        "so the conflict is cleared as for that pull request."
+                        % (branch, remote, holder_branch, holder_pull_request),
                         "If branch %s was not cut to fix pull request #%s, do not "
-                        "close or replace that pull request; ask its author with "
-                        "SendMessage how to clear the conflict."
-                        % (branch, holder_pull_request)])
+                        "merge into, close or replace that pull request; ask its "
+                        "author with SendMessage how to clear the conflict."
+                        % (branch, holder_pull_request)], runner)
     start = checked_commit_not_head_worktree_or_git_switch_instruction_lines(
         head_hash, branch, runner)
-    give_up = [
-        "If you cannot make both changes work, run git %s --abort, which puts the "
-        "branch back as it was, and ask the agent-seat the MAIN'S SIDE line names, "
-        "with SendMessage, naming the file and what you could not reconcile."
-        % ("merge" if on_origin or holders else "rebase"),
-        "Run python3 scripts/run-all-test-suites.py "
-        "--only-suites-whose-recorded-inputs-changed-since %s." % base,
-        "If a suite fails, fix the branch until every suite passes; do not push "
-        "it before then.",
-    ]
+    give_up = give_up_lines("merge" if on_origin or holders else "rebase", base)
     if on_origin:
         return [
             "ANSWER: merge -- branch %s has no open pull request and %s already has "

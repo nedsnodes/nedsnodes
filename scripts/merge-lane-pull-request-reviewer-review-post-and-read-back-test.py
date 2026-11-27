@@ -5,7 +5,7 @@ Runs the program with HOME set to a scratch directory holding a mac-claude
 token file and a ned-review-merge token file, and a stand-in gh first on PATH,
 so no case reaches GitHub. The
 stand-in gh logs each call, with the GH_TOKEN it was given and its standard
-input, answers the author lookup with FAKE_GH_AUTHOR, answers the pull
+input, answers the author lookup with FAKE_GH_AUTHOR, and a draft when FAKE_GH_DRAFT is 1, answers the pull
 request's files with FAKE_GH_FILES or one page holding scripts/thing.py with
 new-side lines 1 to 4 in its diff, answers the post with
 review id 42, and answers the read-back with the event's state and the posted
@@ -77,7 +77,8 @@ if os.environ.get("FAKE_GH_FAILS") == call:
 if call.startswith("gate-"):
     print(os.environ.get("FAKE_GH_" + call.upper().replace("-", "_"), "[]"))
 elif call == "author":
-    print(json.dumps({"user": {"login": os.environ.get("FAKE_GH_AUTHOR", "an author")}}))
+    print(json.dumps({"user": {"login": os.environ.get("FAKE_GH_AUTHOR", "an author")},
+                      "draft": os.environ.get("FAKE_GH_DRAFT") == "1"}))
 elif call == "files":
     print(os.environ.get("FAKE_GH_FILES", json.dumps(
         [[{"filename": "scripts/thing.py", "patch": "@@ -1,2 +1,4 @@\\n a\\n+b\\n+c\\n d"}]])))
@@ -128,14 +129,15 @@ def running(pid):
 
 def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", "7", "--head-commit", HEAD),
                 interrupt=None, merge_token=MERGE_TOKEN, codex_runs=None, review_plan=None, findings_record_match=None,
-                **fake_gh_environment):
+                conflict_check=(0, "VERDICT: CLEAN -- no conflict.\n"), **fake_gh_environment):
     """Run the program; with interrupt, a signal, send it once the stand-in gh is hanging. For merge-lane-2's
     review, codex_runs lists the (head, exit code, report text or None) Codex run records it finds, by
     default one clean run on HEAD, and review_plan is the (exit code, stdout, stderr) of a stand-in review
     plan program, which by default fails, so that a case that should not read the plan shows it;
     findings_record_match maps the subcommands match and add of a stand-in findings record program to the
     (exit code, stdout, stderr) each gives, and each one not given fails; run.match_calls lists the
-    (arguments, standard input as JSON) of each of its runs."""
+    (arguments, standard input as JSON) of each of its runs; conflict_check is the (exit code, stdout) of a stand-in
+    branch conflict check, by default clean, and run.conflict_check_calls lists the arguments of each of its runs."""
     case = Path(tempfile.mkdtemp(dir=scratch))
     home, state, fake_gh_directory = case / "home", case / "state", case / "fake-gh"
     for directory in (home, state, fake_gh_directory):
@@ -165,7 +167,13 @@ def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", 
             f"    log.write(json.dumps([sys.argv[1:], json.loads(sys.stdin.read())]) + '\\n')\n"
             f"code, out, err = {replies!r}[sys.argv[1]]\n"
             f"sys.stdout.write(out)\nsys.stderr.write(err)\nsys.exit(code)\n")
-        arguments = (*arguments, "--merge-lane-worktrees-and-outputs-directory", str(case / "helpers"),
+        conflict_program = case / "stand-in-branch-conflict-check.py"
+        conflict_program.write_text(
+            f"import json, sys\nwith open({str(case / 'conflict-check-calls.jsonl')!r}, 'a') as log:\n"
+            f"    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            f"sys.stdout.write({conflict_check[1]!r})\nsys.exit({conflict_check[0]})\n")
+        arguments = (*arguments, "--branch-conflict-check-program", str(conflict_program),
+                     "--merge-lane-worktrees-and-outputs-directory", str(case / "helpers"),
                      "--pull-request-review-plan-program", str(plan_program),
                      "--findings-record-codex-finding-match-program", str(match_program))
         for index, (run_head, exit_code, report) in enumerate(
@@ -205,6 +213,9 @@ def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", 
     match_calls_file = case / "match-calls.jsonl"
     run.match_calls = ([json.loads(line) for line in match_calls_file.read_text().splitlines()]
                        if match_calls_file.exists() else [])
+    conflict_calls_file = case / "conflict-check-calls.jsonl"
+    run.conflict_check_calls = ([json.loads(line) for line in conflict_calls_file.read_text().splitlines()]
+                                if conflict_calls_file.exists() else [])
     time.sleep(0.2 if interrupt is not None else 0)
     run.gh_left_running = hanging.exists() and running(int(hanging.read_text()))
     return run
@@ -1230,6 +1241,54 @@ def marks_check(review_as_github_holds_it, comments):
     return done.returncode, done.stdout, done.stderr
 
 
+CONFLICT_REPORT = "VERDICT: CONFLICT -- abc conflicts with origin/main.\nANSWER: merge-main-at-next-fix-round -- the stand-in's answer.\n"
+
+
+def conflict_alone_review_cases(scratch):
+    """merge-lane-2's approval of a pull request marked ready that conflicts with main is posted as a request for
+    changes for the conflict alone, which the fix-round program reads as a round with no finding."""
+    posting = load_posting_program()
+    result = run_program(scratch, review("APPROVE", comments=[finding(3, "fix-next")]),
+                         arguments=MERGE_LANE_ARGUMENTS, conflict_check=(1, CONFLICT_REPORT))
+    check("conflict alone: an approval of a ready pull request that conflicts with main is posted as "
+          "REQUEST_CHANGES with Blocking: 0, the merge-lane line and the conflict paragraph, after asking the "
+          "conflict check about the pull request",
+          result.code == 0 and result.posted is not None and result.posted["event"] == "REQUEST_CHANGES"
+          and result.posted["body"].startswith(
+              "REQUEST_CHANGES\n\n**Blocking: 0**\n\n**Merge-lane: merge-lane-2**\n\n"
+              + posting.MAIN_CONFLICT_ONLY_CHANGES_REQUESTED_REVIEW_BODY_PARAGRAPH + "\n\nThe review body.")
+          and result.conflict_check_calls == [["--pull-request", "7"]], result.detail)
+    fix_round = load_fix_round_program()
+    found = fix_round_blocking_findings(fix_round, [result.posted])
+    check("conflict alone: the fix-round program reads the posted review as a round with no finding",
+          found == [], str(found))
+    marks = posting.posted_verdict_review_missing_review_posting_program_marks_reason_or_none(
+        {"state": "CHANGES_REQUESTED", "body": result.posted["body"]}, result.posted["comments"])
+    check("conflict alone: the posted review has the marks the merge gate checks for", marks is None, str(marks))
+
+    result = run_program(scratch, review("APPROVE"), arguments=MERGE_LANE_ARGUMENTS,
+                         conflict_check=(1, CONFLICT_REPORT), FAKE_GH_DRAFT="1")
+    check("conflict alone: a draft is approved as the file says, without asking the conflict check",
+          result.code == 0 and result.posted["event"] == "APPROVE" and not result.conflict_check_calls,
+          result.detail)
+    result = run_program(scratch, review("APPROVE"), arguments=MERGE_LANE_ARGUMENTS)
+    check("conflict alone: a ready pull request with no conflict is approved",
+          result.code == 0 and result.posted["event"] == "APPROVE"
+          and result.posted["body"] == "APPROVE\n\nThe review body.", result.detail)
+    result = run_program(scratch, review("REQUEST_CHANGES", comments=[finding(2, "must-fix-now")]),
+                         arguments=MERGE_LANE_ARGUMENTS, conflict_check=(1, CONFLICT_REPORT))
+    check("conflict alone: a request for changes with a blocking finding is posted as it is, without asking "
+          "the conflict check", result.code == 0 and "**Blocking: 1**" in result.posted["body"]
+          and posting.MAIN_CONFLICT_ONLY_CHANGES_REQUESTED_REVIEW_BODY_PARAGRAPH not in result.posted["body"]
+          and not result.conflict_check_calls, result.detail)
+    for label, answer in (("exits 2", (2, "UNFETCHED: git fetch origin failed.\n")),
+                          ("exits 1 with no conflict verdict", (1, "Traceback: it crashed\n"))):
+        result = run_program(scratch, review("APPROVE"), arguments=MERGE_LANE_ARGUMENTS, conflict_check=answer)
+        check(f"conflict alone: a conflict check that {label} posts nothing, exits 2 and quotes it",
+              result.code == 2 and result.posted is None and "is not known" in result.stderr
+              and answer[1].strip() in result.stderr, result.detail)
+
+
 def verdict_review_marks_cases(scratch):
     """The marks the merge gate requires of merge-lane-2's latest verdict review are the ones this program
     writes: each review it posts passes the check, and a review posted any other way fails it."""
@@ -1311,6 +1370,7 @@ def main():
         finding_fact_line_count_cases(scratch)
         merge_account_comment_review_cases(scratch)
         verdict_review_marks_cases(scratch)
+        conflict_alone_review_cases(scratch)
         comment = {"path": "scripts/thing.py", "line": 3, "body": "A finding."}
         result = run_program(scratch, review("APPROVE", comments=[comment]),
                              FAKE_GH_AUTHOR="ned-review-merge")

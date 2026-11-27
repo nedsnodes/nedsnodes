@@ -50,7 +50,7 @@ SHORT_COMMIT_LENGTH = 12
 # Git runs a hook from the top of the worktree being pushed, so scripts/ is the worktree's.
 PRE_PUSH_CHECK_FROM_WORKTREE_RUN_BY_HAND_COMMAND = "python3 scripts/%s %s"
 PRE_PUSH_CHECK_FROM_REFERENCE_CHECKOUT_RUN_BY_HAND_COMMAND = "python3 %s %s"
-# --branch lets the hand check say whether the branch is rebased or its pull request replaced.
+# --branch lets the hand check say how the branch's conflict is cleared.
 CONFLICT_CHECK_ARGUMENTS = "--head %s --branch %s"
 REVERT_CHECK_ARGUMENTS = "--head %s"
 PRE_PUSH_CHECK_SCRIPT_MISSING_FROM_WORKTREE_AND_REFERENCE_CHECKOUT_TEXT = ("no copy of the check exists to run, as your worktree has no scripts/%s "
@@ -130,7 +130,7 @@ class CheckResult:
 
 
 def run_conflict_check(check_path, local_object_id, seconds_left, branch):
-    # --branch lets the check say whether the branch is rebased or its pull request replaced.
+    # --branch lets the check say how the branch's conflict is cleared.
     return run_check(check_path, local_object_id, seconds_left, CHECK_EXIT_CONFLICT,
                      CONFLICT_VERDICT_PREFIX, "conflict", ["--branch", branch])
 
