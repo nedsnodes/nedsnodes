@@ -79,6 +79,15 @@ Lines are recognised by how they open, as handlers have written them:
 which rule 4 counts attempts again. An entry runs from its "## E<n>" heading to
 the next heading of level one or two. New lines go after the entry's last line that is not blank.
 
+Each entry a subcommand marks as needing the user, needs-the-user's own and
+those attempt and second-agent-verdict mark, gets a user-alert, written once
+the file is replaced, naming the agent-seat whose agent-home the
+handoff-supervisor launched this agent-session in, as
+HANDOFF_SUPERVISOR_WORKING_DIRECTORY_ENVIRONMENT_VARIABLE names it; with no
+agent-home there, such as a run through ssh, the alert names no agent-seat,
+and goes to USER_ALERT_AGENT_SEAT_WHEN_ALERT_NAMES_NONE. Refused before any
+change when that agent-seat's agent-home is not on this machine.
+
 Every subcommand but show and user-ruling is refused on an entry whose
 State line is not "State: open": a settled entry is never changed, and an
 entry that needs the user takes only user-ruling.
@@ -92,7 +101,9 @@ Does not handle: two handlers changing one file at the same time (that
 design's open question 2): the file is read, changed and replaced whole, so the later
 writer's replacement drops the earlier writer's lines.
 
-Failures: a value holding a line break, a refused change, a missing file or entry, a file that cannot be
+Failures: a user-alert that cannot be written, after the file was changed, is
+printed to stderr as FAILED: with the entries left without one and what to do,
+and the program exits 1. Otherwise, a value holding a line break, a refused change, a missing file or entry, a file that cannot be
 read or written, an upstream entry's file that cannot be read, another file of the GHI-MD that cannot be read, a log-store directory that cannot be listed, or a second agent that cannot be run, exits nonzero, runs past
 SECOND_AGENT_TIMEOUT_SECONDS or ends its reply with a line other than
 "VERDICT: agrees" or "VERDICT: disagrees", is printed to stderr with what to
@@ -126,6 +137,20 @@ command_line_prefix = _load(
     "nn-systems/general-tools/claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
 
 ghi_issue_write = _load("ghi_issue_write", "scripts/ghi-issue-write.py")
+
+user_alerts = _load(
+    "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common",
+    "nn-systems/general-tools/user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
+
+launched_agent_session = _load(
+    "handoff_supervisor_launched_agent_session_environment_variable_names_common",
+    "nn-systems/handoff/handoff-supervisor-launched-agent-session-environment-variable-names-common.py")
+HANDOFF_SUPERVISOR_WORKING_DIRECTORY_ENVIRONMENT_VARIABLE = (
+    launched_agent_session.HANDOFF_SUPERVISOR_WORKING_DIRECTORY_ENVIRONMENT_VARIABLE)
+USER_ALERT_AGENT_SEAT_WHEN_ALERT_NAMES_NONE = user_alerts.USER_ALERT_AGENT_SEAT_WHEN_ALERT_NAMES_NONE
+# The subcommands that can mark an entry as needing the user.
+MARKING_COMMANDS = ("attempt", "second-agent-verdict", "needs-the-user")
+INSTRUCTIONS = "docs/agents/queue/proposed-improvements-or-changes-file-reviewer-entries-settling-subagent-instructions.md"
 
 SECOND_AGENT_PROMPT = "docs/agents/queue/proposed-improvements-or-changes-file-entry-not-worth-doing-second-agent-prompt.md"
 SECOND_AGENT_MODEL = "claude-opus-5-5"
@@ -538,6 +563,38 @@ def show(lines) -> str:
     return "\n".join(out) or "The file has no entries."
 
 
+def marking_agent_seat():
+    """The agent-seat whose handler marks entries here: the name of the agent-home this agent-session was launched
+    in, or None when it was launched in no agent-home."""
+    launched_in = os.environ.get(HANDOFF_SUPERVISOR_WORKING_DIRECTORY_ENVIRONMENT_VARIABLE, "")
+    if not launched_in or Path(launched_in).parent != Path.home() / user_alerts.AGENTS_RELATIVE_TO_HOME:
+        return None
+    seat = Path(launched_in).name
+    if not user_alerts.agent_home_on_ned_box_found(seat):
+        raise Refused(
+            f"This agent-session was launched in {launched_in}, which is not an agent-home on this machine, so no user-alert could name agent-seat {seat} and nothing was changed.\n"
+            f"Run this program on ned-box, from an agent-session of an agent-seat whose agent-home is there.")
+    return seat
+
+
+def user_alerts_write(path: Path, lines, entries, seat):
+    """Write one user-alert for each entry marked; return the entries whose alert could not be written, with why."""
+    spans = entry_spans(lines)
+    unwritten = []
+    for entry in entries:
+        state = state_line(entry_lines(lines, spans, entry))
+        try:
+            user_alerts.user_alert_write_to_pending(
+                f"Entry {entry} of a proposed-improvements-or-changes-file needs the user",
+                f"{LOG_STORE_HOST}:{path.resolve()}, entry {entry}: {state}",
+                f"The agent-seat named here brings the entry to the user in its approval-walk, as section 5 of {INSTRUCTIONS} says, "
+                f"and records his ruling with the user-ruling subcommand of {Path(__file__).resolve().relative_to(REPOSITORY_ROOT)}.",
+                claiming_agent_seat_name=seat)
+        except (OSError, ValueError) as failure:
+            unwritten.append((entry, failure))
+    return unwritten
+
+
 def write_replacing(path: Path, lines, ending: str):
     descriptor, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
     try:
@@ -637,6 +694,8 @@ def main(argv=None) -> int:
                 print(f"{LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}\n{show(text.splitlines())}\n")
             return 0
         path = local_path(arguments.file, argv)
+        seat = marking_agent_seat() if arguments.command in MARKING_COMMANDS else None
+        marked = []
         text = path.read_text(encoding="utf-8")
         ending = "\n" if text.endswith("\n") else ""
         lines = text.splitlines()
@@ -657,6 +716,7 @@ def main(argv=None) -> int:
             lines, marked_for_the_user = add_verdict(
                 text.splitlines(), arguments.entry, agrees,
                 f"{SECOND_AGENT_MODEL} run through `claude -p` for {arguments.by}", arguments.by)
+            marked = [arguments.entry] if marked_for_the_user else []
         elif arguments.command == "settle" and arguments.settled_by is not None:
             lines = settle_by_upstream_entry(lines, path, arguments.file, arguments.entry, arguments.by,
                                              arguments.settled_by, argv)
@@ -666,6 +726,7 @@ def main(argv=None) -> int:
             lines = record_user_ruling(lines, arguments.entry, arguments.where, arguments.words, arguments.state, arguments.by)
         else:
             lines = needs_the_user(lines, arguments.entry, arguments.because, arguments.by, arguments.why)
+            marked = [arguments.entry]
         write_replacing(path, lines, ending)
     except Refused as refusal:
         print(f"REFUSED: {refusal}", file=sys.stderr)
@@ -680,6 +741,7 @@ def main(argv=None) -> int:
         print(f"FAILED: {arguments.file} could not be read or written, and was left as it was: {failure}\n"
               "If the path is wrong, run again with the path the file is at.", file=sys.stderr)
         return 1
+    unwritten = user_alerts_write(path, lines, marked, seat)
     print(show(lines))
     if arguments.command == "attempt":
         spans = entry_spans(lines)
@@ -697,6 +759,12 @@ def main(argv=None) -> int:
     if arguments.command == "second-agent-verdict" and marked_for_the_user:
         print(f"The second agent disagreed on attempt {MAXIMUM_ATTEMPTS} of entry {arguments.entry}, the last attempt rule 4 of GHI 1132 allows, so the entry was marked as needing the user.\n"
               "In your report, say what the user must decide, from the second agent's reasons above.")
+    if unwritten:
+        for entry, failure in unwritten:
+            print(f"FAILED: entry {entry} was marked as needing the user, but no user-alert was written for it: {failure}", file=sys.stderr)
+        print("The file was changed as printed above. Put this in your report, so that the agent-seat that dispatched you brings each such entry to the user itself.",
+              file=sys.stderr)
+        return 1
     return 0
 
 

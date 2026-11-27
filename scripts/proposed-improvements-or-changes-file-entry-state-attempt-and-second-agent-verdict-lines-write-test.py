@@ -22,6 +22,17 @@ from pathlib import Path
 from unittest import mock
 
 HERE = Path(__file__).resolve().parent
+
+# Alerts go under a temporary home, so no case writes into the user's own pending/ alerts.
+REAL_PENDING_ALERTS = Path.home() / ".local/state/nedsnodes/user-alerts/pending"
+REAL_PENDING_BEFORE = sorted(os.listdir(REAL_PENDING_ALERTS)) if REAL_PENDING_ALERTS.is_dir() else []
+TEST_HOME = Path(tempfile.mkdtemp())
+os.environ["HOME"] = str(TEST_HOME)
+TEST_SEAT = "test-seat"
+(TEST_HOME / "agents" / TEST_SEAT / ".git").mkdir(parents=True)
+LAUNCHED_IN = "NEDSNODES_HANDOFF_SUPERVISOR_WORKING_DIRECTORY"
+os.environ[LAUNCHED_IN] = str(TEST_HOME / "agents" / TEST_SEAT)
+PENDING_ALERTS = TEST_HOME / ".local/state/nedsnodes/user-alerts/pending"
 SPEC = importlib.util.spec_from_file_location(
     "entry_lines_write",
     HERE / "proposed-improvements-or-changes-file-entry-state-attempt-and-second-agent-verdict-lines-write.py")
@@ -101,6 +112,15 @@ def fresh(text=FILE_TEXT):
     path = directory / "x-proposed-improvements-or-changes-ghi-guide-agent-2026-11-10.md"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def pending_alerts():
+    """The pending alerts, oldest first, each removed once read."""
+    alerts = []
+    for alert_path in sorted(PENDING_ALERTS.glob("*.json")) if PENDING_ALERTS.is_dir() else []:
+        alerts.append(json.loads(alert_path.read_text(encoding="utf-8")))
+        alert_path.unlink()
+    return alerts
 
 
 def entry(path, name):
@@ -649,9 +669,71 @@ case("a failed write exits 1", code == 1 and "disk full" in err)
 case("a failed write leaves the file as it was", path.read_text(encoding="utf-8") == FILE_TEXT)
 case("a failed write leaves no temporary file", sorted(os.listdir(path.parent)) == [path.name])
 
+# Each entry marked as needing the user gets a user-alert naming the agent-seat of the agent-home this
+# agent-session was launched in; a change that marks none writes none.
+pending_alerts()
+path = fresh()
+code, _, _ = run(path, "needs-the-user", "E2", "--because", "user-ruling-change", "--by", "h", "--why", "decide y")
+alerts = pending_alerts()
+case("needs-the-user writes one user-alert naming the agent-seat", code == 0 and len(alerts) == 1
+     and alerts[0]["claiming_agent_seat_name"] == TEST_SEAT)
+case("the user-alert names the file, the entry and its State line", alerts[0]["alert_text"] == (
+    f"nedlern@ned-box:{path.resolve()}, entry E2: State: needs the user — h, 2026-11-10T12:00Z: "
+    "a question whether a user-ruling should change; decide y") and "E2" in alerts[0]["title"])
+path = fresh()
+for number in range(3):
+    code, _, _ = run(path, "attempt", "E1", "E2", "--by", "h", "--found", f"one cause {number}", "--outcome", "left-open", "--source", "PR 5")
+alerts = pending_alerts()
+case("a third left-open attempt on two entries writes a user-alert for each",
+     code == 0 and sorted(alert["alert_text"].split(", entry ")[1][:2] for alert in alerts) == ["E1", "E2"])
+path = fresh()
+for number in range(3):
+    run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--outcome", "not-worth-doing", "--source", "PR 5")
+    second_agent_answers(DISAGREES)
+    run(path, *VERDICT)
+alerts = pending_alerts()
+case("a disagreement on the third attempt writes one user-alert", len(alerts) == 1 and "entry E1: State: needs the user" in alerts[0]["alert_text"])
+path = fresh(UPSTREAM_TEXT)
+run(path, "attempt", "E2", "--by", "h", "--found", "x", "--outcome", "left-open", "--source", "PR 5")
+run(path, "settle", "E2", "--kind", "done", "--by", "h", "--how", "PR 8")
+case("an attempt and a settle that mark nothing write no user-alert", pending_alerts() == [])
+
+# Launched in no agent-home, such as through ssh, the alert names no agent-seat; launched in a directory of
+# ~/agents that is no agent-home, the change is refused before anything is written.
+for name, launched_in in (("with no launch directory", None), ("launched outside ~/agents", str(TEST_HOME / "Projects" / "x"))):
+    path = fresh()
+    with mock.patch.dict(os.environ, {LAUNCHED_IN: launched_in} if launched_in else {}):
+        if launched_in is None:
+            os.environ.pop(LAUNCHED_IN)
+        code, _, _ = run(path, "needs-the-user", "E2", "--because", "user-ruling-change", "--by", "h", "--why", "y")
+    alerts = pending_alerts()
+    case(f"{name}, the user-alert names no agent-seat",
+         code == 0 and len(alerts) == 1 and alerts[0]["claiming_agent_seat_name"] is None)
+path = fresh()
+with mock.patch.dict(os.environ, {LAUNCHED_IN: str(TEST_HOME / "agents" / "no-such-seat")}):
+    code, _, err = run(path, "needs-the-user", "E2", "--because", "user-ruling-change", "--by", "h", "--why", "y")
+case("launched in a directory of ~/agents that is no agent-home, needs-the-user is refused and changes nothing",
+     code == 1 and "REFUSED:" in err and "not an agent-home" in err and path.read_text(encoding="utf-8") == FILE_TEXT
+     and pending_alerts() == [])
+with mock.patch.dict(os.environ, {LAUNCHED_IN: str(TEST_HOME / "agents" / "no-such-seat")}):
+    code, _, _ = run(path, "settle", "E2", "--kind", "done", "--by", "h", "--how", "PR 8")
+case("a settle, which marks no entry, does not need an agent-home", code == 0)
+
+# A user-alert that cannot be written fails after the file is changed, and says so.
+path = fresh()
+with mock.patch.object(PROGRAM.user_alerts, "user_alert_write_to_pending", side_effect=OSError("disk full")):
+    code, out, err = run(path, "needs-the-user", "E2", "--because", "user-ruling-change", "--by", "h", "--why", "y")
+case("a user-alert that cannot be written exits 1 with FAILED: naming the entry", code == 1 and "FAILED: entry E2 was marked" in err
+     and "disk full" in err and "brings each such entry to the user itself" in err)
+case("a user-alert that cannot be written leaves the entry marked", entry(path, "E2")[-1].startswith("State: needs the user"))
+
 # The second agent's prompt file exists.
 root = HERE.parent
 case("the second agent's prompt exists", (root / PROGRAM.SECOND_AGENT_PROMPT).is_file())
 
+# Other programs may write real alerts meanwhile, so only an alert of this program's counts.
+case("no case wrote into the user's own pending alerts", not any(
+    "proposed-improvements-or-changes-file needs the user" in (REAL_PENDING_ALERTS / name).read_text(encoding="utf-8")
+    for name in (set(os.listdir(REAL_PENDING_ALERTS)) - set(REAL_PENDING_BEFORE) if REAL_PENDING_ALERTS.is_dir() else ())))
 print(f"{case_count - len(failures)} of {case_count} cases passed")
 raise SystemExit(1 if failures else 0)
