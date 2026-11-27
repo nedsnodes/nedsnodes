@@ -26,7 +26,8 @@ Usage:
                 ceiling, and otherwise the machine's core count, or the number
                 of suites to run when that is fewer
   --log-dir     where each suite's output and the report are written;
-                default, a new directory under the system temp directory,
+                default, a new directory under TMPDIR when it is set, and
+                otherwise under ~/.cache/run-all-test-suites-temporary-log-directories,
                 on Linux removed two days after its run ends. Two runs cannot share
                 one --log-dir: the second exits 3
   --lock-file   default ~/.claude/.run-all-test-suites.lock. Where each suite
@@ -969,6 +970,9 @@ DEFAULT_LOCK_FILE = Path.home() / ".claude" / ".run-all-test-suites.lock"
 RUN_RECORDS_DIRECTORY_SUFFIX = ".runs"
 # Long enough for whoever reads a run's report and failed-suite logs to read them.
 FINISHED_RUN_LOG_RETENTION_SECONDS = 2 * 24 * 3600
+# On disk, because ned-box's /tmp is a tmpfs, where every retained log directory holds RAM.
+TEMPORARY_LOG_DIRECTORIES_PARENT_WHEN_TMPDIR_IS_UNSET = (
+    Path.home() / ".cache" / "run-all-test-suites-temporary-log-directories")
 LOG_DIRECTORY_LOCK_FILE_NAME = ".run-all-test-suites-log-directory.lock"
 REPORT_FILE_NAME = "test-run-report.txt"
 SUITES_RUN_AT_ONCE_WHEN_CORE_COUNT_UNKNOWN = 4
@@ -2207,6 +2211,12 @@ def remove_old_suite_temporary_directories_left_by_killed_runners(
     return removed, failures
 
 
+def temporary_log_directories_parent_from_tmpdir_or_home_cache():
+    """Where a run given no --log-dir makes its log directory."""
+    return (Path(tempfile.gettempdir()) if os.environ.get("TMPDIR")
+            else TEMPORARY_LOG_DIRECTORIES_PARENT_WHEN_TMPDIR_IS_UNSET)
+
+
 def clean_up_after_earlier_runs(lock_file, previous_holder, platform=None):
     """Remove what earlier runs left, once nothing of theirs still runs; return report lines.
 
@@ -2229,12 +2239,16 @@ def clean_up_after_earlier_runs(lock_file, previous_holder, platform=None):
     runs_dir = run_records_directory_for_lock_file(lock_file)
     lines += remove_leftovers_of_ended_runs_named_in_run_records(runs_dir)
     if Path(lock_file) == DEFAULT_LOCK_FILE:
-        # Only the machine's own runs share the system temp directory with records this old.
-        removed, failures = remove_old_temporary_log_directories_without_run_records(runs_dir)
-        lines += [f"removed the log directory {log_dir}, left by a run from before run records"
-                  for log_dir in removed]
-        lines += [f"could not remove the log directory {log_dir}, left by a run from before "
-                  f"run records ({why})" for log_dir, why in failures]
+        # Only the machine's own runs share these directories with records this old.
+        parents = (Path(tempfile.gettempdir()),
+                   temporary_log_directories_parent_from_tmpdir_or_home_cache())
+        for temp_dir in dict.fromkeys(parents):
+            removed, failures = remove_old_temporary_log_directories_without_run_records(
+                runs_dir, temp_dir=temp_dir)
+            lines += [f"removed the log directory {log_dir}, left by a run no run record names"
+                      for log_dir in removed]
+            lines += [f"could not remove the log directory {log_dir}, left by a run no run "
+                      f"record names ({why})" for log_dir, why in failures]
     return lines
 
 
@@ -5175,7 +5189,16 @@ def main(argv=None, platform=None):
                       f"run has finished.", file=sys.stderr)
                 return EXIT_LOCKED
         else:
-            log_dir = Path(tempfile.mkdtemp(prefix=f"{PROGRAM_FILE_NAME_STEM}-"))
+            log_dirs_parent = temporary_log_directories_parent_from_tmpdir_or_home_cache()
+            try:
+                log_dirs_parent.mkdir(parents=True, exist_ok=True)
+                log_dir = Path(tempfile.mkdtemp(prefix=f"{PROGRAM_FILE_NAME_STEM}-",
+                                                dir=log_dirs_parent))
+            except OSError as error:
+                print(f"{PROGRAM}: not run — could not make a log directory in "
+                      f"{log_dirs_parent} ({error}).\nRun this again with a --log-dir that "
+                      f"this account can create and write to.", file=sys.stderr)
+                return EXIT_COULD_NOT_RUN
         if platform.startswith("linux"):
             run_record = RunRecord(run_records_directory_for_lock_file(arguments.lock_file), log_dir,
                                    log_dir_is_temporary=not arguments.log_dir)
@@ -5412,8 +5435,10 @@ def main(argv=None, platform=None):
                                     f"recording is removed, so the next run with "
                                     f"--only-suites-whose-recorded-inputs-changed-since "
                                     f"selects it.")
-            # Raw strace logs can occupy hundreds of megabytes per suite.
-            shutil.rmtree(recording_paths_for(recording_dir, suite)[1], ignore_errors=True)
+            # Raw traces can occupy hundreds of megabytes per suite, and only recording_of reads them.
+            hook_log, strace_dir = recording_paths_for(recording_dir, suite)
+            hook_log.unlink(missing_ok=True)
+            shutil.rmtree(strace_dir, ignore_errors=True)
             return result
 
         def run_and_record_then_stop_the_run_if_first_to_fail(suite):

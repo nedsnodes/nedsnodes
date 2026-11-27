@@ -827,8 +827,8 @@ def test_suite_runner_command(suites, worktree, arguments, recorded_inputs_direc
     """The suite runner's command: one run of the suites on the worktree, changing no recording.
 
     Every caller adds a --log-dir in this script's log directories parent: without one, the
-    runner keeps a log directory in the system temp directory for two days, and a run per
-    mutant fills that directory's file system."""
+    runner keeps each run's log directory for two days, and a run per
+    mutant fills its file system."""
     command = [sys.executable, str(TEST_SUITE_RUNNER_PATH), "--checkout", str(worktree),
                "--python", arguments.python,
                "--recorded-inputs-directory", str(recorded_inputs_directory),

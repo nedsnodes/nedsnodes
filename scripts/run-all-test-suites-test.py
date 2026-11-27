@@ -367,6 +367,54 @@ with tempfile.TemporaryDirectory() as scratch:
           in result.stdout and "passes-test.sh" in ran(root),
           (result.stdout, ran(root)))
 
+# --- A suite's raw traces go once its recording is saved -----------------------
+with tempfile.TemporaryDirectory() as scratch:
+    root = pathlib.Path(scratch)
+    make_repo(root, {"a-test.py": PASSES})
+    result = run(root)
+    check("a run saves a suite's recording and keeps none of its raw traces in the log "
+          "directory, since nothing reads them once the recording is saved",
+          result.returncode == 0 and list((root / "recordings").glob("*/a-test.py.json"))
+          and (root / "logs" / "recorded-inputs").is_dir()
+          and not list((root / "logs" / "recorded-inputs").iterdir()),
+          (result.returncode, result.stderr,
+           sorted(str(path) for path in (root / "logs").rglob("*"))))
+
+
+def run_without_log_dir(root, home):
+    """Run the program with no --log-dir and no TMPDIR, as a session on ned-box does."""
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in ("TMPDIR", "TEMP", "TMP")}
+    environment.update({"HOME": str(home), RAN_FILE_VARIABLE: str(root / "ran.txt")})
+    command = program_command_line(root)
+    del command[command.index("--log-dir"):command.index("--log-dir") + 2]
+    return subprocess.run([sys.executable, *command], capture_output=True, text=True,
+                          env=environment, stdin=subprocess.DEVNULL, check=False)
+
+
+# --- Without --log-dir or TMPDIR, the log directory is on disk under ~/.cache ----
+with tempfile.TemporaryDirectory() as scratch:
+    root = pathlib.Path(scratch)
+    make_repo(root, {"a-test.py": PASSES})
+    home = root / "home"
+    home.mkdir()
+    result = run_without_log_dir(root, home)
+    parent = home / ".cache" / "run-all-test-suites-temporary-log-directories"
+    made = list(parent.glob("run-all-test-suites-*"))
+    check("with no --log-dir and TMPDIR unset, the log directory is made under "
+          "~/.cache/run-all-test-suites-temporary-log-directories, not the tmpfs /tmp",
+          result.returncode == 0 and len(made) == 1
+          and (made[0] / "test-run-report.txt").is_file(),
+          (result.returncode, result.stderr, made))
+    (home / ".cache").rename(home / "cache-moved-aside")
+    (home / ".cache").write_text("a file where the directory should be\n")
+    result = run_without_log_dir(root, home)
+    check("when that directory cannot be made, the program exits 2, names it and says "
+          "to give a --log-dir",
+          result.returncode == 2 and str(parent) in result.stderr
+          and "Run this again with a --log-dir" in result.stderr,
+          (result.returncode, result.stderr))
+
 # --- An all-passing checkout exits 0 -----------------------------------------
 with tempfile.TemporaryDirectory() as scratch:
     root = pathlib.Path(scratch)
