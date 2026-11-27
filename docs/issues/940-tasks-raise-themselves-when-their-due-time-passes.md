@@ -271,7 +271,7 @@ The idle sweep's entry, `agent-seat-idle-sweep-headless-judge-wake-messages-send
 - What the job does when its own log cannot be read, holds a line cut short, or grows large, and when the user-alert directory cannot be written.
 - Which rule decides an agent-seat whose matched sentences are all tagged conditional on the user or negative, and one whose rule 2 judge fails.
 - What the job does with the four minutes after a limit wake, while rule 1 still matches but sends no second wake.
-- Whether an announced action backed only by a running background command is checked again when that command ends without doing it, and whether a promise already fulfilled without a task is raised.
+- Whether an announced action backed only by a background task the agent-session started that is still running is checked again when that task ends without doing the action, and whether a promise already fulfilled without a task is raised.
 - How the judge sees a hook or test that already enforced a standing rule before the sentence, and a proposal made to the user in an earlier message.
 - How code lays out one message that covers several unbacked sentences of different kinds or turns.
 - How often rule 5 asks the judge again about an agent-seat that stays idle with open work. Today, while a wait is open, code asks no rule 5 judge and runs only the wait's next step; with no wait open, after a verdict not to send, it asks again 15 minutes later for as long as the agent-seat stays idle without spending tokens, even when nothing it hands the judge has changed, where code could reuse the last verdict. To be settled from the job's log of judge answers, which on 2026-11-13 held 396 rule 5 answers.
