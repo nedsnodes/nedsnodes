@@ -287,19 +287,26 @@ RETRYING_PREFIX = "RETRYING:"
 AGENT_BINARY_DOWN_PREFIX = "AGENT-BINARY DOWN:"
 # Both undo messages share this, so that neither can drop the `--` before a path.
 STRAY_WRITE_RESTORE_ARGUMENTS = "restore --staged --worktree --"
+# Plain `git status` lists a new folder as one entry, and `rm -r` on it would also delete the
+# agent's own untracked files inside it, so the listing names every file and the removal is `rm`.
 STOPPED_CELL_WRITE_CHECK_LINE = (
     "The {cell} cell was stopped before it could check for files it wrote outside its "
     "report, and the grid could not check for it, because {reason}; that is "
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
     + ".\nBefore "
-    "you do anything else, read `git status` against the edits you know are your own. "
-    "For a path git status lists whose every uncommitted change shows a reviewer wrote it, such as "
-    "notes about the document under review, undo it: run `rm -r -- <path>` if it is untracked or "
+    "you do anything else, run `git status --untracked-files=all`, which lists each untracked file "
+    "on its own instead of only its folder, and for each path it lists read "
+    "`git --literal-pathspecs diff --cached -- <path>`, its staged changes, and "
+    "`git --literal-pathspecs diff -- <path>`, its unstaged ones, or the file itself if it is "
+    "untracked, against the edits you know are your own. "
+    "For a path whose every uncommitted change shows a reviewer wrote it, such as "
+    "notes about the document under review, undo it: run `rm -- <path>` if it is untracked or "
     f"`git --literal-pathspecs {STRAY_WRITE_RESTORE_ARGUMENTS} <path>` if it is tracked, with <path> "
     "replaced by the path as one shell-quoted argument. "
     "For a file that holds a reviewer's writing beside other uncommitted changes, delete only the "
     "reviewer's writing, by editing the file: either command above throws away every uncommitted "
-    "change to the file. "
+    "change to the file. If its staged changes hold any of the reviewer's writing, ask the user "
+    "instead, because an edit to the file leaves the staged copy in the index. "
     "Ask the user about any other change you did not make, and whenever you are unsure.")
 
 # A stopped cell never reaches its own stray-write check, so the grid runs one for it
