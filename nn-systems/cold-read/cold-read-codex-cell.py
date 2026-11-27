@@ -197,7 +197,7 @@ def credential_denying_permission_profile_arguments(platform: str = sys.platform
 
 def invocation_builder(effort: str, report_staging_directory: pathlib.Path = None, tier: str = None):
     """Return a callback producing (argv, stdin text) for each model and prompt."""
-    # Codex takes a positional prompt; None tells the runner to close stdin explicitly.
+    # `-` reads the prompt from stdin: Linux refuses one argument of 131,072 bytes or more.
     def build_invocation(model: str, prompt: str):
         command = [
             "codex", "exec",
@@ -213,8 +213,8 @@ def invocation_builder(effort: str, report_staging_directory: pathlib.Path = Non
         if tier in TIER_TO_SERVICE_TIER:
             command += ["-c", f'service_tier="{TIER_TO_SERVICE_TIER[tier]}"']
         command += ["-c", 'web_search="live"']
-        command.append(prompt)
-        return command, None
+        command.append("-")
+        return command, prompt
     return build_invocation
 
 

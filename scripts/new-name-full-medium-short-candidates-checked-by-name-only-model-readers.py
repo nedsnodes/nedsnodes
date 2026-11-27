@@ -149,12 +149,13 @@ def reader_command(runtime: str, model: str, effort, prompt: str, folder: pathli
                  "--setting-sources", "", "--no-session-persistence", "--output-format", "text"],
                 prompt, None)
     if runtime == "agy":
-        return [sys.executable, str(AGY_RUNNER), "--model", model, prompt], None, None
+        return [sys.executable, str(AGY_RUNNER), "--model", model, "-"], prompt, None
     answer_file = folder / "answer.txt"
+    # Every runtime takes the prompt on stdin: Linux refuses one argument of 131,072 bytes or more.
     return (["codex", "exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only",
              "-C", str(folder), "-m", model, "-c", f"model_reasoning_effort={effort}",
-             "--disable", "memories", "-o", str(answer_file), prompt],
-            None, answer_file)
+             "--disable", "memories", "-o", str(answer_file), "-"],
+            prompt, answer_file)
 
 
 def last_line(text: str) -> str:

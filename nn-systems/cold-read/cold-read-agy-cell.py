@@ -40,9 +40,13 @@ THE INVOCATION, as measured working in the 2026-09-04 campaign
 run-astra-and-gemini-cells.py on the cold-read-research machine, not
 committed): `agy --add-dir <repo> --dangerously-skip-permissions --model <id>
 --effort <eff> --print-timeout 30m --output-format text --print <prompt>`.
-That is the campaign's command; the cell's own differs in one flag, as the
-end of this paragraph says.
-`--print` takes the prompt as its value. `--add-dir` is required, or the
+That is the campaign's command. The cell's own differs in two ways. It sends
+the prompt on stdin, not as `--print`'s value, because Linux refuses any one
+argument of 131,072 bytes or more: `--input-format stream-json` reads this
+one JSON line from stdin, and takes `--print ""`:
+  {"event":"user","message":{"content":<prompt>}}
+And it passes `--output-format stream-json`, for the reason the next
+paragraph gives. `--add-dir` is required, or the
 repository's AGENTS.md does not load. `--dangerously-skip-permissions` is what
 lets the Write of the report happen headless. Antigravity's model ids carry the
 effort as a suffix (gemini-4-neon-{low,medium,high,xhigh}); `--effort` is passed
@@ -290,11 +294,21 @@ def per_model_run_kill_after_seconds(parsed_arguments) -> int:
             + COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS)
 
 
+def agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(prompt: str) -> tuple:
+    """Return (agy arguments, stdin text) that give agy the prompt on stdin.
+
+    agy's stream-json input requires stream-json output, so a caller reads
+    agy's answer from the result line that
+    agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none parses."""
+    arguments = ["--input-format", "stream-json", "--output-format", "stream-json", "--print", ""]
+    return arguments, json.dumps({"event": "user", "message": {"content": prompt}}) + "\n"
+
+
 def invocation_builder(effort: str, parsed_arguments):
-    """Return a callback producing (agy argv, None) for the shared runner."""
+    """Return a callback producing (agy argv, stdin text) for the shared runner."""
     print_timeout = agy_print_timeout(parsed_arguments.per_model_run_timeout_seconds)
-    # agy takes the prompt through --print; None makes the runner close stdin.
     def build_invocation(model: str, prompt: str):
+        prompt_arguments, stdin_text = agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(prompt)
         command = [
             *credential_sandbox_prefix(),
             "agy",
@@ -303,10 +317,9 @@ def invocation_builder(effort: str, parsed_arguments):
             "--model", model,
             "--effort", effort,
             "--print-timeout", print_timeout,
-            "--output-format", "stream-json",
-            "--print", prompt,
+            *prompt_arguments,
         ]
-        return command, None
+        return command, stdin_text
     return build_invocation
 
 

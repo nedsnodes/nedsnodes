@@ -34,7 +34,10 @@ the log.
 
 Runs `agy models` inside the same sandbox before starting the task, refusing
 unknown names with the known names. The default is gemini-4-neon-high.
-Closes stdin and logs both output streams to REPORT.run.log, or to
+Gives agy the task on stdin, as the one stream-json line that the
+cold-read agy cell sends, because Linux refuses any one argument of
+131,072 bytes or more; agy's output is then stream-json events. Logs both output
+streams to REPORT.run.log, or to
 --run-log; an existing log at that path is overwritten. The
 deadline covers model discovery and task execution after sandbox setup;
 the Codex launcher's process-group cleanup stops agy and its children.
@@ -86,11 +89,14 @@ def _parser():
     return parser
 
 
-def _run(command, checkout, log, deadline, environment):
-    process = subprocess.Popen(command, cwd=checkout, env=environment, stdin=subprocess.DEVNULL,
-                               stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+def _run(command, checkout, log, deadline, environment, stdin_text=None):
+    process = subprocess.Popen(command, cwd=checkout, env=environment,
+                               stdin=subprocess.DEVNULL if stdin_text is None else subprocess.PIPE,
+                               stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+                               text=True)
     try:
-        code = process.wait(timeout=max(0, deadline - time.monotonic()))
+        process.communicate(stdin_text, timeout=max(0, deadline - time.monotonic()))
+        code = process.returncode
     except subprocess.TimeoutExpired:
         codex_task.stop_process_group(process)
         raise RuntimeError("deadline passed; agy and its children were stopped") from None
@@ -147,16 +153,17 @@ def main(argv=None):
                 raise RuntimeError(f"unknown model {args.model!r}; known names: {', '.join(known) or '(none listed)'}")
             command = [*prefix, "agy", "--add-dir", str(checkout),
                        "--dangerously-skip-permissions", "--model", args.model,
-                       "--print-timeout", f"{math.ceil(args.deadline_minutes * 60)}s",
-                       "--output-format", "text"]
+                       "--print-timeout", f"{math.ceil(args.deadline_minutes * 60)}s"]
             for root in roots:
                 command += ["--add-dir", str(root)]
             if args.effort:
                 command += ["--effort", args.effort]
-            command += ["--print", prompt + f"\n\nWrite the task's report to this exact file: {report}\n"]
+            prompt_arguments, stdin_text = agy_cell.agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(
+                prompt + f"\n\nWrite the task's report to this exact file: {report}\n")
+            command += prompt_arguments
             stage = "running the task"
             print(f"{PROGRAM}: running Gemini in {checkout}; log {log_path}", file=sys.stderr)
-            _run(command, checkout, log, deadline, environment)
+            _run(command, checkout, log, deadline, environment, stdin_text)
         stage = f"reading report {report}"
         if not report.is_file() or not report.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"agy exited 0 but wrote no report at {report}")

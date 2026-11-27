@@ -145,6 +145,7 @@ Run: python3 nn-systems/cold-read/tests/cold-read-cell-common-test.py
 """
 
 import contextlib
+import errno
 import hashlib
 import importlib.util
 import io
@@ -224,7 +225,7 @@ import json, os, pathlib, subprocess, sys
 
 received_prompt = ""
 try:
-    received_prompt = sys.stdin.read()  # the Claude leg feeds the prompt on stdin
+    received_prompt = sys.stdin.read()  # every leg feeds the prompt on stdin
 except OSError:
     pass
 argv = sys.argv
@@ -983,7 +984,7 @@ with tempfile.TemporaryDirectory() as scratch:
     PERMISSION_NOISE = ("Permission allow rule (/Users/el/.claude/settings.json): "
                         "Glob(//Users/el/agents/**) is not matched by file permission checks\n")
 
-    def classify(stdout="", stderr="", exit_code=1, start_error=""):
+    def classify(stdout="", stderr="", exit_code=1, start_error=None):
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
             recognised_texts=claude_module.RECOGNISED_FAILURE_TEXTS,
@@ -1003,9 +1004,29 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a recognised text inside a line, not at its start, is not recognised",
           classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")[0] == "exit-1",
           repr(classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")))
-    check("an agent-binary that could not be started is agent-binary-missing with the error",
-          classify(exit_code=None, start_error="[Errno 2] No such file or directory: 'claude'")
+    check("an agent-binary that was not found is agent-binary-missing with the error",
+          classify(exit_code=None, start_error=FileNotFoundError(
+              errno.ENOENT, "No such file or directory", "claude"))
           == ("agent-binary-missing", "[Errno 2] No such file or directory: 'claude'"))
+    # A real E2BIG where the operating system caps one argument (Linux: 131,072 bytes).
+    try:
+        subprocess.run(["true", "x" * 200_000], check=False)
+        too_long = OSError(errno.E2BIG, "Argument list too long", "true")
+    except OSError as error:
+        too_long = error
+    check("a command line the operating system refused as too long (E2BIG) is "
+          "agent-binary-argument-list-too-long, not agent-binary-missing",
+          classify(exit_code=None, start_error=too_long)
+          == ("agent-binary-argument-list-too-long", str(too_long))
+          and too_long.errno == errno.E2BIG,
+          repr(classify(exit_code=None, start_error=too_long)))
+    not_executable = PermissionError(errno.EACCES, "Permission denied", "claude")
+    check("an agent-binary found but not executable is still agent-binary-missing",
+          classify(exit_code=None, start_error=not_executable)
+          == ("agent-binary-missing", "[Errno 13] Permission denied: 'claude'"),
+          repr(classify(exit_code=None, start_error=not_executable)))
+    check("agent-binary-argument-list-too-long is not user-clearable, so not agent-binary-wide",
+          "agent-binary-argument-list-too-long" not in common_module.USER_CLEARABLE_CAUSE_CLASSES)
     check("exit 0 with no report is no-report, with the reviewer's last line as the reason",
           classify(stdout="I read it.\n\nI wrote nothing.\n\n", exit_code=0)
           == ("no-report", "no report written; the reviewer's last line: I wrote nothing."),
@@ -2087,22 +2108,20 @@ with tempfile.TemporaryDirectory() as scratch:
     (scratch_prompts / "terminology.codex.md").write_text(
         "CODEX COPY MARKER. Read {TARGET_PATH}; write to {REPORT_PATH}.\n",
         encoding="utf-8")
-    # The Codex leg passes the prompt as an argument, not on stdin, so the
-    # case reads the argv the stub was given.
     report = report_path_for(repository, "sibling-copy-codex", "codex")
-    received_argv_path = scratch / "sibling-copy-codex-argv.json"
+    received_prompt_path = scratch / "sibling-copy-codex-received.txt"
     result = run_codex_cell(
         repository, stubs,
         {"*": {"report": "STUB REVIEW: one term\n",
-               "dump_argv": str(received_argv_path)}},
+               "dump_prompt": str(received_prompt_path)}},
         report, cell="terminology",
     )
-    received_argv = (" ".join(json.loads(received_argv_path.read_text(encoding="utf-8")))
-                     if received_argv_path.is_file() else "")
+    received_prompt = (received_prompt_path.read_text(encoding="utf-8")
+                       if received_prompt_path.is_file() else "")
     check("a sibling terminology.codex.md is ignored: the Codex cell reads the shared file",
-          result.returncode == 0 and "CODEX COPY MARKER" not in received_argv
-          and str(report) in received_argv and "{REPORT_PATH}" not in received_argv,
-          f"exit {result.returncode}; prompt={received_argv[:200]!r}")
+          result.returncode == 0 and "CODEX COPY MARKER" not in received_prompt
+          and str(report) in received_prompt and "{REPORT_PATH}" not in received_prompt,
+          f"exit {result.returncode}; prompt={received_prompt[:200]!r}")
     stamp = provenance_stamp_of(report)
     check("no prompt= field names a per-runtime copy any more",
           " prompt=" not in stamp and "prompt_file=" not in stamp, repr(stamp))
@@ -2144,21 +2163,21 @@ with tempfile.TemporaryDirectory() as scratch:
         "DRAFT PROMPT MARKER. Read {TARGET_PATH}; write to {REPORT_PATH}.\n",
         encoding="utf-8")
     report = report_path_for(repository, "draft-under-prompt-file", "codex")
-    received_argv_path = scratch / "draft-under-prompt-file-argv.json"
+    received_prompt_path = scratch / "draft-under-prompt-file-received.txt"
     result = run_codex_cell(
         repository, stubs,
         {"*": {"report": "STUB REVIEW: one term\n",
-               "dump_argv": str(received_argv_path)}},
+               "dump_prompt": str(received_prompt_path)}},
         report, "--prompt-file", draft_prompt_relative_path, cell="terminology",
     )
-    received_argv = (" ".join(json.loads(received_argv_path.read_text(encoding="utf-8")))
-                     if received_argv_path.is_file() else "")
+    received_prompt = (received_prompt_path.read_text(encoding="utf-8")
+                       if received_prompt_path.is_file() else "")
     stamp = provenance_stamp_of(report)
     check("--prompt-file reads the draft, not the pass's own prompt",
-          result.returncode == 0 and "DRAFT PROMPT MARKER" in received_argv
+          result.returncode == 0 and "DRAFT PROMPT MARKER" in received_prompt
           and f"prompt_file={draft_prompt_relative_path} " in stamp
           and " prompt=" not in stamp,
-          f"exit {result.returncode}; prompt={received_argv[:120]!r}; stamp={stamp!r}")
+          f"exit {result.returncode}; prompt={received_prompt[:120]!r}; stamp={stamp!r}")
 
     # A path naming no file is a bad invocation, refused before any model
     # runs, with the path it looked for -- the trial that mistypes its

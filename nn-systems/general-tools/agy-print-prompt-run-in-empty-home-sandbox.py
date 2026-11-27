@@ -3,12 +3,17 @@
 
 Usage:
   nn-systems/general-tools/agy-print-prompt-run-in-empty-home-sandbox.py --model MODEL PROMPT
+  nn-systems/general-tools/agy-print-prompt-run-in-empty-home-sandbox.py --model MODEL - < FILE
 
-MODEL is a model name agy accepts, such as gemini-3.8-flash-medium.
+MODEL is a model name agy accepts, such as gemini-3.8-flash-medium. A PROMPT
+of `-` is read from stdin; use it for a prompt of 131,072 bytes or more,
+which Linux refuses as one argument.
 
-Runs `agy --model MODEL --output-format text --print PROMPT` with stdin closed,
-without --dangerously-skip-permissions, inside bwrap or sandbox-exec, the
-sandbox program, and passes agy's stdout and stderr through. Its exit code is
+Runs `agy --model MODEL` without --dangerously-skip-permissions, inside bwrap
+or sandbox-exec, the sandbox program, and gives agy the prompt on stdin as
+the cold-read agy cell does, with stream-json output. It prints agy's answer,
+the response of agy's result line, to stdout, and passes agy's stderr
+through. Its exit code is
 listed under "Exit codes" below. Whenever the sandbox program exits nonzero,
 this program adds one line of its own to stderr, after the messages of agy or
 the sandbox program. GEMINI_API_KEY is removed from agy's environment, because
@@ -58,6 +63,8 @@ Exit codes, and where each comes from:
   PROMPT or an unknown option. Nothing was run.
 - 1, with a line on stderr: agy or the sandbox program is not on PATH.
   Nothing was run.
+- 1, with a line on stderr: agy exited 0 but its result line is missing or
+  its status is not SUCCESS. Nothing is printed to stdout.
 - any other outcome: the code the sandbox program exited with. That is agy's
   own code when agy ran. When the sandbox program failed before agy started,
   it is that program's own code: 1 for bwrap, such as for a bind it cannot
@@ -114,10 +121,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", required=True, help="agy model id, e.g. gemini-3.8-flash-medium")
-    parser.add_argument("prompt")
+    parser.add_argument("prompt", help="the prompt, or - to read the prompt from stdin")
     arguments = parser.parse_args()
-    agy_arguments = ["--model", arguments.model, "--output-format", "text",
-                     "--print", arguments.prompt]
+    prompt = sys.stdin.read() if arguments.prompt == "-" else arguments.prompt
     sandbox_program = "sandbox-exec" if sys.platform == "darwin" else "bwrap"
     agy_path = shutil.which("agy")
     for needed, found in (("agy", agy_path), (sandbox_program, shutil.which(sandbox_program))):
@@ -126,6 +132,8 @@ def main() -> int:
                   file=sys.stderr)
             return 1
     launcher = load_cold_read_skill_agy_cell_launcher_program_module()
+    prompt_arguments, stdin_text = launcher.agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(prompt)
+    agy_arguments = ["--model", arguments.model, *prompt_arguments]
     working_directory_context = (tempfile.TemporaryDirectory(prefix="agy-working-directory-")
                                  if sys.platform == "darwin" else contextlib.nullcontext())
     with working_directory_context as working_directory:
@@ -135,8 +143,23 @@ def main() -> int:
             command = [*empty_home_sandbox_prefix(pathlib.Path.home(), agy_path),
                        AGY_PATH_INSIDE_SANDBOX, *agy_arguments]
         environment = launcher.agy_environment_copy_without_gemini_api_key_or_github_token(os.environ)
-        exit_code = subprocess.run(command, stdin=subprocess.DEVNULL, cwd=working_directory,
-                                   env=environment).returncode
+        completed = subprocess.run(command, input=stdin_text, stdout=subprocess.PIPE, text=True,
+                                   cwd=working_directory, env=environment)
+    exit_code = completed.returncode
+    results = [result for result in map(
+        launcher.agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none,
+        (completed.stdout or "").splitlines()) if result is not None]
+    if exit_code == 0 and (not results or results[0][0] != 0):
+        print(f"{PROGRAM}: exiting 1: agy exited 0 but "
+              + ("printed no result line, the stream-json line that carries its answer"
+                 if not results else "its result line's status is not SUCCESS")
+              + ", so there is no answer and nothing was printed to stdout.\n"
+              f"{PROGRAM}: report this failure, with these lines and any stderr agy wrote "
+              "above them, to the agent or user that asked you for the answer.",
+              file=sys.stderr)
+        return 1
+    if results:
+        print(results[0][1], end="")
     if exit_code != 0:
         print(f"{PROGRAM}: the sandboxed agy run failed with exit code {exit_code}; "
               f"{sandbox_program}'s or agy's own message is above.", file=sys.stderr)

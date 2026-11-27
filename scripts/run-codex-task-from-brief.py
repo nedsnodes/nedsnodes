@@ -10,9 +10,8 @@ Usage:
 
 The program an agent uses to hand Codex a task. It always:
   - reads the prompt from the brief file, never from the command line;
-  - closes Codex's stdin, because `codex exec` reads stdin even when the
-    prompt is an argument and, started from a script or a background shell,
-    otherwise waits for input forever;
+  - gives Codex the prompt on stdin, closed after it, never as an argument,
+    because Linux refuses any one argument of 131,072 bytes or more;
   - writes Codex's whole output to a run log, by default `<report>.run.log`;
   - leaves at <report> Codex's final message, unless Codex itself wrote a
     file there during the run, as a brief may tell it to: that file is kept,
@@ -276,8 +275,9 @@ def codex_command(checkout: pathlib.Path, last_message: pathlib.Path, sandbox: s
         command += ["-m", model]
     if effort:
         command += ["-c", f"model_reasoning_effort={effort}"]
-    # `--` keeps a brief that begins with "-", such as front matter, from being read as an option.
-    return command + ["--"] + ([resume] if resume is not None else []) + [prompt]
+    # The prompt goes on stdin; `-` asks for it there, for exec and for resume alike.
+    # `--` keeps a session id that begins with "-" from being read as an option.
+    return command + ["--"] + ([resume] if resume is not None else []) + ["-"]
 
 
 def signal_process_group(process: subprocess.Popen, signal_number: int) -> bool:
@@ -399,12 +399,13 @@ def main(argv=None) -> int:
         with open(run_log, "w", encoding="utf-8") as log:
             # Its own process group, so the deadline stops every process Codex started.
             process = subprocess.Popen(
-                command, stdin=subprocess.DEVNULL, stdout=log,
-                stderr=subprocess.STDOUT, start_new_session=True)
+                command, stdin=subprocess.PIPE, stdout=log,
+                stderr=subprocess.STDOUT, start_new_session=True, text=True)
     except OSError as error:
         return fail(f"could not start Codex: {error}")
     try:
-        exit_code = process.wait(timeout=seconds_left)
+        process.communicate(prompt, timeout=seconds_left)
+        exit_code = process.returncode
     except subprocess.TimeoutExpired:
         stop_process_group(process)
         place_final_message(report, last_message)

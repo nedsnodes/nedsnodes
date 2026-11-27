@@ -16,11 +16,15 @@ and a stub agy stands in for the real one.
     with that one line and nothing else on stderr.
   - A stub agy that fails exits the program with the stub's code, its stderr
     passed through and a line naming the failure; a stub that succeeds has
-    its stdout passed through and its arguments as the program built them;
+    its result line's response printed and its arguments as the program built them;
     it runs as the sandbox's agy with only .gemini in its home, in the empty
-    /tmp/agy-working-directory, with no agy on PATH and the caller's stdin not
-    reaching it, and a GEMINI_API_KEY, GH_TOKEN or GITHUB_TOKEN the caller set does not reach it, while
+    /tmp/agy-working-directory, with no agy on PATH and only the prompt's
+    stream-json line on its stdin, not the caller's stdin, and a GEMINI_API_KEY, GH_TOKEN or GITHUB_TOKEN the caller set does not reach it, while
     other variables do.
+  - A PROMPT of - over 131,072 bytes, read from stdin, reaches agy whole on
+    stdin and in no argument.
+  - A stub agy that exits 0 with no result line, or with a result whose
+    status is not SUCCESS, makes the program exit 1 with nothing on stdout.
   - Without --model the program refuses, exit 2.
   - Run in this process with sys.platform set, the program hands agy a fresh
     temporary working directory on macOS and none on any other platform.
@@ -98,33 +102,38 @@ def read_only_mount_points(mountinfo: str) -> set:
     return read_only
 
 
-def run_program(home, path, *arguments, extra_environment=None):
+def run_program(home, path, *arguments, extra_environment=None, caller_stdin="caller-stdin"):
     environment = {**os.environ, "HOME": str(home), "PATH": path,
                    "GEMINI_API_KEY": "caller-key", "GH_TOKEN": "caller-gh-token",
                    "GITHUB_TOKEN": "caller-github-token", "AAA_CALLER_VARIABLE": "kept-a",
                    "ZZZ_CALLER_VARIABLE": "kept-z", **(extra_environment or {})}
     return subprocess.run([sys.executable, str(SCRIPT_PATH), *arguments],
-                          input="caller-stdin", capture_output=True, text=True,
+                          input=caller_stdin, capture_output=True, text=True,
                           env=environment)
 
 
-# What the echoing stub agy prints, field by field: its arguments, then what it
-# sees of its key, the caller's variables, its own path, its home, its working
-# directory, PATH and stdin.
-ECHOING_AGY_BODY = ('printf "%s|" "$@" "key=${GEMINI_API_KEY-unset}${GH_TOKEN-unset}${GITHUB_TOKEN-unset}" '
+# What the echoing stub agy answers, as the response of a stream-json result
+# line, field by field: its arguments, then what it sees of its key, the
+# caller's variables, its own path, its home, its working directory, PATH and
+# stdin.
+ECHOING_AGY_BODY = ('fields=$(printf "%s|" "$@" "key=${GEMINI_API_KEY-unset}${GH_TOKEN-unset}${GITHUB_TOKEN-unset}" '
                     '"${AAA_CALLER_VARIABLE-unset}" "${ZZZ_CALLER_VARIABLE-unset}" "$0" '
                     '"$(ls -A "$HOME" | tr "\\n" " ")" "cwd=$(pwd)" '
                     '"cwd-entries=$(ls -A)" "agy-on-path=$(command -v agy || echo none)" '
-                    '"stdin=$(cat)"\n')
-ECHOED_FIELDS = ["--model", "gemini-x", "--output-format", "text", "--print", "say hi",
+                    '"stdin=$(cat)")\n'
+                    'python3 -c \'import json, sys; print(json.dumps({"event": "result", '
+                    '"result": {"status": "SUCCESS", "response": sys.argv[1]}}))\' "$fields"\n')
+SAY_HI_STDIN_LINE = '{"event": "user", "message": {"content": "say hi"}}'
+ECHOED_FIELDS = ["--model", "gemini-x", "--input-format", "stream-json", "--output-format",
+                 "stream-json", "--print", "",
                  "key=unsetunsetunset", "kept-a", "kept-z", program.AGY_PATH_INSIDE_SANDBOX,
                  ".gemini ", "cwd=/tmp/agy-working-directory", "cwd-entries=",
-                 "agy-on-path=none", "stdin=", ""]
+                 "agy-on-path=none", f"stdin={SAY_HI_STDIN_LINE}", ""]
 # The fields only the real bwrap makes true: agy's own path is the bind's
 # destination, the home holds only .gemini, and the working directory is empty.
 # The stand-in starts the bind's source instead, so a case using it checks the
 # path the program asked for in the stand-in's log.
-FIELDS_ONLY_THE_REAL_SANDBOX_MAKES_TRUE = (9, 10, 12)
+FIELDS_ONLY_THE_REAL_SANDBOX_MAKES_TRUE = (11, 12, 14)
 
 # With this flag only the cases that need the real bwrap run;
 # nn-systems/general-tools/tests/agy-print-prompt-run-in-empty-home-sandbox-real-sandbox-test.py
@@ -160,7 +169,7 @@ def real_sandbox_cases(root, home):
     result = run_program(home, f"{echoing}:{bwrap_directory}", "--model", "gemini-x", "say hi")
     check("agy succeeding under the real bwrap: run as the sandbox's agy with only "
           ".gemini in its home, in an empty working directory, with agy off PATH, "
-          "stdin closed and no GEMINI_API_KEY, exit 0",
+          "only the prompt's stream-json line on stdin and no GEMINI_API_KEY, exit 0",
           result.returncode == 0 and result.stdout.split("|") == ECHOED_FIELDS
           and result.stderr == "",
           repr((result.returncode, result.stdout, result.stderr)))
@@ -196,9 +205,10 @@ def cases_with_the_stand_in_sandbox(root, home):
     result = run_program(home, f"{echoing}:{fake_directory}", "--model", "gemini-x", "say hi",
                          extra_environment={"FAKE_SANDBOX_PROGRAM_ARGV_LOG": str(argv_log)})
     fields = result.stdout.split("|")
-    check("agy succeeding: stdout passed through, arguments as built, no "
+    check("agy succeeding: its result's response printed, arguments as built, no "
           "GEMINI_API_KEY, GH_TOKEN or GITHUB_TOKEN but every other variable, in "
-          "/tmp/agy-working-directory, with agy off PATH and stdin closed, exit 0",
+          "/tmp/agy-working-directory, with agy off PATH and only the prompt's "
+          "stream-json line on stdin, not the caller's stdin, exit 0",
           result.returncode == 0 and len(fields) == len(ECHOED_FIELDS)
           and all(field == expected for index, (field, expected)
                   in enumerate(zip(fields, ECHOED_FIELDS))
@@ -213,6 +223,40 @@ def cases_with_the_stand_in_sandbox(root, home):
           and launches[0][0] == "bwrap"
           and launches[0][len(expected_prefix)] == program.AGY_PATH_INSIDE_SANDBOX,
           repr(launches))
+
+    # Linux refuses any one argument over 131,072 bytes (MAX_ARG_STRLEN) with E2BIG.
+    recording = root / "recording-agy"
+    received_stdin_path = root / "recording-agy-stdin.txt"
+    received_argv_path = root / "recording-agy-argv.txt"
+    stub_agy(recording, f'cat > "{received_stdin_path}"\nprintf "%s\\n" "$@" > "{received_argv_path}"\n'
+                        'echo \'{"event":"result","result":{"status":"SUCCESS","response":"answer"}}\'\n')
+    oversize_prompt = "filler line of an oversize prompt\n" * 6000 + "OVERSIZE TAIL MARKER\n"
+    result = run_program(home, f"{recording}:{fake_directory}", "--model", "m", "-",
+                         caller_stdin=oversize_prompt)
+    received_line = (received_stdin_path.read_text(encoding="utf-8")
+                     if received_stdin_path.is_file() else "")
+    received_argv = (received_argv_path.read_text(encoding="utf-8")
+                     if received_argv_path.is_file() else "")
+    check("PROMPT - reads a prompt over 131,072 bytes from stdin and hands agy all of it on "
+          "stdin, none of it as an argument",
+          result.returncode == 0 and result.stdout == "answer"
+          and json.loads(received_line or "{}").get("message", {}).get("content") == oversize_prompt
+          and "OVERSIZE TAIL MARKER" not in received_argv,
+          repr((result.returncode, result.stdout, result.stderr[-300:], len(received_line))))
+
+    for case, stub_stdout, wanted in (
+            ("printed no result line", "not a result line", "printed no result line"),
+            ("a result whose status is ERROR",
+             '{"event":"result","result":{"status":"ERROR","response":"partial"}}',
+             "its result line's status is not SUCCESS")):
+        no_answer = root / f"no-answer-agy-{len(wanted)}"
+        stub_agy(no_answer, f"cat > /dev/null\necho '{stub_stdout}'\nexit 0\n")
+        result = run_program(home, f"{no_answer}:{fake_directory}", "--model", "m", "say hi")
+        check(f"agy exiting 0 having {case}: exit 1, nothing on stdout, the cause and what "
+              "to do on stderr",
+              result.returncode == 1 and result.stdout == "" and wanted in result.stderr
+              and "report this failure" in result.stderr,
+              repr((result.returncode, result.stdout, result.stderr)))
 
     result = run_program(home, f"{echoing}:{fake_directory}", "say hi")
     check("--model missing: refused by argument parsing, exit 2, agy not run",
@@ -231,6 +275,13 @@ class StubGeminiLauncher:
     def credential_sandbox_prefix():
         return ["sandbox-exec"]
 
+    agy_command_arguments_and_stream_json_stdin_line_build_for_prompt = staticmethod(
+        program.load_cold_read_skill_agy_cell_launcher_program_module()
+        .agy_command_arguments_and_stream_json_stdin_line_build_for_prompt)
+    agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none = staticmethod(
+        program.load_cold_read_skill_agy_cell_launcher_program_module()
+        .agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none)
+
     @staticmethod
     def agy_environment_copy_without_gemini_api_key_or_github_token(environment):
         return {name: value for name, value in environment.items()
@@ -248,7 +299,8 @@ def agy_run_with_stubs(platform):
         seen["cwd"] = keywords.get("cwd")
         seen["existed"] = seen["cwd"] is not None and os.path.isdir(seen["cwd"])
         seen["env"] = keywords.get("env")
-        return subprocess.CompletedProcess(command, 0)
+        return subprocess.CompletedProcess(
+            command, 0, '{"event":"result","result":{"status":"SUCCESS","response":""}}\n')
 
     saved = (sys.platform, sys.argv, program.shutil.which, program.subprocess.run,
              program.load_cold_read_skill_agy_cell_launcher_program_module)

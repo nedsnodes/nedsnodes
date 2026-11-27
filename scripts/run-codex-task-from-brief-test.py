@@ -5,12 +5,13 @@ A fake `gh` on PATH stands in for the commands --prefetch-github runs: it
 logs its arguments and the folder it ran in and, by FAKE_GH_MODE, prints data,
 fails, or sleeps.
 
-The fake records its arguments and, by the FAKE_CODEX_MODE environment
+The fake records its arguments and the prompt it reads from stdin, and,
+by the FAKE_CODEX_MODE environment
 variable, writes a report, writes a report file of its own with or without a final
 message, fails with or without a report, writes nothing,
 sleeps past the deadline with a child that may ignore SIGTERM, writes a
-final message and then sleeps past the deadline, or blocks
-reading stdin. Most cases run the real program as a process; the cases that
+final message and then sleeps past the deadline, or reports how many
+characters stdin held. Most cases run the real program as a process; the cases that
 need a stand-in clock, or a stand-in for gh, Codex or killpg, load it as a
 module and call it in this process. One case checks the test's own bound: a
 program stalled after it starts Codex is stopped with every process it started.
@@ -39,6 +40,10 @@ if "FAKE_CODEX_PID_FILE" in os.environ:
     open(os.environ["FAKE_CODEX_PID_FILE"], "w").write(str(os.getpid()))
 with open(os.environ["FAKE_CODEX_ARGUMENTS_FILE"], "w") as record:
     json.dump(arguments, record)
+# As codex exec does for a prompt of `-`: read stdin to its end before anything else.
+prompt = sys.stdin.read() if arguments[-1:] == ["-"] else ""
+with open(os.environ["FAKE_CODEX_ARGUMENTS_FILE"] + ".stdin", "w") as record:
+    record.write(prompt)
 report = arguments[arguments.index("-o") + 1]
 mode = os.environ.get("FAKE_CODEX_MODE", "report")
 print("fake codex trace line")
@@ -73,7 +78,7 @@ elif mode == "final-message-then-sleep":
     sys.stdout.flush()
     time.sleep(600)
 elif mode == "read-stdin":
-    data = sys.stdin.read()
+    data = prompt + sys.stdin.read()
     open(report, "w").write(f"stdin held {len(data)} characters\n")
 '''
 
@@ -204,8 +209,10 @@ try:
           and not report.with_name(report.name + ".last-message").exists()
           and "is kept" not in completed.stderr,
           f"exit {completed.returncode}, stdout {completed.stdout!r}, stderr {completed.stderr!r}")
-    check("the brief's whole text is the prompt, after --",
-          arguments[-1] == brief.read_text() and arguments[-2] == "--", repr(arguments[-2:]))
+    received_prompt = Path(str(arguments_file) + ".stdin").read_text()
+    check("the brief's whole text is the prompt, on stdin, with `-` after -- in its place",
+          received_prompt == brief.read_text() and arguments[-2:] == ["--", "-"],
+          repr((arguments[-2:], received_prompt[:200])))
     check("Codex runs in the checkout with its memory store off",
           arguments[:1] == ["exec"] and ["-C", str(checkout)] == arguments[
               arguments.index("-C"):arguments.index("-C") + 2]
@@ -253,8 +260,9 @@ try:
           ["-c", 'web_search="live"'] == arguments[arguments.index('web_search="live"') - 1:
                                                      arguments.index('web_search="live"') + 1]
           if 'web_search="live"' in arguments else False, repr(arguments))
-    check("the brief is still the last argument with every option on",
-          arguments[-1] == brief.read_text(), repr(arguments[-1]))
+    check("the brief still reaches Codex on stdin with every option on",
+          arguments[-1] == "-" and Path(str(arguments_file) + ".stdin").read_text()
+          == brief.read_text(), repr(arguments[-1]))
 
     session_id = "019abcde-1234-7000-8000-123456789abc"
     for options in ((), ("--sandbox", "workspace-write", "--network",
@@ -267,11 +275,12 @@ try:
                                    "--run-log", str(resume_log), *options)
         arguments = json.loads(arguments_file.read_text())
         expected = fresh_arguments[:3] + ["resume"] + fresh_arguments[3:-1] + [
-            session_id, brief.read_text()]
+            session_id, "-"]
         check(f"--resume preserves checkout, permissions, memory, report and options {options!r}",
               completed.returncode == 0 and arguments == expected
               and arguments[:4] == ["exec", "-C", str(checkout), "resume"]
-              and arguments[-3:] == ["--", session_id, brief.read_text()]
+              and arguments[-3:] == ["--", session_id, "-"]
+              and Path(str(arguments_file) + ".stdin").read_text() == brief.read_text()
               and completed.stdout.strip() == f"report: {report}"
               and "fake codex trace line" in resume_log.read_text(),
               f"exit {completed.returncode}, {arguments!r}, stderr {completed.stderr!r}")
@@ -319,9 +328,25 @@ try:
          "-o", str(scratch / "dash-report.md")], env=environment, capture_output=True,
         text=True, check=False)
     arguments = json.loads(arguments_file.read_text())
-    check("a brief that begins with - reaches Codex after --, so it is not read as an option",
-          completed.returncode == 0 and arguments[-2:] == ["--", dash_brief.read_text()],
+    check("a brief that begins with - reaches Codex whole on stdin, never as an option",
+          completed.returncode == 0 and arguments[-2:] == ["--", "-"]
+          and Path(str(arguments_file) + ".stdin").read_text() == dash_brief.read_text(),
           f"exit {completed.returncode}, {arguments[-2:]!r}")
+
+    # Linux refuses any one argument over 131,072 bytes (MAX_ARG_STRLEN) with E2BIG.
+    oversize_brief = scratch / "oversize-brief.md"
+    oversize_brief.write_text("filler line of an oversize brief\n" * 6000 + "OVERSIZE TAIL MARKER\n")
+    completed = subprocess.run(
+        [sys.executable, str(PROGRAM), "-C", str(checkout), "--brief", str(oversize_brief),
+         "-o", str(scratch / "oversize-report.md")], env=environment, capture_output=True,
+        text=True, check=False)
+    arguments = json.loads(arguments_file.read_text())
+    received_prompt = Path(str(arguments_file) + ".stdin").read_text()
+    check("a brief over 131,072 bytes reaches Codex whole on stdin, in no argument",
+          completed.returncode == 0 and received_prompt == oversize_brief.read_text()
+          and max(len(argument.encode("utf-8")) for argument in arguments) < 4096,
+          f"exit {completed.returncode}, stdin {len(received_prompt)} characters, "
+          f"stderr {completed.stderr[-300:]!r}")
 
     own_report = scratch / "report-report-file-then-final-message.md"
     completed, report, _ = run("report-file-then-final-message",
@@ -408,7 +433,8 @@ try:
           f"exit {completed.returncode}, child {child_pid} alive={child_alive}, {elapsed:.1f}s")
 
     def check_codex_stdin_closed(case_suffix="", extra=()):
-        # The caller's own stdin is an open pipe that never closes; the fake must still see EOF.
+        # The caller's own stdin is an open pipe that never closes; the fake must still see EOF
+        # after the brief.
         holder = subprocess.Popen(["sleep", "600"], stdout=subprocess.PIPE)
         try:
             completed, report, elapsed = run("read-stdin", *extra, stdin=holder.stdout, timeout=30)
@@ -417,9 +443,10 @@ try:
         finally:
             holder.kill()
             holder.wait()
-        check("Codex's stdin is closed even when the caller's stdin is an open pipe" + case_suffix,
+        check("Codex's stdin holds only the brief and is then closed, even when the caller's "
+              "stdin is an open pipe" + case_suffix,
               completed is not None and completed.returncode == 0
-              and report.read_text().strip() == "stdin held 0 characters",
+              and report.read_text().strip() == f"stdin held {len(brief.read_text())} characters",
               f"completed {completed!r}")
 
     check_codex_stdin_closed()
@@ -495,13 +522,14 @@ try:
               "gh data for pr list --state merged --limit 5\n",
               "gh data for api repos/o/r/pulls?state=closed\n"],
           repr([(path.name, path.read_text()) for path in saved]))
+    received_prompt = Path(str(arguments_file) + ".stdin").read_text()
     check("the brief Codex gets is the brief file followed by the list of saved files",
-          bool(arguments) and arguments[-1].startswith(brief.read_text().rstrip())
-          and all(str(path) in arguments[-1] for path in saved)
-          and "`gh pr list --state merged --limit 5`" in arguments[-1]
+          received_prompt.startswith(brief.read_text().rstrip())
+          and all(str(path) in received_prompt for path in saved)
+          and "`gh pr list --state merged --limit 5`" in received_prompt
           and "permission profile keeps you from the folder holding gh's login"
-          in arguments[-1],
-          repr(arguments[-1:]))
+          in received_prompt,
+          repr(received_prompt[-400:]))
 
     fresh_prefetch_case()
     long_endpoint = "repos/o/r/" + "x" * 400
@@ -643,7 +671,7 @@ try:
         def __init__(self):
             self.wait_timeouts = []
 
-        def wait(self, timeout=None):
+        def communicate(self, input=None, timeout=None):
             self.wait_timeouts.append(timeout)
             raise subprocess.TimeoutExpired("codex", timeout)
     codex_process = CodexRunningPastItsTimeout()

@@ -2,7 +2,8 @@
 """Test the Gemini launcher with fake agy and sandbox commands, without model calls.
 
 Checks CLI forwarding, sandbox mount order and profiles, model discovery,
-closed stdin, logging, every failure handler and process-group deadlines.
+the task on stdin and no argument, even past Linux's 131,072-byte limit on
+one argument, logging, every failure handler and process-group deadlines.
 Sandbox argument tests do not claim that a host supports sandbox execution.
 Run directly with Python; unittest exits nonzero on a failed assertion.
 """
@@ -124,11 +125,14 @@ class GeminiTaskTests(unittest.TestCase):
         calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
         self.assertEqual(calls[0], [str(self.checkout), ["models"], ""])
         cwd, args, stdin = calls[1]
-        self.assertEqual((cwd, stdin), (str(self.checkout), ""))
-        self.assertTrue(args[-1].startswith(self.brief.read_text()))
-        self.assertIn(str(self.report), args[-1])
+        self.assertEqual(cwd, str(self.checkout))
+        task = json.loads(stdin)["message"]["content"]
+        self.assertTrue(task.startswith(self.brief.read_text()))
+        self.assertIn(str(self.report), task)
+        self.assertNotIn(self.brief.read_text(), " ".join(args))
         for flag, value in (("--model", "gemini-3.8-flash-medium"), ("--effort", "medium"),
-                            ("--print-timeout", "600s"), ("--output-format", "text")):
+                            ("--print-timeout", "600s"), ("--input-format", "stream-json"),
+                            ("--output-format", "stream-json"), ("--print", "")):
             self.assertEqual(args[args.index(flag) + 1], value)
         self.assertIn("--dangerously-skip-permissions", args)
         self.assertEqual([args[i+1] for i, arg in enumerate(args) if arg == "--add-dir"],
@@ -137,6 +141,17 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertEqual(self.log.read_text().count("agy stderr"), 2)
         prefixes = [json.loads(line) for line in self.sandbox_calls.read_text().splitlines()]
         self.assertEqual(prefixes[0][:prefixes[0].index("agy")], prefixes[1][:prefixes[1].index("agy")])
+
+    def test_brief_over_one_argument_limit_reaches_agy_on_stdin(self):
+        # Linux refuses any one argument over 131,072 bytes (MAX_ARG_STRLEN) with E2BIG.
+        self.brief.write_text("filler line of an oversize brief\n" * 6000 + "OVERSIZE TAIL MARKER\n")
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cwd, args, stdin = json.loads(self.calls.read_text().splitlines()[1])
+        task = json.loads(stdin)["message"]["content"]
+        self.assertGreater(len(task.encode("utf-8")), 131072)
+        self.assertIn("OVERSIZE TAIL MARKER", task)
+        self.assertLess(max(len(argument.encode("utf-8")) for argument in args), 4096)
 
     def test_defaults(self):
         self.args = self.args[:-2]
