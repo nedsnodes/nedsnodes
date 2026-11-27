@@ -11,7 +11,8 @@ The line names the new agent-session by this agent-session's current title, the
 customTitle of the last custom-title record in its transcript, which is the name
 claude.ai shows and changes when the user renames the agent-session there. With
 no such record, or a transcript that cannot be read, the line names the agent-seat
-the handoff-supervisor launched the agent-session under, and failing that, says
+the handoff-supervisor launched the agent-session under, when this is that launched
+agent-session and not a child started from its shell, and failing that, says
 "this agent-seat's new session".
 
 The line is shown once per marker file, because a refused handoff leaves the
@@ -71,13 +72,14 @@ def hook_payload_from_stdin() -> dict:
     return payload
 
 
-def launched_agent_seat_name() -> str:
+def launched_agent_seat_name(session_id) -> str:
     launched = module_from_path("handoff_supervisor_launched_agent_session_environment_variable_names_common",
                                 LAUNCHED_AGENT_SESSION_ENVIRONMENT_PATH)
-    return os.environ.get(launched.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()
+    return launched.handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session(
+        os.environ, session_id)
 
 
-def new_session_name(transcript_path_text) -> str:
+def new_session_name(transcript_path_text, session_id) -> str:
     """Return the name the line gives the new agent-session, or "" when none is found."""
     remote_control_name_common = module_from_path("handoff_remote_control_name_common",
                                                   REMOTE_CONTROL_NAME_COMMON_PATH)
@@ -88,7 +90,7 @@ def new_session_name(transcript_path_text) -> str:
             title = ""
         if title:
             return title
-    agent_seat = launched_agent_seat_name()
+    agent_seat = launched_agent_seat_name(session_id)
     if not agent_seat:
         return ""
     # The handoff-supervisor launches the successor under the stored name, as it does here when the file is unreadable.
@@ -122,9 +124,9 @@ def main() -> int:
                 return 0
         except FileNotFoundError:
             pass
-        notice = user_notice(new_session_name(payload.get("transcript_path")))
+        notice = user_notice(new_session_name(payload.get("transcript_path"), session_id))
         shown_record.write_text(marker_modified + "\n", encoding="utf-8")
-        print(json.dumps({"systemMessage": notice}, ensure_ascii=False))
+        print(json.dumps({"systemMessage": notice}))
     except Exception as error:
         print(HOOK_FAILED_MESSAGE.format(error=f"{type(error).__name__}: {error}"), file=sys.stderr)
         return 1

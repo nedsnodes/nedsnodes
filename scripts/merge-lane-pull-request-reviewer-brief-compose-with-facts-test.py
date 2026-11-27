@@ -289,6 +289,8 @@ def main():
               and not (helpers / "briefs" / "brief-13-mac-claude.md").exists(),
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
+        saved_block_31 = repository / ".git" / "pull-request-follow-up-requests" / \
+            "pull-request-31-non-blocking-findings.md"
         refusal = ("REFUSED: ned-review-merge's review 2 of pull request 31 holds 2 fix-next finding(s) on "
                    "scripts/a.py worded as 1 earlier finding(s) but with new Codex finding ids.\n"
                    "Write the block by hand.\n")
@@ -304,8 +306,40 @@ def main():
                    + " refused to print it from merge-lane-2's reviews, saying:\n\n"
                    "> REFUSED: ned-review-merge's review 2 of pull request 31 holds 2 fix-next finding(s) on "
                    "scripts/a.py worded as 1 earlier finding(s) but with new Codex finding ids.\n"
-                   "> Write the block by hand.\n") in brief,
+                   "> Write the block by hand.\n\n"
+                   f"No block merge-lane-2 wrote by hand is saved at `{saved_block_31}`, where the author's "
+                   "follow-up request hook saves the block merge-lane-2 sends it; an author on the Mac saves it on "
+                   "the Mac.\n") in brief,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        hand_written_31 = ("#follow_up_request pull request 31\n1. fix-next: `scripts/a.py:3`: It drops a line.\n"
+                           "2. fix-next: `scripts/a.py:9`: It drops a second line.\n")
+        saved_block_31.parent.mkdir()
+        saved_block_31.write_text(hand_written_31)
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14s"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        brief_file = helpers / "briefs" / "brief-14s-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("a refused block is quoted with the block merge-lane-2 wrote by hand, as the author's hook saved it in "
+              "the review tools worktree's git common directory",
+              completed.returncode == 0
+              and ("> Write the block by hand.\n\n"
+                   "The block merge-lane-2 wrote by hand and sent the author instead, as the author's follow-up "
+                   f"request hook saved it at `{saved_block_31}`:\n\n"
+                   "> #follow_up_request pull request 31\n> 1. fix-next: `scripts/a.py:3`: It drops a line.\n"
+                   "> 2. fix-next: `scripts/a.py:9`: It drops a second line.\n") in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        saved_block_31.unlink()
+        saved_block_31.mkdir()
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14u"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        saved_block_31.rmdir()
+        check("a saved block that cannot be read exits 1, naming it, and writes no brief",
+              completed.returncode == 1 and "brief not composed: StepFailed" in completed.stderr
+              and f"could not read {saved_block_31}" in completed.stderr
+              and not (helpers / "briefs" / "brief-14u-mac-claude.md").exists(),
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         completed = run_program(scratch, helpers, [first_round, {**first_round, "tag": "7b"}],
                                 gh_routes=FOLLOW_UP_GH_ROUTES)
@@ -348,6 +382,10 @@ def main():
         program_spec = importlib.util.spec_from_file_location("brief_compose", PROGRAM)
         program = importlib.util.module_from_spec(program_spec)
         program_spec.loader.exec_module(program)
+        found = program.FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER.findall(
+            "#follow_up_request pull request 31\n#follow_up_request# pull request 32\n")
+        check("a follow-up request line is read in its open form and in its closed form, with the closing `#`",
+              found == ["31", "32"], repr(found))
         log_store = Path("/home/nedlern/nedsnodes-logs")
         default_parent = program.DEFAULT_MERGE_LANE_PULL_REQUEST_REVIEWER_SCRATCH_DIRECTORIES_PARENT_DIRECTORY
         check("the default reviewer scratch parent is outside the log-store, which the "

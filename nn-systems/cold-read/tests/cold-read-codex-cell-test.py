@@ -45,9 +45,8 @@ launcher's list holds the logged-out text alone, and a codex whose stderr
 carries the captured 401 line leaves the cell naming `cause: logged-out` in
 its own stderr, the line the grid lifts.
 
-The service tier is pinned for both cases: the deep tier asks codex for the
-Fast service tier, and the second-strongest-model tier asks for no service
-tier.
+The service tier is pinned for both tiers: the deep tier and the
+second-strongest-model tier each ask codex for the Fast service tier.
 
 Everything else about this cell — the model and effort pins, the memory store
 being off for the launch, the stray-write detector, the provenance stamp's
@@ -112,7 +111,7 @@ def build_scratch_repository(scratch):
 # 0.153.4) from a scratch directory outside any checkout with an empty
 # CODEX_HOME: `CODEX_HOME=$(mktemp -d) codex exec --sandbox read-only
 # --skip-git-repo-check "say hi"`, exit 1, this line on stderr. Its source
-# is recorded beside recognised_failure_texts_for_model in the cell.
+# is recorded beside RECOGNISED_FAILURE_TEXTS in the cell.
 CODEX_LOGGED_OUT_LINE = (
     "2026-09-18T19:37:41.140816Z ERROR codex_api::endpoint::responses_websocket: "
     "failed to connect to websocket: HTTP error: 401 Unauthorized, "
@@ -285,7 +284,7 @@ with tempfile.TemporaryDirectory() as scratch:
         "cold_read_codex_cell_under_test", CELL_SCRIPT)
     codex_module = importlib.util.module_from_spec(codex_spec)
     codex_spec.loader.exec_module(codex_module)
-    recognised = codex_module.recognised_failure_texts_for_model("gpt-5-codex")
+    recognised = codex_module.RECOGNISED_FAILURE_TEXTS
     check("the launcher recognises one text, and it is logged-out",
           [text.cause_class for text in recognised] == ["logged-out"],
           repr(recognised))
@@ -452,9 +451,9 @@ with tempfile.TemporaryDirectory() as scratch:
                       "--target", str(target), argv_path=second_tier_argv_dump)
     second_tier_argv = (json.loads(second_tier_argv_dump.read_text(encoding="utf-8"))
                         if second_tier_argv_dump.is_file() else None)
-    check("the second-strongest-model tier asks codex for no service tier",
+    check("the second-strongest-model tier asks codex for the Fast service tier",
           result.returncode == 0 and second_tier_argv is not None
-          and service_tier_settings(second_tier_argv) == [],
+          and service_tier_settings(second_tier_argv) == ['service_tier="priority"'],
           f"exit {result.returncode}; argv={second_tier_argv!r}; stderr={result.stderr[-300:]!r}")
 
     # --- A report that cannot be moved to its destination fails the cell ----

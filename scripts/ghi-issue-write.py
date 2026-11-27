@@ -1113,14 +1113,15 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     reaches GitHub; otherwise None. A ruling question
     does not stop the write.
 
-    Not handled: a too-similar verdict naming the edited issue, while it is
-    open, and a number that is not a GHI, such as a pull request's. The ask's
-    closed-GHI check passes a number its mirror does not hold, the edited
-    issue is dropped here, and the refusal sends the author to that number;
-    the author's reconsider path in RECONSIDER_LINE passes the write. When
-    the edited issue is closed in the mirror, the ask rechecks the verdict
-    before it reaches here, and a failed or repeated recheck skips the
-    adjudication instead."""
+    Not handled: a too-similar verdict naming a number the ask's mirror does
+    not hold as a closed GHI, such as the edited issue while the mirror shows
+    it open, even after GitHub has closed it, or a pull request's number that
+    a recheck kept. The ask's closed-GHI check passes such a number, the
+    edited issue is dropped here, and the refusal sends the author to that
+    number; the author's reconsider path in RECONSIDER_LINE passes the write.
+    A number the mirror holds as a closed GHI makes the ask recheck the
+    verdict before it reaches here, and a failed or repeated recheck skips
+    the adjudication instead."""
     marker = repository_root / RECONSIDERED_MARKER_NAME
     if marker.is_file():
         marker.unlink()
@@ -1229,7 +1230,7 @@ def ghi_guide_agent_log_store():
     directory on this machine; the store's directory)."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return None, override
+        return None, os.path.abspath(override)
     if socket.gethostname().split(".")[0] == GHI_GUIDE_AGENT_LOG_STORE_HOSTNAME:
         return None, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
     return GHI_GUIDE_AGENT_LOG_STORE_HOST, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
@@ -1240,7 +1241,7 @@ def ghi_guide_agent_log_store_citation(name: str) -> str:
     as the local path when a test points the store at a directory."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return str(Path(override) / name)
+        return os.path.join(os.path.abspath(override), name)
     return f"{GHI_GUIDE_AGENT_LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}"
 
 
@@ -2108,6 +2109,28 @@ def ghi_md_paths_for_issue(number: int, repository_root: Path, runner,
     return selected
 
 
+def landed_heading_the_title_lacks(repo: str, number: int, paths,
+                                   repository_root: Path, runner):
+    """The heading of the issue's one GHI-MD as main holds it, when the
+    issue's title differs from it, else None. The issue is titled with the
+    heading the file had at step 3, and its landing pull request can still
+    change that heading before it merges; no edit follows to carry the
+    change, since main's copy already has the new heading. Read from main,
+    not from the checkout, which can be older than the landing pull request
+    or hold a local edit. An issue with several GHI-MDs is left alone, as
+    `title_follows_heading_in_this_edit` leaves it."""
+    if len(paths) != 1:
+        return None
+    shown = runner(["git", "show", f"origin/main:{paths[0]}"],
+                   cwd=str(repository_root))
+    heading = first_heading(shown.stdout)
+    viewed = runner(["gh", "issue", "view", str(number), "--repo", repo,
+                     "--json", "title"])
+    if json.loads(viewed.stdout)["title"] == heading:
+        return None
+    return heading
+
+
 def link_body(repo: str, number: int, repository_root: Path, runner, report,
               rerun_on: str):
     """Step 5. Nothing happens until the file is on main: until then the body
@@ -2133,9 +2156,18 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
         report("Once the pull request from step 4 merges, pull main and "
                f"rerun: {create_rerun_command(repo, rerun_on)}")
         return False
-    runner(["gh", "issue", "edit", str(number), "--repo", repo,
-            "--body", links_body(repo, paths)])
+    # The title goes in the same call as the body: the body edit removes
+    # the pairing key, after which no rerun can come back to set it.
+    heading = landed_heading_the_title_lacks(repo, number, paths,
+                                             repository_root, runner)
+    command = ["gh", "issue", "edit", str(number), "--repo", repo,
+               "--body", links_body(repo, paths)]
+    if heading is not None:
+        command += ["--title", heading]
+    runner(command)
     report(f"body is now {len(paths)} link(s): " + ", ".join(paths))
+    if heading is not None:
+        report(f"title is now: {heading}")
     return True
 
 

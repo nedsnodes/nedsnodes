@@ -7,7 +7,10 @@ those it may carry, and the values a rule, decision, sentence kind and code read
 verdict_field_problems() below says which fields a verdict must and may have. The printing program's
 test checks every verdict it prints with verdict_field_problems(), and the program that judges and
 sends reads verdicts by the names here, so a field renamed in one place and not the other fails a
-test instead of being read as missing.
+test instead of being read as missing. That holds for the verdict's top-level fields and for the
+nested fields verdict_field_problems() names, those of a sentence, of the usage limit and of the
+fallback decision; other nested keys, such as each running subagent entry's "id" and "started",
+are written as literals and no test catches a rename of one.
 """
 
 AGENT_SEAT = "agent_seat"
@@ -33,6 +36,11 @@ SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY = (
 # because it holds other tasks, so it cannot back a promise about the task it updates.
 IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS = (
     "idle_sweep_verdict_field_listing_successful_task_update_tool_calls_setting_add_blocks_with_blocked_tasks")
+# [message_id], oldest first: the id each Bash call in the agent-session's own transcript passes to
+# scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py, each naming
+# an idle-sweep reminder the agent-seat marked irrelevant
+IDLE_SWEEP_VERDICT_FIELD_LISTING_REMINDER_MESSAGE_IDS_THE_AGENT_SEAT_MARKED_IRRELEVANT = (
+    "idle_sweep_verdict_field_listing_reminder_message_ids_the_agent_seat_marked_irrelevant")
 # ISO time of the newest message the user typed in the agent-session's own transcript, or null
 LAST_USER_TYPED_AT = "last_user_typed_at"
 TURN_ENDED = "turn_ended"
@@ -62,9 +70,10 @@ HANDOFF_DEFERRED_MARKER = "handoff_deferred_marker"  # path or null
 USAGE_LIMIT = "usage_limit"
 SENTENCES = "sentences"
 OPEN_TASKS_NOTHING_HOLDS = "open_tasks_nothing_holds"  # [{"id", "subject"}]
-# [{"kind", "number"}], once each, at rules 3 to 5, and at rule 2 when its fallback reached them: each prerequisite of an open task, such as
-# {"kind": "pr_merged", "number": 50}, that was not asked of GitHub because the due-task hook's
-# GitHubConditionChecker had spent its time budget, so the task it holds may be free; absent when none
+# [{"kind", "number"}], once each: each prerequisite of an open task, such as
+# {"kind": "pr_merged", "number": 50}, that the open-task scan did not ask GitHub about because the
+# due-task hook's GitHubConditionChecker had spent its time budget, so the task it holds may be free.
+# Set whenever the scan runs, even when a gh failure ends it; absent when the scan skipped none.
 GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET = "github_conditions_skipped_for_budget"
 TEXT = "text"                              # code's text to send as written, at rule 3
 IF_EVERY_SENTENCE_BACKED = "if_every_sentence_backed"  # {"rule", "decision", maybe "text"}
@@ -88,7 +97,7 @@ OPTIONAL = (DECISION, NOT_CHECKED, SUPERVISOR_LAST_POLL_AT, LAST_ACTIVITY, LAST_
             LAST_USER_TYPED_AT,
             SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY,
             IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS,
-            TURN_ENDED,
+            IDLE_SWEEP_VERDICT_FIELD_LISTING_REMINDER_MESSAGE_IDS_THE_AGENT_SEAT_MARKED_IRRELEVANT, TURN_ENDED,
             APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER, IDLE, NOT_IDLE_BECAUSE, RUNNING,
             HANDOFF_DEFERRED_MARKER,
             USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, TEXT, IF_EVERY_SENTENCE_BACKED,

@@ -166,6 +166,17 @@ _rebase_or_replace_spec = importlib.util.spec_from_file_location(
 rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
 _rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
 
+_branch_lock_spec = importlib.util.spec_from_file_location(
+    "branch_rebase_and_push_per_checkout_mutual_exclusion_lock_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "branch-rebase-and-push-per-checkout-mutual-exclusion-lock-common.py")
+branch_lock = importlib.util.module_from_spec(_branch_lock_spec)
+_branch_lock_spec.loader.exec_module(branch_lock)
+
+# Well under the Stop hook's 60-second default, which the fetch before it also spends. A turn end
+# that cannot take the lock leaves the checkout as it is; the next turn end catches it up.
+CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = 20
+
 _reusable_prompt_rule_spec = importlib.util.spec_from_file_location(
     "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
@@ -1517,6 +1528,16 @@ def catch_up_session_checkout(checkout: Path, interval_seconds: int) -> None:
     branch = current_branch(checkout)
     if branch is None:
         return
+    # Held from deciding the branch was never pushed until any rebase ends, so the turn-end push
+    # hook, running in parallel, pushes the branch either before that decision or after the rebase.
+    with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(
+            git_dir, CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS) as held:
+        if held:
+            catch_up_session_checkout_branch_under_lock(checkout, git_dir, stamp_path, stamp, branch)
+
+
+def catch_up_session_checkout_branch_under_lock(checkout: Path, git_dir: Path, stamp_path: Path,
+                                                stamp: dict, branch: str) -> None:
     state_key, state_text = head_state(checkout, branch)
 
     # 1. Misbehaviour, to the agent, once per distinct finding of each

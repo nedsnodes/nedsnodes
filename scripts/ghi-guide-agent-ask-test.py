@@ -366,13 +366,18 @@ with tempfile.TemporaryDirectory() as temporary:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     held_handle = open(lock_path, "a+")
     fcntl.flock(held_handle.fileno(), fcntl.LOCK_EX)
+    contended_stderr = io.StringIO()
     try:
-        answer, closed_on, error = ghi_ask.ask("q", False, seat4, "x/y")
+        with contextlib.redirect_stderr(contended_stderr):
+            answer, closed_on, error = ghi_ask.ask("q", False, seat4, "x/y")
     finally:
         fcntl.flock(held_handle.fileno(), fcntl.LOCK_UN)
         held_handle.close()
     check("a contended lock still returns an answer (a throwaway session)",
           answer == reading_list(9), (answer, error))
+    check("a contended ask says on stderr that it cold-starts because another ask holds the lock",
+          "another ask holds the state lock" in contended_stderr.getvalue(),
+          contended_stderr.getvalue())
     check("a contended lock cold-starts (never resumes the held session)",
           claude_calls[0][1] is None, claude_calls)
     check("a contended lock never writes the state file",
@@ -548,9 +553,19 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
                                             closed_at="2026-08-08T00:00:00Z")}, None)])
     budgets = []
+    # Each turn takes a known time on a fake clock, so each later turn's
+    # budget is exact: the ask's whole budget less what earlier turns spent.
+    fake_clock = {"now": 1000.0}
+
+    class FakeTime:
+        @staticmethod
+        def monotonic():
+            return fake_clock["now"]
+    seconds_each_turn_takes = [600, 50, 0]
 
     def recording_run_claude(prompt, resume_session_id, seat_dir, timeout_seconds, json_schema):
         budgets.append(timeout_seconds)
+        fake_clock["now"] += seconds_each_turn_takes[len(budgets) - 1]
         replies = [
             {"session_id": "sess-T", "result": "(ack)"},
             {"session_id": "sess-T", "structured_output": reading_list(13)},   # cites a closed issue
@@ -558,15 +573,43 @@ with tempfile.TemporaryDirectory() as temporary:
         ]
         return replies[len(budgets) - 1], None
     patch("run_claude", recording_run_claude)
-    answer, closed_on, error = ghi_ask.ask("q", False, seat11, "x/y", timeout_seconds=300)
-    check("all three turns of one ask draw on a single budget",
-          len(budgets) == 3, budgets)
+    real_time = ghi_ask.time
+    patch("time", FakeTime)
+    try:
+        answer, closed_on, error = ghi_ask.ask("q", False, seat11, "x/y", timeout_seconds=300)
+    finally:
+        patch("time", real_time)
+    whole_budget = 300 + ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
     check("the cold-start turn gets the ask's budget plus GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS, and "
-          "each later turn only what the ask has left, never the full budget again",
-          budgets == sorted(budgets, reverse=True)
-          and 300 < budgets[0] <= 300 + ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
-          and budgets[1] <= budgets[0] and budgets[-1] < budgets[0],
+          "each later turn exactly what the ask has left",
+          budgets == [whole_budget, whole_budget - 600, whole_budget - 650],
           budgets)
+
+    # A cold start that leaves the question turn too little time is still
+    # saved, so the next ask resumes it rather than cold-starting again.
+    seat11b = root / "seat11b"
+    seat11b.mkdir()
+    fake_refresh_queue([([], {}, None)])
+    fake_clock["now"] = 1000.0
+    cold_start_spends_everything = []
+
+    def cold_start_spends_whole_budget(prompt, resume_session_id, seat_dir, timeout_seconds, json_schema):
+        cold_start_spends_everything.append(timeout_seconds)
+        fake_clock["now"] += timeout_seconds
+        return {"session_id": "sess-SLOW-COLD", "result": "(ack)"}, None
+    patch("run_claude", cold_start_spends_whole_budget)
+    patch("time", FakeTime)
+    try:
+        answer, closed_on, error = ghi_ask.ask("q", False, seat11b, "x/y", timeout_seconds=300)
+    finally:
+        patch("time", real_time)
+    saved = ghi_ask.load_state(seat11b / ghi_ask.STATE_FILE_NAME)
+    check("a cold start whose question turn finds the budget spent still saves its session id",
+          answer is None and len(cold_start_spends_everything) == 1
+          and saved.get(ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY) == "sess-SLOW-COLD",
+          (error, saved))
+    check("a cold-starting ask that runs out names the budget it actually had, not timeout_seconds",
+          error is not None and f"{whole_budget}s budget" in error, error)
 
     # An ask whose budget is already gone fails saying so, rather than
     # starting a turn it cannot afford. A resumed session, since a cold
@@ -1357,7 +1400,10 @@ with tempfile.TemporaryDirectory() as temporary:
              "kind 'repair' is none the schema allows"),
             ("a field no kind of the request form uses fails the ask",
              {"kind": "reading-list", "issues": [1], "verdict": "related"},
-             "fields the schema does not: verdict"),
+             'fields the schema does not: "verdict"'),
+            ("a field name holding a newline is quoted, so the message stays on one line",
+             {"kind": "not-about-issues", "re\nason": "x"},
+             'fields the schema does not: "re\\nason"'),
             ("a kind outside the schema fails the ask",
              {"kind": "escalate"}, "kind 'escalate' is none the schema allows"),
             ("a kind that is not text fails the ask",
@@ -1365,7 +1411,7 @@ with tempfile.TemporaryDirectory() as temporary:
             ("an answer with no kind fails the ask",
              {"issues": [3]}, "kind None is none the schema allows"),
             ("a field the schema does not have fails the ask",
-             {"kind": "not-about-issues", "reason": "x"}, "fields the schema does not: reason"),
+             {"kind": "not-about-issues", "reason": "x"}, 'fields the schema does not: "reason"'),
             ("issue numbers given as text fail the ask",
              {"kind": "reading-list", "issues": ["#3"]}, "issues is not a list of integers"),
             ("a ruling issue given as text fails the ask",

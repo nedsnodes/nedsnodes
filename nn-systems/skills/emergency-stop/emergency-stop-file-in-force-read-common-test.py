@@ -63,6 +63,10 @@ def main():
         check("lift line as the last line lifts", isinstance(state, common.Lifted)
               and state.lift_line == "#emergency_stop_lifted the user said lift it", state)
 
+        newer.write_text(newer.read_text() + "#emergency_stop_lifted# the user said lift it\n")
+        state = common.read_state(folder)
+        check("a lift line in the closed form, with the closing `#`, lifts", isinstance(state, common.Lifted), state)
+
         newer.write_bytes(b"\xff\xfe broken")
         state = common.read_state(folder)
         check("undecodable newest file is unreadable", isinstance(state, common.Unreadable), state)

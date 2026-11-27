@@ -40,6 +40,8 @@ Look in three places, in this order:
 
 If an existing name fails the naming criterion, reuse it anyway, but tell the user it should be renamed: renaming it is a separate change, and a second name for the same thing is worse than one weak name.
 
+Name a hashtag by `docs/nedsnodes-wiki/nedsnodes-hashtag-glossary.md`, which lists every hashtag and what it means.
+
 ## Step 2: build the name from three questions
 
 A name that meets the naming criterion usually answers three questions by itself. Each answer is one part of the name, and a part may be one word or several: `main-gatekeeper-check-in-request-holder` has three parts and six words.
@@ -124,7 +126,7 @@ A hyphen makes a name easy to find with `git grep`; the words must also say what
 
 - **A name that belongs to the whole project names no system.** `agent-seat` and `log-store` belong to no single system, and a general tool such as `scripts/branch-conflict-check.py` serves them all. Adding the project's name, as in `nedsnodes-agent-seat`, would add a word that every such name shares. The wiki's `nedsnodes-` prefix is a pattern set by the file naming standards, and the pattern governs there.
 - **An SDLC-term keeps its standard name.** `worktree`, `pull request` and `test double` mean the same thing to every programmer who knows them, and a reader who does not can look them up anywhere. A longer name of this project's own would hide that they are standard.
-- **A project-term or system-term whose words already name something in software engineering or another computing field starts with `nn-`, short for NedsNodes, placed before any system name, when the project means something different by them or adds significant project-specific detail to the standard meaning.** In standard usage a critical component is a part whose failure brings a system down, so the project's term for the code that judges other work is `nn-critical-code`; a test suite is a set of test cases run as one program, so the project's term for one `-test.py` or `-test.sh` file is `nn-test-suite`. The prefix tells the reader to look the term up in the glossary. A standard term used with its standard meaning takes no prefix.
+- **A project-term or system-term whose words already name something in software engineering or another computing field starts with `nn-`, short for NedsNodes, placed before any system name, when the project means something different by them or adds significant project-specific detail to the standard meaning.** In standard usage a test suite is a set of test cases run as one program, so the project's term for one `-test.py` or `-test.sh` file is `nn-test-suite`. The prefix tells the reader to look the term up in the glossary. A standard term used with its standard meaning takes no prefix.
 - **What is set outside the project stays as it is set**, as the opening of this page says.
 - **A name used only inside one file** is left to the writer: this page does not govern it. A loop index `i`, an exception `error`, or a constant only its own file reads is found by a reader who already has the file open.
 

@@ -47,7 +47,7 @@ An overview already on main without a `**Checked against:**` line was written be
 
 ## Checking an overview
 
-A new overview gets a cold-read-full-run of the /cold-read skill; a refresh gets a cold-read-fast-read (both terms are in `.claude/skills/skills-glossary.md`). Then the overview is checked against the code at one commit, the one its `**Checked against:**` line will name: a commit of main, or, in a pull request that also changes the code the overview describes, a commit of that pull request that holds the code and is earlier in its history than the overview edit. A round is the check, the writer's fixes, and a cold-read-fast-read of the whole overview. The overview merges once the check, run on the overview's text as it will merge, leaves no assertion ranked must fix. If round 3 ends without that, the writer brings the overview, with what is left, to the user.
+A new overview gets a cold-read-full-run of the /cold-read skill; a refresh gets a cold-read-fast-read (both terms are in `docs/nedsnodes-wiki/nedsnodes-glossary.md`). Then the overview is checked against the code at one commit, the one its `**Checked against:**` line will name: a commit of main, or, in a pull request that also changes the code the overview describes, a commit of that pull request that holds the code and is earlier in its history than the overview edit. A round is the check, the writer's fixes, and a cold-read-fast-read of the whole overview. The overview merges once the check, run on the overview's text as it will merge, leaves no assertion ranked must fix. If round 3 ends without that, the writer brings the overview, with what is left, to the user.
 
 The check has two stages, and the second runs only once the first is clean.
 

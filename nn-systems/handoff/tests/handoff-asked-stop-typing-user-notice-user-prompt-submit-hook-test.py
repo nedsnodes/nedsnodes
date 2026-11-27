@@ -8,8 +8,10 @@ handoff-asked marker files and files recording a shown notice are ones this suit
 real ~/.claude/handoffs. The threshold hook computes HANDOFF_DIRECTORY from
 Path.home() at import, so HOME decides the directory.
 
-The agent-seat name variable is set or removed explicitly in every case, because
-an agent-seat running this suite has its own value in the environment.
+The agent-seat name and launched session id variables are set or removed explicitly
+in every case, because an agent-seat running this suite has its own values in the
+environment. A case that sets an agent-seat name runs as the launched agent-session,
+whose session id the launched session id variable holds, unless it names another.
 
 The exit code is asserted on every case: exit 2 from a UserPromptSubmit hook
 would block the user's message.
@@ -38,6 +40,7 @@ _supervisor_specification = importlib.util.spec_from_file_location(
 supervisor = importlib.util.module_from_spec(_supervisor_specification)
 _supervisor_specification.loader.exec_module(supervisor)
 AGENT_NAME_VARIABLE = supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE
+LAUNCHED_SESSION_ID_VARIABLE = supervisor.HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE
 
 failures = []
 
@@ -50,11 +53,19 @@ def check(case_name, condition, detail=""):
         failures.append(case_name)
 
 
-def run_hook(payload, home, agent_seat_name=None, raw_input_text=None):
+def run_hook(payload, home, agent_seat_name=None, raw_input_text=None, launched_session_id=None,
+             stdout_encoding=None):
     environment = {**os.environ, "HOME": str(home)}
+    if stdout_encoding is not None:
+        environment["PYTHONIOENCODING"] = stdout_encoding
     environment.pop(AGENT_NAME_VARIABLE, None)
+    environment.pop(LAUNCHED_SESSION_ID_VARIABLE, None)
     if agent_seat_name is not None:
         environment[AGENT_NAME_VARIABLE] = agent_seat_name
+        if launched_session_id is None and isinstance(payload, dict):
+            launched_session_id = payload.get("session_id")
+        if launched_session_id:
+            environment[LAUNCHED_SESSION_ID_VARIABLE] = launched_session_id
     text = raw_input_text if raw_input_text is not None else json.dumps(payload)
     return subprocess.run([sys.executable, str(HOOK_SCRIPT)], input=text, capture_output=True,
                           text=True, check=False, env=environment)
@@ -174,6 +185,15 @@ with tempfile.TemporaryDirectory() as workspace:
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     (handoffs / "seat-a-remote-control-name").rmdir()
 
+    accented = workspace / "accented.jsonl"
+    accented.write_text(custom_title_record("café") + "\n", encoding="utf-8")
+    marker("s-ascii-stdout").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-ascii-stdout", "transcript_path": str(accented)}, home,
+                      stdout_encoding="ascii")
+    check("a title with é and an ASCII stdout: the line, exit 0",
+          result.returncode == 0 and shown_notice(result) == expected_named("café"),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
     marker("s-unnamed").write_text("40.0\n", encoding="utf-8")
     result = run_hook({"session_id": "s-unnamed", "transcript_path": str(untitled)}, home)
     check("no title record and no agent-seat name: the line says this agent-seat's new session",
@@ -200,6 +220,13 @@ with tempfile.TemporaryDirectory() as workspace:
           result.returncode == 0 and shown_notice(result) == expected_named("seat-c"),
           f"code {result.returncode}, stdout {result.stdout!r}")
 
+    marker("s-child").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-child", "transcript_path": str(untitled)}, home,
+                      agent_seat_name="seat-a", launched_session_id="s-parent")
+    check("a child agent-session started from the launched one's shell: the line names no agent-seat",
+          result.returncode == 0 and shown_notice(result) == EXPECTED_UNNAMED,
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
     # ---- faults --------------------------------------------------------------
 
     result = run_hook(None, home, raw_input_text="[1, 2]")
@@ -213,7 +240,25 @@ with tempfile.TemporaryDirectory() as workspace:
     (handoffs / "s-record-unwritable-handoff-asked-user-notice-shown").mkdir()
     result = run_hook({"session_id": "s-record-unwritable", "transcript_path": str(titled)},
                       home, agent_seat_name="seat-a")
-    check("the file recording a shown notice cannot be read or written: exit 1, nothing on stdout, one stderr line",
+    check("the file recording a shown notice cannot be read: exit 1, nothing on stdout, one stderr line",
+          result.returncode == 1 and result.stdout == ""
+          and len(result.stderr.splitlines()) == 1
+          and result.stderr.startswith(hook.PROGRAM + ": "),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+    # A home of its own, so that making its handoffs directory read-only touches no other case.
+    unwritable_home = workspace / "unwritable-home"
+    unwritable_handoffs = unwritable_home / ".claude" / "handoffs"
+    unwritable_handoffs.mkdir(parents=True)
+    (unwritable_handoffs / "s-record-absent-handoff-asked").write_text("40.0\n", encoding="utf-8")
+    unwritable_handoffs.chmod(0o555)
+    try:
+        result = run_hook({"session_id": "s-record-absent", "transcript_path": str(titled)},
+                          unwritable_home, agent_seat_name="seat-a")
+    finally:
+        unwritable_handoffs.chmod(0o755)
+    check("no file recording a shown notice, and its directory refuses writes: exit 1, nothing on"
+          " stdout, one stderr line",
           result.returncode == 1 and result.stdout == ""
           and len(result.stderr.splitlines()) == 1
           and result.stderr.startswith(hook.PROGRAM + ": "),

@@ -25,3 +25,7 @@ The rebuild reuses `scripts/merge-lane-pull-request-head-and-merged-worktrees-re
 When a rebuild fails, as on a merge conflict, the program prints what failed, runs no tests for that pull request, goes on to the next pull request, and exits 2. `scripts/merge-lane-pull-request-head-test-run-on-merged-worktree-test.py` covers a main that has moved past `pr<n>-merged` and a rebuild that fails.
 
 A rerun outside the review pipeline rebuilds on whatever commit the review tools worktree has checked out, so whoever reruns it must first move that worktree to the fixed main. Making the program fetch main itself is left out of this fix.
+
+## Outcome
+
+Fixed by [PR 4349, "merge-lane head test run: rebuild pr<n>-merged from the current head and main on each run"](https://github.com/nedsnodes/nedsnodes/pull/4349), merged as 2a99eb74d; the GHI was closed as completed on 2026-11-23. Two follow-ups changed the same program after review: [PR 4378, "Merge-lane head test run: fetch each commit it tests once, and take only a full hash as --head-commit"](https://github.com/nedsnodes/nedsnodes/pull/4378), merged as 20930a4a0, and [PR 4400, "Merge-lane head test run: keep a fetched commit when ref cleanup fails, and fetch the head once"](https://github.com/nedsnodes/nedsnodes/pull/4400), merged as c04944075. No work on this GHI remains.

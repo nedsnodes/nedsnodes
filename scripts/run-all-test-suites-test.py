@@ -1091,6 +1091,34 @@ with tempfile.TemporaryDirectory() as scratch:
           (ran(root), result.stdout, result.stderr))
     base = head_tested
 
+    # When the runner differs from the first commit, the later comparisons are not made, so a
+    # later commit whose comparison would fail, such as one git ls-tree cannot read, stops
+    # nothing.
+    real_suites_selected_since = module.suites_selected_since
+    compared = []
+
+    def suites_selected_since_failing_after_the_first(top, suites, recordings, commit, *rest):
+        compared.append(commit)
+        if len(compared) > 1:
+            raise module.CouldNotRun("injected: git ls-tree of the second commit failed")
+        return [(suite, False, "none of its files differs") for suite in suites]
+
+    module.suites_selected_since = suites_selected_since_failing_after_the_first
+    try:
+        answer = module.suites_selected_since_every_commit(
+            pathlib.Path("/nowhere"), ["a-test.py"], {}, ["first-commit", "second-commit"],
+            [{module.PROGRAM: "M"}, {}], {}, {}, None)
+        refused = None
+    except module.CouldNotRun as refusal:
+        answer, refused = None, str(refusal)
+    finally:
+        module.suites_selected_since = real_suites_selected_since
+    check("given two commits, when the test runner differs from the first, the comparison with "
+          "the second is not made, so its failure does not stop the run, and every suite runs",
+          refused is None and compared == ["first-commit"] and answer is not None
+          and [(suite, selected) for suite, selected, _ in answer] == [("a-test.py", True)],
+          (compared, answer, refused))
+
     result = run(root, CHANGED_SINCE, "no-such-commit")
     check("a commit git cannot resolve is refused, exit 2, before anything runs",
           result.returncode == 2 and CHANGED_SINCE in result.stderr, (result.returncode,
@@ -2413,41 +2441,41 @@ with tempfile.TemporaryDirectory() as scratch:
           "of cases, so it recorded only what the cases that ran read" in lines(result.stdout),
           result.stdout)
 
-# A suite a cause outside this repository stopped, such as claude's usage limit, is NOT RUN,
+# A suite a cause outside this repository stopped, such as claude logged out, is NOT RUN,
 # not FAIL, and names the cause; a failing case in the same run still fails the run.
 OUTSIDE_CAUSE_EXIT = module.NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES
-STOPPED_BY_WEEKLY_LIMIT = ("print('PASS  a case that needs no claude')\n"
-                           "print(\"NOT RUN: the trial; claude stopped: account-limit — weekly limit · "
-                           "resets Nov 16, 8pm (America/Los_Angeles)\")\n"
-                           f"sys.exit({OUTSIDE_CAUSE_EXIT})\n")
+STOPPED_BY_CLAUDE_LOGGED_OUT = ("print('PASS  a case that needs no claude')\n"
+                                "print(\"NOT RUN: the trial; claude stopped: logged-out — Not logged in · "
+                                "Please run /login\")\n"
+                                f"sys.exit({OUTSIDE_CAUSE_EXIT})\n")
 with tempfile.TemporaryDirectory() as scratch:
     root = pathlib.Path(scratch)
-    repo = make_repo(root, {"claude-limit-test.py": STOPPED_BY_WEEKLY_LIMIT, "passes-test.py": PASSES})
+    repo = make_repo(root, {"claude-logged-out-test.py": STOPPED_BY_CLAUDE_LOGGED_OUT, "passes-test.py": PASSES})
     base = head(repo)
     result = run(root)
     not_run_lines = [line for line in lines(result.stdout)
-                     if line.startswith(module.NOT_RUN_SUITE_LINE_PREFIX + "claude-limit-test.py ")]
+                     if line.startswith(module.NOT_RUN_SUITE_LINE_PREFIX + "claude-logged-out-test.py ")]
     check("a suite that exits the outside-cause exit code is NOT RUN, not FAIL, with its last line "
           "as the cause, and the run exits 2 with no suite failed",
           result.returncode == module.EXIT_COULD_NOT_RUN
           and len(not_run_lines) == 2
-          and all("stopped by an outside cause: NOT RUN: the trial; claude stopped: account-limit — "
-                  "weekly limit · resets Nov 16, 8pm (America/Los_Angeles)" in line for line in not_run_lines)
+          and all("stopped by an outside cause: NOT RUN: the trial; claude stopped: logged-out — "
+                  "Not logged in · Please run /login" in line for line in not_run_lines)
           and not any(line.startswith(module.FAILED_SUITE_LINE_PREFIX) for line in lines(result.stdout))
           and any(line.startswith(module.SUMMARY_LINE_PREFIX) and " 1 passed, 0 failed, 1 not run, " in line
                   for line in lines(result.stdout)), (result.returncode, result.stdout))
     commit_files(repo, {"other.txt": "x\n"}, "unrelated")
     result = select_since(root, base)
     check("a suite NOT RUN for an outside cause is selected again by the next selective run",
-          "claude-limit-test.py" in ran(root) and "passes-test.py" not in ran(root),
+          "claude-logged-out-test.py" in ran(root) and "passes-test.py" not in ran(root),
           (ran(root), result.stdout))
 with tempfile.TemporaryDirectory() as scratch:
     root = pathlib.Path(scratch)
-    make_repo(root, {"claude-limit-test.py": STOPPED_BY_WEEKLY_LIMIT, "fails-test.py": "sys.exit(1)\n"})
+    make_repo(root, {"claude-logged-out-test.py": STOPPED_BY_CLAUDE_LOGGED_OUT, "fails-test.py": "sys.exit(1)\n"})
     result = run(root)
     check("beside a suite NOT RUN for an outside cause, a failing suite still makes the run exit 1",
           result.returncode == module.EXIT_SOME_FAILED
-          and any(line.startswith(module.NOT_RUN_SUITE_LINE_PREFIX + "claude-limit-test.py ")
+          and any(line.startswith(module.NOT_RUN_SUITE_LINE_PREFIX + "claude-logged-out-test.py ")
                   for line in lines(result.stdout)), (result.returncode, result.stdout))
 
 with tempfile.TemporaryDirectory() as scratch:
@@ -5055,7 +5083,32 @@ check("the JUnit XML names each skipped case, and says whether each suite ran to
       and junit_suites["scripts/b-test.py"].get("ran_to_the_end") == "false"
       and junit_suites["scripts/b-test.py"].get("judged") == "false",
       xml.etree.ElementTree.tostring(junit_root))
+check("the JUnit XML counts each skipped case among a suite's tests",
+      junit_suites["scripts/a-test.py"].get("tests") == "2"
+      and junit_suites["scripts/a-test.py"].get("skipped") == "1",
+      xml.etree.ElementTree.tostring(junit_root))
 shutil.rmtree(ran_to_the_end_directory)
+
+skipped_sibling = module.test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(
+    [case_line("FAIL", "p: X: got 1")], ["p: Y: no Mac"])
+check("a failing case's name is read against the suite's SKIP lines too, so a skipped sibling "
+      "case leaves it the name a passing sibling would",
+      [(case["name"], case["detail"]) for case in skipped_sibling] == [("p: X", "got 1")],
+      skipped_sibling)
+
+for how, text, expected in (
+        ("reached its SUMMARY with only FAIL suites", "FAIL scripts/a-test.py exit 1\nSUMMARY: 0 passed, 1 failed\n", True),
+        ("was cut short at its run time limit before its SUMMARY",
+         "FAIL scripts/a-test.py exit 1\n"
+         f"{module.RUN_STOPPED_AT_RUN_TIME_LIMIT_NOT_COUNTING_ADMISSION_WAITS_LINE_PREFIX}\n"
+         "SUMMARY: 0 passed, 1 failed\n", False),
+        ("was cut short, in a runner's bare-name form",
+         "FAIL scripts/a-test.py exit 1\nrun-all-test-suites: not run to the end — stopped\n"
+         "SUMMARY: 0 passed, 1 failed\n", False)):
+    check(f"a run that {how} {'has' if expected else 'does not have'} failed suites as its only "
+          f"problem",
+          module.run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(
+              module.EXIT_SOME_FAILED, text) is expected, text)
 
 print()
 # The count is printed so a short run is visible on sight: a run that ends

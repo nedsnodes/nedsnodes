@@ -592,10 +592,19 @@ ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION = (
 
 WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE = (
     "Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
-    "{link}. Before your first message, open that page with the Artifact tool. If it is gone, publish "
-    "the item again from docs/walk/{walk}.md and append the line \"#item_page item {count} <new link>\" "
-    "to docs/walk/{walk}-minutes.md. Show the item in full, and end your first message with its closing "
-    "line, holding the link that opens."
+    "{link}. Before your first message, check, with the Artifact tool's read action, that the link "
+    "still works. If the read fails, publish the item again from docs/walk/{walk}.md and append the line "
+    "\"#item_page item {count} <new link>\" to docs/walk/{walk}-minutes.md. Show the item in full, and "
+    "end your first message with the item's closing line, holding the link that works: this one, or "
+    "the new link when you published again."
+)
+
+# The Artifact tool reads only claude.ai pages, and a `file:` page is recorded when publishing failed, so the
+# successor keeps that link rather than reading it and publishing again.
+WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE = (
+    "Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
+    "{link}, a file on ned-box, which the Artifact tool cannot read. Show the item in full, and end your "
+    "first message with the item's closing line, holding this link."
 )
 
 WAITING_APPROVAL_WALK_ITEM_WITHOUT_PAGE_LINK_INSTRUCTION_TEMPLATE = (
@@ -1327,6 +1336,9 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
     values = {"walk": name, "count": count, "count_and_point": f"{count}, {point}," if point else count}
     if link is None or link == walk_finder.ITEM_PAGE_PUBLISH_FAILED:
         return (WAITING_APPROVAL_WALK_ITEM_WITHOUT_PAGE_LINK_INSTRUCTION_TEMPLATE.format(**values)
+                + document_problem,)
+    if link.startswith("file:"):
+        return (WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE.format(link=link, **values)
                 + document_problem,)
     return (WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE.format(link=link, **values) + document_problem,)
 
