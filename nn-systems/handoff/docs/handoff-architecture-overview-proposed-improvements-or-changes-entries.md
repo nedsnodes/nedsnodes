@@ -1257,3 +1257,15 @@ The claim check's evidence:
 > - The writer takes them from the supervisor, not from the module: handoff-write-and-check-supervisor.py:152-154.
 > - Ranked fix-later: renaming one of these fields still takes one edit, in handoff-supervisor.py, and a search finds it.
 State: open
+
+## E108 — possible problem: an assertion of the overview is contradicted
+
+Claim: the first is required by `handoff-supervisor.py` and names the task list the writer script prunes, the second names the agent-seat in `uncommitted-work-snapshots.py`.
+Found by: the overview claim check of 2026-11-27 against commit 02ee2e5e33d18e48d21dedfeba0d87cdd20566bb; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/6d808b560b329c78d46b66695c387891343c0640-2026-11-27T00-50-30-489961Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - `GIT_AUTHOR_NAME` also names the agent-seat in other components the overview names. scripts/worktree-owner-file-read-and-write.py:47-48 "--agent-session names the nearest `claude` process among this program's parent processes, and the agent-seat GIT_AUTHOR_NAME names"
+> - nn-systems/handoff/agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py:20-21 "the tip commit's author name is this agent-seat's name (the launchers set GIT_AUTHOR_NAME to it)"
+> - scripts/launch-claude-mac:268-270 "GIT_AUTHOR_NAME names the new agent-seat, so the post-checkout hook sees the agent-seat's own agent-home"
+State: open
