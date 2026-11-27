@@ -11,8 +11,8 @@ unlocked, once claude has exited. A later Claude Code that locks or removes such
 fails it. It needs the real HOME, where claude is logged in, and an agent-seat of this machine
 for GIT_AUTHOR_NAME, so scripts/run-all-test-suites.py runs it outside any sandbox. It spends
 one short haiku agent-session, and removes the Claude Code project directory claude made for
-the scratch clone. When claude names a cause outside this repository, such as being logged out
-or a model's limit, the trial's cases are not judged: the suite prints the cause as its last
+the scratch clone. When claude names a cause outside this repository, such as being logged out,
+the trial's cases are not judged: the suite prints the cause as its last
 line and exits run-all-test-suites.py's NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES,
 unless another case failed.
 
