@@ -30,7 +30,7 @@ OTHER_LISTED_MODEL = "gemini-3.8-flash-medium"
 # A strict prefix of a listed id, so a launcher that accepted prefixes would take it.
 PARTIAL_MODEL = LISTED_MODEL.rsplit("-", 1)[0]
 
-FAKE_AGY = r'''#!PYTHON
+FAKE_AGY = rf'''#!PYTHON
 import json, os, pathlib, signal, sys, time
 args = sys.argv[1:]
 mode = os.environ.get("FAKE_AGY_MODE", "report")
@@ -44,7 +44,7 @@ if args == ["models"]:
     if mode == "models-fail":
         sys.exit(4)
     if mode != "models-sleep":
-        print("Available models:\n  @LISTED@\n  @OTHER@", flush=True)
+        print("Available models:\n  {LISTED_MODEL}\n  {OTHER_LISTED_MODEL}", flush=True)
         sys.exit(0)
 if mode in ("sleep", "models-sleep"):
     child = os.fork()
@@ -89,8 +89,7 @@ class GeminiTaskTests(unittest.TestCase):
         for name, content in (("agy", FAKE_AGY), ("bwrap", FAKE_SANDBOX),
                               ("sandbox-exec", FAKE_SANDBOX)):
             script = self.bin / name
-            script.write_text(content.replace("#!PYTHON", "#!" + sys.executable)
-                              .replace("@LISTED@", LISTED_MODEL).replace("@OTHER@", OTHER_LISTED_MODEL))
+            script.write_text(content.replace("#!PYTHON", "#!" + sys.executable))
             script.chmod(0o755)
         self.brief = self.base / "brief.md"
         self.brief.write_text("---\nRead README.md.\nWrite three lines.\n")
@@ -172,7 +171,6 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertNotIn("test-key-from-caller", self.log.read_text())
 
     def test_unknown_model_stops_before_task(self):
-        self.assertTrue(LISTED_MODEL.startswith(PARTIAL_MODEL) and PARTIAL_MODEL != LISTED_MODEL)
         result = self.run_cli(extra=("-m", PARTIAL_MODEL))
         self.assertEqual(result.returncode, 1)
         self.assertIn("unknown model", result.stderr)
