@@ -2746,9 +2746,10 @@ def test_settled_line_a_newest_turn_origin_record_with_no_message_is_no_match_no
           result.returncode == 0 and SETTLED_LINE in context_lines(result),
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     result = case.run("take the other option", transcript_path=transcript)
-    check("a reply in his own words with that record gives no failed-transcript-read line and exits 0",
-          result.returncode == 0 and context_lines(result)
-          and not any("could not tell who wrote this prompt" in line for line in context_lines(result)),
+    lines = context_lines(result)
+    check("a reply in his own words with that record gets the own-words line naming the waiting item, then the "
+          "settled line, with no failed-transcript-read line between them, and exits 0",
+          is_only_the_own_words_message(result) and "item 4 of 9" in lines[0],
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 
