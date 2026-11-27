@@ -28,7 +28,9 @@ gh asserts it was called, that each call named the case's pull request, and
 that the token was the one in the case's token file, so a case cannot pass by
 reaching the real gh or the real credential. Cases that must stop before gh
 assert the log is empty. A run in which the stand-in fails for a reason of its own,
-such as a call it was given no route for, fails the suite whatever its case expects.
+such as a call it was given no route for, fails the suite whatever its case expects:
+run_gate reads the stand-in's failure log, and the gate's stderr for the line the
+stand-in prints there, which still arrives when a full disk stops the failure log.
 
 Exit codes are asserted exactly: 0 passed, 1 refused, 2 could not run.
 
@@ -175,8 +177,9 @@ scratch = Path(tempfile.mkdtemp(prefix="merge-gate-test-"))
 # because the gate turns every gh failure into the same exit 2 and message, and a route
 # may script any exit code.
 # An exported BASH_ENV is not handled: bash sources it before the stand-in reads GH_TOKEN.
+GH_STAND_IN_FAILURE_LINE_PREFIX = "merge-gate-test stand-in: "
 GH_STAND_IN_TEMPLATE = f"#!{BASH}\n" + r"""stand_in_failed() {
-  printf 'merge-gate-test stand-in: %s\n' "$2" >&2
+  printf '@FAILURE_LINE_PREFIX@%s\n' "$2" >&2
   printf '%s\n' "$2" >>"$MERGE_GATE_TEST_GH_STAND_IN_FAILURE_LOG"
   exit "$1"
 }
@@ -211,7 +214,7 @@ case "$key" in
 esac
 printf -v call ' %q' "$@"
 stand_in_failed 97 "unarranged gh call:$call"
-"""
+""".replace("@FAILURE_LINE_PREFIX@", GH_STAND_IN_FAILURE_LINE_PREFIX)
 
 
 def gh_stand_in(routes, case_dir):
@@ -438,7 +441,7 @@ def gate_copy(text):
 
 def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=None,
              wrapper=None, arguments=None, jq_failing_filter=None, description_reader_fails=False,
-             marks_check_fails=False,
+             marks_check_fails=False, failure_log_unwritable=False,
              cwd=None, no_sandbox_suites_state=None, failed_suites_record=None):
     case_dir = Path(tempfile.mkdtemp(dir=scratch))
     home = case_dir / "home"
@@ -487,7 +490,7 @@ def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=
         PATH=path_override(stand_in_dir) if path_override else
         f"{stand_in_dir}{os.pathsep}{os.environ['PATH']}",
         MERGE_GATE_TEST_GH_CALL_LOG=str(call_log),
-        MERGE_GATE_TEST_GH_STAND_IN_FAILURE_LOG=str(failure_log))
+        MERGE_GATE_TEST_GH_STAND_IN_FAILURE_LOG="/dev/full" if failure_log_unwritable else str(failure_log))
     if jq_failing_filter is not None:
         environment.update(MERGE_GATE_TEST_JQ_FAILING_FILTER=jq_failing_filter,
                            MERGE_GATE_TEST_REAL_JQ=shutil.which("jq"))
@@ -509,7 +512,12 @@ def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=
     calls = gh_calls(call_log)
     # A failed check of its own, not only the case's verdict: a mutation counts a false
     # verdict as caught.
-    stand_in_failures = failure_log.read_text()
+    # The gate passes gh's stderr through, so the stand-in's own line is there even when
+    # its failure log could not be written; a mutation that hides gh's stderr still leaves
+    # the failure log.
+    stand_in_failures = failure_log.read_text() + "".join(
+        line + "\n" for line in completed.stderr.splitlines()
+        if line.startswith(GH_STAND_IN_FAILURE_LINE_PREFIX))
     if stand_in_failures:
         check(f"the gh stand-in served every call of merge-gate.sh {shlex.join(arguments)}",
               False, stand_in_failures.strip())
@@ -2530,17 +2538,21 @@ def check_stand_in_fails_when_it_cannot_send_or_log():
 
 def check_run_gate_fails_a_run_whose_stand_in_failed():
     """With its inline route gone, the case that scripts an inline-channel failure still
-    passes on the gate's exit 2, so run_gate itself must fail."""
+    passes on the gate's exit 2, so run_gate itself must fail, also when the stand-in
+    cannot write its failure log, as on a full disk."""
     routes = {key: route for key, route in base_routes().items() if key != "inline:paginated"}
-    failures_before = len(failures)
-    # Its FAIL line is the expected outcome here, so it is kept off the suite's output.
-    with contextlib.redirect_stdout(io.StringIO()):
-        run_gate(GATE, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], routes)
-    recorded = failures[failures_before:]
-    del failures[failures_before:]
-    check("run_gate records a failed check when the gh stand-in fails for a reason of its own",
-          len(recorded) == 1 and recorded[0].startswith("the gh stand-in served every call"),
-          f"failed checks recorded: {recorded!r}")
+    for name, failure_log_unwritable in (("", False),
+                                         (" and cannot write its failure log", True)):
+        failures_before = len(failures)
+        # Its FAIL line is the expected outcome here, so it is kept off the suite's output.
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_gate(GATE, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], routes,
+                     failure_log_unwritable=failure_log_unwritable)
+        recorded = failures[failures_before:]
+        del failures[failures_before:]
+        check(f"run_gate records a failed check when the gh stand-in fails for a reason of its own{name}",
+              len(recorded) == 1 and recorded[0].startswith("the gh stand-in served every call"),
+              f"failed checks recorded: {recorded!r}")
 
 
 def main():
