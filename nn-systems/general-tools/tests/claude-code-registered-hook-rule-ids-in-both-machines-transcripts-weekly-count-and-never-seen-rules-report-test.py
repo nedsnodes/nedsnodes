@@ -267,10 +267,11 @@ for rule_id, row in recorded.items():
             wrong_squash_rows[rule_id] = (row, real_first_parent_subjects[row["commit"]])
 check("a recorded commit on main's first-parent history names the pull request its subject's (#<number>) "
       "names, or null when the subject names none", wrong_squash_rows == {}, wrong_squash_rows)
-# docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md: an agent-seat name is one word; a person's git name is not.
-not_one_word_seats = {rule_id: row["agent_seat"] for rule_id, row in recorded.items() if not row["agent_seat"]
-                      or any(character.isspace() for character in row["agent_seat"])}
-check("every recorded agent-seat is one word, as an agent-seat name is", not_one_word_seats == {}, not_one_word_seats)
+# docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md: an agent-seat name is one token with no spaces; a person's git name is not.
+not_one_token_seats = {rule_id: row["agent_seat"] for rule_id, row in recorded.items() if not row["agent_seat"]
+                       or any(character.isspace() for character in row["agent_seat"])}
+check("every recorded agent-seat is one token with no spaces, as an agent-seat name is",
+      not_one_token_seats == {}, not_one_token_seats)
 check("rules whose message words or constant changed since are recorded with the commit that wrote them",
       [(recorded[rule_id]["commit"][:9], recorded[rule_id]["agent_seat"], recorded[rule_id]["pull_request"])
        for rule_id in ("bash-guard-git-push-and-pr-merge-during-emergency-stop",
