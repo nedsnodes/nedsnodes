@@ -2646,10 +2646,13 @@ try:
     own_check_directory = scratch / "stopped-cell-whose-own-write-check-already-ran"
     own_check_directory.mkdir()
     grid_stopped_without_snapshot_reason = "its snapshot of the working tree before the cells launched failed (test)"
+    own_skipped_check_line = io.StringIO()
+    with contextlib.redirect_stderr(own_skipped_check_line):
+        grid_module.cell_common.report_stray_writes(
+            "cold-read-claude-cell", grid_module.cell_common.WriteDetectorUnavailable("test"))
     own_check_lines = (
-        f"cold-read-claude-cell: {grid_module.cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE} — no pre-run "
-        "snapshot of the working tree was taken (git status failed: test).\n"
-        f"cold-read-claude-cell: {grid_module.cell_common.STRAY_WRITE_PHRASE} — notes.md.\n"
+        own_skipped_check_line.getvalue()
+        + f"cold-read-claude-cell: {grid_module.cell_common.STRAY_WRITE_PHRASE} — notes.md.\n"
         "cold-read-claude-cell: fell back to claude-opus-5-5 after claude-fable-5-2(exit1).\n")
     for case_label, timeout_seconds, target_move in (
             ("past its time limit", 60, lambda: None),
