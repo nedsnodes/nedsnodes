@@ -1,6 +1,6 @@
 # Project glossary defects from the cold reads, each with its findings and proposed change
 
-This is the list of defects that work item 1 of GHI [Fix the defects a full cold read found in the project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`](https://github.com/nedsnodes/nedsnodes/issues/3960) asks for. It sorts the 228 findings of the cold-read-full-run, and the four findings of the later cold-read-fast-read, into distinct defects. Each defect is checked against the glossary on main at commit `2765c1b88`, after pull request [5239](https://github.com/nedsnodes/nedsnodes/pull/5239) merged. It replaced PR [Project glossary: fleet-restart-at-login is named as an agent-seat in the agent-crash-watcher and failed-restart-notice entries](https://github.com/nedsnodes/nedsnodes/pull/3948), which closed without merging. Findings that main has fixed since are listed once, under "Findings main has fixed", and nowhere else.
+This is the list of defects that work item 1 of GHI [Fix the defects a full cold read found in the project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`](https://github.com/nedsnodes/nedsnodes/issues/3960) asks for. It sorts the 228 findings of the cold-read-full-run, and the four findings of the later cold-read-fast-read, into distinct defects. Each defect is checked against the glossary on main at commit `2765c1b88`, after pull request [5239](https://github.com/nedsnodes/nedsnodes/pull/5239) merged. Pull request 5239 replaced PR [Project glossary: fleet-restart-at-login is named as an agent-seat in the agent-crash-watcher and failed-restart-notice entries](https://github.com/nedsnodes/nedsnodes/pull/3948), which closed without merging. Findings that main has fixed since are listed once, under "Findings main has fixed", and nowhere else.
 
 The findings are cited by report and number. The reports are in two cold-read-records:
 
@@ -15,7 +15,11 @@ The findings are cited by report and number. The reports are in two cold-read-re
   - Q4 is `question-4-what-should-be-code-answer.md`.
 - `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/nedsnodes-glossary-2026-11-20-8`: FR is `cold-read-fast-read.md`.
 
-Each defect gives the glossary's text on main, a proposed change, the case against that change with a rating, an alternative, and a recommendation. Work item 3's approval-walk shows these to the user. Some defects are marked as a pre-approved-change candidate. That means an exception of `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md` may cover the change, so the agent running the approval-walk checks the exception before it shows the item.
+Each defect gives the glossary's text on main, a proposed change, the case against that change with a rating, an alternative, and a recommendation. Work item 3's approval-walk shows these to the user. Where a recommendation says to check something first, such as code or a search of the repository, the agent that runs the approval-walk does that check, and revises the item from it, before it shows the item. A part that changes a file other than the glossary goes in the same pull request as the glossary changes.
+
+Every finding is cited exactly once, in the list of fixed findings, under one defect or under one proposed program. AG2, AG10 and CT32 are each split in two and cited once for each half. Q4-1 is also named under D5, whose defect it found.
+
+Three pages are named often below. The approval page is `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md`. The file-naming page is `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md`. The SDLC-terms page is `docs/nedsnodes-wiki/nedsnodes-sdlc-terms.md`. Some defects are marked as a pre-approved-change candidate. That means an exception of the approval page may cover the change, so the agent running the approval-walk checks the exception before it shows the item.
 
 ## Findings main has fixed
 
@@ -31,7 +35,7 @@ These 20 findings, and the first half of AG10, need no work:
 
 ## The obvious-error-fix
 
-Work item 2's pull request makes one obvious-error-fix. The nn-test-suite entry said that a selective run picks "the nn-test-suites its docstring's selection rules pick". Since commit `ac11b908d`, the docstring of `scripts/run-all-test-suites.py` says under SELECTION that "Which suites a run selects, and why, is on the page `docs/nedsnodes-wiki/nedsnodes-how-the-test-runner-selects-which-nn-test-suites-a-test-run-runs.md`". The entry now points to that page. The 22 lines marked UNRESOLVED in `cold-read-reference-check.md` are all name patterns, such as `-test.py` and `~/.claude/handoffs/`, or paths that live outside the repository; none of them is a broken reference. Every other repository path, section name and docstring heading that the glossary cites resolves on main.
+Work item 2's pull request makes one obvious-error-fix. The nn-test-suite entry said that a selective run picks "the nn-test-suites its docstring's selection rules pick". Since commit `ac11b908d`, the docstring of `scripts/run-all-test-suites.py` says under SELECTION that "Which suites a run selects, and why, is on the page `docs/nedsnodes-wiki/nedsnodes-how-the-test-runner-selects-which-nn-test-suites-a-test-run-runs.md`". The entry now points to that page. The 22 lines marked UNRESOLVED in `cold-read-reference-check.md` of the cold-read-record `nedsnodes-glossary-2026-11-20-3` are all name patterns, such as `-test.py` and `~/.claude/handoffs/`, or paths that live outside the repository; none of them is a broken reference. Every other repository path, section name and docstring heading that the glossary cites resolves on main.
 
 ## The defects
 
@@ -115,7 +119,7 @@ Proposed change: move design-contract, design-requirement, test-design and test-
 
 The alternative: move handoff-deferral, component-consumer, coverage-type and no-tests into this glossary.
 
-Recommendation: before the approval-walk, search the repository for each of the four terms outside `docs/design-to-main/`, then move them, or keep them here, as that search shows.
+Recommendation: before the approval-walk, search the repository for each of the four terms outside `docs/design-to-main/`, then move them, or keep them here, as that search shows. D8, D27 and D48 change the same four entries, and apply to them in whichever glossary they end up in.
 
 ### D6. "a term this page does not list is not a project-term, at least not yet" contradicts itself
 
@@ -147,7 +151,7 @@ Recommendation: change the sentence to the new text.
 
 ### D8. Entries that define a kind of text, a change to text or a check on text carry no #prose, #code or #data label
 
-Findings: CH9, XH4, AG4, C2-7, X2-2, X2-9, X2-10, X2-19, FR Q2.3, and the dispatcher's added point.
+Findings: CH9, XH4, AG4, C2-7, X2-2, X2-9, X2-10, X2-19, FR Q2.3, and a point that agent-instructions-editor added when it handed out this work on 2026-11-26.
 
 The opening says such an entry "ends with one or more of the labels #prose, #code and #data". These entries carry none: agent-instructions, initial-agent-instructions, tool-message-to-agent, design-requirement, design-contract, test-design, test-requirement, provisional-addition, GHI-MD, link-only-GHI, deferred-decisions, conversation-tail, seat-brief, supporting-document, walk-minutes, user-approved-change, pre-approved-change, hand-merge, fix-round, nn-mutation-testing and nn-test-suite. The five cold-read entries that pull request [4344](https://github.com/nedsnodes/nedsnodes/pull/4344) moved here from the skills glossary also carry none: cold-read-cell, cold-read-fast-read, cold-read-full-run, cold-read-target and cold-read-tier. Of these five, cold-read-fast-read and cold-read-full-run are checks on text and cold-read-target is a text. cold-read-cell and cold-read-tier name a thing.
 
@@ -155,7 +159,7 @@ Which labels each entry needs is a judgment, so the proposed change gives a labe
 
 - #prose: agent-instructions, initial-agent-instructions, provisional-addition, GHI-MD, link-only-GHI, deferred-decisions, conversation-tail, seat-brief, supporting-document, walk-minutes, design-requirement, design-contract, test-design, test-requirement, fix-round, cold-read-fast-read, cold-read-full-run and cold-read-target;
 - #prose #code #data: user-approved-change, pre-approved-change and hand-merge;
-- #prose: tool-message-to-agent, which `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md` § Prose, code and data counts as prose even inside a program's source;
+- #prose: tool-message-to-agent, which the approval page's section Prose, code and data counts as prose even inside a program's source;
 - #code: nn-mutation-testing and nn-test-suite;
 - no label: cold-read-cell and cold-read-tier, which name a thing.
 
@@ -327,7 +331,7 @@ Part 2. Add to the end of failed-restart-notice: "; and after a restart that `sc
 
 Part 3. Change the first "the agent-seat fleet-restart-at-login" in agent-crash-watcher to "the agent-seat fleet-restart-at-login, which owns the agent-crash-watcher".
 
-#case_against weak: the user approved the wording "the agent-seat fleet-restart-at-login" as item 52 of approval-walk agent-instructions-editor-backlog-decisions-2026-11-05 (minutes line 406), and part 3 adds to it.
+#case_against weak: the user approved the wording "the agent-seat fleet-restart-at-login" as item 52 of approval-walk agent-instructions-editor-backlog-decisions-2026-11-05 (`nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/agent-instructions-editor-backlog-decisions-2026-11-05-minutes.md`, line 406), and part 3 adds to it.
 
 The alternative: make parts 1 and 2 only.
 
@@ -537,7 +541,7 @@ Part 2. Old (nn-head-commit): "a pull request's nn-head-commit, once pushed, is 
 
 The alternative: leave the entries as they are.
 
-Recommendation: make both parts. This is a pre-approved-change candidate under "Rewording a sentence of prose to remove an ambiguity or a contradiction", if the latest user-ruling is the CLAUDE.md sentence.
+Recommendation: make both parts. This is a pre-approved-change candidate under "Rewording a sentence of prose to remove an ambiguity or a contradiction", because CLAUDE.md's sentence settles which meaning is intended.
 
 ### D34. instruction-file guard names fewer files than guarded-file, and three entries disagree on the marker for an obvious-error-fix
 
@@ -631,7 +635,7 @@ New: "The user does not review a one-off-prompt; an agent gives a brief to a fre
 
 The alternative: delete the second clause.
 
-Recommendation: bring the user both readings and let him choose.
+Recommendation: change the sentence to the new text, without the clause "when the brief is longer than a lookup".
 
 ### D40. outside-program-term says "never pull-request", yet ready writes "a pull-request review"
 
@@ -699,7 +703,7 @@ New: "Nor is work that starts a cold-read-full-run, a review of a pull request o
 
 The alternative: leave "long work" and add "work expected to take more than 10 minutes".
 
-Recommendation: bring the user both and let him choose.
+Recommendation: change the sentence to the new text.
 
 ### D45. ruling-agent ends in -agent like guide-agent, but is an agent-seat
 
@@ -837,7 +841,7 @@ The alternative: leave the entry as it is.
 
 Recommendation: change the entry to the new text.
 
-### D55. Words that no glossary defines: build plan, NNNN, MD and PR, scratchpad, the launchers
+### D55. Words that no glossary defines: build plan, NNNN, MD, scratchpad and the launchers
 
 Findings: C2-15, C2-17, C2-24, C2-39, C2-48.
 
@@ -849,11 +853,13 @@ Part 3. In GHI-MD, change "the MD file used to explain a GitHub issue." to "the 
 
 Part 4. In seat-branch, change "that the launchers created" to "that the launchers `scripts/launch-claude-mac` and `scripts/launch-claude-ubuntu` created".
 
+Part 5. In one-off-prompt, change "written in the agent's scratchpad" to "written in the scratchpad directory that Claude Code gives each agent-session". D58 part 5 covers PR.
+
 #case_against weak: each part adds words to an entry.
 
 The alternative: make parts 3 and 4 only.
 
-Recommendation: make all four parts, after checking part 2 in the code.
+Recommendation: make all five parts, after checking part 2 in the code.
 
 ### D56. reusable-prompt, SDLC-term and user-ruling say more than holds
 
@@ -921,7 +927,7 @@ Recommendation: make the changes as listed.
 
 ### D60. "fast-clarify" in the cold-read-fast-read entry is in no glossary
 
-Findings: the dispatcher's added point.
+Findings: a point that agent-instructions-editor added when it handed out this work on 2026-11-26.
 
 "fast-clarify" names the prompt `.claude/skills/cold-read/prompts/fast-clarify-prompt.md`, whose copy `nn-systems/cold-read/cold-read-fast-read.py` holds as `FAST_CLARIFY_PROMPT_TEMPLATE`. None of the listed glossaries has an entry for it. The name exists, so this is not an obvious-error. cold-read-full-run's "the defect-hunt prompt and the terminology prompt" names its prompts the same way, but without the hyphenated form.
 
@@ -940,13 +946,25 @@ Recommendation: change the phrase to the new text.
 Each of these is a separate pull request, if the user approves it. Every finding below asks for code, so it goes to the user as a program to build or not.
 
 - P1, a test that each term on a listed glossary fits one of the four forms, allowing an `(aka X)` suffix. Finding: Q4-3. Today it would flag ready and the three terms that contain a space (D2). Recommendation: build it after the user decides D2, so that the test encodes the forms he chose.
-- P2, a term lookup program and a test that every hyphenated term inside an entry has an entry in some listed glossary, with an allow-list for agent-seat names and paths. Finding: Q4-2. Today the test would flag fast-clarify (D60), reincarnation threshold (D14) and minimal-context (D3). Recommendation: build both.
+- P2, a term lookup program and a test that every hyphenated term inside an entry has an entry in some listed glossary, with an allow-list for agent-seat names and paths that also accepts every word on `docs/nedsnodes-wiki/nedsnodes-ordinary-hyphenated-words-list.md`. Finding: Q4-2. Today the test would flag fast-clarify (D60), reincarnation threshold (D14) and minimal-context (D3). Recommendation: build both.
 - P3, a test that a system-term is used by one system only. Finding: Q4-1. It would have caught D5. Recommendation: build it after the user decides D5.
-- P4, a word check that flags `pull-request` outside a file, skill or script name. Finding: Q4-4. Recommendation: add the check to the style-guide word checker, if that checker can tell a name from prose; otherwise build nothing.
+- P4, a word check that flags `pull-request` outside a file, skill or script name. Finding: Q4-4. Recommendation: add the check to `scripts/style-guide-word-checker-hack.py`, if that checker can tell a name from prose; otherwise build nothing.
 - P5, a test that no file without the -hack suffix imports, loads or runs a -hack file, apart from a reviewed allow-list, and that each -hack file's docstring has the parts the nn-hack entry requires. Findings: Q4-5, FR Q4.2. `scripts/handoff-extract-conversation.py` loads `scripts/handoff-extract-conversation-subagent-tracker-hack.py` and would be the first case on the allow-list. Recommendation: build it.
 - P6, a test of the #prose, #code and #data label format: only those three, only at the end of an entry, separated by single spaces, and on no entry for a skill or a filename suffix. Findings: Q4-10, FR Q4.3. Recommendation: build it.
-- P7, a test that design-requirement names are unique across the repository and that each test-design matches its design-contract one to one. Finding: Q4-6. Recommendation: send it to design-to-main's own GHI, since it checks design-to-main files.
-- P8, the message program opens the sender's task when work is handed over and closes it on the receiver's acknowledgement. Finding: Q4-7. Recommendation: build nothing until a handed-over loose-end has been lost, as CLAUDE.md's rule on guards requires.
+- P7, a test that design-requirement names are unique across the repository and that each test-design matches its design-contract one to one. Finding: Q4-6. Recommendation: file it through /ghi-write, which finds the GHI that covers design-to-main's tests.
+- P8, the program that sends a message between agent-seats, not identified for this list, opens the sender's task when work is handed over and closes it on the receiver's acknowledgement. Finding: Q4-7. Recommendation: build nothing until a handed-over loose-end has been lost, as CLAUDE.md's rule on guards requires.
 - P9, a program that answers ready's state checks: whether a pull request has merged, whether ned-box can be reached, and whether a handoff-deferral is active. Finding: Q4-8. Recommendation: build nothing until an agent has started work that was not ready.
-- P10, the review program puts a document's `Deferred-decisions` section into the reviewer's prompt. Finding: Q4-9. Recommendation: send it to the cold-read GHIs, since it changes the cold-read programs.
+- P10, the cold-read programs, `nn-systems/cold-read/cold-read-grid.py` and `nn-systems/cold-read/cold-read-fast-read.py`, put a document's `Deferred-decisions` section into the reviewer's prompt. Finding: Q4-9. Recommendation: file it through /ghi-write, which finds the GHI that covers the cold-read programs.
 - P11, a test that every backticked repository path in the glossary exists and every quoted section or docstring heading appears in the file it names. Finding: Q4-11. The nn-test-suite reference that work item 2 fixes would have failed it. Recommendation: build it, and run it over the system glossaries too.
+
+## Proposals from the cold-read-fast-read of 2026-11-26
+
+The cold-read-fast-read of work item 2's change, in the cold-read-record `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/nedsnodes-glossary-2026-11-26-3` and cited here as F26, found nothing about the changed sentence. Seven of its findings repeat earlier ones: Q2.1 repeats D40, Q2.2 repeats D2, Q4.2 P5, Q4.4 P8, Q4.7 P7, Q4.8 P1 and P6, and Q4.9 P2. Its other findings propose code. CLAUDE.md allows a guard only once its failure has happened or is shown to be foreseeable, and none of these failures is cited, so each recommendation is to build nothing until it is:
+
+- P12, a pre-push hook that refuses a push that is not a fast-forward to the branch of a ready pull request. Finding: F26 Q4.1.
+- P13, a scheduled-jobs entry that runs `scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py` as a maintenance-job. Finding: F26 Q4.3. This is a decision about cost, not a guard, so the recommendation is to ask the user.
+- P14, a script that retires an agent-seat in the four steps of `docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md`. Finding: F26 Q4.5.
+- P15, a check that a hand-merge changed only the paths that conflicted. Finding: F26 Q4.6.
+- P16, a hook that refuses to dispatch a fresh subagent whose brief has had no cold-read-fast-read. Finding: F26 Q4.10.
+- P17, a commit-msg hook that requires a source line in a commit made with an obvious-fix marker. Finding: F26 Q4.11.
+- P18, a maintenance-job that deletes nn-one-shot-canary-tests older than 30 days from the log-store, and a test that no `-common` file runs on its own. Findings: F26 Q4.12, F26 Q4.13.
