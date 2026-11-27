@@ -1058,14 +1058,15 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
         # A Codex finding id is a hash of the finding's priority and heading only, so a later comment under an
         # earlier finding's id but worded differently may be that finding reworded or another defect with the
         # same heading: refuse rather than guess. A comment with an earlier finding's own text and id is that
-        # finding on any line, however its siblings under the id are worded.
+        # finding on any line, however its siblings under that id are worded; its other ids are still checked.
         for comment in parsed:
-            if any(same_finding(comment, found) for found in earlier):
-                continue
+            accounted = frozenset().union(*(found["codex_finding_ids"] for found in earlier
+                                            if same_finding(comment, found)))
+            unaccounted = comment["codex_finding_ids"] - accounted
             for found in earlier:
                 if (comment["finding"][0] != posting.BLOCKING_CATEGORY
                         and comment["compared"][:2] == found["compared"][:2] and comment["compared"] != found["compared"]
-                        and comment["codex_finding_ids"] & found["codex_finding_ids"]):
+                        and unaccounted & found["codex_finding_ids"]):
                     category, path, _text = comment["compared"]
                     raise Refused(
                         f"{account}'s review {review[1]} of pull request {review[0]} holds a {category} finding on "
@@ -1082,8 +1083,8 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
         for index, comment in enumerate(parsed):
             restates[index] = next((found for found in earlier if same_finding(comment, found)
                                     and not any(paired is found for paired in restates)), None)
-        # A moved line range gives a restatement a new Codex finding id, and then nothing tells it from a new
-        # finding worded alike: refuse rather than guess. Only a comment or an earlier finding with no Codex
+        # Matching wording under different Codex finding ids may be a restatement whose heading changed or a new
+        # finding worded alike, and nothing tells which: refuse rather than guess. Only a comment or an earlier finding with no Codex
         # finding id pairs by its text, when one earlier finding and one finding of this review are left with it.
         for compared in dict.fromkeys(comment["compared"] for index, comment in enumerate(parsed)
                                       if restates[index] is None):

@@ -1850,6 +1850,10 @@ def test_print_block_exact_restatements_and_new_id_lookalikes():
         ("refuses a later comment in an earlier finding's wording under a new Codex finding id far from its line, "
          "rather than drop it as a restatement",
          [[(3, rename)], [(90, "Rename it (Codex finding bbbbbbbbbbbb).")]], lookalike),
+        ("refuses a comment in one finding's text under its Codex finding id and a second finding's id, worded "
+         "differently from that second finding, rather than skip the check against the second id",
+         [[(3, "Rename it (Codex finding aaaaaaaaaaaa)."), (9, "Delete it (Codex finding bbbbbbbbbbbb).")],
+          [(3, "Rename it (Codex finding aaaaaaaaaaaa) (Codex finding bbbbbbbbbbbb).")]], reworded),
         ("refuses a reworded restatement on another line that names the earlier finding's Codex finding id in its text",
          [[(3013, "Search the form that keeps the emphasis (Codex finding dddddddddddd).")],
           [(3631, "Codex finding eeeeeeeeeeee repeats Codex finding dddddddddddd: search the form that keeps "
