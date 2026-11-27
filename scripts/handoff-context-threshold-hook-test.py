@@ -1695,14 +1695,24 @@ with tempfile.TemporaryDirectory() as workspace:
                   result.returncode == 0 and not result.stderr.strip() and not sent.exists(),
                   f"code {result.returncode}, stderr {result.stderr!r}")
 
-            # A link into a missing directory makes the write fail, as a full or read-only disk
-            # would, while the record still reads as not there.
+            # 32.6% is below the 33% threshold, so it must not print as 33%.
+            session = "handoff-threshold-hook-test-get-ready-share-just-below-threshold"
+            get_ready_sessions.append(session)
+            just_below = transcript_with_usage(workspace, "get-ready-at-32.6.jsonl", 326_000)
+            result = run_hook({"session_id": session, "transcript_path": str(just_below)})
+            check("at 32.6% the get-ready notice reads 32%, not the 33% threshold",
+                  result.returncode == 2 and result.stderr.strip() == get_ready_notice_text("32%"),
+                  f"code {result.returncode}, stderr {result.stderr!r}")
+
+            # A link into a missing directory, where the record is first written, makes the write
+            # fail, as a full or read-only disk would, while the record still reads as not there.
             session = "handoff-threshold-hook-test-get-ready-unwritable"
             get_ready_sessions.append(session)
             sent, asked, _ = get_ready_files(session)
-            sent.symlink_to(SUITE_HOME / "no-such-directory" / "record")
+            partial = sent.with_name(sent.name + ".partial")
+            partial.symlink_to(SUITE_HOME / "no-such-directory" / "record")
             result = get_ready_run(session, 31)
-            problem = f"[Errno 2] No such file or directory: '{sent}'"
+            problem = f"[Errno 2] No such file or directory: '{partial}'"
             check("when the get-ready record cannot be written, the notice says so and what to tell the user",
                   result.returncode == 2 and result.stderr.strip() == (
                       get_ready_notice_text("31%") + "\n"
@@ -1710,6 +1720,38 @@ with tempfile.TemporaryDirectory() as workspace:
                       "notice and this line at each turn's end until the context reaches 33%. The second time you "
                       "see this line, tell the user once: \"On "
                       f"{socket.gethostname()}, the threshold-hook cannot write {sent}: {problem}.\""),
+                  f"code {result.returncode}, stderr {result.stderr!r}")
+            check("when the get-ready record's write fails, the link it was written to is removed",
+                  not partial.is_symlink() and not sent.exists(), (partial, sent))
+
+            # A write that creates the record's file and then fails, as on a full disk, must leave no
+            # record, so the next stop repeats the notice as the not-recorded line promises.
+            session = "handoff-threshold-hook-test-get-ready-write-fails-after-create"
+            get_ready_sessions.append(session)
+            sent, asked, _ = get_ready_files(session)
+            real_write_text = Path.write_text
+
+            def write_text_creates_then_fails(path, *arguments, **keywords):
+                real_write_text(path, "", encoding="utf-8")
+                raise OSError(28, "No space left on device")
+
+            Path.write_text = write_text_creates_then_fails
+            try:
+                with contextlib.redirect_stderr(io.StringIO()) as first_stderr:
+                    first_code = hook.send_handoff_get_ready_notice(
+                        session, 31.0, "31%", argparse.Namespace(
+                        threshold_used_percentage=hook.DEFAULT_THRESHOLD_USED_PERCENTAGE,
+                        get_ready_used_percentage=hook.DEFAULT_GET_READY_USED_PERCENTAGE))
+            finally:
+                Path.write_text = real_write_text
+            check("when the get-ready record's write fails after creating the file, the notice says it "
+                  "was not recorded and no record is left", first_code == 2
+                  and "could not write" in first_stderr.getvalue() and not sent.exists()
+                  and not sent.with_name(sent.name + ".partial").exists(), first_stderr.getvalue())
+            result = get_ready_run(session, 31)
+            check("after a get-ready record write that failed after creating the file, the next stop "
+                  "repeats the notice", result.returncode == 2
+                  and result.stderr.strip() == get_ready_notice_text("31%"),
                   f"code {result.returncode}, stderr {result.stderr!r}")
         finally:
             for session in get_ready_sessions:
