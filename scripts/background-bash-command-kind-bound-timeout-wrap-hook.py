@@ -44,12 +44,11 @@ _WRAPPER_PREFIX_PATTERN = re.compile(r"timeout [0-9.]+s bash -c ")
 _WRAPPER_TAIL_START = ' ; status=$?; if [ "$status" -eq ' + str(TIMEOUT_STOPPED_EXIT_STATUS) + " ]; then printf "
 TIMEOUT_PROGRAM_MISSING_MESSAGE = (
     "background-bash-command-kind-bound-timeout-wrap-hook: coreutils `timeout` is not on PATH on "
-    "{machine}, so this background command runs with no bound, and nothing stops it if it is stuck.\n"
-    "Stop it yourself with TaskStop if it is still running after {minutes} minutes, its bound for "
-    "kind {kind}.\n"
-    "Tell the user, once in this agent-session: \"Background commands on {machine} run with no time "
-    "bound, because coreutils `timeout` is not installed there.\"\n"
-    "If you are a subagent, pass that sentence to the agent that dispatched you instead.")
+    "{machine}, so this background command runs with no time bound, and nothing stops it if it is "
+    "stuck.\n"
+    "Tell the user, if you have not yet in this agent-session: \"Background commands on {machine} "
+    "run with no time bound, because coreutils `timeout` is not on PATH there.\"\n"
+    "If you are a subagent, send that sentence to the agent that dispatched you instead of to the user.")
 
 
 def background_bash_command_text_wrapped_in_kind_bound_timeout_with_stop_message(command: str, bound_minutes: float,
@@ -115,14 +114,14 @@ def main() -> int:
     command = tool_input.get("command")
     if not isinstance(command, str) or names_a_program_that_enforces_its_own_time_limits(command):
         return 0
-    kind, bound_minutes = kind_and_bound_minutes(command)
     if shutil.which(TIMEOUT_PROGRAM) is None:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "additionalContext": TIMEOUT_PROGRAM_MISSING_MESSAGE.format(
-                machine=socket.gethostname(), minutes=f"{bound_minutes:g}", kind=kind),
+                machine=socket.gethostname()),
         }}))
         return 0
+    kind, bound_minutes = kind_and_bound_minutes(command)
     # updatedInput replaces the whole input, so every other field is carried through.
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",

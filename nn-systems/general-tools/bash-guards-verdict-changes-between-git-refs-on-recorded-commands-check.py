@@ -641,6 +641,11 @@ def read_emergency_stop(guard, command, working_directory, search_file_directory
     return "passed", None
 
 
+def read_background_bash_command_kind_bound_timeout_wrap(guard, command, working_directory, search_file_directory):
+    # The hook refuses nothing; it only rewrites a run_in_background command to run under timeout.
+    return "passed", None
+
+
 # A renamed guard's former file path, which a base ref's settings.json may still run, to its path in GUARDS.
 # The line does nothing once main's settings.json no longer runs the former path, and may then be removed.
 BASH_GUARD_CURRENT_PATHS_BY_FORMER_PATH = {
@@ -687,6 +692,7 @@ GUARDS = {
     ".claude/guard-hooks/git-worktree-remove-cold-read-record-and-sanity-check-record-ship-to-log-store-first-guard-hook.py":
         read_git_worktree_remove_records_ship_first,
     "nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py": read_emergency_stop,
+    "scripts/background-bash-command-kind-bound-timeout-wrap-hook.py": read_background_bash_command_kind_bound_timeout_wrap,
 }
 SEARCH_FILE_GUARD = ".claude/guard-hooks/search-file-argument-read-as-option-guard-hook.py"
 

@@ -97,7 +97,6 @@ class HookRewritesBackgroundCommands(unittest.TestCase):
         output = json.loads(completed.stdout)["hookSpecificOutput"]
         self.assertNotIn("updatedInput", output)
         self.assertIn("coreutils `timeout` is not on PATH", output["additionalContext"])
-        self.assertIn("after 75 minutes, its bound for kind waiting-task", output["additionalContext"])
 
 
 class WrappedCommandRuns(unittest.TestCase):
