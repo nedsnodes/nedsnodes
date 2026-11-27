@@ -1567,15 +1567,16 @@ def test_print_block():
     check(f"{PRINT_BLOCK} reports a review without its expected fields as FAILED with exit 2",
           code == 2 and err.startswith(f"FAILED: GitHub's reviews of pull request {NUMBER} were not in the "
                                        "expected shape: KeyError"), err)
-    without_state = merge_lane_review(2)
+    # The program reads reviews in id order, so the stateless review takes the lower id to be read before the approval.
+    without_state = merge_lane_review(1)
     del without_state["state"]
-    code, out, err = print_block([without_state, merge_lane_review(1)],
-                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
-    check(f"{PRINT_BLOCK} prints the block when a merge-lane-2 review has no state but another review approves",
+    code, out, err = print_block([merge_lane_review(2), without_state],
+                                 [merge_lane_comment(10, 2, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} prints the block when a merge-lane-2 review has no state but a later review approves",
           code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
                                                "1. fix-next: `scripts/thing.py:3`: Rename it.\n"), out + err)
-    code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED"), without_state],
-                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    code, out, err = print_block([merge_lane_review(2, state="CHANGES_REQUESTED"), without_state],
+                                 [merge_lane_comment(10, 2, "**fix-next** Rename it.")])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when a merge-lane-2 review has no state and no "
           "readable review approves",
           code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
