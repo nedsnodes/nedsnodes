@@ -261,6 +261,17 @@ def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
     return texts
 
 
+def reviewed_before_commit(review_tools_worktree, reviewed_before):
+    """Refuse a reviewed_before that names no commit: as a range end, an empty one means HEAD."""
+    if not reviewed_before.strip():
+        raise StepFailed("the entry's reviewed_before is empty; give the nn-head-commit reviewed before")
+    try:
+        git(review_tools_worktree, "rev-parse", "--verify", "--quiet", f"{reviewed_before}^{{commit}}")
+    except StepFailed:
+        raise StepFailed(f"the entry's reviewed_before, `{reviewed_before}`, names no commit "
+                         f"in {review_tools_worktree}") from None
+
+
 def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pull_requests):
     tag, number = spec["tag"], spec["number"]
     head, main = spec["head"], spec["main"]
@@ -282,6 +293,7 @@ def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pu
              f"- Merged tree (head merged onto main by merge-lane-2): `{merged_tree}`.",
              f"- Your scratch directory: `{scratch}`. Use it as `<your scratchpad>`."]
     if "reviewed_before" in spec:
+        reviewed_before_commit(review_tools_worktree, spec["reviewed_before"])
         facts.append(f"- This nn-head-commit is a fix-round. nn-head-commit reviewed before: "
                      f"`{spec['reviewed_before']}` ({spec['previous_reviews']}). "
                      f"{spec['new_commits']}")
