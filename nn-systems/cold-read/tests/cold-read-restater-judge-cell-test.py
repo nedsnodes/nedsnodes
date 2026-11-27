@@ -118,8 +118,8 @@ Write your report to {REPORT_PATH}.
 # prompt from stdin, then does what the plan says for that model: "report" is
 # text to write to the report path (absent means write nothing), "dump_argv",
 # "dump_prompt" and "dump_environment" are paths to record what the stub was
-# launched with, and
-# "exit" is the code to exit with. The report path arrives by environment, as
+# launched with, "dump_environment" holding only the variables
+# "dump_environment_names" lists, and "exit" is the code to exit with. The report path arrives by environment, as
 # in the other cell tests, so a reworded template cannot unhook the stub.
 STUB_CLAUDE = """#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -135,7 +135,10 @@ if "dump_argv" in step:
 if "dump_prompt" in step:
     pathlib.Path(step["dump_prompt"]).write_text(prompt, encoding="utf-8")
 if "dump_environment" in step:
-    pathlib.Path(step["dump_environment"]).write_text(json.dumps(dict(os.environ)), encoding="utf-8")
+    # Only the variables a case names, so no credential the shell exports is written to disk.
+    names = step["dump_environment_names"]
+    pathlib.Path(step["dump_environment"]).write_text(
+        json.dumps({name: os.environ[name] for name in names if name in os.environ}), encoding="utf-8")
 if "report" in step:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(step["report"], encoding="utf-8")
@@ -250,7 +253,8 @@ with tempfile.TemporaryDirectory() as scratch:
     result = run_judge_cell(
         repository, stubs,
         {"*": {"report": STUB_JUDGE_REPORT, "dump_argv": str(argv_dump),
-               "dump_prompt": str(prompt_dump), "dump_environment": str(environment_dump)}},
+               "dump_prompt": str(prompt_dump), "dump_environment": str(environment_dump),
+               "dump_environment_names": ["CLAUDE_CODE_TASK_LIST_ID"]}},
         report,
     )
     check("a judge cell whose Fable writes the report exits 0",

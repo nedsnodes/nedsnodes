@@ -215,7 +215,8 @@ CONCURRENT_RUN_REVIEW_TEXT = (
 # prompt the stub received to -- the whole of stdin on the Claude leg, which
 # is how a case reads what the cell composed -- "dump_argv" is a path to
 # write the argv the cell built, as JSON, "dump_environment" a path to write
-# the environment the stub was started with, as JSON, and "exit" is the code
+# the variables "dump_environment_names" lists from the environment the stub
+# was started with, as JSON, and "exit" is the code
 # to exit with.
 # The report path arrives by environment rather than by parsing the prompt,
 # so a change to the prompt templates cannot silently unhook the stub.
@@ -297,7 +298,10 @@ if "dump_argv" in step:
     # single argument that happens to contain both.
     pathlib.Path(step["dump_argv"]).write_text(json.dumps(argv), encoding="utf-8")
 if "dump_environment" in step:
-    pathlib.Path(step["dump_environment"]).write_text(json.dumps(dict(os.environ)), encoding="utf-8")
+    # Only the variables a case names, so no credential the shell exports is written to disk.
+    names = step["dump_environment_names"]
+    pathlib.Path(step["dump_environment"]).write_text(
+        json.dumps({name: os.environ[name] for name in names if name in os.environ}), encoding="utf-8")
 if "dump_record_directory_descriptor_count" in step:
     # How many of the stub's descriptors are open on the record directory: one when the cell passed
     # its being-written lock on to the reviewer program, none when the cell closed it.
@@ -1627,7 +1631,8 @@ with tempfile.TemporaryDirectory() as scratch:
         repository, stubs,
         {"*": {"report": "STUB REVIEW: one finding\n",
                "dump_argv": str(received_argv_path),
-               "dump_environment": str(received_environment_path)}},
+               "dump_environment": str(received_environment_path),
+               "dump_environment_names": ["CLAUDE_CODE_TASK_LIST_ID"]}},
         report, environment_overrides={"HOME": str(claude_scratch_home),
                                        "CLAUDE_CODE_TASK_LIST_ID": "launching-agent-seat-task-list"},
     )
