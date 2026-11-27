@@ -225,30 +225,8 @@ def resolve_directory(base, target):
 
 def push_refspecs(push_words):
     """Return the refspecs among the words after git push: every operand after the repository."""
-    positionals = []
-    index = 0
-    while index < len(push_words):
-        word = push_words[index]
-        if word == "--":
-            positionals.extend(push_words[index + 1:])
-            break
-        if word.startswith("--"):
-            if word.split("=", 1)[0] in PUSH_VALUE_OPTIONS and "=" not in word:
-                index += 2
-                continue
-            index += 1
-            continue
-        if word.startswith("-") and len(word) > 1:
-            consumes_next_word = False
-            for position, letter in enumerate(word[1:], start=1):
-                if letter in SHORT_VALUE_LETTERS:
-                    consumes_next_word = position == len(word) - 1
-                    break
-            index += 2 if consumes_next_word else 1
-            continue
-        positionals.append(word)
-        index += 1
-    return positionals[1:]
+    _, operands, _ = options_and_operands(push_words, PUSH_VALUE_OPTIONS, SHORT_VALUE_LETTERS)
+    return operands[1:]
 
 
 def git_subcommand(words):
