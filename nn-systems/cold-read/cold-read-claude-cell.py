@@ -39,6 +39,7 @@ it up with no change here.
 """
 
 import importlib.util
+import json
 import pathlib
 import sys
 
@@ -117,12 +118,27 @@ def invocation_builder(effort: str, parsed_arguments=None):
                 "dontAsk", caller_claude_code_session_settings=settings),
             "--model", model,
             "--effort", effort,
-            "--output-format", "text",
+            # Stream events as they come, so the agent-binary's output grows while it works;
+            # --print takes stream-json only with --verbose.
+            "--output-format", "stream-json", "--verbose",
             "--allowedTools", ALLOWED_TOOLS,
             "--disallowedTools", DISALLOWED_TOOLS,
         ]
         return command, prompt
     return build_invocation
+
+
+def claude_stream_json_stdout_result_event_text_or_stdout(stdout: str) -> str:
+    """Return what `--output-format text` prints: the last result event's text and a newline.
+    Return stdout as it is when it holds no result event, as when the agent-binary was stopped."""
+    for line in reversed(stdout.splitlines()):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result" and isinstance(event.get("result"), str):
+            return event["result"] + "\n"
+    return stdout
 
 
 RECOGNISED_FAILURE_TEXTS = (
@@ -139,6 +155,7 @@ def main() -> int:
         invocation_builder=invocation_builder,
         recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
         cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
+        agent_binary_stdout_to_response_text=claude_stream_json_stdout_result_event_text_or_stdout,
     )
 
 

@@ -1071,6 +1071,60 @@ with tempfile.TemporaryDirectory() as scratch:
           len(cause_lines) == 1
           and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: exit-1"),
           repr(result.stderr))
+    # The Claude cell runs claude with --output-format stream-json, and turns the stream back into
+    # the text --output-format text prints before it reads it. The stdouts are real: ned-box, Claude
+    # Code 2.1.332, 2026-11-26, `claude -p --output-format stream-json --verbose`, once logged out
+    # (HOME an empty directory, exit 1) and once logged in (`--model haiku`, exit 0).
+    logged_out_stream = (SYSTEM_DIRECTORY / "tests"
+                         / "cold-read-claude-cell-test-real-claude-stream-json-output-logged-out.jsonl"
+                         ).read_text(encoding="utf-8")
+    one_reply_stream = (SYSTEM_DIRECTORY / "tests"
+                        / "cold-read-claude-cell-test-real-claude-stream-json-output-of-one-reply.jsonl"
+                        ).read_text(encoding="utf-8")
+    shutil.rmtree(repository)
+    repository = build_scratch_repository(scratch)
+    report = repository / "cold-read-records" / "run-cause-stream" / "claude-defect-hunt-second-strongest-model.md"
+    argv_dump = scratch / "claude-stream-json-argv.json"
+    result = run_claude_cell(
+        repository, stubs,
+        {"*": {"exit": 1, "stdout": logged_out_stream, "dump_argv": str(argv_dump)}},
+        report, "--tier", "second-strongest-model",
+    )
+    stream_argv = json.loads(argv_dump.read_text(encoding="utf-8")) if argv_dump.is_file() else []
+    check("the Claude cell asks claude for stream-json, with the --verbose it needs",
+          "--output-format" in stream_argv
+          and stream_argv[stream_argv.index("--output-format") + 1] == "stream-json"
+          and "--verbose" in stream_argv, repr(stream_argv))
+    check("a logged-out claude's stream-json stdout gives cause: logged-out, the line as detail",
+          f"cold-read-claude-cell: cause: logged-out — {LOGGED_OUT_LINE}" in result.stderr,
+          repr(result.stderr[-2000:]))
+    check("the failed attempt's stdout is printed as its text, not as stream events",
+          LOGGED_OUT_LINE in result.stderr and '"type":"system"' not in result.stderr,
+          repr(result.stderr[-2000:]))
+    shutil.rmtree(repository)
+    repository = build_scratch_repository(scratch)
+    report = repository / "cold-read-records" / "run-stream-ok" / "claude-defect-hunt-second-strongest-model.md"
+    result = run_claude_cell(
+        repository, stubs,
+        {"*": {"report": "FINDINGS: 1. something real\nclean sections: none\n", "stdout": one_reply_stream}},
+        report, "--tier", "second-strongest-model",
+    )
+    check("a claude run whose stream-json ends in a successful result event lands its report",
+          result.returncode == 0 and report.is_file()
+          and "FINDINGS: 1. something real\n" in report.read_text(encoding="utf-8"),
+          f"exit {result.returncode}; stderr={result.stderr[-2000:]!r}")
+    claude_cell_spec = importlib.util.spec_from_file_location(
+        "cold_read_claude_cell_under_test", SYSTEM_DIRECTORY / "cold-read-claude-cell.py")
+    claude_cell_module = importlib.util.module_from_spec(claude_cell_spec)
+    claude_cell_spec.loader.exec_module(claude_cell_module)
+    to_text = claude_cell_module.claude_stream_json_stdout_result_event_text_or_stdout
+    check("the stream turns into the result event's text and a newline, as text output prints it",
+          to_text(one_reply_stream) == "hello there\n" and to_text(logged_out_stream) == LOGGED_OUT_LINE + "\n",
+          repr((to_text(one_reply_stream), to_text(logged_out_stream))))
+    stream_without_result = "".join(logged_out_stream.splitlines(keepends=True)[:-1])
+    check("a stream with no result event, as from a claude that was stopped, is kept as it is",
+          to_text(stream_without_result) == stream_without_result and to_text("not json\n") == "not json\n",
+          repr(to_text(stream_without_result)[:200]))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
     report = repository / "cold-read-records" / "run-cause-b" / "codex-defect-hunt-second-strongest-model.md"

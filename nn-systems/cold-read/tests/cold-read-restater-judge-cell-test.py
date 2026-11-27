@@ -271,7 +271,7 @@ with tempfile.TemporaryDirectory() as scratch:
           Path(argv[0]).name == "claude" and argv[1] == "-p"
           and argv[argv.index("--model") + 1] == "claude-fable-5-1"
           and argv[argv.index("--effort") + 1] == "xhigh"
-          and argv[argv.index("--output-format") + 1] == "text"
+          and argv[argv.index("--output-format") + 1] == "stream-json" and "--verbose" in argv
           and argv[argv.index("--allowedTools") + 1] == "Read,Grep,Glob,Write,WebFetch",
           repr(argv))
     prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else ""
