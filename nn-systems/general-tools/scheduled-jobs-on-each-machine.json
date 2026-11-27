@@ -202,6 +202,16 @@
       }
     },
     {
+      "name": "pinned-model-ids-newer-model-of-same-family-shipped-daily-check-user-alert-write",
+      "owner": "MD-skills",
+      "program": "nn-systems/general-tools/pinned-model-ids-newer-model-of-same-family-shipped-daily-check-user-alert-write.py",
+      "arguments": [],
+      "output": ".claude/pinned-model-ids-newer-model-of-same-family-shipped-daily-check-user-alert-write.log",
+      "on": {
+        "ned-box": {"scheduler": "cron", "schedule": "45 7 * * *"}
+      }
+    },
+    {
       "name": "claude-code-registered-hook-rule-ids-in-both-machines-transcripts-weekly-count-and-never-seen-rules-report",
       "owner": "reboot-test",
       "program": "nn-systems/general-tools/claude-code-registered-hook-rule-ids-in-both-machines-transcripts-weekly-count-and-never-seen-rules-report.py",

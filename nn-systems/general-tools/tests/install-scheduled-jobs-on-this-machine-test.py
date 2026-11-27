@@ -155,6 +155,12 @@ NED_BOX_CREDENTIAL_FILES_CHECK_LINE = (
     "cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write.py >> "
     "/home/nedlern/.claude/cold-read-cell-credential-files-outside-denied-directories-daily-check-"
     "user-alert-write.log 2>&1")
+# The daily check for a newer model of each pinned model id's family, on ned-box alone.
+NED_BOX_PINNED_MODEL_IDS_CHECK_LINE = (
+    "45 7 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/general-tools/"
+    "pinned-model-ids-newer-model-of-same-family-shipped-daily-check-user-alert-write.py >> "
+    "/home/nedlern/.claude/pinned-model-ids-newer-model-of-same-family-shipped-daily-check-"
+    "user-alert-write.log 2>&1")
 # The weekly count of each hook rule ID in both machines' transcripts, on ned-box alone.
 NED_BOX_HOOK_RULE_IDS_WEEKLY_COUNT_LINE = (
     "30 5 * * 1 /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/general-tools/"
@@ -346,7 +352,7 @@ check("the table's jobs are the two typed by hand before this program, the workt
       "Mac, the deletion of exited agent-sessions' temp folders, the no-sandbox test "
       "suites' run on main, the GHI-MD edit pull "
       "requests' check, approval and merge, the daily search for credential files no "
-      "cold-read-cell is denied, the weekly count of each hook rule ID in both machines' "
+      "cold-read-cell is denied, the daily check for a newer model of each pinned model id's family, the weekly count of each hook rule ID in both machines' "
       "transcripts, the one count of cold-read-fast-read finding outcomes, the deletion of "
       "old agent-seat terminal captures, the open-pull-request watcher's poll, the standing "
       "user-rulings store's each-minute add, and no other",
@@ -372,6 +378,7 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "nn-shared-database-newest-backup-copy-to-mac",
                             "nn-shared-database-nightly-backup-with-integrity-check",
                             "no-sandbox-test-suites-run-on-main-in-a-quiet-gap",
+                            "pinned-model-ids-newer-model-of-same-family-shipped-daily-check-user-alert-write",
                             "scheduled-full-test-run-of-main",
                             "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-"
                             "anchor-list-for-hooks-write",
@@ -425,6 +432,18 @@ check("the daily search for credential files no cold-read-cell is denied runs on
       and "nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py"
       in (REPOSITORY_ROOT / credential_files_check["program"]).read_text(encoding="utf-8"),
       installer.cron_line(ned_box, credential_files_check, credential_files_check["on"]["ned-box"]))
+pinned_model_ids_check = real_jobs[
+    "pinned-model-ids-newer-model-of-same-family-shipped-daily-check-user-alert-write"]
+check("the daily check for a newer model of each pinned model id's family runs on ned-box alone, at 07:45, and its "
+      "program documents the table's line and names this installer",
+      list(pinned_model_ids_check["on"]) == ["ned-box"]
+      and installer.cron_line(ned_box, pinned_model_ids_check, pinned_model_ids_check["on"]["ned-box"])
+      == NED_BOX_PINNED_MODEL_IDS_CHECK_LINE
+      and f"    {NED_BOX_PINNED_MODEL_IDS_CHECK_LINE}\n"
+      in (REPOSITORY_ROOT / pinned_model_ids_check["program"]).read_text(encoding="utf-8")
+      and "nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py"
+      in (REPOSITORY_ROOT / pinned_model_ids_check["program"]).read_text(encoding="utf-8"),
+      installer.cron_line(ned_box, pinned_model_ids_check, pinned_model_ids_check["on"]["ned-box"]))
 hook_rule_ids_weekly_count = real_jobs[
     "claude-code-registered-hook-rule-ids-in-both-machines-transcripts-weekly-count-and-never-seen-rules-report"]
 check("the weekly count of each hook rule ID runs on ned-box alone, Mondays at 05:30, and its program "
@@ -553,6 +572,8 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "merge — cron line:", NED_BOX_GHI_MD_EDIT_PULL_REQUESTS_MERGE_LINE,
           "cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write"
           " — cron line:", NED_BOX_CREDENTIAL_FILES_CHECK_LINE,
+          "pinned-model-ids-newer-model-of-same-family-shipped-daily-check-user-alert-write — cron line:",
+          NED_BOX_PINNED_MODEL_IDS_CHECK_LINE,
           "claude-code-registered-hook-rule-ids-in-both-machines-transcripts-weekly-count-and-never-seen-rules-"
           "report — cron line:", NED_BOX_HOOK_RULE_IDS_WEEKLY_COUNT_LINE,
           "cold-read-fast-read-finding-outcomes-count-as-user-alert-once-14-days-after-own-first-cron-run — cron "
