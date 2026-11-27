@@ -288,8 +288,8 @@ AGENT_BINARY_DOWN_PREFIX = "AGENT-BINARY DOWN:"
 # Both undo messages share this, so that neither can drop the `--` before a path.
 STRAY_WRITE_RESTORE_ARGUMENTS = "restore --staged --worktree --"
 STOPPED_CELL_WRITE_CHECK_LINE = (
-    "The {cell} cell was stopped before it could check for files it wrote outside its "
-    "report, and the grid could not check for it, because {reason}; that is "
+    "The {cell} cell was stopped, so any check it made for files it wrote outside its "
+    "report is not used, and the grid could not check for it, because {reason}; that is "
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
     + ".\nBefore "
     "you do anything else, read `git status` against the edits you know are your own. "
@@ -1095,14 +1095,16 @@ COLD_READ_CELL_NEAR_MISS_REPORT_RECOVERED_STATUS_LINE_NEXT_STEP_INSTRUCTION = (
     "The report is intact and now in place, so triage it as usual; nothing else needs doing.")
 
 
-def lift_cell_status_lines(report_path: pathlib.Path, log_lines: list) -> None:
+def lift_cell_status_lines(report_path: pathlib.Path, log_lines: list,
+                           stray_write_lines: bool = True) -> None:
     """Print cell status lines before successful-attempt logs are deleted,
-    each followed by the line that says what to do about it."""
+    each followed by the line that says what to do about it; without
+    stray_write_lines, leave out the STRAY WRITE and WRITE CHECK DID NOT RUN kinds."""
     for line in log_lines:
-        if cell_status_line(line, cell_common.STRAY_WRITE_PHRASE):
+        if stray_write_lines and cell_status_line(line, cell_common.STRAY_WRITE_PHRASE):
             print(f"STRAY WRITE: {line.strip()}", flush=True)
             print(COLD_READ_CELL_STRAY_WRITE_STATUS_LINE_NEXT_STEP_INSTRUCTION, flush=True)
-        if cell_status_line(line, cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE):
+        if stray_write_lines and cell_status_line(line, cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE):
             print(f"WRITE CHECK DID NOT RUN: {report_path.name} — "
                   f"{line.strip()}", flush=True)
             print(COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_STATUS_LINE_NEXT_STEP_INSTRUCTION, flush=True)
@@ -1209,7 +1211,9 @@ def wait_for_cells(running: dict,
             name = cell_name_of(report_path)
             is_question_4 = report_path.name == COLD_READ_FULL_RUN_WHAT_SHOULD_BE_CODE_QUESTION_ANSWER_REPORT_FILE_NAME
             log_lines = attempt.stderr_path.read_text(encoding="utf-8").splitlines()
-            lift_cell_status_lines(report_path, log_lines)
+            # A stopped cell may have logged its own write check before the stop, and
+            # print_stopped_cells_write_check reports that cell's writes instead.
+            lift_cell_status_lines(report_path, log_lines, stray_write_lines=not timed_out)
             has_report = (
                 report_path.is_file()
                 and report_path.read_text(encoding="utf-8").strip() != ""
@@ -1264,7 +1268,8 @@ def wait_for_cells(running: dict,
                     outcome.stopped.append(cell_name_of(report_path))
                     log_lines = (attempt.stderr_path.read_text(encoding="utf-8").splitlines()
                                  if attempt.stderr_path.is_file() else [])
-                    lift_cell_status_lines(report_path, log_lines)
+                    # print_stopped_cells_write_check reports this cell's writes.
+                    lift_cell_status_lines(report_path, log_lines, stray_write_lines=False)
                     print(STOPPED_CELL_LINE.format(
                         report=report_path.name,
                         deleted=STOPPED_CELL_UNFINISHED_REPORT_DELETED_PHRASE if report_deleted else ""),
