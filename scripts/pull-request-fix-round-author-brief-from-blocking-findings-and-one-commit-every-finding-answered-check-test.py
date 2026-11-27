@@ -62,7 +62,8 @@ STEP_5_START = ("5. Fill in the answers file {path}, which this program wrote wi
                 "\" for each finding above, followed by any answer an earlier run kept for it: after each line's tag, "
                 "on the same line, write what you fixed, why the finding does not hold, or, "
                 "for a change moved as step 3 says, the new pull request; further lines of an entry may follow. "
-                "Keep each line's start as this program wrote it: the check refuses any other line opening \"<n>.\". "
+                "Keep each line's start as this program wrote it: the check refuses any other line opening \"<n>.\" "
+                "followed by whitespace, \"(\" or the line's end. "
                 "Never commit it: ")
 
 FAKE_GH = r'''#!/usr/bin/env python3
@@ -2087,7 +2088,8 @@ def answers_put_back_cases(root, repository, _base, frozen_head):
     code, check_out, check_err = run(root, repository, routes, "--check")
     check("answers put back: --check refuses a line opening \"<n>.\" whose tag is damaged, naming the line, "
           "rather than taking the damaged tag as the answer",
-          code == 1 and "1 line(s) opening \"<n>.\" that are not an entry's start" in check_err
+          code == 1 and "1 line(s) opening \"<n>.\" followed by whitespace, \"(\" or the line's end that are not an "
+                        "entry's start" in check_err
           and "\n  1. (finding 1\n" in check_err and "Fix-round answered" not in check_out,
           check_out + check_err)
     for untagged in ("1. Fixed the lookup.\n2. (finding 3) Added the timeout case.\n",
