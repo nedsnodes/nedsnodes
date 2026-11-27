@@ -6310,9 +6310,9 @@ def test_the_read_step_prints_a_brace_pair_in_a_no_answer_row_as_it_is():
     for suffix in ("{review}", "{item}"):
         case = close_the_issue_case(root_name_suffix=suffix)
         result = case.run(WAITING_ITEM_READ)
-        rows = [line for line in result.stdout.splitlines() if "--cwd" in line]
+        rows = no_answer_rows_printed(result)
         check(f"the read step, on an item rated none whose checkout path holds {suffix}, exits 0 and prints the path "
-              "unchanged in every line that holds --cwd",
+              "unchanged in every no-answer row",
               result.returncode == 0 and rows and all(str(case.checkout) in line for line in rows),
               described(result))
 
