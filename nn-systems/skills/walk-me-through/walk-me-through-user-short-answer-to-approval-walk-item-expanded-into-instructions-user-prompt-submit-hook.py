@@ -453,10 +453,11 @@ MORE_RESPONSES_CLOSING_LINE = "{item}'s closing line: {closing_line}"
 # The page builder refuses an item it cannot read, so publishing before this fix would only fail.
 PAGE_BUILDER = HERE / "walk-me-through-approval-walk-item-page-html-build-from-walk-document.py"
 WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_FIX_APPROVAL_WALK_ITEM_TEXT_UNREADABLE_FROM_WALK_DOCUMENT_BEFORE_PUBLISHING_ITEM_PAGE_LINE = (
-    "The hook could not read the text of {item} from the walk-document {document}, so the page builder, "
-    f"{PAGE_BUILDER}, would refuse to build the item's page: {{problem}}. First fix what the reason after the "
-    "colon describes. Then publish the item as the lines below say: {item}, or, if the fix changed which item the "
-    "walk-minutes' last `#next_to_present` line names, that item instead.")
+    "The walk short-answer hook could not read the text of {item} from the walk-document {document}: {problem}. "
+    "The hook stopped nothing, but the page builder, {page_builder}, would refuse to build the item's page until "
+    "that is fixed. First fix the cause that reason names, in the walk-document or the walk-minutes. Then publish the item as the lines below say. The last `#next_to_present` line "
+    "of the walk-minutes{minutes} names the item waiting for the user's answer; if your fix changed that line, "
+    "publish the item it now names instead of {item}.")
 MORE_RESPONSES_UNPUBLISHED_LINES = (
     "The hook found no `#item_page` line for {item} in the walk-minutes{minutes}.",
     *REPEAT_UNPUBLISHED_LINES[1:3],
@@ -1059,7 +1060,8 @@ def unpublished_item_unreadable_lines(number, walk):
     if number in walk.shown_texts or not walk.shown_text_problem:
         return ""
     return WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_FIX_APPROVAL_WALK_ITEM_TEXT_UNREADABLE_FROM_WALK_DOCUMENT_BEFORE_PUBLISHING_ITEM_PAGE_LINE.format(item=item_name(number, walk), document=walk.document,
-                                                   problem=walk.shown_text_problem.rstrip(".")) + "\n"
+        problem=walk.shown_text_problem.rstrip("."), page_builder=PAGE_BUILDER,
+        minutes=f" {walk.minutes}" if walk.minutes else "") + "\n"
 
 
 def checked_item_numbers(answer, walk):
