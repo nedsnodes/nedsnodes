@@ -325,6 +325,7 @@ def main() -> int:
         cell_started_at=cell_started_at,
         prompt_file_argument=args.prompt_file,
         model_to_effort=model_to_effort,
+        agent_binary_stdout_to_response_text=claude_cell.claude_stream_json_stdout_result_event_text_or_stdout,
     )
 
 

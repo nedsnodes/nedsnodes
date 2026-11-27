@@ -266,6 +266,9 @@ def reviews_saved_lines(result):
 # whose report name contains COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT,
 # which does not wait. One fast cell that edits the target while six slow
 # ones read is how a case moves the target mid-run.
+# COLD_READ_GRID_TEST_STUB_PRINTS_LINES_DURING_ITS_WAIT_FOR_CELL_WHOSE_REPORT_NAME_CONTAINS, when set, makes the
+# cell whose report name contains it print a line to stdout every 0.2 seconds of that wait,
+# an agent-binary streaming its events; every other cell waits in silence.
 # COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY, when set, gets a file
 # named for the report once that wait ends. The grid deletes a stopped cell's report
 # but not this file, so the file shows the cell outlived its time limit.
@@ -355,8 +358,16 @@ for written_path in filter(None, os.environ.get(
         handle.write("A reviewer's write outside its report, made before it was stopped.\n")
 sleep_seconds = float(os.environ.get("COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS") or 0)
 fast_fragment = os.environ.get("COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT")
+writing_fragment = os.environ.get("COLD_READ_GRID_TEST_STUB_PRINTS_LINES_DURING_ITS_WAIT_FOR_CELL_WHOSE_REPORT_NAME_CONTAINS")
 if sleep_seconds and not (fast_fragment and fast_fragment in given.name):
-    time.sleep(sleep_seconds)
+    if writing_fragment and writing_fragment in given.name:
+        reading_ends = time.monotonic() + sleep_seconds
+        while time.monotonic() < reading_ends:
+            sys.stdout.write("STUB STREAM EVENT: still reading\n")
+            sys.stdout.flush()
+            time.sleep(0.2)
+    else:
+        time.sleep(sleep_seconds)
 finished_marker_directory = os.environ.get("COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY")
 if finished_marker_directory:
     pathlib.Path(finished_marker_directory).mkdir(parents=True, exist_ok=True)
@@ -1124,6 +1135,24 @@ try:
           repr(lines_opening(result, "FAILED")))
     check("differing causes on one agent-binary are three facts, not one down line",
           "AGENT-BINARY DOWN:" not in result.stdout, repr(result.stdout))
+
+    # --- Every progress check, a line for each cell whose agent-binary output grew ---
+    # One cell's stand-in agent-binary prints while it reads; the other cells read in silence.
+    repository = build_scratch_repository(scratch, "checkout-progress-lines")
+    result = run_grid(repository, stubs, {
+        "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": "4",
+        "COLD_READ_GRID_TEST_STUB_PRINTS_LINES_DURING_ITS_WAIT_FOR_CELL_WHOSE_REPORT_NAME_CONTAINS": "claude-hunt-deep.md",
+        "COLD_READ_GRID_CELL_PROGRESS_CHECK_INTERVAL_SECONDS": "1"})
+    progress_lines = lines_opening(result, "PROGRESS:")
+    check("the cell whose agent-binary output grows gets progress lines, in the approved words",
+          len(progress_lines) >= 2
+          and all(line == "PROGRESS: claude-hunt-deep still writing, 0 minutes in." for line in progress_lines),
+          repr(result.stdout))
+    check("a silent cell gets no progress line, and all seven reports land",
+          len(reviews_saved_lines(result)) == 7, repr(result.stdout))
+    check("a landed cell's agent-binary output file is deleted",
+          list(record_directory_of(repository).glob("*.agent-binary-stdout-and-stderr-copy.log")) == [],
+          sorted(path.name for path in record_directory_of(repository).iterdir()))
 
     # --- A logged-out cell is not retried, and the user is told at once -------
     # The other five read for a few seconds, so a Tell the user line printed

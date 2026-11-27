@@ -420,6 +420,10 @@ CELL_POLL_INTERVAL_DEFAULT_SECONDS = 5.0
 # Tests shorten the limit so a timed-out attempt is seen in seconds.
 CELL_ATTEMPT_TIMEOUT_OVERRIDE_VARIABLE = "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS"
 CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS = 2 * 60 * 60
+# Tests shorten the check so a progress line is seen in seconds.
+CELL_PROGRESS_CHECK_INTERVAL_OVERRIDE_VARIABLE = "COLD_READ_GRID_CELL_PROGRESS_CHECK_INTERVAL_SECONDS"
+CELL_PROGRESS_CHECK_INTERVAL_DEFAULT_SECONDS = 5 * 60
+CELL_PROGRESS_LINE = "PROGRESS: {cell} still writing, {minutes} minutes in."
 TIMED_OUT_CAUSE_CLASS = "timed-out"
 TIMED_OUT_CAUSE_DETAIL = f"timed out after {CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS / 3600:g} hours"
 STOPPED_CELL_UNFINISHED_REPORT_DELETED_PHRASE = "; the unfinished report it had written is deleted"
@@ -893,6 +897,10 @@ class RunOutcome(typing.NamedTuple):
     what_should_be_code_question_absent: dict
 
 
+def agent_binary_stdout_and_stderr_copy_file_path_of(report_path: pathlib.Path) -> pathlib.Path:
+    return report_path.with_name(report_path.name + ".agent-binary-stdout-and-stderr-copy.log")
+
+
 def cell_name_of(report_path: pathlib.Path) -> str:
     return report_path.stem
 
@@ -937,7 +945,8 @@ def launch_cells(target: pathlib.Path, record_dir: pathlib.Path,
                    "--tier", cell.tier,
                    "--target", str(target),
                    "--target-origin", str(target_origin),
-                   "--report", str(report_path)]
+                   "--report", str(report_path),
+                   "--agent-binary-stdout-and-stderr-copy-file", str(agent_binary_stdout_and_stderr_copy_file_path_of(report_path))]
         # An explicit model or effort bypasses the launcher's tier-map default.
         if cell.model:
             command += ["--model", cell.model]
@@ -968,6 +977,7 @@ def launch_what_should_be_code_question_cell(
                "--target", str(target),
                "--target-origin", str(target_origin),
                "--report", str(report_path),
+               "--agent-binary-stdout-and-stderr-copy-file", str(agent_binary_stdout_and_stderr_copy_file_path_of(report_path)),
                "--prompt-file", str(prompt_file)]
     stderr_path = record_dir / (report_path.name + ".stderr.log")
     return {report_path: start_attempt(command, report_path, 1, stderr_path)}
@@ -1171,6 +1181,7 @@ def wait_for_cells(running: dict,
                    cell_attempt_timeout_seconds: float = CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS,
                    working_tree_baseline=None,
                    working_tree_baseline_failure_reason: typing.Optional[str] = None,
+                   cell_progress_check_interval_seconds: float = CELL_PROGRESS_CHECK_INTERVAL_DEFAULT_SECONDS,
                    ) -> RunOutcome:
     """Retry failed cells once, unless the cause is user-clearable or the attempt
     timed out, and wait for reports, absences or a changed target."""
@@ -1183,6 +1194,20 @@ def wait_for_cells(running: dict,
         cells_by_runtime.setdefault(
             runtime_of(cell_name_of(report_path)), []).append(cell_name_of(report_path))
     stray_paths_reported = set()
+    last_progress_check = time.monotonic()
+    output_size_at_last_progress_check = {}
+
+    def print_progress_lines():
+        for report_path, attempt in running.items():
+            try:
+                size = agent_binary_stdout_and_stderr_copy_file_path_of(report_path).stat().st_size
+            except FileNotFoundError:
+                size = 0
+            if size > output_size_at_last_progress_check.get(report_path, 0):
+                print(CELL_PROGRESS_LINE.format(
+                    cell=cell_name_of(report_path),
+                    minutes=int((time.monotonic() - attempt.started_at) // 60)), flush=True)
+            output_size_at_last_progress_check[report_path] = size
 
     def print_stopped_cells_write_check(stopped_report_paths):
         for line in stopped_cells_write_check_lines(
@@ -1216,6 +1241,7 @@ def wait_for_cells(running: dict,
             )
             if attempt.process is not None and code == 0 and has_report:
                 attempt.stderr_path.unlink(missing_ok=True)
+                agent_binary_stdout_and_stderr_copy_file_path_of(report_path).unlink(missing_ok=True)
                 print(f"saved: {report_path}", flush=True)
                 if not is_question_4:
                     outcome.landed.append(name)
@@ -1255,6 +1281,9 @@ def wait_for_cells(running: dict,
             announce_agent_binary_down(cells_by_runtime, outcome)
         if timed_out_this_poll:
             print_stopped_cells_write_check(timed_out_this_poll)
+        if running and time.monotonic() - last_progress_check >= cell_progress_check_interval_seconds:
+            last_progress_check = time.monotonic()
+            print_progress_lines()
         if running and time.monotonic() - last_target_check >= target_check_interval_seconds:
             last_target_check = time.monotonic()
             move = target_move()
@@ -1456,7 +1485,9 @@ def main() -> int:
                   or CELL_POLL_INTERVAL_DEFAULT_SECONDS),
             float(os.environ.get(CELL_ATTEMPT_TIMEOUT_OVERRIDE_VARIABLE)
                   or CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS),
-            working_tree_baseline, working_tree_baseline_failure_reason)
+            working_tree_baseline, working_tree_baseline_failure_reason,
+            float(os.environ.get(CELL_PROGRESS_CHECK_INTERVAL_OVERRIDE_VARIABLE)
+                  or CELL_PROGRESS_CHECK_INTERVAL_DEFAULT_SECONDS))
     # Before any marker goes in and before shipping: the store refuses changed bytes.
     question_4_line = what_should_be_code_question_closing_line(record_dir, outcome)
     # Retain the poll result if the changed bytes were restored before the final comparison.
