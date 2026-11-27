@@ -97,7 +97,7 @@ same fresh session. Both prompts follow the design's § Prompts word for
 word except where it asks for a text reply: there they ask for the JSON
 answer the --json-schema holds (COLD_START_PROMPT_TEMPLATE's answer
 sentences and boundaries, and a draft-verdict ask, which relays the asker's
-question in place of the design's title, GHI-MD and reply line).
+question in place of the design's edits-only line, title, GHI-MD and reply line).
 One boundary also differs in behavior: a draft that conflicts with a ruling
 the user made gets the ruling question, where the design gives every
 draft-body request a verdict.
