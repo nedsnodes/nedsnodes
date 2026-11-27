@@ -283,7 +283,8 @@ count, or its whole title when it has no number, opens with "summary". When
 the next item is unnumbered, a `## <title>` heading as the walk finder reads
 one, CLOSE first writes its running count into that heading, `## Item K of M:
 <title>`, K one more than the highest whole number any item heading holds and
-M the walk finder's count of the items shown and waiting, and names it with
+M as the walk finder's approval_walk_item_total_shown_and_waiting_counted_from_walk_document
+gives it, and names it with
 the same K and M. The line naming the next item gives that counted M,
 whatever M the walk-document's headings give.
 
@@ -3058,9 +3059,8 @@ def start_read_ahead_of_item_after(walk_finder, top, minutes, parser, numbers, t
         number_predicted = isinstance(after[0], int)  # pragma: no mutate, next_item is given the same numbers as answered and waiting, so it names at most one item and after[-1] is after[0]
         if number_predicted:
             number = walk_finder.approval_walk_next_unnumbered_item_number(units)
-            once_numbered = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)
-            after_named = items_named([number], once_numbered)
-            text = unnumbered_item_text_once_numbered(walk_finder, minutes, after[0], units, number, once_numbered)
+            after_named = items_named([number], count)
+            text = unnumbered_item_text_once_numbered(walk_finder, minutes, after[0], units, number, count)
         else:
             after_named = items_named(after, total)
             _, text = item_text(walk_finder, minutes, after_named, after, total, parser,
@@ -4394,13 +4394,14 @@ def numbered_heading(heading, number, total):
 def unnumbered_item_numbered(walk_finder, minutes, first, units):
     """Write the running count `Item K of M: ` into the unnumbered item heading on line first of the walk-document,
     K and M as the walk finder's approval_walk_next_unnumbered_item_number and approval_walk_item_total_shown_and_waiting_counted_from_walk_document give them for
-    units, the walk-document's units; return K."""
+    units, the walk-document's units; return (K, M)."""
     document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
     lines = document.read_text(encoding="utf-8").split("\n")
     number = walk_finder.approval_walk_next_unnumbered_item_number(units)
-    lines[first] = numbered_heading(lines[first], number, walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units))
+    total = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)
+    lines[first] = numbered_heading(lines[first], number, total)
     document.write_text("\n".join(lines), encoding="utf-8")
-    return number
+    return number, total
 
 
 def unnumbered_item_text_once_numbered(walk_finder, minutes, first, units, number, total):
@@ -4445,8 +4446,8 @@ def new_item_for_held_answer_numbered(walk_finder, minutes, value, answered_numb
             document=document, item=" and ".join(answered_numbers), new_item=f"`{lines[units[after][3]].strip()}`",
             waited_on=", ".join(f"`{lines[other].strip()}`" if isinstance(other, int) else f"item {other}"
                                 for other in to_come)))
-    number = unnumbered_item_numbered(walk_finder, minutes, units[after][3], units)
-    return f"item {number} of {walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)}"
+    number, total = unnumbered_item_numbered(walk_finder, minutes, units[after][3], units)
+    return f"item {number} of {total}"
 
 
 def deferred_item_heading_noted(walk_finder, minutes, numbers, total, parser, noted=True):
@@ -4865,8 +4866,8 @@ def bump(arguments):
                                                     close_command=step_command_with_cwd(top, "close"),
                                                     bump_command=bump_command))
     waiting, numbers, total = waiting_items(walk_finder, value, minutes)
-    _, _, _, units, placing = walk_document_items(walk_finder, minutes, value, numbers, total, parser,
-                                                  "check --bump", top, stamp=False)
+    count, _, _, units, placing = walk_document_items(walk_finder, minutes, value, numbers, total, parser,
+                                                      "check --bump", top, stamp=False)
     document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
     lines = document.read_text(encoding="utf-8").split("\n")
     title = heading_title(walk_finder, "## " + arguments.bump.strip().lstrip("# "))
@@ -4886,7 +4887,6 @@ def bump(arguments):
     _, waiting_units = walk_finder.waiting_item_units(document, value, numbers, total, parser, units)
     before = waiting_units[0][3]
     number = walk_finder.approval_walk_next_unnumbered_item_number(units)
-    count = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)
     # Numbered before it moves: an unnumbered heading above the walk-document's first numbered item is no item.
     block = [numbered_heading(lines[first], number, count)] + lines[first + 1:end]
     while block and not block[-1].strip():
@@ -5022,8 +5022,8 @@ def close(arguments):
         if first in placing:  # Not the summary item, which stays where it is.
             first, units = unshown_items_gathered_behind_chosen(walk_finder, minutes, first, units, placing, parser,
                                                                 answered_numbers, total)
-        count = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)
-        numbers = [unnumbered_item_numbered(walk_finder, minutes, first, units)]
+        number, count = unnumbered_item_numbered(walk_finder, minutes, first, units)
+        numbers = [number]
     # A number several headings name, such as 3 in `3 of 9` and `3 of 12`, takes its heading's M, so the read step
     # can tell which heading the line names.
     shown_total = count
