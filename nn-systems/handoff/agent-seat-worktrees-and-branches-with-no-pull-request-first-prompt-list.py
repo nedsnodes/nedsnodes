@@ -52,11 +52,12 @@ WHAT IT DELETES. Only the first prompt's list, never the list command, deletes
 a branch it would list whose every commit is already on origin/main as a
 cherry-picked copy (`git cherry origin/main <branch>` prints no `+` line, and
 the branch has no merge commit origin/main lacks, since `git cherry` leaves
-merge commits out): no work is lost, and the list names the branch with the `git branch <name>
-<sha>` command that restores it, under a line that opens with the heading
-"Already deleted, needing nothing from you:", which the handoff-supervisor
-puts above the leftovers' opening sentence. A branch whose deletion fails is listed as
-before, with why.
+merge commits out): no work is lost. It prints each such branch with the
+`git branch <name> <sha>` command that restores it, under a line that opens
+with the heading "Already deleted, needing nothing from you:", to the
+handoff-supervisor's console and leaves it out of the first prompt, since the
+agent-session has nothing to do with it. A branch whose deletion fails is
+listed as before, with why.
 
 HOW IT CAN FAIL. When gh cannot list pull requests, worktrees are listed with
 their pull request state unknown and the branch list is replaced by a line
@@ -389,7 +390,8 @@ def list_text_and_failure(repo, agent_seat, skip_worktree=None, entries_at_most=
     """Return (the list's text, or "" when there is nothing to list; whether part failed).
     entries_at_most caps the entries shown of each kind; None shows every entry.
     delete_cherry_picked_copies deletes, instead of listing, each branch whose every commit is
-    on origin/main as a cherry-picked copy. task_list_directory is the agent-seat's task list,
+    on origin/main as a cherry-picked copy, and prints the deleted ones instead of returning
+    them, unless a failure follows a deletion. task_list_directory is the agent-seat's task list,
     whose open tasks' entries are left out; None reads the agent-seat's own."""
     cleaner = None
     deleted = []
@@ -437,7 +439,8 @@ def list_text_and_failure(repo, agent_seat, skip_worktree=None, entries_at_most=
     if worktrees or branches:
         lines.append(INSTRUCTIONS)
     lines += [line for line in (unreadable_task_list_line(holding),) if line]
-    lines += deleted_section(deleted)
+    if deleted:
+        print("\n".join(deleted_section(deleted)))
     return "\n".join(lines), bool(pull_request_failure)
 
 

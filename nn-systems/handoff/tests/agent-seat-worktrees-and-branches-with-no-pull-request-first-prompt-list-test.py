@@ -461,13 +461,18 @@ def test_cherry_picked_copies_deleted():
     check(not failed and "branch seat-a-copied;" in listed
           and git(main, "branch", "--list", "seat-a-copied") != "",
           "the list command deletes nothing: a cherry-picked copy is listed", listed)
-    text = listing.first_prompt_text(main, "seat-a")
+    console = io.StringIO()
+    with redirect_stdout(console):
+        text = listing.first_prompt_text(main, "seat-a")
     restore = shlex.join(["git", "-C", str(main), "branch", "seat-a-copied", tip])
     check("branch seat-a-copied;" not in text and git(main, "branch", "--list", "seat-a-copied") == ""
+          and console.getvalue().startswith(listing.ALREADY_DELETED_HEADING_START)
           and f"- deleted branch seat-a-copied, whose every commit is on origin/main as a "
-              f"cherry-picked copy; restore it with: {restore}" in text,
+              f"cherry-picked copy; restore it with: {restore}" in console.getvalue()
+          and "seat-a-copied" not in text and listing.ALREADY_DELETED_HEADING_START not in text,
           "the first prompt deletes a branch whose every commit is a copy on origin/main, and "
-          "names it with the command that restores it", text)
+          "prints it to the console with the command that restores it, not in the first prompt",
+          f"console: {console.getvalue()}\nfirst prompt: {text}")
     check("branch seat-a-unique;" in text,
           "a branch with a commit origin/main lacks is still listed", text)
     restored = subprocess.run(shlex.split(restore), capture_output=True, text=True)
@@ -526,17 +531,21 @@ def test_deletion_reported_when_a_later_git_call_fails():
         return saved(repo, *arguments, **keywords)
 
     cleaner.run_git = fail_after_deleting
+    console = io.StringIO()
     try:
-        text, failed = listing.list_text_and_failure(main, "seat-a",
-                                                     delete_cherry_picked_copies=True)
+        with redirect_stdout(console):
+            text, failed = listing.list_text_and_failure(main, "seat-a",
+                                                         delete_cherry_picked_copies=True)
     finally:
         cleaner.run_git = saved
     restore = shlex.join(["git", "-C", str(main), "branch", "seat-a-copied", tip])
     check(failed and git(main, "branch", "--list", "seat-a-copied") == ""
           and "could not be listed (ListingFailed" in text
-          and f"restore it with: {restore}" in text,
-          "a deletion is still reported, with its restore command, when a later git call fails",
-          text)
+          and f"{listing.ALREADY_DELETED_HEADING_START} " in text
+          and f"restore it with: {restore}" in text and console.getvalue() == "",
+          "a deletion is still reported in the first prompt, with its restore command, below the "
+          "failure line, when a later git call fails, and nothing goes to the console",
+          f"console: {console.getvalue()}\nfirst prompt: {text}")
 
 
 def test_supervisor_puts_leftovers_before_the_next_step_without_a_conversation_tail():
@@ -597,7 +606,7 @@ def test_supervisor_puts_leftovers_before_the_next_step():
           "an unreadable counts file is stated, and the entries are still listed", broken)
 
 
-def test_supervisor_puts_deleted_branches_above_the_leftovers_and_forgets_counts_when_none():
+def test_supervisor_puts_a_failure_with_deleted_branches_above_the_leftovers_and_forgets_counts_when_none():
     fixture_spec = importlib.util.spec_from_file_location(
         "handoff_supervisor_test_fixture_deleted_and_counts",
         SYSTEM_DIRECTORY / "tests" / "handoff-supervisor-test-fixture.py")
@@ -606,35 +615,28 @@ def test_supervisor_puts_deleted_branches_above_the_leftovers_and_forgets_counts
     supervisor = fixture.supervisor
     counts = SCRATCH / "seat-w-leftovers-prompt-listing-counts.json"
     prompt = f"Opening.{supervisor.NEXT_STEP_HEADING}Do the next thing."
-    deleted = "\n".join(listing.deleted_section(["deleted branch d1, whose every commit is a copy"]))
-    branches = ("This agent-seat's branches with no pull request: 1:\n- branch b1; main lacks the changes of its 1 commit(s)\nSteps.\n"
-                + deleted)
-    both = supervisor.launch_prompt_with_leftovers_before_the_next_step(prompt, ("", branches), counts)
-    check(both.startswith("Opening.\n\n" + listing.ALREADY_DELETED_HEADING_START)
-          and both.index("- deleted branch d1,")
-          < both.index(supervisor.LEFTOVERS_BEFORE_THE_NEXT_STEP_SENTENCE)
-          < both.index("- (listed in 1 first prompt(s)) branch b1;")
-          and both.endswith(f"Steps.{supervisor.NEXT_STEP_HEADING}Do the next thing."),
-          "the deleted branches go above the leftovers' opening sentence", both)
-    only_deleted = supervisor.launch_prompt_with_leftovers_before_the_next_step(
-        prompt, ("", deleted), counts)
-    check(only_deleted == f"Opening.\n\n{deleted}{supervisor.NEXT_STEP_HEADING}Do the next thing."
+    failure = "\n".join(["This agent-seat's worktrees and branches with no pull request could not be listed (x)."]
+                        + listing.deleted_section(["deleted branch d1, whose every commit is a copy"]))
+    snapshots = "Leftover work-snapshots: 1:\n- refs/work-snapshots/k/w: worktree /x (is gone); more"
+    both = supervisor.launch_prompt_with_leftovers_before_the_next_step(
+        prompt, (snapshots, failure), counts)
+    check(both.startswith(f"Opening.\n\n{failure}\n\n"
+                          + supervisor.LEFTOVERS_BEFORE_THE_NEXT_STEP_SENTENCE)
+          and "- (listed in 1 first prompt(s)) refs/work-snapshots/k/w:" in both
+          and "(listed in 1 first prompt(s)) deleted branch" not in both
+          and both.endswith(f"more{supervisor.NEXT_STEP_HEADING}Do the next thing."),
+          "a failure, with the branches deleted before it, goes uncounted above the leftovers' "
+          "opening sentence", both)
+    only_failure = supervisor.launch_prompt_with_leftovers_before_the_next_step(
+        prompt, ("", failure), counts)
+    check(only_failure == f"Opening.\n\n{failure}{supervisor.NEXT_STEP_HEADING}Do the next thing."
           and not counts.exists(),
-          "with only deleted branches, no leftovers sentence is shown and the counts file is deleted",
-          only_deleted)
-    again = supervisor.launch_prompt_with_leftovers_before_the_next_step(prompt, ("", branches), counts)
-    check("- (listed in 1 first prompt(s)) branch b1;" in again,
+          "with only a failure, no leftovers sentence is shown and the counts file is deleted",
+          only_failure)
+    again = supervisor.launch_prompt_with_leftovers_before_the_next_step(
+        prompt, (snapshots, failure), counts)
+    check("- (listed in 1 first prompt(s)) refs/work-snapshots/k/w:" in again,
           "a leftover listed after a launch that listed none starts its count again", again)
-    quoting = ("This agent-seat's branches with no pull request: 2:\n"
-               f"- branch b2; main lacks the changes of its 1 commit(s), the newest \"Move the {listing.ALREADY_DELETED_HEADING_START} "
-               "heading\"\n- branch b3; main lacks the changes of its 1 commit(s)\nSteps.\n" + deleted)
-    quoted = supervisor.launch_prompt_with_leftovers_before_the_next_step(prompt, ("", quoting), counts)
-    check("- (listed in 1 first prompt(s)) branch b2;" in quoted
-          and "- (listed in 1 first prompt(s)) branch b3;" in quoted
-          and quoted.index("- deleted branch d1,")
-          < quoted.index(supervisor.LEFTOVERS_BEFORE_THE_NEXT_STEP_SENTENCE),
-          "a commit subject quoting the deleted branches' heading does not start the deleted block",
-          quoted)
     counts.unlink()
     counts.mkdir()
     stderr = io.StringIO()
@@ -684,12 +686,17 @@ def test_supervisor_appends_the_list():
     main = new_clone()
     set_pull_requests([])
     branch_with_commit(main, "seat-five-work", "seat-five")
+    cherry_picked_branch(main, "seat-five-copied", "seat-five")
     output = io.StringIO()
     with redirect_stdout(output):
         text = supervisor.agent_seat_worktrees_and_branches_text("seat-five", main)
     check(text.startswith("This agent-seat's branches with no pull request: 1:")
           and "handoff-supervisor: This agent-seat's branches" in output.getvalue(),
           "the handoff-supervisor builds the list and prints its first line", text[:200])
+    check("- deleted branch seat-five-copied," in output.getvalue()
+          and "seat-five-copied" not in text and listing.ALREADY_DELETED_HEADING_START not in text,
+          "a deleted branch goes to the handoff-supervisor's console, not the first prompt",
+          f"console: {output.getvalue()}\nfirst prompt: {text}")
     handoffs = SCRATCH / "handoffs-supervisor"
     handoffs.mkdir()
     launched = []
@@ -853,7 +860,7 @@ for case in (test_branches, test_pushed_text, test_worktrees, test_gh_failure,
              test_merge_commit_branch_not_deleted,
              test_deletion_reported_when_a_later_git_call_fails,
              test_supervisor_puts_leftovers_before_the_next_step,
-             test_supervisor_puts_deleted_branches_above_the_leftovers_and_forgets_counts_when_none,
+             test_supervisor_puts_a_failure_with_deleted_branches_above_the_leftovers_and_forgets_counts_when_none,
              test_supervisor_shows_no_leftovers_sentence_above_a_part_with_no_entry,
              test_supervisor_puts_leftovers_before_the_next_step_without_a_conversation_tail,
              test_supervisor_appends_the_list, test_open_tasks_hold_entries,
