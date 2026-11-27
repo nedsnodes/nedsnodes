@@ -9,7 +9,8 @@ checked whatever the tool call's working directory. At
 each run the hook compares each checked file's stat data with what it stored at its previous
 run, hashes only a file whose stat data differs, logs each new version in this machine's
 directory of the log-store kind guarded-file-versions-and-approvals/, copies it there unless
-the file's checkout is on a branch whose HEAD commit holds it, and, when the version is not in its path's
+the file's checkout is on a branch whose HEAD commit holds it or the checkout's local origin/main
+holds it at the same path, and, when the version is not in its path's
 approved set, tells the agent to show the user the change and run this program with --approve
 or --restore; for a file whose path has no approved version and that origin/main does not hold,
 when the store keeps its copy, it also offers the rm that deletes it. A version that the checkout's local origin/main holds at the same path enters the
@@ -28,12 +29,18 @@ shown and restored against the newest of them; a file git stops listing and list
 unchanged is again left unstored. A version a run saw and the user did not approve stays
 unapproved, unless origin/main holds it or it is a deletion.
 
+On the Mac the store work stops when ned-box's store has not answered for 15 seconds, and a
+run the store keeps answering stops at 90 seconds and names the long run, which does the same
+work for the checkout it runs in with no 90-second limit.
+
     python3 <this file> --approve <path> <hash> [<path> <hash> ...]
     python3 <this file> --restore <path> <hash> [<path> <hash> ...]
+    python3 <this file> --back-up-and-check-every-changed-guarded-file-in-one-long-run
 
 Design and tests: docs/issues/1268-catch-a-guarded-file-changed-without-the-user.md.
 
-Exit status: the hook always exits 0, since the tool call has already happened. --approve and
+Exit status: the hook always exits 0, since the tool call has already happened. The long run
+exits 0 when it ran and 1 when the backup did not run. --approve and
 --restore exit 0 when done, 1 when they refuse, when the store cannot be reached, when a
 file operation or git fails, when --restore changes some files and fails on others, or when
 --approve records the approval but cannot delete the approval marker, and 64 on a bad command line.
@@ -43,6 +50,7 @@ import difflib
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import pickle
 import select
@@ -77,10 +85,18 @@ AGENTS_DIRECTORY_VARIABLE = "GUARDED_FILE_VERSIONS_AGENTS_DIRECTORY"
 DEADLINE_VARIABLE = "GUARDED_FILE_VERSIONS_DEADLINE_SECONDS"
 OWNER_VARIABLE = "GUARDED_FILE_VERSIONS_OWNER_KEY"
 
-# The hook's timeout in .claude/settings.json is 30 s. On the Mac every store operation runs in
-# a child with about half of that, so a hung SMB mount is still reported in additionalContext
-# before Claude Code kills the hook.
+# On the Mac the store work runs in a child, killed when the store has not answered for
+# MAC_STORE_DEADLINE_SECONDS, as with a hung SMB mount, or when a run the store keeps answering
+# reaches GUARDED_FILE_BACKUP_STORE_OPERATIONS_TOTAL_LIMIT_SECONDS_PER_HOOK_RUN_ON_THE_MAC. The hook's timeout in .claude/settings.json, 120 s, is
+# longer, so either stop is reported in additionalContext before Claude Code kills the hook.
 MAC_STORE_DEADLINE_SECONDS = 15
+GUARDED_FILE_BACKUP_STORE_OPERATIONS_TOTAL_LIMIT_SECONDS_PER_HOOK_RUN_ON_THE_MAC = 90
+BACK_UP_AND_CHECK_EVERY_CHANGED_GUARDED_FILE_IN_ONE_LONG_RUN_OPTION = "--back-up-and-check-every-changed-guarded-file-in-one-long-run"
+SESSION_ID_VARIABLE = "CLAUDE_CODE_SESSION_ID"
+# The child writes an answer mark after each store operation that answered, then the result
+# mark and its pickled result.
+ANSWER_MARK = b"."
+RESULT_MARK = b"="
 
 STATE_FILE_NAME = HOOK_NAME + "-state.json"
 # The checkout state's key for {path: blob id} of the versions the checkout's first run found
@@ -198,6 +214,13 @@ STORE_FAILED = (
     "checked against the versions the user approved: {reason}.\n"
     "Tell the user what failed, with this remedy: {remedy}\n"
     "Once the store can be reached, the next tool call checks the files again.")
+BACKUP_DID_NOT_RUN = STORE_FAILED.split(",")[0]
+GUARDED_FILE_BACKUP_STORE_OPERATIONS_TOTAL_SECONDS_LIMIT_REACHED_INSTRUCTIONS = (
+    f"The guarded-file backup ran {GUARDED_FILE_BACKUP_STORE_OPERATIONS_TOTAL_LIMIT_SECONDS_PER_HOOK_RUN_ON_THE_MAC} seconds with ned-box answering "
+    "and did not finish. Run it yourself once in this checkout, as a Bash call with a 15-minute "
+    "timeout: python3 .claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-"
+    f"ask-hook.py {BACK_UP_AND_CHECK_EVERY_CHANGED_GUARDED_FILE_IN_ONE_LONG_RUN_OPTION}")
+BACK_UP_AND_CHECK_LONG_RUN_FOUND_NOTHING_TO_ASK_MESSAGE = "The guarded-file backup checked every changed guarded file; none needs the user."
 FIRST_RUN_VERSION_LOST = (
     "[rule guarded-file-changed-without-approval-ask-user-afterward] "
     "The guarded-file backup could not approve version {blob} of {path}, the version this "
@@ -248,6 +271,10 @@ class ApprovalRecordedButApprovalMarkerNotDeleted(Exception):
 
 class StoreUnreachable(Exception):
     """The store could not be checked, opened, read or written."""
+
+
+class GuardedFileBackupStoreOperationsTotalSecondsLimitReached(Exception):
+    """The store work ran its whole limit with the store answering, and was stopped."""
 
 
 class RestoreIncomplete(Exception):
@@ -390,6 +417,26 @@ def write_all(fd, data: bytes):
         raise OSError(f"a short write: {written} of {len(data)} bytes")
 
 
+# The pipe to the parent, in a child of run_with_deadline; None elsewhere.
+answer_pipe = None
+
+
+def write_backup_store_operation_done_mark_to_parent_pipe():
+    """Tell the parent, when there is one, that the store answered."""
+    if answer_pipe is not None:
+        write_all(answer_pipe, ANSWER_MARK)
+
+
+def answers_the_store(method):
+    """A Store method whose return is an answer from the store. append and copy open the path's
+    directory through path_directory first, so each of their calls answers too."""
+    def answered(*arguments, **keywords):
+        result = method(*arguments, **keywords)
+        write_backup_store_operation_done_mark_to_parent_pipe()
+        return result
+    return answered
+
+
 class Store:
     """One machine's directory of the store, opened once. Every later read and write is relative
     to the open directory, so a mount that disappears part way fails the operation instead of
@@ -426,6 +473,7 @@ class Store:
         self.present = set()
         self.missing = set()
 
+    @answers_the_store
     def path_directory(self, path: str, create: bool):
         """An open descriptor of the directory of path's versions, or None when there is none.
         The directory mirrors the path as this machine sees it, without its leading slash."""
@@ -458,6 +506,7 @@ class Store:
         self.missing.difference_update(prefixes)
         return fd
 
+    @answers_the_store
     def read(self, path: str, name: str) -> bytes:
         fd = self.path_directory(path, create=False)
         if fd is None:
@@ -614,8 +663,8 @@ def versions_head_holds(checkout, versions):
     """The (path, blob id) pairs among versions whose path, in the checkout's HEAD commit, is
     that blob, when HEAD is on a branch; none when HEAD is detached, since a detached HEAD is
     not a durable ref. A branch's HEAD is the one durable ref the hook can ask cheaply on every
-    tool call; a version only another durable ref holds is copied, and the daily prune deletes
-    the copy. Raises BranchUnreadable, a RuntimeError carrying git's stderr, when git
+    tool call; a version only another durable ref than origin/main holds is copied, and the
+    daily prune deletes the copy. Raises BranchUnreadable, a RuntimeError carrying git's stderr, when git
     rev-parse --verify or git symbolic-ref fails with any exit other than 1."""
     if all(blob_id == DELETED for _, blob_id in versions):
         return set()
@@ -1048,8 +1097,8 @@ def store_phase(store, session, owner, checks, unsettled_unchanged, approvals, q
     each reminder ends with whether its message offers to delete the file.
 
     approvals: [(path, key, how, rule)] git's own work and renames, recorded before the checks.
-    checks: the files whose content changed, each copied unless its checkout's branch HEAD
-    holds it.
+    checks: the files whose content changed, each copied unless its checkout's branch HEAD or
+    origin/main holds it.
     unsettled_unchanged: [(path, key)] files left unsettled by an earlier run. quiet: a rebase,
     merge, cherry-pick or revert is stopped, so every version is copied and nothing is asked.
     origin_main_paths: the paths origin/main holds, in any version."""
@@ -1152,14 +1201,18 @@ def ask_entry(store, check, log, reason=""):
     return check.path, check.key, diff_text(before, after, check.path), reason
 
 
-def run_with_deadline(function, deadline_seconds):
-    """Run function in a child process and return its result, or raise StoreUnreachable at the
-    deadline, after killing the child: a mount that is still listed while ned-box has gone can
-    make a read wait for SMB to reconnect."""
+def run_with_deadline(function, deadline_seconds, run_limit_seconds=math.inf):
+    """Run function in a child process and return its result. After killing the child, raise
+    StoreUnreachable when the store has not answered for deadline_seconds, since a mount that is
+    still listed while ned-box has gone can make a read wait for SMB to reconnect, or
+    GuardedFileBackupStoreOperationsTotalSecondsLimitReached when the child has run run_limit_seconds. A function that uses no
+    Store method, as the prune's, gives no answer, so it stops at deadline_seconds in all."""
+    global answer_pipe
     read_end, write_end = os.pipe()
     child = os.fork()
     if child == 0:
         os.close(read_end)
+        answer_pipe = write_end
         try:
             result = ("ok", function())
         except StoreUnreachable as error:
@@ -1167,42 +1220,61 @@ def run_with_deadline(function, deadline_seconds):
         except Exception as error:
             result = ("unreachable", f"{type(error).__name__}: {error}")
         try:
-            write_all(write_end, pickle.dumps(result))
+            write_all(write_end, RESULT_MARK + pickle.dumps(result))
         finally:
             os._exit(0)
     os.close(write_end)
-    chunks = []
-    end = time.monotonic() + deadline_seconds
     try:
-        while True:
-            remaining = end - time.monotonic()
-            if remaining <= 0:
-                os.kill(child, signal.SIGKILL)
-                raise StoreUnreachable(
-                    f"the store did not answer within {deadline_seconds} seconds")
-            ready, _, _ = select.select([read_end], [], [], remaining)
-            if ready:
-                chunk = os.read(read_end, 1 << 16)
-                if not chunk:
-                    break
-                chunks.append(chunk)
+        received = wait_for_backup_store_child_process_answers_until_silent_or_run_limit(read_end, deadline_seconds, run_limit_seconds)
+    except (StoreUnreachable, GuardedFileBackupStoreOperationsTotalSecondsLimitReached):
+        os.kill(child, signal.SIGKILL)
+        raise
     finally:
         os.close(read_end)
         os.waitpid(child, 0)
-    status, value = pickle.loads(b"".join(chunks)) if chunks else ("unreachable", "no answer")
+    _, marked, result = received.partition(RESULT_MARK)
+    status, value = pickle.loads(result) if marked else ("unreachable", "no answer")
     if status != "ok":
         raise StoreUnreachable(value)
     return value
+
+
+def pipe_readable(fd, seconds):
+    return bool(select.select([fd], [], [], seconds)[0])
+
+
+def wait_for_backup_store_child_process_answers_until_silent_or_run_limit(read_end, deadline_seconds, run_limit_seconds, clock=time.monotonic,
+                           readable=pipe_readable):
+    """Everything the child writes to read_end, once it closes the pipe. Each read is an answer
+    from the store and restarts the deadline. Raises StoreUnreachable when nothing came for
+    deadline_seconds, else GuardedFileBackupStoreOperationsTotalSecondsLimitReached run_limit_seconds after the start."""
+    chunks = []
+    started = last_answer = clock()
+    while True:
+        now = clock()
+        if now - last_answer >= deadline_seconds:
+            raise StoreUnreachable(f"the store did not answer within {deadline_seconds} seconds")
+        if now - started >= run_limit_seconds:
+            raise GuardedFileBackupStoreOperationsTotalSecondsLimitReached()
+        if readable(read_end, min(last_answer + deadline_seconds,
+                                  started + run_limit_seconds) - now):
+            chunk = os.read(read_end, 1 << 16)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+            last_answer = clock()
 
 
 def deadline_seconds():
     return float(os.environ.get(DEADLINE_VARIABLE) or MAC_STORE_DEADLINE_SECONDS)
 
 
-def with_store(machine, work):
-    """work(store) where the machine's store is; on the Mac in a child with a deadline."""
+def with_store(machine, work, run_limit_seconds=math.inf):
+    """work(store) where the machine's store is; on the Mac in a child that is stopped when the
+    store stops answering or at run_limit_seconds."""
     if machine == "mac":
-        return run_with_deadline(lambda: work(Store(machine)), deadline_seconds())
+        return run_with_deadline(lambda: work(Store(machine)), deadline_seconds(),
+                                 run_limit_seconds)
     return work(Store(machine))
 
 
@@ -1250,9 +1322,11 @@ def scan(files, state_files, hash_function):
     return changed, unsettled
 
 
-def run_hook(payload):
-    """Messages for the agent, possibly none."""
-    session = str(payload.get("session_id") or "unknown-session")
+def run_hook(payload, run_limit_seconds=GUARDED_FILE_BACKUP_STORE_OPERATIONS_TOTAL_LIMIT_SECONDS_PER_HOOK_RUN_ON_THE_MAC):
+    """Messages for the agent, possibly none. On the Mac the store work is stopped
+    run_limit_seconds after this run started."""
+    started = time.monotonic()
+    session =str(payload.get("session_id") or "unknown-session")
     tool = payload.get("tool_name") or ""
     event = payload.get("hook_event_name") or "PostToolUse"
     tool_input = payload.get("tool_input") or {}
@@ -1441,7 +1515,8 @@ def run_hook(payload):
                 elif edit_succeeded and written == path:
                     how = HOW_EDIT
                 previous = state["files"].get(path)
-                checks.append(Check(path, data, key, copy_hash, how, (path, copy_hash) in held,
+                in_git = (path, copy_hash) in held or main_blobs.get(path) == copy_hash
+                checks.append(Check(path, data, key, copy_hash, how, in_git,
                                     previous and previous[4]))
             # Only a first-run version store_phase will approve carries its approval to a rename.
             approvals = first + approvals + renames(
@@ -1461,7 +1536,9 @@ def run_hook(payload):
         return results
 
     try:
-        results = with_store(machine, work)
+        results = with_store(machine, work, run_limit_seconds - (time.monotonic() - started))
+    except GuardedFileBackupStoreOperationsTotalSecondsLimitReached:
+        return [GUARDED_FILE_BACKUP_STORE_OPERATIONS_TOTAL_SECONDS_LIMIT_REACHED_INSTRUCTIONS]
     except (StoreUnreachable, OSError, RuntimeError) as error:
         remedy = (REMEDY_MAC if machine == "mac" else REMEDY_NED_BOX).format(
             store=store_directory(machine))
@@ -1784,6 +1861,14 @@ def run_command_work(work):
 
 # ---------------------------------------------------------------- main
 
+def hook_texts(payload, run_limit_seconds):
+    try:
+        return run_hook(payload, run_limit_seconds)
+    except Exception as error:
+        return [STORE_FAILED.format(reason=f"{type(error).__name__}: {error}",
+                                    remedy="tell the user the hook failed, with this message.")]
+
+
 def main(arguments=None):
     arguments = sys.argv[1:] if arguments is None else arguments
     if arguments and arguments[0] in ("--approve", "--restore"):
@@ -1816,9 +1901,16 @@ def main(arguments=None):
             return EXIT_REFUSED
         print("\n".join(lines))
         return EXIT_DONE
+    if arguments == [BACK_UP_AND_CHECK_EVERY_CHANGED_GUARDED_FILE_IN_ONE_LONG_RUN_OPTION]:
+        texts = hook_texts({"session_id": os.environ.get(SESSION_ID_VARIABLE),
+                            "hook_event_name": "PostToolUse", "tool_name": "Bash",
+                            "cwd": os.getcwd()}, math.inf)
+        print("\n\n".join(texts) or BACK_UP_AND_CHECK_LONG_RUN_FOUND_NOTHING_TO_ASK_MESSAGE)
+        return (EXIT_REFUSED if any(text.startswith(BACKUP_DID_NOT_RUN) for text in texts)
+                else EXIT_DONE)
     if arguments:
-        print(f"usage: python3 {HOOK_PATH} [--approve | --restore <path> <hash> ...]",
-              file=sys.stderr)
+        print(f"usage: python3 {HOOK_PATH} [--approve | --restore <path> <hash> ... | "
+              f"{BACK_UP_AND_CHECK_EVERY_CHANGED_GUARDED_FILE_IN_ONE_LONG_RUN_OPTION}]", file=sys.stderr)
         return EXIT_BAD_INVOCATION
     try:
         payload = json.loads(sys.stdin.read() or "{}")
@@ -1826,11 +1918,7 @@ def main(arguments=None):
         payload, texts = {}, [STORE_FAILED.format(reason=f"the hook's input was not JSON: {error}",
                                                   remedy="tell the user this hook got bad input.")]
     else:
-        try:
-            texts = run_hook(payload)
-        except Exception as error:
-            texts = [STORE_FAILED.format(reason=f"{type(error).__name__}: {error}",
-                                         remedy="tell the user the hook failed, with this message.")]
+        texts = hook_texts(payload, GUARDED_FILE_BACKUP_STORE_OPERATIONS_TOTAL_LIMIT_SECONDS_PER_HOOK_RUN_ON_THE_MAC)
     if texts:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": payload.get("hook_event_name") or "PostToolUse",
