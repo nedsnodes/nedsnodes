@@ -24,7 +24,6 @@ import os
 import re
 import shlex
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile

@@ -8,7 +8,9 @@ directories and keeps the permission bits of the file it replaces. When the
 path is a symlink, the file the symlink points to is replaced and the symlink
 is kept, unless the caller passes follow_symlink=False, which replaces the
 symlink itself with a regular file. A symlink that points to itself, directly
-or through others, is replaced, not kept, either way.
+or through other symlinks, is replaced, not kept, either way. With the
+default, a symlink that points to a path under itself raises FileExistsError
+and is left as it was.
 
 It refuses:
 - a copy that is the file at the path, through a symlink or a hard link too,
@@ -53,11 +55,14 @@ def saved_copy_put_back_at_path(saved_copy, path, follow_symlink=True):
     Raise OSError when it cannot, with any file already at path left as it was:
     shutil.SameFileError when saved_copy is the file at path, PermissionError
     when the file at path is not writable, and SavedCopyPutBackFailedWithStagedFileLeftBehind when the
-    temporary file could not be removed after a failure.
+    temporary file could not be removed after a failure. With follow_symlink=False
+    and a symlink at path, neither SameFileError nor PermissionError is raised,
+    since only the symlink is replaced.
     """
     in_memory = isinstance(saved_copy, bytes)
-    replaces_symlink = not follow_symlink and os.path.islink(path)
-    target = os.path.realpath(path) if os.path.islink(path) and follow_symlink else path
+    is_link = os.path.islink(path)
+    replaces_symlink = is_link and not follow_symlink
+    target = os.path.realpath(path) if is_link and follow_symlink else path
     # Opened first, so a copy that cannot be read leaves no new directories behind.
     with io.BytesIO(saved_copy) if in_memory else open(saved_copy, "rb") as source:
         # A symlink being replaced gives no permission bits to keep, and its target's are not the path's own.
