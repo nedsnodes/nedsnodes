@@ -2807,6 +2807,50 @@ def run_generation_continues_past_numbered_files_on_disk_cases(workspace: Path):
           state.get("generation") == 21, str(state))
 
 
+def run_session_handoff_writer_warning_cases(recent: str):
+    """The successor is shown each warning the writer printed after the write, in writer order."""
+    fields = {
+        "written-at": recent,
+        "next-step": "merge the queue",
+        "session-handoff-writer-warning-2": "The prune failed. Tell the user.",
+        "session-handoff-writer-warning-1": "The writer script could not list the subagents. Find them.",
+    }
+    prompt = supervisor.build_ignition_prompt(Path("/tmp/d.md"), fields)
+    expected = supervisor.SESSION_HANDOFF_WRITER_WARNINGS_SHOWN_TO_SUCCESSOR_SENTENCE_TEMPLATE.format(
+        warning_count=2,
+        joined_warnings="The writer script could not list the subagents. Find them. The prune failed. Tell the user.")
+    check("the successor is shown each writer warning, in writer order", expected in prompt, prompt)
+    check("the joined writer warnings carry no doubled punctuation",
+          ".;" not in expected and ".." not in prompt[prompt.index(expected):prompt.index(expected) + len(expected) + 2],
+          prompt)
+    check("the writer warnings come before the next step",
+          prompt.index(expected) < prompt.index("merge the queue"), prompt)
+    quiet = supervisor.build_ignition_prompt(Path("/tmp/d.md"), {"written-at": recent, "next-step": "go"})
+    check("a session-handoff with no writer warning adds no warning sentence",
+          "the writer script found" not in quiet, quiet)
+    # A missing transcript is what makes the writer warn about the roster, so the recovery launch must show it too.
+    recovery_fields = dict(fields, **{
+        supervisor.SESSION_HANDOFF_BACKGROUND_TASK_STILL_RUNNING_FIELD_PREFIX + "1": "task-r: the test run",
+        supervisor.BACKGROUND_TASK_PAST_WAIT_LIMIT_FIELD_PREFIX + "1": "task-a: the long build",
+        supervisor.COLD_READ_FULL_RUN_COMMAND_REFUSED_DURING_HANDOFF_DEFERRAL_FIELD_PREFIX + "1": "cold-read run x",
+    })
+    _, plan = supervisor.successor_session_id_and_ignition_plan_without_conversation_tail(
+        SimpleNamespace(working_directory=Path("/tmp")), None, recovery_fields, "supervisor boot")
+    recovered = plan.compose("")
+    check("the recovery launch shows each writer warning, in writer order, before the next step",
+          expected in recovered and recovered.index(expected) < recovered.index("merge the queue"), recovered)
+    check("the recovery launch shows the still-running and past-wait-limit tasks and the refused cold-read commands",
+          "task-r: the test run" in recovered and "task-a: the long build" in recovered
+          and "cold-read run x" in recovered, recovered)
+    found = supervisor.IgnitionPlanWithoutConversationTail(
+        next_step="go", unextracted_session_id="abc",
+        unextracted_transcript_path=Path("/tmp/project-dir/abc.jsonl"),
+        handoff_fields={supervisor.SPAWNED_SUBAGENT_FIELD_PREFIX + "1": "agent-x: builds the thing"},
+    ).compose("")
+    check("a recovery launch with the transcript found points the roster at that session's subagents folder",
+          "/tmp/project-dir/abc/subagents/agent-<id>.jsonl" in found, found)
+
+
 def run_conversation_tail_last_lines_cases(workspace: Path):
     """A successor's launch leaves the conversation-tail's last 100 lines, under a heading, in
     the file the MessageDisplay hook shows the user, and none of them in the launched prompt,
@@ -3310,6 +3354,7 @@ with fixture.handoff_supervisor_suite_workspace() as workspace:
     run_multi_line_next_step_cases(workspace, recent_timestamp)
     run_launch_and_retention_cases(workspace, recent_timestamp)
     run_spawned_subagent_roster_cases(workspace, recent_timestamp)
+    run_session_handoff_writer_warning_cases(recent_timestamp)
     run_recycle_prompt_composition_cases(workspace, recent_timestamp)
     run_retiring_session_id_from_the_handoff_cases(workspace, recent_timestamp)
 
