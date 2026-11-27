@@ -598,12 +598,13 @@ WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE = (
     "the new link when you published again."
 )
 
-# The Artifact tool reads only claude.ai pages, and a `file:` page is recorded when publishing failed, so the
-# successor keeps that link rather than reading it and publishing again.
-WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE = (
+# The Artifact tool reads only claude.ai pages, so the successor keeps any other link, such as the `file:` page
+# recorded when publishing failed, rather than reading it and publishing again.
+WAITING_APPROVAL_WALK_ITEM_WITH_NON_CLAUDE_AI_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE = (
     "Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
-    "{link}, a file on ned-box, which the Artifact tool cannot read. Show the item in full, and end your "
-    "first message with the item's closing line, holding this link."
+    "{link}, which is not a claude.ai page, so the Artifact tool cannot read it. Do not read it or "
+    "publish the item again. Show the item in full from docs/walk/{walk}.md, and end your first message "
+    "with the item's closing line, with {link} as its link."
 )
 
 WAITING_APPROVAL_WALK_ITEM_WITHOUT_PAGE_LINK_INSTRUCTION_TEMPLATE = (
@@ -1336,8 +1337,8 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
     if link is None or link == walk_finder.ITEM_PAGE_PUBLISH_FAILED:
         return (WAITING_APPROVAL_WALK_ITEM_WITHOUT_PAGE_LINK_INSTRUCTION_TEMPLATE.format(**values)
                 + document_problem,)
-    if link.startswith("file:"):
-        return (WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE.format(link=link, **values)
+    if not link.startswith("https://claude.ai/"):
+        return (WAITING_APPROVAL_WALK_ITEM_WITH_NON_CLAUDE_AI_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE.format(link=link, **values)
                 + document_problem,)
     return (WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE.format(link=link, **values) + document_problem,)
 
