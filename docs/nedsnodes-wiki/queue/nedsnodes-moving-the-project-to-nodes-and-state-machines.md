@@ -51,7 +51,7 @@ Each node follows one contract (item 3), built by one shared contract module fro
 - `--schema` prints as JSON Schema the node's input, output and output states.
 - `--help` states the one question the node answers.
 - It reads JSON on stdin or from files named by flags, and takes subcommands as `git` and `gh` do.
-- It prints one JSON object on stdout, naming its output state. Progress and errors go to stderr.
+- Under `--json`, which the runner always passes, it prints one JSON object on stdout, naming its output state; without `--json` it prints sentences on stdout, as the exit-code page says. Progress and errors go to stderr.
 - Its exit code follows the exit-code page, `docs/nedsnodes-wiki/nedsnodes-how-a-program-reports-success-failure-and-findings-with-its-exit-code.md`: 0 yes, 1 no, 2 could not answer. On exit 0 or 1 the runner reads the one JSON object on stdout. On exit 2, or when stdout is not exactly one valid JSON object, as after a crash, the runner takes the output state `could-not-run`. The output state, not the exit code, picks the next node.
 
 For example, `background-task-check` answers "Did the task finish?":
