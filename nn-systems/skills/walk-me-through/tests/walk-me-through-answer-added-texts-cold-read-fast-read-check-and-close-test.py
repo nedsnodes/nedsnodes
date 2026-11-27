@@ -211,8 +211,8 @@ Item 7 of 9 drops a sentence.
 # written without one; rated() gives each item opening in such a document a `#case_against none.` line, or a line
 # with the rating given.
 # The walk-document holds five of the walk's items, numbered 3 to 7 under `of 9`; close counts M from the items it
-# holds, so the `#next_to_present` lines close writes say `of 5`.
-WALK_DOCUMENT_COUNTED_M = "5"
+# holds, at least the highest number among them, so the `#next_to_present` lines close writes say `of 7`.
+WALK_DOCUMENT_COUNTED_M = "7"
 ITEM_OPENING = re.compile(r"^(?:#+\s*)?\**Items? [\d.]+(?: (?:and|to) [\d.]+)* of \d+\b.*$", re.M)
 
 
@@ -1377,9 +1377,9 @@ def test_the_waiting_item_read_step_names_and_reads_the_first_undecided_numbered
           and "item 3 of 9" not in items_read, described(result) + repr(items_read))
     case.run("check", "--moved-on-no-decision", reply="next")
     closed = case.run("close")
-    # close counts M from the walk-document, which holds item 3 alone.
+    # close counts M from the walk-document, which holds item 3 alone, so M is at least 3.
     check("the close after sub-step 3.1 names sub-step 3.2", closed.returncode == 0
-          and marker(case) == "#next_to_present item 3.2 of 1", described(closed) + case.minutes.read_text())
+          and marker(case) == "#next_to_present item 3.2 of 3", described(closed) + case.minutes.read_text())
     case.minutes.write_text(case.minutes.read_text() + "#next_to_present item 3 of 9\n")
     again = case.run(WAITING_ITEM_READ_STEP_NAME)
     check("with sub-step 3.1 decided, a line naming item 3 again is moved to sub-step 3.2",
@@ -3408,14 +3408,14 @@ def test_the_summary_item_picks_the_order_and_headings_of_another_m_are_walked()
     case.run("check")
     case.run("close")
     check("a deferred item comes back before the heading whose point is summary, not before a later item or one "
-          "that only mentions a summary", marker(case) == "#next_to_present item 3 of 8", case.minutes.read_text())
+          "that only mentions a summary", marker(case) == "#next_to_present item 3 of 9", case.minutes.read_text())
     case = Case(next_to_present="item 6 of 16", document=STRAY_TOTALS_DOCUMENT)
     case.minutes.write_text("# Minutes\n\n" + "".join(approved_line(f"item {n} of 16") for n in range(1, 6))
                             + "#next_to_present item 6 of 16\n")
     case.run("check")
     closed = case.run("close")
     check("headings whose `of M` is not the minutes' are walked like any other, and M counts them",
-          closed.returncode == 0 and marker(case) == "#next_to_present item 7 of 8", case.minutes.read_text())
+          closed.returncode == 0 and marker(case) == "#next_to_present item 7 of 9", case.minutes.read_text())
 
 
 FIX_NEXT_LINE = "#approval_walk_item_in_category_fix_next"
@@ -3483,6 +3483,38 @@ def test_an_unnumbered_item_is_numbered_when_it_is_shown_and_nothing_else_is_ren
           walk_document(case))
 
 
+def test_an_item_numbered_past_a_number_gone_from_the_walk_document_is_not_numbered_past_m():
+    document = ("# A walk\n\n## Item 1 of 3: one\n\n#case_against none.\n\n## Item 3 of 3: three\n\n#case_against none.\n\n"
+                f"## four\n\n{FIX_NEXT_LINE}\n\n#case_against none.\n")
+    case = Case(next_to_present="item 3 of 3", document=document)
+    case.run("check")
+    closed = case.run("close")
+    check("with item 2's heading gone, close numbers the next unnumbered item 4 of 4, not 4 of 3",
+          closed.returncode == 0 and marker(case) == "#next_to_present item 4 of 4"
+          and "\n## Item 4 of 4: four\n" in walk_document(case), described(closed) + walk_document(case))
+
+
+def test_a_numbered_item_after_a_number_gone_from_the_walk_document_keeps_m_at_its_number():
+    document = ("# A walk\n\n## Item 1 of 3: one\n\n#case_against none.\n\n## Item 3 of 3: three\n\n#case_against none.\n\n"
+                "## Item 4 of 4: four\n\n#case_against none.\n")
+    case = Case(next_to_present="item 3 of 3", document=document)
+    case.run("check")
+    closed = case.run("close")
+    check("with item 2's heading gone and item 4 already numbered, close names the next item 4 of 4, not 4 of 3",
+          closed.returncode == 0 and marker(case) == "#next_to_present item 4 of 4", described(closed) + walk_document(case))
+
+
+def test_a_numbered_sub_step_after_a_number_gone_from_the_walk_document_keeps_m_at_its_item_number():
+    document = ("# A walk\n\n## Item 1 of 3: one\n\n#case_against none.\n\n## Item 3 of 3: three\n\n#case_against none.\n\n"
+                "## Item 4 of 4: four\n\n### Item 4.1 of 4: first part\n\n#case_against none.\n\n"
+                "### Item 4.2 of 4: second part\n\n#case_against none.\n")
+    case = Case(next_to_present="item 4.1 of 4", document=document)
+    case.run("check")
+    closed = case.run("close")
+    check("with item 2's heading gone, close names sub-step 4.2 of 4, not 4.2 of 3",
+          closed.returncode == 0 and marker(case) == "#next_to_present item 4.2 of 4", described(closed) + walk_document(case))
+
+
 def test_an_unnumbered_summary_heading_is_the_summary_item():
     case = Case(next_to_present="item 1 of 4", document=UNNUMBERED_ITEMS_DOCUMENT)
     case.run("check")
@@ -3535,7 +3567,7 @@ def test_a_heading_that_opens_with_an_item_label_and_no_m_is_not_an_unnumbered_i
     case.run("check")
     closed = case.run("close")
     check("a `## Item 3: ...` heading that groups sub-steps is not numbered, and the walk goes on to item 3.2",
-          closed.returncode == 0 and marker(case) == "#next_to_present item 3.2 of 2" and walk_document(case) == before,
+          closed.returncode == 0 and marker(case) == "#next_to_present item 3.2 of 3" and walk_document(case) == before,
           described(closed) + walk_document(case))
 
 
@@ -3920,7 +3952,7 @@ def test_a_note_on_unanswered_sub_items_does_not_skip_them_or_count_as_a_second_
     closed = case.run("close")
     check("after item 5.2 is approved, a note on its unanswered sub-items that says `he approved` inside a "
           "parenthesis leaves them unrecorded, so the first sub-item comes next",
-          closed.returncode == 0 and marker(case) == "#next_to_present item 5.2.1 of 3",
+          closed.returncode == 0 and marker(case) == "#next_to_present item 5.2.1 of 7",
           described(closed) + case.minutes.read_text())
     case = Case(next_to_present="item 6 of 24", document=SUB_ITEMS_DOCUMENT)
     case.minutes.write_text(
@@ -3938,7 +3970,7 @@ def test_a_note_on_unanswered_sub_items_does_not_skip_them_or_count_as_a_second_
     closed = case.run("close")
     check("a note on several items that says one of them was deferred is not a second deferral of it, so the "
           "once-deferred item is named before the summary item instead of leaving the walk",
-          closed.returncode == 0 and marker(case) == "#next_to_present item 5.2.2 of 3",
+          closed.returncode == 0 and marker(case) == "#next_to_present item 5.2.2 of 7",
           described(closed) + case.minutes.read_text())
 
 
@@ -3985,7 +4017,7 @@ def test_a_note_that_adds_parts_and_says_approved_or_deferred_in_another_sense_d
         closed = case.run("close")
         check(f"after item {answered} is approved, a note adding item {expected} that says approved or deferred in "
               f"another sense leaves it unrecorded, so close names item {expected} next",
-              closed.returncode == 0 and marker(case) == f"#next_to_present item {expected} of 3",
+              closed.returncode == 0 and marker(case) == f"#next_to_present item {expected} of 18",
               described(closed) + case.minutes.read_text())
 
 
@@ -6269,10 +6301,10 @@ Recommendation: close the issue.
 """
 
 
-def close_the_issue_case(touches="", recorded=""):
+def close_the_issue_case(touches="", recorded="", root_name_suffix=""):
     document = ("# A walk\n\n" + CLOSE_THE_ISSUE_ITEM.format(touches=touches)
                 + "\n## Item 23 of 26: a later item\n\n#case_against weak: a line more.\n\nRecommendation: add it.\n")
-    case = Case(next_to_present="item 22 of 26", document=document)
+    case = Case(next_to_present="item 22 of 26", document=document, root_name_suffix=root_name_suffix)
     case.minutes.write_text(f"# Minutes\n\n{recorded}#next_to_present item 22 of 26\n")
     return case
 
@@ -6303,6 +6335,18 @@ def test_the_read_step_says_an_item_rated_none_that_asks_a_decision_is_not_shown
           settled.returncode == 0
           and "item 22 of 26 is recorded as settled without asking the user, case against none;" in settled.stdout,
           described(settled))
+
+
+def test_the_read_step_prints_a_brace_pair_in_a_no_answer_row_as_it_is():
+    # {review} names no placeholder and crashed the step; {item} names one and was silently replaced.
+    for suffix in ("{review}", "{item}"):
+        case = close_the_issue_case(root_name_suffix=suffix)
+        result = case.run(WAITING_ITEM_READ)
+        rows = [line for line in result.stdout.splitlines() if "--cwd" in line]
+        check(f"the read step, on an item rated none whose checkout path holds {suffix}, exits 0 and prints the path "
+              "unchanged in every line that holds --cwd",
+              result.returncode == 0 and rows and all(str(case.checkout) in line for line in rows),
+              described(result))
 
 
 def test_the_read_step_presents_an_item_rated_none_that_is_shown_all_the_same():
