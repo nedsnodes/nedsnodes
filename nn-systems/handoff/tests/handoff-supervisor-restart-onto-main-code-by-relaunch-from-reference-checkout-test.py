@@ -144,9 +144,12 @@ def end_processes_earlier_cases_started(wait_seconds=10):
     """
     end_started_processes()
     deadline = time.monotonic() + wait_seconds
-    while any(running(process_id) for process_id in started_process_ids) and time.monotonic() < deadline:
+    while True:
+        survivors = [process_id for process_id in started_process_ids if running(process_id)]
+        if not survivors or time.monotonic() >= deadline:
+            break
         time.sleep(0.05)
-    started_process_ids[:] = [process_id for process_id in started_process_ids if running(process_id)]
+    started_process_ids[:] = survivors
 
 
 def git(*arguments, cwd):
@@ -233,8 +236,9 @@ def running(process_id):
     # A fake ended while its parent lives stays a zombie, which ps still lists by its command line.
     listed = subprocess.run(["ps", "-o", "stat=", "-p", str(process_id)], capture_output=True,
                             text=True)
-    # ps exits 1 when no process has this ID.
-    if listed.returncode not in (0, 1):
+    # ps exits 1 with no output when no process has this ID, and exits 1 with a message on some errors.
+    absent = listed.returncode == 1 and not listed.stdout.strip() and not listed.stderr.strip()
+    if listed.returncode != 0 and not absent:
         raise RuntimeError(f"ps -p {process_id} exited {listed.returncode}: {listed.stderr.strip()}")
     state = listed.stdout.strip()
     return bool(state) and not state.startswith("Z")
@@ -1042,33 +1046,39 @@ def clean_up_helper_cases():
     global end_started_processes
     survivor = subprocess.Popen(["sleep", "600"])
     started_process_ids.append(survivor.pid)
-    real_end_started_processes = end_started_processes
-    end_started_processes = lambda: None
     try:
-        end_processes_earlier_cases_started(wait_seconds=0.1)
+        real_end_started_processes = end_started_processes
+        end_started_processes = lambda: None
+        try:
+            end_processes_earlier_cases_started(wait_seconds=0.1)
+        finally:
+            end_started_processes = real_end_started_processes
+        check("clean-up: the ID of a process still running after the wait is kept",
+              survivor.pid in started_process_ids, str(started_process_ids))
+        end_processes_earlier_cases_started()
+        survivor.wait(timeout=10)
+        check("clean-up: the ID of a process that ended is dropped", survivor.pid not in started_process_ids,
+              str(started_process_ids))
     finally:
-        end_started_processes = real_end_started_processes
-    check("clean-up: the ID of a process still running after the wait is kept",
-          survivor.pid in started_process_ids, str(started_process_ids))
-    end_processes_earlier_cases_started()
-    survivor.wait()
-    check("clean-up: the ID of a process that ended is dropped", survivor.pid not in started_process_ids,
-          str(started_process_ids))
+        # Through the handle, so a clean-up that wrongly dropped the ID cannot leave sleep 600 running.
+        survivor.kill()
+        survivor.wait()
 
-    failing_ps_directory = Path(tempfile.mkdtemp(dir=SCRATCH_HOME))
-    failing_ps = failing_ps_directory / "ps"
-    failing_ps.write_text("#!/bin/sh\necho 'ps cannot read the process table' >&2\nexit 2\n")
-    failing_ps.chmod(0o755)
-    real_path = os.environ["PATH"]
-    os.environ["PATH"] = f"{failing_ps_directory}{os.pathsep}{real_path}"
-    try:
-        running(os.getpid())
-        check("running: a ps that fails raises an error", False, "no error")
-    except RuntimeError as error:
-        check("running: a ps that fails raises an error", "ps cannot read the process table" in str(error),
-              str(error))
-    finally:
-        os.environ["PATH"] = real_path
+    for exit_code, message in ((2, "ps cannot read the process table"), (1, "fatal library error, reap")):
+        failing_ps_directory = Path(tempfile.mkdtemp(dir=SCRATCH_HOME))
+        failing_ps = failing_ps_directory / "ps"
+        failing_ps.write_text(f"#!/bin/sh\necho '{message}' >&2\nexit {exit_code}\n")
+        failing_ps.chmod(0o755)
+        real_path = os.environ["PATH"]
+        os.environ["PATH"] = f"{failing_ps_directory}{os.pathsep}{real_path}"
+        name = f"running: a ps that exits {exit_code} with a message raises an error"
+        try:
+            running(os.getpid())
+            check(name, False, "no error")
+        except RuntimeError as error:
+            check(name, message in str(error), str(error))
+        finally:
+            os.environ["PATH"] = real_path
 
 
 def main_cases():
