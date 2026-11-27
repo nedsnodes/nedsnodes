@@ -51,11 +51,15 @@ Subcommands, each on one file; show and attempt also read the GHI-MD's other fil
                   the agent runs, when no Attempt line follows the entry's last
                   verdict, so a disagreement spends the attempt it answers, and
                   asking again takes a new attempt; refused too when that Attempt line
-                  names no sources. A disagreement on the entry's
+                  names no sources. An agreement also settles the entry as
+                  not worth doing, as settle --kind not-worth-doing does,
+                  citing the Attempt line it answers, which holds the
+                  handler's reasons. A disagreement on the entry's
                   MAXIMUM_ATTEMPTS-th attempt also marks the entry as needing the
                   user, as needs-the-user --because three-attempts does.
   settle          rewrites the State line as "settled, <how settled> — <by>,
-                  <time>: <how>". "not worth doing" is refused unless the
+                  <time>: <how>". "not worth doing", for an agreement that
+                  second-agent-verdict did not write, is refused unless the
                   entry's last verdict is an agreement and no Attempt line
                   follows it; "new GHI filed" is refused unless <how> holds a
                   GHI's link. With `--settled-by [<file>] <upstream entry>`
@@ -480,13 +484,19 @@ def verdict_of(reply) -> bool:
 
 
 def add_verdict(lines, entry, agrees, who, by):
-    """(the lines, and whether the verdict marked the entry as needing the user)."""
+    """(the lines, and whether the verdict marked the entry as needing the user); an agreement settles the entry."""
     spans = entry_spans(lines)
     refuse_unless_an_attempt_awaits_a_verdict(lines, entry)
+    block = entry_lines(lines, spans, entry)
+    # Attempt numbers start again after a User-ruling line, so the cited attempt is named with its author and time too.
+    answered = block[last_index(block, lambda line: bool(ATTEMPT_LINE_PATTERN.match(line)))].partition(": ")[0]
     word = "agrees" if agrees else "disagrees"
     lines.insert(insertion_index(lines, spans, entry),
                  f"Second agent: {word} that it is not worth doing, {who}, {now()}")
-    if agrees or attempts_since_user_ruling(entry_lines(lines, entry_spans(lines), entry)) < MAXIMUM_ATTEMPTS:
+    if agrees:
+        return settle(lines, entry, "not-worth-doing", by,
+                      f"the second agent agreed with {answered}, whose line gives the reasons"), False
+    if attempts_since_user_ruling(entry_lines(lines, entry_spans(lines), entry)) < MAXIMUM_ATTEMPTS:
         return lines, False
     return needs_the_user(lines, entry, "three-attempts", by, THIRD_ATTEMPT_DISAGREEMENT_WHY), True
 
@@ -783,6 +793,8 @@ def main(argv=None) -> int:
             elif count >= MAXIMUM_ATTEMPTS and arguments.outcome == "not-worth-doing":
                 print(f"Entry {entry} now has {count} attempts: run the second-agent-verdict subcommand on it.\n"
                       "If the second agent disagrees, that subcommand marks the entry as needing the user.")
+    if arguments.command == "second-agent-verdict" and agrees:
+        print(f"The second agent agreed, so entry {arguments.entry} was settled as not worth doing.")
     if arguments.command == "second-agent-verdict" and marked_for_the_user:
         print(f"The second agent disagreed on attempt {MAXIMUM_ATTEMPTS} of entry {arguments.entry}, the last attempt rule 4 of GHI 1132 allows, so the entry was marked as needing the user.\n"
               "In your report, say what the user must decide, from the second agent's reasons above.")

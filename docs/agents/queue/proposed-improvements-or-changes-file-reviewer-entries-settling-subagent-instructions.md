@@ -44,7 +44,7 @@ A second, independent agent must agree:
 
 1. Record your attempt with `attempt`, ending `--found` with your conclusion.
 2. Run `second-agent-verdict` on the entry. Run it in the background, with the Bash tool's `run_in_background`, and wait for it to finish, because the agent it runs can take longer than a foreground command may. The program runs the second agent, gives it the entry and your attempt's sources but not your conclusion, writes its verdict under the entry, and prints its reply.
-3. If it agrees, mark the entry with `settle --kind not-worth-doing`, giving in `--how` the reason in one sentence. If it disagrees, the attempt is spent: read the reasons in its reply, and start another attempt if the program allows one. A disagreement on the third attempt marks the entry as needing the user, and the program says so.
+3. If it agrees, the program marks the entry settled as not worth doing, citing your attempt. If it disagrees, the attempt is spent: read the reasons in its reply, and start another attempt if the program allows one. A disagreement on the third attempt marks the entry as needing the user, and the program says so.
 4. If `second-agent-verdict` prints `FAILED:`, no verdict was written and the entry stays open: go on with the other entries, and put what it printed in your report.
 
 ### Worth doing, and doable now

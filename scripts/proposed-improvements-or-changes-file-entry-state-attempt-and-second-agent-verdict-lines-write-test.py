@@ -343,8 +343,8 @@ for number in range(3):
     run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--outcome", "not-worth-doing", "--source", "PR 5")
     second_agent_answers(DISAGREES if number < 2 else AGREES)
     run(path, *VERDICT)
-case("an agreement on the third attempt leaves the entry open to settle",
-     entry(path, "E1")[2] == "State: open" and entry(path, "E1")[-1].startswith("Second agent: agrees"))
+case("an agreement on the third attempt settles the entry",
+     entry(path, "E1")[2].startswith("State: settled, not worth doing") and entry(path, "E1")[-1].startswith("Second agent: agrees"))
 
 # An agreement is recorded; the agent is run headless, with Bash to read its sources.
 path = fresh()
@@ -419,20 +419,48 @@ code, _, _ = run(path, "settle", "E1", "--kind", "not-worth-doing", "--by", "h",
 case("not worth doing after a disagreement is refused", code == 1)
 run(path, "attempt", "E1", "--by", "h", "--found", "again", "--outcome", "not-worth-doing", "--source", "PR 5")
 second_agent_answers(AGREES)
-run(path, *VERDICT)
+pending_alerts()
+code, out, _ = run(path, *VERDICT)
+case("an agreement settles the entry as not worth doing, citing the attempt it answers", code == 0
+     and entry(path, "E1")[2] == "State: settled, not worth doing — h, 2026-11-10T12:00Z: "
+     "the second agent agreed with Attempt 2 — h, 2026-11-10T12:00Z, whose line gives the reasons")
+case("an agreement is recorded under the entry it settles",
+     entry(path, "E1")[-1].startswith("Second agent: agrees that it is not worth doing"))
+case("an agreement leaves one State line", sum(line.startswith("State:") for line in entry(path, "E1")) == 1)
+case("an agreement says the entry was settled", "entry E1 was settled as not worth doing" in out)
+case("an agreement writes no user-alert", pending_alerts() == [])
+code, _, err = run(path, "settle", "E1", "--kind", "not-worth-doing", "--by", "h", "--how", "x")
+case("settle on an entry an agreement settled is refused", code == 1 and "is not open" in err)
+
+# After a user-ruling line, attempt numbers start again; the agreement names the attempt by its author and time too.
+path = fresh(FILE_TEXT.replace("Goes wrong when: a closed GHI's decision changes without the user.\n",
+                               "Goes wrong when: a closed GHI's decision changes without the user.\n"
+                               "Attempt 1 — old handler, 2026-10-01T09:00Z: first — sources read: PR 1\n"
+                               "User-ruling — the user, 2026-10-02T09:00Z, approval-walk w, item 1: look again\n"))
+run(path, "attempt", "E1", "--by", "new handler", "--found", "not real", "--outcome", "not-worth-doing", "--source", "PR 5")
+second_agent_answers(AGREES)
+code, _, _ = run(path, *VERDICT)
+case("an agreement after a user-ruling cites the attempt after it", code == 0
+     and [line for line in entry(path, "E1") if line.startswith("State:")][0].endswith("the second agent agreed with Attempt 1 — new handler, 2026-11-10T12:00Z, whose line gives the reasons"))
+
+# settle --kind not-worth-doing settles an entry whose agreement the program did not write, such as a handler's
+# under the rule as first decided.
+HAND_WRITTEN_AGREEMENT = FILE_TEXT.replace(
+    "Goes wrong when: a closed GHI's decision changes without the user.\nState: open\n",
+    "Goes wrong when: a closed GHI's decision changes without the user.\nState: open\n"
+    "Attempt 1 — h, 2026-11-01T09:00Z: not real — sources read: PR 5\n"
+    "Second agent: agrees that it is not worth doing, h, 2026-11-01T09:30Z\n")
+path = fresh(HAND_WRITTEN_AGREEMENT)
 code, _, _ = run(path, "settle", "E1", "--kind", "not-worth-doing", "--by", "h", "--how", "the ruling covers decisions")
 case("not worth doing after an agreement exits 0", code == 0)
 case("the State line is rewritten in place",
      entry(path, "E1")[2] == "State: settled, not worth doing — h, 2026-11-10T12:00Z: the ruling covers decisions")
 case("only one State line remains", sum(line.startswith("State:") for line in entry(path, "E1")) == 1)
 
-path = fresh()
-run(path, "attempt", "E1", "--by", "h", "--found", "a", "--outcome", "not-worth-doing", "--source", "PR 5")
-second_agent_answers(AGREES)
-run(path, *VERDICT)
+path = fresh(HAND_WRITTEN_AGREEMENT)
 run(path, "attempt", "E1", "--by", "h", "--found", "b", "--outcome", "not-worth-doing", "--source", "PR 5")
-code, _, _ = run(path, "settle", "E1", "--kind", "not-worth-doing", "--by", "h", "--how", "x")
-case("an agreement followed by a newer attempt does not settle", code == 1)
+code, _, err = run(path, "settle", "E1", "--kind", "not-worth-doing", "--by", "h", "--how", "x")
+case("an agreement followed by a newer attempt does not settle", code == 1 and "stays open" in err)
 
 # Done and new GHI need no verdict; an entry with no State line gets one.
 path = fresh(FILE_TEXT.replace("Gain: a smaller tool.\nState: open\n", "Gain: a smaller tool.\n"))
