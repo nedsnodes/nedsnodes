@@ -261,16 +261,23 @@ def main():
         brief = brief_file.read_text() if brief_file.exists() else ""
         program_line = ("`scripts/pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py {n} "
                         "print-follow-up-request-block-from-merge-lane-2-reviews` prints it from merge-lane-2's reviews")
+        saved_blocks = repository / ".git" / "pull-request-follow-up-requests"
+        not_saved = ("No block the author received is saved at `{path}`, where the author's follow-up request hook "
+                     "saves the block merge-lane-2 sends it; an author on the Mac saves it on the Mac")
+        not_saved_beside_reprint = not_saved + ", so the block quoted here may not be the one the author received.\n\n"
         expected_follow_up_facts = (
             "- merge-lane-2's follow-up request for pull request #4, which the description names, as "
             + program_line.format(n=4) + ": it printed no finding, so merge-lane-2's reviews of that pull "
-            "request hold no non-blocking finding.\n"
-            "- merge-lane-2's follow-up request for pull request #31, which the description names, as "
+            "request hold no non-blocking finding. "
+            + not_saved_beside_reprint.format(path=saved_blocks / "pull-request-4-non-blocking-findings.md")
+            + "- merge-lane-2's follow-up request for pull request #31, which the description names, as "
             + program_line.format(n=31) + ":\n\n"
             "> #follow_up_request pull request 31\n> 1. fix-next: `scripts/a.py:3`: It drops a line.\n\n"
-            "- Hazards: Check the thing.\n")
+            + not_saved_beside_reprint.format(path=saved_blocks / "pull-request-31-non-blocking-findings.md")
+            + "- Hazards: Check the thing.\n")
         check("the brief gives the follow-up request block of each pull request the description names, "
-              "anywhere in it, lowest number first, before the hazards",
+              "anywhere in it, lowest number first, before the hazards, and says no block the author received is "
+              "saved when none is",
               completed.returncode == 0 and expected_follow_up_facts in brief,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
         calls = follow_up_calls(scratch)
@@ -307,9 +314,7 @@ def main():
                    "> REFUSED: ned-review-merge's review 2 of pull request 31 holds 2 fix-next finding(s) on "
                    "scripts/a.py worded as 1 earlier finding(s) but with new Codex finding ids.\n"
                    "> Write the block by hand.\n\n"
-                   f"No block merge-lane-2 wrote by hand is saved at `{saved_block_31}`, where the author's "
-                   "follow-up request hook saves the block merge-lane-2 sends it; an author on the Mac saves it on "
-                   "the Mac.\n") in brief,
+                   + not_saved.format(path=saved_block_31) + ".\n") in brief,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
 
         hand_written_31 = ("#follow_up_request pull request 31\n1. fix-next: `scripts/a.py:3`: It drops a line.\n"
@@ -320,18 +325,101 @@ def main():
                                 follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
         brief_file = helpers / "briefs" / "brief-14s-mac-claude.md"
         brief = brief_file.read_text() if brief_file.exists() else ""
-        check("a refused block is quoted with the block merge-lane-2 wrote by hand, as the author's hook saved it in "
+        check("a refused block is quoted with the block the author received, as the author's hook saved it in "
               "the review tools worktree's git common directory",
               completed.returncode == 0
               and ("> Write the block by hand.\n\n"
-                   "The block merge-lane-2 wrote by hand and sent the author instead, as the author's follow-up "
+                   "The block the author received, as the author's follow-up "
                    f"request hook saved it at `{saved_block_31}`:\n\n"
                    "> #follow_up_request pull request 31\n> 1. fix-next: `scripts/a.py:3`: It drops a line.\n"
                    "> 2. fix-next: `scripts/a.py:9`: It drops a second line.\n") in brief,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
 
+        received_31_fact = ("- merge-lane-2's follow-up request for pull request #31, which the description names. "
+                            "The block the author received, as the author's follow-up request hook saved it at "
+                            f"`{saved_block_31}`:\n\n"
+                            "> #follow_up_request pull request 31\n> 1. fix-next: `scripts/a.py:3`: It drops a line.\n"
+                            "> 2. fix-next: `scripts/a.py:9`: It drops a second line.\n\n")
+        program_31 = program_line.format(n=31).replace(" prints it from merge-lane-2's reviews", "")
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14m"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"stdout": hand_written_31}})
+        brief_file = helpers / "briefs" / "brief-14m-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("a saved block the reprint matches is quoted as the block the author received, and the brief says the "
+              "reprint has the same findings",
+              completed.returncode == 0
+              and (received_31_fact + program_31 + " prints the same findings from merge-lane-2's reviews now.\n\n"
+                   "- Hazards:") in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        reprint_31 = ("#follow_up_request pull request 31\n1. fix-next: `scripts/a.py:3`: It drops a line.\n"
+                      "2. fix-in-maintenance: `scripts/c.py:30`: A reprint whose second finding differs.\n"
+                      "3. file-for-later: `scripts/d.py:4`: A finding the author never received.\n")
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14d"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"stdout": reprint_31}})
+        brief_file = helpers / "briefs" / "brief-14d-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("a saved block the reprint differs from is quoted as the block the author received, with the reprint "
+              "beside it and each finding that differs named",
+              completed.returncode == 0
+              and (received_31_fact + program_31 + " prints different findings from merge-lane-2's reviews now, so "
+                   "check the author's answers against the saved block above, which is the one the author "
+                   "answered:\n\n"
+                   "> #follow_up_request pull request 31\n> 1. fix-next: `scripts/a.py:3`: It drops a line.\n"
+                   "> 2. fix-in-maintenance: `scripts/c.py:30`: A reprint whose second finding differs.\n"
+                   "> 3. file-for-later: `scripts/d.py:4`: A finding the author never received.\n\n"
+                   "- Finding 2 differs between the saved block and the reprint.\n"
+                   "- Finding 3 of the reprint is not in the saved block.\n\n"
+                   "- Hazards:") in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14e"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"stdout": ""}})
+        brief_file = helpers / "briefs" / "brief-14e-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("a saved block whose reprint prints no finding names each saved finding as missing from the reprint",
+              completed.returncode == 0
+              and ("answered:\n\n> (it printed no finding)\n\n"
+                   "- Finding 1 of the saved block is not in the reprint.\n"
+                   "- Finding 2 of the saved block is not in the reprint.\n") in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14p"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {
+                                    "stdout": "#follow_up_request pull request 31\n2. fix-next: `a.py:1`: Misnumbered.\n"}})
+        check("a reprint that is not a follow-up request block, beside a saved block, exits 1, naming it, and writes "
+              "no brief",
+              completed.returncode == 1 and "brief not composed: StepFailed" in completed.stderr
+              and "is not a follow-up request block" in completed.stderr
+              and not (helpers / "briefs" / "brief-14p-mac-claude.md").exists(),
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        saved_text_31 = saved_block_31.read_bytes()
+        saved_block_31.write_bytes(b"#follow_up_request pull request 31\n1. fix-next: \xff\xfe\n")
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14n"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"stdout": hand_written_31}})
+        saved_block_31.write_bytes(saved_text_31)
+        check("a saved block that is not UTF-8 exits 1, naming the file, and writes no brief",
+              completed.returncode == 1 and "brief not composed: StepFailed" in completed.stderr
+              and f"could not read {saved_block_31}" in completed.stderr
+              and not (helpers / "briefs" / "brief-14n-mac-claude.md").exists(),
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
         saved_block_31.unlink()
         saved_block_31.mkdir()
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14c", "claude_reviewer": False}],
+                                gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        brief_file = helpers / "briefs" / "brief-14c-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("an entry with no Claude reviewer is composed though its saved block cannot be read, with the "
+              "follow-up request facts left out and the follow-up request program not run",
+              completed.returncode == 0
+              and "- Follow-up request blocks: left out, because this pull request's review tier calls for no "
+                  "Claude reviewer.\n" in brief
+              and "merge-lane-2's follow-up request for pull request" not in brief
+              and not follow_up_calls(scratch),
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
         completed = run_program(scratch, helpers, [{**first_round, "tag": "14u"}], gh_routes=follow_up_gh_routes,
                                 follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
         saved_block_31.rmdir()

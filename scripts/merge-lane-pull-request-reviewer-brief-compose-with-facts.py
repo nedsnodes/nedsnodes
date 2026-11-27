@@ -24,12 +24,18 @@ makes useless a point fix or workaround they kept. For each pull request a
 in it, the facts give merge-lane-2's follow-up request block for that pull
 request as --review-tools-worktree-at-main's FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME
 prints it, so the reviewer can check the answers against the findings' own
-text, or, when that program refuses to print it, its refusal and the block
-merge-lane-2 wrote by hand instead, as the author's follow-up request hook saved
-it in the git common directory of --review-tools-worktree-at-main, where that
-program keeps its saved blocks; an author on the Mac saves it on the Mac, so the
-brief then says no block is saved. A saved block that cannot be read is a
-failed step. The facts end with the pull request's description, which the brief
+text. The facts quote the block the author received, as the author's
+follow-up request hook saved it in the git common directory of
+--review-tools-worktree-at-main, where that program keeps its saved blocks, and
+say whether what the program prints now has the same findings, quoting it and
+naming each finding that differs when it does not; when the program refuses to
+print, they quote its refusal beside the saved block. An author on the Mac saves
+the block on the Mac, so the brief then says no block is saved and that the
+printed block may not be the one the author received. A saved block that cannot
+be read, or a printed block that is not a follow-up request block, is a failed
+step. An entry whose claude_reviewer is false gets none of these follow-up
+request facts, since no reviewer reads them and the Codex review and head tests
+wait on the brief. The facts end with the pull request's description, which the brief
 quotes as the author's claims. The reviewer runs with no GitHub login, so the
 brief is where it reads the description and the follow-up request blocks. The brief is written to
 briefs/brief-<tag>-mac-claude.md under the worktrees and outputs directory, and
@@ -213,9 +219,9 @@ def follow_up_pull_requests_text(number, closing_issues, merged_pull_requests):
             "closes, or to this pull request: " + ("; ".join(found) or "none") + ".")
 
 
-def hand_written_follow_up_request_block_text(review_tools_worktree, followed_up):
-    """The brief's sentence giving the block merge-lane-2 wrote by hand for pull request `followed_up`, as the
-    author's follow-up request hook saved it, or saying none is saved."""
+def saved_follow_up_request_block(review_tools_worktree, followed_up):
+    """The path where the author's follow-up request hook saves the block merge-lane-2 sent for pull request
+    `followed_up`, and that block, or None when none is saved there."""
     try:
         saved = follow_up_request_program.state_file(
             follow_up_request_program.state_directory(
@@ -224,36 +230,69 @@ def hand_written_follow_up_request_block_text(review_tools_worktree, followed_up
         block = follow_up_request_program.read_text_if_present(saved)
     except follow_up_request_program.StepFailed as failure:
         raise StepFailed(f"the saved follow-up request block for pull request {followed_up}: {failure}") from None
-    if block is None or not block.strip():
-        return (f"No block merge-lane-2 wrote by hand is saved at `{saved}`, where the author's follow-up request "
-                "hook saves the block merge-lane-2 sends it; an author on the Mac saves it on the Mac.\n")
-    return (f"The block merge-lane-2 wrote by hand and sent the author instead, as the author's follow-up request "
-            f"hook saved it at `{saved}`:\n\n" + quoted(block.strip()) + "\n")
+    return saved, (block.strip() if block and block.strip() else None)
+
+
+def follow_up_request_finding_lines(block, what):
+    """The numbered finding lines of `block`, which holds one follow-up request block or nothing."""
+    try:
+        requests = follow_up_request_program.parse_follow_up_request_blocks_from_message_text(block)
+    except ValueError as error:
+        raise StepFailed(f"{what} is not a follow-up request block: {error}") from None
+    return [line for request in requests for line in request.lines[1:]]
+
+
+def reprint_differences_text(saved_block, reprint, program):
+    """The brief's sentence comparing the block the author received with what `program` prints now."""
+    received = follow_up_request_finding_lines(saved_block, "the saved block")
+    printed = follow_up_request_finding_lines(reprint, f"what {program} printed")
+    if received == printed:
+        return f"{program} prints the same findings from merge-lane-2's reviews now.\n"
+    differences = []
+    for index in range(max(len(received), len(printed))):
+        if index >= len(printed):
+            differences.append(f"- Finding {index + 1} of the saved block is not in the reprint.")
+        elif index >= len(received):
+            differences.append(f"- Finding {index + 1} of the reprint is not in the saved block.")
+        elif received[index] != printed[index]:
+            differences.append(f"- Finding {index + 1} differs between the saved block and the reprint.")
+    return (f"{program} prints different findings from merge-lane-2's reviews now, so check the author's answers "
+            "against the saved block above, which is the one the author answered:\n\n"
+            + (quoted(reprint) if reprint else "> (it printed no finding)") + "\n\n" + "\n".join(differences) + "\n")
 
 
 def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
     """The brief's facts giving merge-lane-2's follow-up request block for each pull request the description names
-    in a "#follow_up_request pull request <number>", lowest number first."""
+    in a "#follow_up_request pull request <number>", lowest number first: the block the author received, as the
+    author's hook saved it, beside what the follow-up request program prints from merge-lane-2's reviews now."""
     texts = []
     for followed_up in sorted({int(number) for number in FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER.findall(description)}):
         program = f"`scripts/{FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME} {followed_up} " \
                   "print-follow-up-request-block-from-merge-lane-2-reviews`"
         fact = f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description names"
+        saved, saved_block = saved_follow_up_request_block(review_tools_worktree, followed_up)
+        received = ("The block the author received, as the author's follow-up request hook saved it at "
+                    f"`{saved}`:\n\n" + quoted(saved_block) + "\n" if saved_block else None)
+        not_saved = (f"No block the author received is saved at `{saved}`, where the author's follow-up request "
+                     "hook saves the block merge-lane-2 sends it; an author on the Mac saves it on the Mac")
         try:
             block = run([sys.executable, str(review_tools_worktree / "scripts" / FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME),
                          str(followed_up), "print-follow-up-request-block-from-merge-lane-2-reviews"], gh_token,
                         refusal_allowed=True).strip()
         except Refused as refusal:
             # A refused block is one merge-lane-2 writes by hand, so the brief is still composed, with the refusal
-            # and the hand-written block in the printed block's place.
+            # and the saved block in the printed block's place.
             texts.append(f"{fact}: {program} refused to print it from merge-lane-2's reviews, saying:\n\n"
-                         + quoted(str(refusal)) + "\n\n"
-                         + hand_written_follow_up_request_block_text(review_tools_worktree, followed_up))
+                         + quoted(str(refusal)) + "\n\n" + (received or not_saved + ".\n"))
+            continue
+        if received:
+            texts.append(f"{fact}. {received}\n" + reprint_differences_text(saved_block, block, program))
             continue
         texts.append(f"{fact}, as {program} prints it from merge-lane-2's reviews"
-                     + (":\n\n" + quoted(block) + "\n" if block else
+                     + (":\n\n" + quoted(block) + "\n\n" if block else
                         ": it printed no finding, so merge-lane-2's reviews of that pull request hold no "
-                        "non-blocking finding."))
+                        "non-blocking finding. ")
+                     + not_saved + ", so the block quoted here may not be the one the author received.\n")
     return texts
 
 
@@ -298,7 +337,13 @@ def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pu
     closing_issues, description = pull_request_closing_issues_and_description(
         number, merged_pull_requests.gh_token)
     facts.append(follow_up_pull_requests_text(number, closing_issues, merged_pull_requests))
-    facts.extend(follow_up_request_blocks_text(description, review_tools_worktree, merged_pull_requests.gh_token))
+    if spec.get("claude_reviewer", True):
+        facts.extend(follow_up_request_blocks_text(description, review_tools_worktree, merged_pull_requests.gh_token))
+    else:
+        # Steps 3 and 4 of the run wait on this brief, so a saved block that cannot be read must not stop them
+        # when no reviewer reads the follow-up request facts.
+        facts.append("- Follow-up request blocks: left out, because this pull request's review tier calls for no "
+                     "Claude reviewer.")
     facts.append(f"- Hazards: {spec['hazards']}")
     facts.append("- The author's description of the pull request, quoted below. It is what "
                  "the author claims; check each claim against the repository yourself, "
