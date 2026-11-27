@@ -11,7 +11,13 @@ Usage:
 -o may be left out only where the log-store is on this machine, as on ned-box:
 the report and its companion files then go in the run's own numbered folder,
 described below, as <that folder>/report.md, where no later run writes.
-Elsewhere, as on the Mac, -o is required, and a run without it is refused.
+Elsewhere, as on the Mac, -o is required, and a run without it is refused;
+there a run that writes its report also saves a copy of it as report.md in
+its own numbered folder <agent-seat>/<brief file name without its
+extension>/<number> of ~/.claude/codex-or-gemini-task-run-reports/, which
+scripts/transcript-mirror-to-log-store.py copies to the log-store, and
+prints the copy's path on stderr. When that copy cannot be saved, the run
+exits 1, and the report stays at -o.
 
 The program an agent uses to hand Codex a task. It always:
   - reads the prompt from the brief file, never from the command line;
@@ -177,6 +183,11 @@ _test_suite_runner_spec = importlib.util.spec_from_file_location(
 test_suite_runner = importlib.util.module_from_spec(_test_suite_runner_spec)
 _test_suite_runner_spec.loader.exec_module(test_suite_runner)
 CODEX_OR_GEMINI_TEST_SUITE_RUNNER_IN_WORKTREE = pathlib.Path("scripts") / "run-all-test-suites.py"
+_transcript_mirror_spec = importlib.util.spec_from_file_location(
+    "transcript_mirror_to_log_store",
+    pathlib.Path(__file__).resolve().parent / "transcript-mirror-to-log-store.py")
+transcript_mirror = importlib.util.module_from_spec(_transcript_mirror_spec)
+_transcript_mirror_spec.loader.exec_module(transcript_mirror)
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -318,8 +329,13 @@ def codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief: p
     writable folder, or None when the log-store is not on this machine."""
     if not CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER.parent.is_dir():
         return None
+    return codex_or_gemini_task_run_numbered_folder_create(CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER, brief)
+
+
+def codex_or_gemini_task_run_numbered_folder_create(base: pathlib.Path, brief: pathlib.Path):
+    """Create and return this run's numbered folder in base/<agent-seat>/<brief stem>/."""
     seat = seat_shared_file_ship.seat_name_from_environment() or NO_AGENT_SEAT_NAME
-    brief_folder = CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER / seat / brief.stem
+    brief_folder = base / seat / brief.stem
     brief_folder.mkdir(parents=True, exist_ok=True)
     attempts = CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_CREATE_ATTEMPTS
     number = 1 + max((int(entry.name) for entry in brief_folder.iterdir()
@@ -347,9 +363,25 @@ def codex_or_gemini_task_report_path_in_run_numbered_folder_when_dash_o_omitted(
         parser.error(
             f"-o is required on this machine: the log-store "
             f"{CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER.parent} is not here, so the run has no "
-            f"numbered folder to keep its report in.\n"
+            f"numbered folder there to write its report in.\n"
             f"Give -o with the file the report is to be written to.")
     return shared_subfolder / CODEX_OR_GEMINI_TASK_REPORT_FILE_NAME_IN_RUN_NUMBERED_FOLDER
+
+
+def codex_or_gemini_task_report_copy_into_run_numbered_folder_on_a_machine_without_the_log_store(
+        brief: pathlib.Path, report: pathlib.Path):
+    """Where the log-store is not on this machine, copy report as report.md into this run's
+    numbered folder under the folder transcript-mirror-to-log-store.py copies to the
+    log-store, and return the copy's path; return None where the log-store is here."""
+    if CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER.parent.is_dir():
+        return None
+    folder = codex_or_gemini_task_run_numbered_folder_create(
+        pathlib.Path.home()
+        / transcript_mirror.CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_UNDER_HOME_ON_A_MACHINE_WITHOUT_THE_LOG_STORE,
+        brief)
+    copy = folder / CODEX_OR_GEMINI_TASK_REPORT_FILE_NAME_IN_RUN_NUMBERED_FOLDER
+    shutil.copyfile(report, copy)
+    return copy
 
 
 def brief_with_shared_writable_subfolder(prompt: str, subfolder: pathlib.Path) -> str:
@@ -702,6 +734,16 @@ def main(argv=None) -> int:
     if last_message.exists():
         print(f"{PROGRAM}: Codex wrote the report at {report} itself, so it is kept; "
               f"Codex's final message is in {last_message}.", file=sys.stderr)
+    try:
+        report_copy = (
+            codex_or_gemini_task_report_copy_into_run_numbered_folder_on_a_machine_without_the_log_store(
+                brief, report))
+    except OSError as error:
+        return fail(f"could not save the copy of the report that goes to the log-store: "
+                    f"{error}\nThe report is at {report}.")
+    if report_copy:
+        print(f"{PROGRAM}: a copy of the report, which goes to the log-store, is at "
+              f"{report_copy}", file=sys.stderr)
     if worktree_to_commit:
         done, error = codex_or_gemini_finished_workspace_write_run_changes_commit(
             worktree_to_commit)

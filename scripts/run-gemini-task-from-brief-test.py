@@ -338,6 +338,32 @@ class GeminiTaskTests(unittest.TestCase):
             self.assertEqual((run_folder / "report.md").read_text(), f"run {number}'s report\n")
             self.assertIn("agy stdout", (run_folder / "report.md.run.log").read_text())
 
+    def test_run_where_the_log_store_is_absent_also_saves_a_report_copy_for_the_mirror(self):
+        self.env["CLAUDE_CODE_TASK_LIST_ID"] = "nedsnodes-test-seat-tasks"
+        reports = self.home / ".claude" / "codex-or-gemini-task-run-reports" / "test-seat" / "brief"
+        for number in ("1", "2"):
+            result = self.run_cli()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            copy = reports / number / "report.md"
+            self.assertEqual(copy.read_text(), self.report.read_text())
+            self.assertIn(f"a copy of the report, which goes to the log-store, is at {copy}\n",
+                          result.stderr)
+
+    def test_report_copy_that_cannot_be_saved_exits_1_leaving_the_report(self):
+        (self.home / ".claude").mkdir()
+        (self.home / ".claude" / "codex-or-gemini-task-run-reports").write_text("not a folder\n")
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("failed while saving the copy of the report that goes to the log-store; "
+                      f"the report is at {self.report}", result.stderr)
+        self.assertTrue(self.report.read_text().strip())
+
+    def test_run_where_the_log_store_is_present_saves_no_report_copy(self):
+        self.shared_folder.parent.mkdir()
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.home / ".claude" / "codex-or-gemini-task-run-reports").exists())
+
     def test_run_without_dash_o_where_the_log_store_is_absent_is_refused(self):
         self.args = self.args[:4]
         result = self.run_cli()

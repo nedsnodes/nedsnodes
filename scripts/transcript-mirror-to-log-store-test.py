@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for scripts/transcript-mirror-to-log-store.py: the layout, the seven
+"""Tests for scripts/transcript-mirror-to-log-store.py: the layout, the eight
 sources, the seat-briefs and global CLAUDE.md picked out by a file list on
 rsync's stdin, never --delete, the live-tree exits, the lock, the remote
 invocation, and --failures-only, the quiet mode cron runs it in. LOCAL mode runs the real rsync into a scratch store; REMOTE mode
@@ -115,6 +115,10 @@ def make_home(root: pathlib.Path) -> pathlib.Path:
     terminal_captures = home / ".claude" / "agent-seat-terminal-captures" / "MD-skills"
     terminal_captures.mkdir(parents=True)
     (terminal_captures / "20261105T140322Z-MD-skills-terminal-capture.log").write_text("\x1b[1mDo you trust this folder?\x1b[0m\n")
+    task_run_report = (home / ".claude" / "codex-or-gemini-task-run-reports" / "MD-skills"
+                       / "loose-ends-trawl" / "1")
+    task_run_report.mkdir(parents=True)
+    (task_run_report / "report.md").write_text("# trawl report\n")
     return home
 
 
@@ -145,8 +149,8 @@ with tempfile.TemporaryDirectory(prefix="transcript-mirror-test-") as scratch_na
     # --- Local mode, real rsync ---------------------------------------------
     result = run_mirror(home, str(store))
     lines = result.stdout.splitlines()
-    check("one pass exits 0 with one line per source, all seven opening mirrored:",
-          result.returncode == 0 and len(lines) == 7
+    check("one pass exits 0 with one line per source, all eight opening mirrored:",
+          result.returncode == 0 and len(lines) == 8
           and all(line.startswith("mirrored: ") for line in lines),
           result.stdout + result.stderr)
     check("transcripts land under agent-session-files-by-machine/<machine>/projects/ in Claude Code's own layout",
@@ -184,7 +188,9 @@ with tempfile.TemporaryDirectory(prefix="transcript-mirror-test-") as scratch_na
           and lines[5].startswith(f"mirrored: {WATCHER_PROGRAM} ")
           and "local 1 files, store 1 files" in lines[5]
           and lines[6].startswith("mirrored: agent-seat-terminal-captures")
-          and "local 1 files, store 1 files" in lines[6],
+          and "local 1 files, store 1 files" in lines[6]
+          and lines[7].startswith("mirrored: codex-or-gemini-task-run-reports")
+          and "local 1 files, store 1 files" in lines[7],
           result.stdout)
     check("the Mac's Remote Control reconnect watcher log lands under agent-session-files-by-machine/<machine>/<watcher program>/",
           text_or_none(store / machine / WATCHER_PROGRAM / f"{WATCHER_PROGRAM}-decisions.jsonl") == '{"seat": "MD-skills"}\n')
@@ -192,6 +198,9 @@ with tempfile.TemporaryDirectory(prefix="transcript-mirror-test-") as scratch_na
           text_or_none(store / machine / "agent-seat-terminal-captures" / "MD-skills"
                        / "20261105T140322Z-MD-skills-terminal-capture.log")
           == "\x1b[1mDo you trust this folder?\x1b[0m\n")
+    check("a Codex or Gemini task run's report lands under agent-session-files-by-machine/<machine>/codex-or-gemini-task-run-reports/<seat>/<brief>/<number>/",
+          text_or_none(store / machine / "codex-or-gemini-task-run-reports" / "MD-skills"
+                       / "loose-ends-trawl" / "1" / "report.md") == "# trawl report\n")
 
     # A transcript grows and a session's scratch directory disappears: the
     # grown file is re-sent, the vanished one stays in the store.
@@ -226,7 +235,7 @@ with tempfile.TemporaryDirectory(prefix="transcript-mirror-test-") as scratch_na
     (bare_home / ".claude").mkdir(parents=True)
     result = run_mirror(bare_home, str(scratch / "store-bare"))
     check("a missing source directory is noted and the run still exits 0",
-          result.returncode == 0 and result.stdout.count("nothing to mirror") == 7, result.stdout)
+          result.returncode == 0 and result.stdout.count("nothing to mirror") == 8, result.stdout)
     # ~/agents present with no seat-brief and ~/.claude without CLAUDE.md: the
     # file list is empty, which is nothing to mirror, not an rsync of nothing.
     briefless_home = scratch / "briefless-home"
@@ -322,7 +331,7 @@ os.execv({shutil.which("rsync")!r}, ["rsync", *sys.argv[1:]])
     locked_machine = scratch / "store-locked" / machine
     (locked_machine / "projects").mkdir(parents=True)
     for store_directory in ("handoffs", "tasks", "seat-briefs", WATCHER_PROGRAM,
-                            "agent-seat-terminal-captures"):
+                            "agent-seat-terminal-captures", "codex-or-gemini-task-run-reports"):
         (locked_machine / store_directory).mkdir()
     locked_machine.chmod(0o555)
     try:
@@ -381,8 +390,8 @@ os.execv({shutil.which("rsync")!r}, ["rsync", *sys.argv[1:]])
     check("the remote stamp command carries one UTC time line",
           bool(stamp_calls) and re.search(r"printf %s '\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\n'", stamp_calls[0][-1]),
           str(stamp_calls))
-    check("remote mode exits 0 and reports all seven sources",
-          result.returncode == 0 and result.stdout.count("mirrored:") == 7, result.stdout + result.stderr)
+    check("remote mode exits 0 and reports all eight sources",
+          result.returncode == 0 and result.stdout.count("mirrored:") == 8, result.stdout + result.stderr)
     expected_rsyncs = [
         (home / ".claude" / "projects", f"{machine}/projects/", False),
         (home / ".claude" / "handoffs", f"{machine}/handoffs/", False),
@@ -392,9 +401,11 @@ os.execv({shutil.which("rsync")!r}, ["rsync", *sys.argv[1:]])
         (home / ".local" / "state" / "claude" / WATCHER_PROGRAM, f"{machine}/{WATCHER_PROGRAM}/", False),
         (home / ".claude" / "agent-seat-terminal-captures",
          f"{machine}/agent-seat-terminal-captures/", False),
+        (home / ".claude" / "codex-or-gemini-task-run-reports",
+         f"{machine}/codex-or-gemini-task-run-reports/", False),
     ]
-    check("seven rsync calls, -a, over batch-mode ssh, each source into its place under agent-session-files-by-machine/<machine>/ on ned-box, a file list only for the seat-briefs and CLAUDE.md",
-          len(rsync_calls) == 7 and all(
+    check("eight rsync calls, -a, over batch-mode ssh, each source into its place under agent-session-files-by-machine/<machine>/ on ned-box, a file list only for the seat-briefs and CLAUDE.md",
+          len(rsync_calls) == 8 and all(
               "-a" in c and RSYNC_SSH_TRANSPORT in c
               and c[-1] == f"{RULED_DESTINATION}/{target}"
               and c[-2] == f"{source}/"
@@ -424,12 +435,12 @@ os.execv({shutil.which("rsync")!r}, ["rsync", *sys.argv[1:]])
     result = run_mirror(home, RULED_DESTINATION, dict(
         remote_env, MIRROR_TEST_RSYNC_VERSION_LINE=GNU_VERSION_LINE, MIRROR_TEST_RSYNC_EXIT="24"))
     check("GNU rsync exit 24, files vanished mid-run, is a mirrored line with a note, exit 0",
-          result.returncode == 0 and result.stdout.count("vanished mid-run") == 7, result.stdout)
+          result.returncode == 0 and result.stdout.count("vanished mid-run") == 8, result.stdout)
     argv_log.unlink()
     result = run_mirror(home, RULED_DESTINATION, dict(
         remote_env, MIRROR_TEST_RSYNC_VERSION_LINE=GNU_VERSION_LINE, MIRROR_TEST_RSYNC_EXIT="23"))
     check("GNU rsync exit 23, a partial transfer, is FAILED naming the exit, exit 1",
-          result.returncode == 1 and result.stdout.count("FAILED:") == 7
+          result.returncode == 1 and result.stdout.count("FAILED:") == 8
           and "rsync exit 23" in result.stdout and "ned-box unreachable" not in result.stdout,
           result.stdout)
     check("a pass with a FAILED source leaves the stamp alone: no stamp is written",
@@ -441,15 +452,15 @@ os.execv({shutil.which("rsync")!r}, ["rsync", *sys.argv[1:]])
         MIRROR_TEST_RSYNC_STDERR="openrsync: error: some files could not be transferred"), QUIET)
     check("openrsync exit 23 is FAILED naming the exit, with openrsync's stderr, exit 1, even "
           "with --failures-only",
-          result.returncode == 1 and result.stdout.count("FAILED:") == 7
+          result.returncode == 1 and result.stdout.count("FAILED:") == 8
           and "rsync exit 23" in result.stdout and "vanished mid-run" not in result.stdout
-          and result.stderr.count("openrsync: error: some files could not be transferred") == 7,
+          and result.stderr.count("openrsync: error: some files could not be transferred") == 8,
           result.stdout + result.stderr)
     argv_log.unlink()
     result = run_mirror(home, RULED_DESTINATION, dict(
         remote_env, MIRROR_TEST_RSYNC_VERSION_LINE=OPENRSYNC_VERSION_LINE, MIRROR_TEST_RSYNC_EXIT="24"))
     check("openrsync exit 24 is not its vanished code and is FAILED naming the exit, exit 1",
-          result.returncode == 1 and result.stdout.count("FAILED:") == 7
+          result.returncode == 1 and result.stdout.count("FAILED:") == 8
           and "rsync exit 24" in result.stdout and "ned-box unreachable" not in result.stdout,
           result.stdout)
     failing_find_directory = scratch / "failing-find-bin"
@@ -463,14 +474,14 @@ os.execv({shutil.which("rsync")!r}, ["rsync", *sys.argv[1:]])
         remote_env, MIRROR_TEST_FAILING_FIND_DIRECTORY=str(failing_find_directory)))
     check("a store count whose find fails after counting two files is unknown, not 2, and "
           "find's error is passed on",
-          result.returncode == 0 and result.stdout.count("store unknown files") == 7
+          result.returncode == 0 and result.stdout.count("store unknown files") == 8
           and "store 2 files" not in result.stdout
-          and result.stderr.count("find: injected: Permission denied") == 7,
+          and result.stderr.count("find: injected: Permission denied") == 8,
           result.stdout + result.stderr)
     argv_log.unlink()
     result = run_mirror(home, RULED_DESTINATION, dict(remote_env, MIRROR_TEST_RSYNC_EXIT="255"))
     check("rsync exit 255 is FAILED naming ned-box unreachable, exit 1",
-          result.returncode == 1 and result.stdout.count("FAILED:") == 7
+          result.returncode == 1 and result.stdout.count("FAILED:") == 8
           and "ned-box unreachable" in result.stdout, result.stdout)
     argv_log.unlink()
     result = run_mirror(home, RULED_DESTINATION, dict(
@@ -482,13 +493,13 @@ os.execv({shutil.which("rsync")!r}, ["rsync", *sys.argv[1:]])
           repr(result.stdout + result.stderr))
     check("--failures-only: a pass that prints nothing does not ask ned-box for its file count",
           not any(c[0].endswith("ssh") and "wc -l" in " ".join(c) for c in quiet_calls)
-          and sum(1 for c in quiet_calls if c[0].endswith("rsync")) == 7,
+          and sum(1 for c in quiet_calls if c[0].endswith("rsync")) == 8,
           str(quiet_calls))
     argv_log.unlink()
     result = run_mirror(home, RULED_DESTINATION, dict(
         remote_env, MIRROR_TEST_RSYNC_EXIT="255", MIRROR_TEST_RSYNC_STDERR="ssh: connect refused"), QUIET)
     check("--failures-only: rsync exit 255 still prints every FAILED line naming ned-box unreachable, exit 1",
-          result.returncode == 1 and result.stdout.count("FAILED:") == 7
+          result.returncode == 1 and result.stdout.count("FAILED:") == 8
           and "ned-box unreachable" in result.stdout and "mirrored:" not in result.stdout,
           result.stdout)
     check("--failures-only: a failed rsync's stderr still reaches the log",
@@ -501,12 +512,12 @@ os.execv({shutil.which("rsync")!r}, ["rsync", *sys.argv[1:]])
         MIRROR_TEST_SSH_STDERR="ssh: connect to host ned-box port 22: Operation timed out"), QUIET)
     prepare_calls = [json.loads(line) for line in argv_log.read_text().splitlines()]
     check("--failures-only: ssh failing to prepare the store prints every could-not-make-the-store-folder FAILED line, exit 1, and rsync never runs",
-          result.returncode == 1 and result.stdout.count("FAILED:") == 7
-          and result.stdout.count("could not make the store folder") == 7 and "(exit 255)" in result.stdout
+          result.returncode == 1 and result.stdout.count("FAILED:") == 8
+          and result.stdout.count("could not make the store folder") == 8 and "(exit 255)" in result.stdout
           and not any(c[0].endswith("rsync") for c in prepare_calls),
           result.stdout + str(prepare_calls))
     check("--failures-only: a failed preparation's ssh stderr still reaches the log",
-          result.stderr.count("ssh: connect to host ned-box port 22: Operation timed out") == 7,
+          result.stderr.count("ssh: connect to host ned-box port 22: Operation timed out") == 8,
           repr(result.stderr))
     argv_log.unlink()
     result = run_mirror(home, RULED_DESTINATION, dict(remote_env, MIRROR_TEST_SSH_MKDIR_KILLED="1"), QUIET)
@@ -531,7 +542,7 @@ os.execv({shutil.which("rsync")!r}, ["rsync", *sys.argv[1:]])
     result = run_mirror(home, RULED_DESTINATION, dict(
         remote_env, MIRROR_TEST_RSYNC_VERSION_LINE=GNU_VERSION_LINE, MIRROR_TEST_RSYNC_EXIT="23"), QUIET)
     check("--failures-only: GNU rsync exit 23 is still FAILED naming the exit, exit 1",
-          result.returncode == 1 and result.stdout.count("FAILED:") == 7
+          result.returncode == 1 and result.stdout.count("FAILED:") == 8
           and "rsync exit 23" in result.stdout, result.stdout)
     check("the documented cron lines run every minute with --failures-only, the Mac's under Homebrew python3",
           "  Mac:     * * * * * /opt/homebrew/bin/python3 /Users/el/Projects/nedsnodes/scripts/"

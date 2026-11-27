@@ -9,7 +9,9 @@ Usage: run-gemini-task-from-brief.py -C CHECKOUT --brief FILE [-o REPORT]
 -o may be left out only where the log-store is on this machine, as on ned-box:
 REPORT is then report.md in the run's own numbered folder, described below,
 with its run log beside it, where no later run writes. Elsewhere, as on the
-Mac, -o is required, and a run without it is refused.
+Mac, -o is required, and a run without it is refused; there a run that
+writes its report also saves a copy of it, as the Codex task program does:
+scripts/run-codex-task-from-brief.py says where.
 
 Reads use the cold-read agy sandbox: the filesystem, including log-store
 paths, is readable except for credential paths. No --readable-root is
@@ -285,6 +287,14 @@ def main(argv=None):
         stage = f"reading report {report}"
         if not report.is_file() or not report.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"agy exited 0 but wrote no report at {report}")
+        stage = (f"saving the copy of the report that goes to the log-store; the report is "
+                 f"at {report}")
+        report_copy = (codex_task.
+                       codex_or_gemini_task_report_copy_into_run_numbered_folder_on_a_machine_without_the_log_store(
+                           brief, report))
+        if report_copy:
+            print(f"{PROGRAM}: a copy of the report, which goes to the log-store, is at "
+                  f"{report_copy}", file=sys.stderr)
         if worktree_to_commit:
             stage = f"committing the run's changes; the report is at {report}"
             done, error = codex_task.codex_or_gemini_finished_workspace_write_run_changes_commit(

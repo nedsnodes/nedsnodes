@@ -969,6 +969,31 @@ try:
           and not any("shared-writable-folder" in argument for argument in arguments),
           repr(arguments))
 
+    reports_folder = scratch_home / ".claude" / "codex-or-gemini-task-run-reports"
+    shutil.rmtree(reports_folder, ignore_errors=True)
+    seat_environment = {"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"}
+    copies = []
+    for number in ("1", "2"):
+        completed, report, _ = run("report", extra_environment=seat_environment)
+        copies.append(reports_folder / "test-seat" / "brief" / number / "report.md")
+        check(f"without a log-store on the machine, run {number} also saves a copy of its report "
+              f"in test-seat/brief/{number}/ of the folder the transcript mirror copies, and "
+              f"prints its path",
+              completed.returncode == 0 and completed.stdout == f"report: {report}\n"
+              and copies[-1].is_file() and copies[-1].read_text() == report.read_text()
+              and f"a copy of the report, which goes to the log-store, is at {copies[-1]}\n"
+              in completed.stderr,
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+    shutil.rmtree(reports_folder)
+    reports_folder.write_text("a file where the folder should be\n")
+    completed, report, _ = run("report", extra_environment=seat_environment)
+    check("a report copy that cannot be saved exits 1, says so, and leaves the report at -o",
+          completed.returncode == 1 and completed.stdout == ""
+          and "could not save the copy of the report that goes to the log-store" in completed.stderr
+          and f"The report is at {report}." in completed.stderr and report.is_file(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+    reports_folder.unlink()
+
     arguments_file.unlink()
     completed, _, _ = run("report", with_dash_o=False)
     check("without a log-store on the machine, a run without -o exits 2, says -o is required, "
@@ -979,6 +1004,12 @@ try:
 
     log_store = scratch_home / "nedsnodes-logs"
     log_store.mkdir()
+    completed, report, _ = run("report", extra_environment=seat_environment)
+    check("with the log-store on the machine, a run saves no copy of its report for the mirror",
+          completed.returncode == 0 and not reports_folder.exists()
+          and "a copy of the report" not in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+    shutil.rmtree(log_store / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
     shared_folder = log_store / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder"
     for seat_environment, seat_folder in (
             ({"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"}, "test-seat"),
