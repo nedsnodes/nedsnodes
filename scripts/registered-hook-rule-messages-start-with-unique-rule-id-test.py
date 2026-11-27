@@ -63,6 +63,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "UNCHECKED_NOTE_FIRST_LINE"): HOOK_FAILED,
     (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "UNCHECKED_NOTE_NO_RETRY_TEMPLATE"): HOOK_FAILED,
     (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "UNCHECKED_NOTE_RETRY_TEMPLATE"): HOOK_FAILED,
+    (".claude/guard-hooks/gh-api-graphql-paginate-without-endcursor-variable-refusal-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
     (".claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py", "CLOSE_LINES"): LATER_PART,
     (".claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py", "LABELS_ONLY_LINE"): LATER_PART,
     (".claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
