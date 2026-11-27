@@ -664,6 +664,7 @@ BASH_GUARD_CURRENT_PATHS_BY_FORMER_PATH = {
 # The line does nothing once main's settings.json no longer runs the path, and may then be removed.
 BASH_GUARD_PATHS_OF_REMOVED_GUARDS = {
     ".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py",  # in git history only
+    "scripts/force-push-with-open-pull-request-guard-hook.py",  # in git history only
 }
 
 # Every Bash PreToolUse hook in .claude/settings.json, by the file it runs, with the function
@@ -686,6 +687,17 @@ GUARDS = {
     "nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py": read_emergency_stop,
 }
 SEARCH_FILE_GUARD = ".claude/guard-hooks/search-file-argument-read-as-option-guard-hook.py"
+
+
+def bash_guards_replay_command_reading_modes_to_run_chosen_from_guards_and_pairs(guards, new_process_pairs):
+    """Return the (mode, pairs file, new process, search-file main()) modes the replay runs: search-file
+    main() only while guards holds the search-file guard, so removing that guard from GUARDS removes its mode."""
+    modes = [("in-process", "pairs.json", False, False)]
+    if SEARCH_FILE_GUARD in guards:
+        modes.append(("search-file main()", "pairs.json", False, True))
+    if new_process_pairs:
+        modes.append(("new-process", "new-process-pairs.json", True, False))
+    return modes
 
 
 def guard_readings(guards, command, working_directory, search_file_directory):
@@ -1320,10 +1332,7 @@ def replay_with_sigterm_handled(arguments):
         added_guards, base_guard_files = guards_added_at_head(checkouts)
         print(f"guards the head adds, read at the head only: {added_guards or 'none'}")
 
-        modes = [("in-process", "pairs.json", False, False),
-                 ("search-file main()", "pairs.json", False, True)]
-        if new_process_pairs:
-            modes.append(("new-process", "new-process-pairs.json", True, False))
+        modes = bash_guards_replay_command_reading_modes_to_run_chosen_from_guards_and_pairs(GUARDS, new_process_pairs)
         verdict_changed = False
         added_guard_refused = False
         refusals_by_mode = []

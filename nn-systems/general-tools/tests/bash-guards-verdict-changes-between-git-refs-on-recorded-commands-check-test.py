@@ -766,6 +766,32 @@ try:
         replay.GUARDS = guards_as_written
         replay.BASH_GUARD_PATHS_OF_REMOVED_GUARDS = removals_as_written
 
+    pre_move_force_push_guard = "scripts/force-push-with-open-pull-request-guard-hook.py"
+
+    def register_pre_move_force_push_guard(worktree):
+        path = worktree / ".claude" / "settings.json"
+        settings = json.loads(path.read_text())
+        settings["hooks"]["PreToolUse"].append(
+            {"matcher": "Bash", "hooks": [{"type": "command",
+                                           "command": f'python3 "$CLAUDE_PROJECT_DIR"/{pre_move_force_push_guard}'}]})
+        path.write_text(json.dumps(settings, indent=2))
+    base_with_pre_move_force_push_guard = commit_with_change(register_pre_move_force_push_guard, scratch)
+    status, out, err = run_replay("HEAD", scratch, base_ref=base_with_pre_move_force_push_guard)
+    check("a base older than the guards' move to .claude/guard-hooks/, whose settings.json still runs the removed "
+          "force-push guard at its scripts/ path: exit 0, and that guard is read at neither ref",
+          status == 0 and "NO VERDICT CHANGED" in out and pre_move_force_push_guard not in out + err,
+          f"status {status}\n{out}\n{err}")
+
+    search_file_guard_modes = [mode for mode, *_ in replay.bash_guards_replay_command_reading_modes_to_run_chosen_from_guards_and_pairs(replay.GUARDS, ["pair"])]
+    without_search_file_guard_modes = [
+        mode for mode, *_ in replay.bash_guards_replay_command_reading_modes_to_run_chosen_from_guards_and_pairs(
+            {path: read for path, read in replay.GUARDS.items() if path != replay.SEARCH_FILE_GUARD}, ["pair"])]
+    check("the replay runs search-file main() only while GUARDS holds the search-file guard, so removing that "
+          "guard by the refusal's recipe also removes its mode",
+          search_file_guard_modes == ["in-process", "search-file main()", "new-process"]
+          and without_search_file_guard_modes == ["in-process", "new-process"],
+          f"with the guard: {search_file_guard_modes}; without it: {without_search_file_guard_modes}")
+
     def commit_without_guard(guard_path):
         """Return a commit made from HEAD that has neither the guard's file nor its hook, as a base before the guard."""
         def remove(worktree):
