@@ -711,9 +711,11 @@ class CitedQueryCannotBePlaced(Exception):
     """A cited path cannot be resolved from the available host and directory information."""
 
 
-def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
+def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True, place=None):
     """Resolve host, home and dot-relative forms, or raise CitedQueryCannotBePlaced. An unknown host's bare
-    name is returned as a search fragment, or refused when fragment_allowed is False."""
+    name is returned as a search fragment, or refused when fragment_allowed is False. place turns a path on
+    this machine into the one searched; os.path.normpath gives the spelling as written, symlinks unread."""
+    place = place or _placed_as_the_system_places_it
     host, path = locator.split_host(query)
     if host is not None and not path.startswith("/"):
         home = locator.KNOWN_HOST_HOMES.get(host.split(".")[0])
@@ -721,7 +723,7 @@ def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
         if home:
             placed = home + ("/" + inside if inside else "")
             if _names_this_machine(host):
-                return _placed_as_the_system_places_it(placed)
+                return place(placed)
             # Another machine's symlinks cannot be read from here.
             return os.path.normpath(placed)
         if "/" in inside.rstrip("/") or not fragment_allowed:
@@ -740,7 +742,7 @@ def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
             raise CitedQueryCannotBePlaced(
                 "Give the file's absolute path: the current directory no longer exists, so %r cannot be placed "
                 "from it." % query)
-    return _placed_as_the_system_places_it(os.path.join(cwd, path))
+    return place(os.path.join(cwd, path))
 
 
 def _names_this_machine(host):
@@ -750,10 +752,18 @@ def _names_this_machine(host):
 def _placed_as_the_system_places_it(path):
     # realpath, not normpath: ".." must climb from the directory a symlink leads to, as the system does. The
     # file name is kept as given, so a symlink at the path itself is replaced, not the file it leads to.
+    # ALLOW_MISSING, so a directory on the way that is a file is refused, as the system refuses it, instead
+    # of being placed somewhere the system would never write.
     parent, name = os.path.split(path)
-    if name in ("", ".", ".."):
-        return os.path.realpath(path)
-    return os.path.join(os.path.realpath(parent), name)
+    try:
+        if name in ("", ".", ".."):
+            return os.path.realpath(path, strict=os.path.ALLOW_MISSING)
+        return os.path.join(os.path.realpath(parent, strict=os.path.ALLOW_MISSING), name)
+    except OSError as error:
+        raise CitedQueryCannotBePlaced(
+            "%s cannot be placed, because the system refuses a directory on its way: %s: %s. Give a path "
+            "the system can reach, such as the file's absolute path with no symlink to a file on the way." % (
+                path, error.strerror or type(error).__name__, error.filename or path))
 
 
 
@@ -2636,6 +2646,7 @@ def main(argv=None, runner=run_command):
 
     try:
         named = _plain_path_from_cited_query(args.path)
+        as_written = _plain_path_from_cited_query(args.path, place=os.path.normpath)
     except CitedQueryCannotBePlaced as refusal:
         parser.error(str(refusal))
     try:
@@ -2650,6 +2661,11 @@ def main(argv=None, runner=run_command):
     shown = wanted if wanted == args.path else "%s (given as %s)" % (wanted, args.path)
 
     print(render_header(shown) + "\n", flush=True)
+    if as_written != named:
+        # A backup made before the symlink existed holds the file under the spelling as written.
+        print("%s runs through a symlink, so this searches %s, where the symlink leads now. A copy saved "
+              "before the symlink was made sits under %s; to search there too, run this again with that path "
+              "in place of %s.\n" % (args.path, named, as_written, args.path), flush=True)
     reports = build_report(
         wanted,
         args.repo,
