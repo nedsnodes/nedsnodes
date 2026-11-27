@@ -22,14 +22,18 @@ For each agent-home, in order:
      a record, never a pull request's head;
   3. leaves the agent-home as it is, and says why, when a git operation that
      scripts/checkout-freshness-catch-up.py knows is in progress there,
-     when `git status` lists any change, untracked files included, or when its HEAD is detached
-     and holds commits no branch or remote branch holds;
+     when it is on a branch and `git status` lists any change, untracked files included, or
+     when its HEAD is detached and holds commits no branch or remote branch holds. An
+     agent-home already on a detached HEAD is not left for an uncommitted change: git keeps
+     most changes across the move to origin/main, or refuses the move and names the files;
   4. otherwise writes the file agent-home-marker into the agent-home's own git directory, which
      makes scripts/git-client-side-hooks/pre-commit refuse commits in it, then runs
      `git checkout --detach origin/main` there. The detach comes last, so a failure of
      either leaves the agent-home on the branch it was on, and a rerun finds it and finishes;
      a marker written before a failed detach stays, and refuses commits on that branch until
-     the rerun moves the agent-home.
+     the rerun moves the agent-home. A tracked file whose uncommitted change the move did not
+     keep, as when git restores an unstaged deletion of a file origin/main changed, is named in
+     the agent-home's line, and the agent-home counts as not cleanly moved.
 It deletes nothing: the seat-branch, any other branch the agent-home was on, and every untracked
 or ignored file stay. It prints one line per agent-home. The line names the branch step 2
 pushed, if any, and a branch other than the seat-branch that the agent-home was on, when that
@@ -43,8 +47,9 @@ origin already is not pushed again, so running it twice pushes nothing new.
 How it fails: a git step that fails is printed with git's error and the agent-home is left as
 that step found it, apart from a marker step 4 wrote before its detach failed; a failed push
 leaves the agent-home unmoved. The other agent-homes are still handled. Exit status: 0 when
-every agent-home now rests detached at origin/main and is marked; 1 when any was left or a step
-failed; 2 when the agent-homes could not be listed.
+every agent-home now rests detached at origin/main, is marked and kept its uncommitted
+changes; 1 when any was left, lost a change or a step failed; 2 when the agent-homes could not
+be listed.
 """
 
 import argparse
@@ -153,16 +158,29 @@ def reasons_to_leave(home: Path) -> list:
     marker = freshness.in_progress_marker(git_directory)
     if marker is not None:
         reasons.append(f"a {freshness.in_progress_operation(git_directory, marker)} is in progress")
+    branch = current_branch(home)
     changes = output(home, "status", "--porcelain", "--untracked-files=normal").splitlines()
-    if changes:
+    # On a branch, a change belongs to that branch's work; a detached HEAD carries no branch.
+    if branch and changes:
         reasons.append(f"git status lists {len(changes)} uncommitted change(s), untracked files "
                        "included")
-    if not current_branch(home):
+    if not branch:
         on_no_branch = len(output(home, "rev-list", "HEAD", "--not", "--branches",
                                   "--remotes").split())
         if on_no_branch:
             reasons.append(f"its detached HEAD holds {on_no_branch} commit(s) no branch holds")
     return reasons
+
+
+def working_copy(home: Path, path: str):
+    """The file's bytes, or None when it is absent."""
+    return (home / path).read_bytes() if (home / path).is_file() else None
+
+
+def uncommitted_tracked_file_contents(home: Path) -> dict:
+    """Each tracked file whose working copy differs from HEAD, mapped to its working copy."""
+    paths = output(home, "diff", "--name-only", "--no-renames", "-z", "HEAD").split("\0")
+    return {path: working_copy(home, path) for path in paths if path}
 
 
 def other_branch_note(home: Path, seat: str) -> str:
@@ -190,11 +208,26 @@ def move_agent_home(home: Path, today: datetime.date):
         if reasons:
             return False, f"{home}: left as it was, because {'; '.join(reasons)}; {saved}"
         note = other_branch_note(home, seat)
+        before = uncommitted_tracked_file_contents(home)
         marker = Path(output(home, "rev-parse", "--absolute-git-dir")) / AGENT_HOME_MARKER_NAME
         marker.touch()
-        git(home, "checkout", "--quiet", "--no-overwrite-ignore", "--detach", "origin/main")
     except (GitStepFailed, OSError) as error:
         return False, f"{home}: not moved: {error}; {saved}"
+    try:
+        git(home, "checkout", "--quiet", "--no-overwrite-ignore", "--detach", "origin/main")
+    except GitStepFailed as error:
+        return False, f"{home}: marked as an agent-home but not moved: {error}; {saved}"
+    try:
+        lost = sorted(path for path, contents in before.items()
+                      if working_copy(home, path) != contents)
+    except OSError as error:
+        return False, (f"{home}: now detached at origin/main and marked as an agent-home, but "
+                       f"whether the move kept its uncommitted changes could not be read: {error}; "
+                       f"{saved}{note}")
+    if lost:
+        return False, (f"{home}: now detached at origin/main and marked as an agent-home, but the "
+                       f"move lost the uncommitted change to {', '.join(lost)}; redo it if it was "
+                       f"wanted; {saved}{note}")
     return True, f"{home}: now detached at origin/main and marked as an agent-home; {saved}{note}"
 
 
