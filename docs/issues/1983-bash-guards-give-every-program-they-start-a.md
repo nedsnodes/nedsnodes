@@ -1,5 +1,5 @@
 ---
-issue: "[Bash guards give every program they start a time limit of their own, so a program that never exits cannot hold up `nn-systems/general-tools/bash-guards-verdict-changes-between-git-refs-on-recorded-commands-check.py` for hours](https://github.com/nedschorus/nedschorus/issues/1983)"
+issue: "[Bash guards give every program they start a time limit of their own, so a program that never exits cannot hold up `nn-systems/general-tools/bash-guards-verdict-changes-between-git-refs-on-recorded-commands-check.py` for hours](https://github.com/nedsnodes/nedsnodes/issues/1983)"
 ---
 
 # Bash guards give every program they start a time limit of their own, so a program that never exits cannot hold up `nn-systems/general-tools/bash-guards-verdict-changes-between-git-refs-on-recorded-commands-check.py` for hours
