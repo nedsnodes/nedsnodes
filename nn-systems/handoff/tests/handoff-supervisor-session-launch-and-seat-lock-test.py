@@ -1349,28 +1349,29 @@ with tempfile.TemporaryDirectory() as onboarding_workspace:
         claude_json.unlink(missing_ok=True)
 
 for resume in (False, True):
-    with tempfile.TemporaryDirectory() as naming_workspace:
-        # Without --name, Claude Code registers a name derived from the working
-        # directory plus a code that changes every agent-session, and a peer
-        # addressing the agent-seat's name misses the live session.
-        agent = an_agent_recording_its_invocations(naming_workspace)
-        supervisor.launch_agent_session(
-            str(agent), "session-named-after-seat", Path(naming_workspace), "the prompt",
-            resume=resume, remote_control_name="merge-lane-2",
-            update_timeout_seconds=0).wait()
-        arguments = (invocations_of(naming_workspace) or [""])[0].split(" ")
-        flag = "--resume" if resume else "--session-id"
-        check(f"a launch with {flag} names the session after its agent-seat, "
-              "locally and on Remote Control",
-              arguments == [flag, "session-named-after-seat",
-                            "--remote-control=merge-lane-2",
-                            "--name=merge-lane-2",
-                            "--remote-control-session-name-prefix=merge-lane-2",
-                            "the", "prompt"],
-              str(arguments))
+    for label, listed_as in (("--pr-merger", "--pr-merger"), ("", "merge-lane-2")):
+        with tempfile.TemporaryDirectory() as naming_workspace:
+            # Without --name, Claude Code registers a name derived from the working
+            # directory plus a code that changes every agent-session, and a peer
+            # addressing the agent-seat's name misses the live session.
+            agent = an_agent_recording_its_invocations(naming_workspace)
+            supervisor.launch_agent_session(
+                str(agent), "session-named-after-seat", Path(naming_workspace), "the prompt",
+                resume=resume, remote_control_name=label, handoff_supervisor_agent_name="merge-lane-2",
+                update_timeout_seconds=0).wait()
+            arguments = (invocations_of(naming_workspace) or [""])[0].split(" ")
+            flag = "--resume" if resume else "--session-id"
+            check(f"a launch with {flag} and {'a label' if label else 'no label'} is addressed by its "
+                  f"agent-seat name and listed in Remote Control under {listed_as}",
+                  arguments == [flag, "session-named-after-seat",
+                                f"--remote-control={listed_as}",
+                                "--name=merge-lane-2",
+                                "--remote-control-session-name-prefix=merge-lane-2",
+                                "the", "prompt"],
+                  str(arguments))
 
 with tempfile.TemporaryDirectory() as rename_directory:
-    # The name file lives under HOME; the transcript is found by session id under PROJECTS_ROOT,
+    # The label file lives under HOME; the transcript is found by session id under PROJECTS_ROOT,
     # in a project directory other than the working directory's, as after a worktree takeover.
     handoffs = Path(rename_directory) / ".claude" / "handoffs"
     projects = Path(rename_directory) / "projects"
@@ -1382,73 +1383,105 @@ with tempfile.TemporaryDirectory() as rename_directory:
     real_home, real_projects_root = os.environ.get("HOME"), supervisor.PROJECTS_ROOT
     os.environ["HOME"] = rename_directory
     supervisor.PROJECTS_ROOT = projects
+    common = supervisor.remote_control_name_common
+    names_record = common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a")
 
-    def carry(notice, launched_name):
-        return supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
-            rename_settings, notice, "retiring", launched_name)
+    def launched():
+        # As the handoff-supervisor does at each launch, after reading what to give back.
+        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name("seat-a", "seat-a")
+
+    def retiring_title(title):
+        (other_project / "retiring.jsonl").write_text(
+            json.dumps({"type": "custom-title", "customTitle": title}) + "\n", encoding="utf-8")
+
+    def carry(notice):
+        return supervisor.handoff_supervisor_claude_ai_rename_in_last_turn_save_as_remote_control_label_or_add_failure_to_successor_notice(
+            rename_settings, notice, "retiring")
+
+    def given_back():
+        return supervisor.handoff_supervisor_address_given_back_at_launch_instruction_or_empty("seat-a")
+
+    stop_hook_transcript = Path(rename_directory) / "stop-hook-transcript.jsonl"
+
+    def stop_hook_stores(title):
+        stop_hook_transcript.write_text(
+            json.dumps({"type": "custom-title", "customTitle": title}) + "\n", encoding="utf-8")
+        return common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
+            "seat-a", stop_hook_transcript)
 
     try:
-        (other_project / "retiring.jsonl").write_text(
-            '{"type":"custom-title","customTitle":"seat-a"}\n', encoding="utf-8")
-        check("an unchanged title leaves the successor's notice as it is",
-              carry("earlier notice", "seat-a") == "earlier notice")
-        check("a launch with no stored name uses the agent-seat name",
+        check("a launch with no stored label is listed under the agent-seat name",
               supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a") == "seat-a")
-        (other_project / "retiring.jsonl").write_text(
-            '{"type":"custom-title","customTitle":"--renamed"}\n', encoding="utf-8")
-        notice = carry("earlier notice", "seat-a")
-        check("a rename found at stop, in a transcript outside the working directory's project "
-              "directory, keeps the earlier notice and has the successor send the line",
-              notice.startswith("earlier notice ")
-              and "The agent-seat seat-a is now --renamed in Remote Control; send it messages under that name." in notice, notice)
-        check("the successor launches under the stored name",
-              supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a") == "--renamed")
-        notice = carry("", "seat-a")
-        check("a rename the Stop hook already stored, before the retiring session sent its line, "
-              "still has the successor send the line",
-              "The agent-seat seat-a is now --renamed in Remote Control; send it messages under that name." in notice, notice)
-        check("a successor launched under the stored name sends nothing at its own handoff",
-              carry("", "--renamed") == "")
-        check("a state file with no launched name sends nothing for a rename already stored",
-              carry("", None) == "")
-        name_file.unlink()
-        notice = carry("", None)
-        check("a state file with no launched name still sends the line for a rename found at stop",
-              "seat-a is now --renamed in Remote Control" in notice, notice)
+        launched()
+        name_file.write_text("--pr-merger\n", encoding="utf-8")
+        check("a label written by hand: the turn end after a launch, whose title is the agent-seat "
+              "name, stores nothing and announces nothing",
+              stop_hook_stores("seat-a") is None
+              and name_file.read_text(encoding="utf-8").strip() == "--pr-merger")
+        retiring_title("seat-a")
+        check("a label written by hand: the handoff keeps the successor's notice as it is and the label",
+              carry("earlier notice") == "earlier notice"
+              and name_file.read_text(encoding="utf-8").strip() == "--pr-merger")
+        check("a label written by hand: the successor tells the others nothing", given_back() == "")
+        check("a label written by hand: the successor is listed under it",
+              supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a") == "--pr-merger")
+        rename = stop_hook_stores("--renamed")
+        instruction = common.handoff_remote_control_rename_message_other_agent_seats_instruction_build(rename)
+        check("a claude.ai rename is stored as the label and announced once, from the agent-seat name",
+              rename == common.RemoteControlRename("seat-a", "--renamed")
+              and name_file.read_text(encoding="utf-8").strip() == "--renamed"
+              and "The agent-seat seat-a is now --renamed in Remote Control; send it messages under that name." in instruction
+              and "Until its next session-handoff" in instruction
+              and stop_hook_stores("--renamed") is None, instruction)
+        retiring_title("--renamed")
+        notice = carry("")
+        instruction = given_back()
+        check("after a claude.ai rename, the successor tells the others the address is the agent-seat "
+              "name again, and the rename stays the label",
+              notice == ""
+              and "The agent-seat --renamed is now seat-a in Remote Control; send it messages under that name." in instruction
+              and "changes only the label" in instruction
+              and name_file.read_text(encoding="utf-8").strip() == "--renamed", notice + " | " + instruction)
+        launched()
+        check("the successor's own successor tells the others nothing", given_back() == "")
+        retiring_title("--third")
+        notice = carry("earlier notice")
+        check("a rename the Stop hook did not see, found at the handoff, is stored as the label",
+              notice == "earlier notice" and name_file.read_text(encoding="utf-8").strip() == "--third", notice)
+        launched()
+        stop_hook_stores("--renamed")
+        stop_hook_stores("--fourth")
+        instruction = given_back()
+        check("after two renames, the successor sends a line from each address the renames gave, oldest first",
+              instruction.index("The agent-seat --renamed is now seat-a") < instruction.index("The agent-seat --fourth is now seat-a")
+              and "send these lines, word for word" in instruction, instruction)
+        launched()
+        stop_hook_stores("--renamed")
+        stop_hook_stores("seat-a")
+        check("a rename back to the agent-seat name, after another, is stored as the label",
+              name_file.read_text(encoding="utf-8").strip() == "seat-a")
+        instruction = given_back()
+        check("a rename announced, then undone by a rename back to the agent-seat name, still tells the "
+              "others at the next launch that the announced address is gone",
+              "The agent-seat --renamed is now seat-a in Remote Control" in instruction
+              and "The agent-seat seat-a is now seat-a" not in instruction, instruction)
+        launched()
         name_file.unlink()
         name_file.mkdir()
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
             name = supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a")
-            kept = carry("earlier notice", "seat-a")
-        check("an unreadable stored name launches under the agent-seat name and reports it",
+        check("an unreadable stored label launches under the agent-seat name and reports it",
               name == "seat-a" and "could not be read" in errors.getvalue(), errors.getvalue())
-        check("a rename that cannot be stored keeps the notice and reports it, to the console and "
-              "to the successor",
-              kept.startswith("earlier notice The handoff-supervisor could not check whether the user "
-                              "renamed agent-seat seat-a")
-              and "could not check whether the user renamed" in errors.getvalue(),
-              kept + " | " + errors.getvalue())
         name_file.rmdir()
         name_file.write_bytes(b"\xff\xfe not utf-8\n")
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
             name = supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a")
-            kept = carry("earlier notice", "seat-a")
-        check("a stored name that is not UTF-8 text launches under the agent-seat name and is "
+        check("a stored label that is not UTF-8 text launches under the agent-seat name and is "
               "reported, naming the file",
               name == "seat-a" and "is not UTF-8 text" in errors.getvalue()
-              and str(name_file) in errors.getvalue()
-              and "The handoff-supervisor could not check" in kept,
-              kept + " | " + errors.getvalue())
-        name_file.write_text("--renamed\n", encoding="utf-8")
-        (other_project / "retiring.jsonl").write_text(
-            '{"type":"custom-title","customTitle":"seat-a"}\n', encoding="utf-8")
-        notice = carry("", "seat-a")
-        check("a rename back to the launched name, found at the handoff, tells the others the name "
-              "the Stop hook stored and announced is gone",
-              "The agent-seat --renamed is now seat-a in Remote Control; send it messages under that name." in notice
-              and name_file.read_text(encoding="utf-8").strip() == "seat-a", notice)
+              and str(name_file) in errors.getvalue(), errors.getvalue())
         name_file.write_text("--renamed\n", encoding="utf-8")
         second_project = projects / "-a-third-worktree"
         second_project.mkdir()
@@ -1456,67 +1489,42 @@ with tempfile.TemporaryDirectory() as rename_directory:
             '{"type":"custom-title","customTitle":"--other"}\n', encoding="utf-8")
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
-            kept = carry("earlier notice", "seat-a")
+            kept = carry("earlier notice")
         check("a session id found in two project directories is reported to the console and the "
-              "successor, and a rename the Stop hook stored is still announced",
-              kept.startswith("earlier notice The handoff-supervisor could not check")
+              "successor, and the label is kept",
+              kept.startswith("earlier notice The handoff-supervisor could not check whether the user "
+                              "renamed agent-seat seat-a")
               and "several project directories" in errors.getvalue()
-              and "The agent-seat seat-a is now --renamed in Remote Control" in kept,
+              and "~/.claude/handoffs/seat-a-remote-control-name" in kept
+              and name_file.read_text(encoding="utf-8").strip() == "--renamed",
               kept + " | " + errors.getvalue())
         shutil.rmtree(second_project)
-        common = supervisor.remote_control_name_common
-        stop_hook_transcript = Path(rename_directory) / "stop-hook-transcript.jsonl"
-
-        def stop_hook_stores(title):
-            stop_hook_transcript.write_text(
-                json.dumps({"type": "custom-title", "customTitle": title}) + "\n", encoding="utf-8")
-            return common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
-                "seat-a", stop_hook_transcript)
-
-        name_file.write_text("seat-a\n", encoding="utf-8")
-        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name("seat-a", "seat-a")
-        stop_hook_stores("--renamed")
-        stop_hook_stores("seat-a")
-        (other_project / "retiring.jsonl").write_text(
-            '{"type":"custom-title","customTitle":"seat-a"}\n', encoding="utf-8")
-        notice = carry("", "seat-a")
-        check("a rename announced by the Stop hook, then undone by a rename back to the launched name "
-              "the Stop hook stored before the handoff, tells the others the announced name is gone",
-              "The agent-seat --renamed is now seat-a in Remote Control; send it messages under that name." in notice,
-              notice)
-        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name("seat-a", "seat-a")
-        stop_hook_stores("--renamed")
-        (other_project / "retiring.jsonl").write_text(
-            '{"type":"custom-title","customTitle":"--third"}\n', encoding="utf-8")
-        notice = carry("", "seat-a")
-        check("a rename found at the handoff after a rename the Stop hook announced sends a line from "
-              "each name the others may know the agent-seat by",
-              "The agent-seat seat-a is now --third in Remote Control; send it messages under that name." in notice
-              and "The agent-seat --renamed is now --third in Remote Control; send it messages under that name." in notice
-              and "send these lines, word for word" in notice, notice)
-        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a").unlink()
-        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a").mkdir()
-        name_file.write_text("--fourth\n", encoding="utf-8")
-        (other_project / "retiring.jsonl").write_text(
-            '{"type":"custom-title","customTitle":"--fourth"}\n', encoding="utf-8")
+        names_record.unlink()
+        names_record.mkdir()
+        retiring_title("--fifth")
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
-            notice = carry("", "seat-a")
-        check("an unreadable record of announced names is reported, and the launched name is still "
-              "announced as old",
-              "could not be read" in errors.getvalue()
-              and "The agent-seat seat-a is now --fourth in Remote Control" in notice,
-              notice + " | " + errors.getvalue())
+            kept = carry("earlier notice")
+            instruction = given_back()
+        check("an unreadable record of announced names: the rename found at the handoff is not stored, "
+              "and that is reported to the console and the successor",
+              kept.startswith("earlier notice The handoff-supervisor could not check")
+              and name_file.read_text(encoding="utf-8").strip() == "--renamed",
+              kept + " | " + errors.getvalue())
+        check("an unreadable record of announced names: the launch tells the others nothing, and "
+              "reports why",
+              instruction == "" and "are not told that agent-seat seat-a's new agent-session is addressed as seat-a"
+              in errors.getvalue(), errors.getvalue())
         try:
-            stop_hook_stores("--fifth")
+            stop_hook_stores("--sixth")
             append_failure = ""
         except OSError as error:
             append_failure = str(error)
-        check("when the record of announced names cannot be appended to, the rename is not stored, "
-              "so the hook's report that it was not stored holds and the next turn's end tries again",
-              append_failure and name_file.read_text(encoding="utf-8").strip() == "--fourth",
+        check("when the record of announced names cannot be read or appended to, the rename is not "
+              "stored, so the hook's report that it was not stored holds and the next turn's end tries again",
+              append_failure and name_file.read_text(encoding="utf-8").strip() == "--renamed",
               append_failure + " | " + name_file.read_text(encoding="utf-8"))
-        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a").rmdir()
+        names_record.rmdir()
     finally:
         os.environ["HOME"] = real_home
         supervisor.PROJECTS_ROOT = real_projects_root

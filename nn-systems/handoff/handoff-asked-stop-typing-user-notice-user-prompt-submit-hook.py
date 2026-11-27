@@ -7,13 +7,13 @@ file for this agent-session exists, the hook prints {"systemMessage": <line>},
 which Claude Code shows the user, in the terminal and on the claude.ai page, and
 not the agent. The message itself always goes through unchanged.
 
-The line names the new agent-session by this agent-session's current title, the
-customTitle of the last custom-title record in its transcript, which is the name
-claude.ai shows and changes when the user renames the agent-session there. With
-no such record, or a transcript that cannot be read, the line names the agent-seat
-the handoff-supervisor launched the agent-session under, when this is that launched
-agent-session and not a child started from its shell, and failing that, says
-"this agent-seat's new session".
+In the agent-session a handoff-supervisor launched, and not in a child started from
+its shell, the line names the new agent-session by the Remote Control label stored
+for the agent-seat, the name claude.ai lists the successor under, or by the
+agent-seat name when no label is stored or the file cannot be read. In another
+agent-session it names it by this agent-session's title, the customTitle of the
+last custom-title record in its transcript, and with no such record, or a
+transcript that cannot be read, says "this agent-seat's new session".
 
 The line is shown once per marker file, because a refused handoff leaves the
 marker file in place and a wrong notice must not repeat on every message. Before
@@ -83,21 +83,20 @@ def new_session_name(transcript_path_text, session_id) -> str:
     """Return the name the line gives the new agent-session, or "" when none is found."""
     remote_control_name_common = module_from_path("handoff_remote_control_name_common",
                                                   REMOTE_CONTROL_NAME_COMMON_PATH)
+    agent_seat = launched_agent_seat_name(session_id)
+    if agent_seat:
+        # The handoff-supervisor lists the successor in Remote Control under the stored label, and
+        # under the agent-seat name when the file is unreadable, as here.
+        try:
+            return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)
+        except OSError:
+            return agent_seat
     if isinstance(transcript_path_text, str) and transcript_path_text:
         try:
-            title = remote_control_name_common.session_title_from_transcript(transcript_path_text)
+            return remote_control_name_common.session_title_from_transcript(transcript_path_text)
         except OSError:
-            title = ""
-        if title:
-            return title
-    agent_seat = launched_agent_seat_name(session_id)
-    if not agent_seat:
-        return ""
-    # The handoff-supervisor launches the successor under the stored name, as it does here when the file is unreadable.
-    try:
-        return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)
-    except OSError:
-        return agent_seat
+            return ""
+    return ""
 
 
 def user_notice(name: str) -> str:

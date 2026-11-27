@@ -3,8 +3,8 @@
 
 A Stop hook. In the agent-session a handoff-supervisor launched, and not in a child session that
 inherited its variables, it compares the transcript's latest
-custom-title with the agent-seat's stored Remote Control name. On a difference it stores the title
-and prints {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": <instruction>}}.
+custom-title with the address the agent-session holds, as the common module says. On a difference it
+stores the title as the agent-seat's Remote Control label and prints {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": <instruction>}}.
 
 A fault, such as stdin that is not a JSON object: one line on stderr naming the hook and the
 fault, nothing on stdout, exit 1, which Claude Code records as a non-blocking error.

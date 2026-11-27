@@ -29,6 +29,7 @@ YELLOW = "\033[33m"
 RED = "\033[31m"
 RED_BOLD = "\033[01;31m"
 CYAN_BOLD = "\033[01;36m"
+MAGENTA_BOLD = "\033[01;35m"
 
 # Warn shortly before the handoff trigger at roughly half the context used.
 COMFORTABLE_REMAINING_PERCENT = 55.0
@@ -37,6 +38,8 @@ TIGHT_REMAINING_PERCENT = 25.0
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
 SECONDS_PER_DAY = 86400
+
+HANDOFF_SYSTEM_DIRECTORY = Path(__file__).resolve().parents[1] / "nn-systems" / "handoff"
 
 # Claude Code keeps one record per running session here; a session with a Remote
 # Control connection has a bridgeSessionId in its record.
@@ -132,6 +135,34 @@ def location_segment(working_directory: str) -> str:
 
 def agent_segment(payload: dict) -> str:
     return str(payload.get("agent", {}).get("name", "") or "")
+
+
+def module_from_path(module_name: str, path: Path):
+    specification = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def status_line_remote_control_label_segment(payload: dict, environment=None) -> str:
+    """Return the name Remote Control lists the agent-seat under, in the agent-session a
+    handoff-supervisor launched; else, or when the label cannot be read, nothing."""
+    try:
+        launched = module_from_path(
+            "handoff_supervisor_launched_agent_session_environment_variable_names_common",
+            HANDOFF_SYSTEM_DIRECTORY / "handoff-supervisor-launched-agent-session-environment-variable-names-common.py")
+        agent_seat = launched.handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session(
+            os.environ if environment is None else environment, payload.get("session_id"))
+        if not agent_seat:
+            return ""
+        remote_control_name_common = module_from_path(
+            "handoff_remote_control_name_common",
+            HANDOFF_SYSTEM_DIRECTORY / "handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py")
+        return colored(
+            remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat),
+            MAGENTA_BOLD)
+    except OSError:
+        return ""
 
 
 def model_segment(payload: dict) -> str:
@@ -243,6 +274,7 @@ def status_line_text(payload: dict) -> str:
     segments = [
         backup_health_segment(),
         location_segment(working_directory),
+        status_line_remote_control_label_segment(payload),
         agent_segment(payload),
         model_segment(payload),
         consumption_segment(payload),

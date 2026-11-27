@@ -191,6 +191,54 @@ with tempfile.TemporaryDirectory() as records_directory_name:
     finally:
         statusline.CLAUDE_CODE_LIVE_SESSION_REGISTRY_DIRECTORY = original_directory
 
+with tempfile.TemporaryDirectory() as label_home:
+    label_file = Path(label_home) / ".claude" / "handoffs" / "seat-a-remote-control-name"
+    label_file.parent.mkdir(parents=True)
+    launched_environment = {"NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME": "seat-a",
+                            "NEDSNODES_HANDOFF_SUPERVISOR_SESSION_ID": "test-session"}
+    real_home = os.environ.get("HOME")
+    os.environ["HOME"] = label_home
+    try:
+        def label_shown(environment, label_payload=payload):
+            return statusline.status_line_remote_control_label_segment(label_payload, environment)
+
+        check("a launched agent-session with no stored label shows its agent-seat name",
+              label_shown(launched_environment) == statusline.colored("seat-a", statusline.MAGENTA_BOLD),
+              repr(label_shown(launched_environment)))
+        label_file.write_text("PR merger\n", encoding="utf-8")
+        check("a launched agent-session shows the Remote Control label stored for its agent-seat",
+              label_shown(launched_environment) == statusline.colored("PR merger", statusline.MAGENTA_BOLD),
+              repr(label_shown(launched_environment)))
+        check("an agent-session no handoff-supervisor launched shows no label",
+              label_shown({}) == "", repr(label_shown({})))
+        check("a child agent-session started from the launched one's shell shows no label",
+              label_shown(launched_environment, {"session_id": "child-session"}) == "",
+              repr(label_shown(launched_environment, {"session_id": "child-session"})))
+        label_file.unlink()
+        label_file.mkdir()
+        check("an unreadable label file shows no label, and does not blank the line",
+              label_shown(launched_environment) == "", repr(label_shown(launched_environment)))
+        label_file.rmdir()
+        label_file.write_bytes(b"\xff\xfe not utf-8\n")
+        check("a label file that is not UTF-8 text shows no label",
+              label_shown(launched_environment) == "", repr(label_shown(launched_environment)))
+        label_file.write_text("PR merger\n", encoding="utf-8")
+        real_environment = dict(os.environ)
+        os.environ.update(launched_environment)
+        try:
+            rendered = statusline.status_line_text(payload)
+        finally:
+            os.environ.clear()
+            os.environ.update(real_environment)
+        check("the label follows the location on the whole line",
+              statusline.SEPARATOR + statusline.colored("PR merger", statusline.MAGENTA_BOLD) + statusline.SEPARATOR
+              in rendered and rendered.index("PR merger") > rendered.index("nedschorus"), repr(rendered))
+    finally:
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
+
 # An empty payload no longer renders empty: the host is derived locally,
 # not from the payload, so the line degrades to it rather than vanishing.
 empty_line = statusline.status_line_text({})

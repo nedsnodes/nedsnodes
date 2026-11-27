@@ -59,6 +59,14 @@ with tempfile.TemporaryDirectory() as directory:
     check("a title equal to the agent-seat name stores nothing and says nothing",
           result.returncode == 0 and result.stdout == "" and not stored.exists(), result)
 
+    stored.write_text("PR merger\n", encoding="utf-8")
+    result = run_hook(home, payload(transcript))
+    check("a label written by hand, and a title equal to the agent-seat name, as each launch writes: "
+          "the label is kept and nothing is said",
+          result.returncode == 0 and result.stdout == ""
+          and stored.read_text(encoding="utf-8") == "PR merger\n", result)
+    stored.unlink()
+
     transcript = transcript_with_titles(directory, "seat-a", "----new name")
     result = run_hook(home, payload(transcript, stop_hook_active=True))
     check("while the agent answers a Stop hook, a changed title waits for the next turn's end",
@@ -83,7 +91,7 @@ with tempfile.TemporaryDirectory() as directory:
 
     transcript = transcript_with_titles(directory, "----new name", "third")
     result = run_hook(home, payload(transcript))
-    check("a second rename names the stored name as the old name",
+    check("a second rename names the address the first rename gave as the old name",
           "----new name is now third" in result.stdout, result.stdout)
 
     stored.unlink()
