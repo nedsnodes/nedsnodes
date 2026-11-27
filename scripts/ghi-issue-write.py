@@ -1856,39 +1856,18 @@ def create_ghi_landing_path_for_ghi_md(number, title: str, source_name: str) -> 
             f"{_landed_name_without_number(title, source_name)}.md")
 
 
-def landed_file_of_merged_filing_pull_request(repo: str, number: int,
-                                              branch: str, main_commit: str,
-                                              repository_root: Path, runner):
-    """Main's one file for the issue when a pull request on the filing
-    branch has merged, else None. A resumed filing whose source is unchanged
-    still differs from main's copy when review changed the copy before it
-    merged, and the branch is deleted on merge, so without this a rerun
-    lands the file a second time. Raises when main holds other than one file
-    for the issue, since this run cannot tell which one the filing landed."""
+def filing_pull_request_merged_into_main(repo: str, branch: str, runner):
+    """Whether a pull request on the filing branch has merged into main,
+    which means step 4 is done whatever main now holds for the issue. A
+    resumed filing whose source is unchanged still differs from main's copy
+    when review changed the copy before it merged, and the branch is deleted
+    on merge, so without this a rerun lands the file a second time."""
     # --base main: a filing branch's pull request merged into another base
     # never put the file on main.
     listed = runner(["gh", "pr", "list", "--repo", repo, "--head", branch,
                      "--base", "main", "--state", "merged", "--json",
                      "number"])
-    if not json.loads(listed.stdout or "[]"):
-        return None
-    paths = ghi_md_paths_for_issue(number, repository_root, runner,
-                                   revision=main_commit)
-    if len(paths) != 1:
-        held = ", ".join(paths) or "no file named for it"
-        raise Refused(
-            f"Not landed: the filing pull request on {branch} has merged, "
-            f"and main at {main_commit} holds {len(paths)} file(s) for issue "
-            f"{number}: {held}. This run cannot tell which one the filing "
-            "landed, so it stopped, and the issue's body keeps its "
-            "placeholder.\n"
-            f"Tell the user which files main holds for issue {number}; "
-            "which of them the filing landed is his to say. Then rerun "
-            f"create on that file: `scripts/ghi-issue-write.py create "
-            "<that file>`.\n"
-            "If you are a subagent, pass this to the agent that dispatched "
-            "you instead.", 1)
-    return paths[0]
+    return bool(json.loads(listed.stdout or "[]"))
 
 
 def land_file(repo: str, number: int, title: str, source: Path,
@@ -1897,6 +1876,8 @@ def land_file(repo: str, number: int, title: str, source: Path,
     so the commit is never made against stale or dirty disk. Returns the
     path the issue's file has, or will have once step 4's pull request
     merges: main's file for the issue when it is already this file, or,
+    when a resumed filing's pull request merged, the first of main's files
+    for the issue, or,
     when the branch was already pushed, the file that branch holds
     (`ghi_md_path_on_pushed_filing_branch`), or else the destination.
 
@@ -1910,8 +1891,9 @@ def land_file(repo: str, number: int, title: str, source: Path,
 
     runner(["git", "fetch", "origin", "main"], cwd=str(repository_root))
     main_commit = origin_main_commit_hash(repository_root, runner)
-    for landed in ghi_md_paths_for_issue(number, repository_root, runner,
-                                         revision=main_commit):
+    on_main = ghi_md_paths_for_issue(number, repository_root, runner,
+                                     revision=main_commit)
+    for landed in on_main:
         read = runner(["git", "show", f"{main_commit}:{landed}"],
                       cwd=str(repository_root))
         if is_ghi_md_on_main_same_as_staged_copy_reading_name_before_project_rename_as_current(
@@ -1920,14 +1902,11 @@ def land_file(repo: str, number: int, title: str, source: Path,
                    "file")
             return landed
 
-    if resumed:
-        landed = landed_file_of_merged_filing_pull_request(
-            repo, number, branch, main_commit, repository_root, runner)
-        if landed is not None:
-            report(f"step 4 already done: the filing pull request on {branch} "
-                   f"has merged, and main's file for issue {number} is "
-                   f"{landed}")
-            return landed
+    if resumed and filing_pull_request_merged_into_main(repo, branch, runner):
+        report(f"step 4 already done: the filing pull request on {branch} "
+               "has merged")
+        # Any of main's files for the issue resumes a rerun at step 5.
+        return on_main[0] if on_main else destination
 
     on_remote = runner(
         ["git", "ls-remote", "--heads", "origin", branch],

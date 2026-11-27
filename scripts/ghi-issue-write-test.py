@@ -3090,14 +3090,15 @@ def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
         FILE_TEXT.replace(f"# {EDIT_TITLE}", f"# {reviewed_heading}"),
         REPO, 570, reviewed_heading)
 
-    def rerun_on_original_after_review_renamed(merged):
+    def rerun_on_original_after_review_renamed(merged,
+                                               on_main=(EDIT_RELATIVE,)):
         answers = {
             "gh issue list": Completed(json.dumps([{
                 "number": 570, "title": EDIT_TITLE,
                 "body": tool.placeholder_body(key, REPO)}])),
             title_view: Completed(json.dumps({"title": EDIT_TITLE})),
             "git show": Completed(reviewed),
-            "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
+            "git ls-tree": Completed("".join(f"{path}\0" for path in on_main)),
             "git ls-remote": Completed(""),
             "gh pr create": Completed("pr\n"),
         }
@@ -3117,6 +3118,19 @@ def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
           and not renamed.ran("gh pr create")
           and len(one_edit_with_title(renamed, reviewed_heading)) == 1,
           (outcome, renamed.calls, lines))
+    second_file = "docs/issues/570-another-file.md"
+    two_files, lines, outcome = rerun_on_original_after_review_renamed(
+        True, on_main=(EDIT_RELATIVE, second_file))
+    edits = one_edit_with_title(two_files, None)
+    check("a rerun whose filing pull request merged, with two files on main "
+          "for the issue, lands nothing again and links both",
+          outcome == (570, True)
+          and not two_files.ran("git worktree add")
+          and not two_files.ran("gh pr create")
+          and len(edits) == 1
+          and edits[0][edits[0].index("--body") + 1]
+          == tool.links_body(REPO, [EDIT_RELATIVE, second_file]),
+          (outcome, two_files.calls, lines))
     class MergedIntoStaging(Recorder):
         """gh, asked for merged pull requests from the filing branch,
         finds one merged into a staging branch, and none into main."""
