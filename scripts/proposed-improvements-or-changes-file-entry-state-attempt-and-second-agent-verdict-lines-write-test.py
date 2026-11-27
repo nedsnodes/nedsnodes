@@ -427,6 +427,46 @@ for how in ("GHI 9", "https://github.com/nedsnodes/nedsnodes/pull/9", "https://g
     case(f"new GHI with --how {how!r} is refused", code == 1 and "holds no GHI link" in err
          and path.read_text(encoding="utf-8") == FILE_TEXT)
 
+# Settled by an upstream entry: an attempt and a done State line, each quoting the upstream entry's State line.
+UPSTREAM_DONE = "State: settled, done — h, t: PR 7 deletes the job"
+UPSTREAM_TEXT = FILE_TEXT.replace("changes without the user.\nState: open", f"changes without the user.\n{UPSTREAM_DONE}")
+CITES = f"settled by the change that settled E1: {UPSTREAM_DONE}"
+path = fresh(UPSTREAM_TEXT)
+code, _, _ = run(path, "settle", "E2", "--settled-by", "E1", "--by", "h")
+case("settled by an entry of the same file exits 0", code == 0)
+case("settled by an entry of the same file writes the attempt and the done State line", entry(path, "E2")[2:] == [
+    f"State: settled, done — h, 2026-11-10T12:00Z: {CITES}",
+    f"Attempt 1 — h, 2026-11-10T12:00Z: {CITES} — sources read: {path}"])
+case("settled by an upstream entry leaves the upstream entry alone", entry(path, "E1")[2] == UPSTREAM_DONE)
+path = fresh()
+other = sibling(path, UPSTREAM_TEXT)
+code, _, _ = run(path, "settle", "E2", "--settled-by", str(other), "E1", "--by", "h")
+cited_elsewhere = f"settled by the change that settled E1 of {other}: {UPSTREAM_DONE}"
+case("settled by an entry of another file cites that file", code == 0 and entry(path, "E2")[2:] == [
+    f"State: settled, done — h, 2026-11-10T12:00Z: {cited_elsewhere}",
+    f"Attempt 1 — h, 2026-11-10T12:00Z: {cited_elsewhere} — sources read: {other}"])
+case("settled by an entry of another file leaves that file alone", other.read_text(encoding="utf-8") == UPSTREAM_TEXT)
+for name, text, arguments, expected in (
+        ("an upstream entry that is open", FILE_TEXT, ["--settled-by", "E1"], "is not settled as done (State: open)"),
+        ("an upstream entry settled as not worth doing",
+         FILE_TEXT.replace("changes without the user.\nState: open", "changes without the user.\nState: settled, not worth doing — h, t: x"),
+         ["--settled-by", "E1"], "is not settled as done"),
+        ("an upstream entry with no State line", FILE_TEXT.replace("changes without the user.\nState: open\n", "changes without the user.\n"),
+         ["--settled-by", "E1"], "no State line"),
+        ("a missing upstream entry", UPSTREAM_TEXT, ["--settled-by", "E9"], "has no entry E9"),
+        ("an upstream file that cannot be read", UPSTREAM_TEXT, ["--settled-by", "/nonexistent/x.md", "E1"], "could not be read"),
+        ("three values", UPSTREAM_TEXT, ["--settled-by", "a", "b", "E1"], "was given 3 values"),
+        ("--kind with it", UPSTREAM_TEXT, ["--settled-by", "E1", "--kind", "done"], "takes no --kind or --how"),
+        ("--how with it", UPSTREAM_TEXT, ["--settled-by", "E1", "--how", "x"], "takes no --kind or --how"),
+        ("neither it nor --how", UPSTREAM_TEXT, ["--kind", "done"], "needs both --kind and --how, or --settled-by")):
+    path = fresh(text)
+    code, _, err = run(path, "settle", "E2", *arguments, "--by", "h")
+    case(f"settled by with {name} is refused", code == 1 and expected in err and path.read_text(encoding="utf-8") == text)
+path = fresh(UPSTREAM_TEXT.replace("Gain: a smaller tool.\nState: open", "Gain: a smaller tool.\nState: needs the user — h, t: decide"))
+before = path.read_text(encoding="utf-8")
+code, _, err = run(path, "settle", "E2", "--settled-by", "E1", "--by", "h")
+case("settled by on an entry that is not open is refused", code == 1 and "is not open" in err and path.read_text(encoding="utf-8") == before)
+
 # Needs the user: three-attempts needs three attempts; the other reasons need none.
 path = fresh()
 code, _, err = run(path, "needs-the-user", "E1", "--because", "three-attempts", "--by", "h", "--why", "x")

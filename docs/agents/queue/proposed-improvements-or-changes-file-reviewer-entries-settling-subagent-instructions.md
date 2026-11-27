@@ -24,7 +24,7 @@ Work through every open entry in them before you report, even when one of them g
 
 ## 2. Order the open entries
 
-- **Dependent entries**, where settling one may settle or change another: handle the one furthest upstream first, then run `show` and read the others again, since a change upstream may settle them. Settle an entry the upstream change settled in its own attempt, citing that change.
+- **Dependent entries**, where settling one may settle or change another: handle the one furthest upstream first, then run `show` and read the others again, since a change upstream may settle them. When the upstream change settles another entry, run `settle` on it with `--settled-by` and the upstream entry, such as `--settled-by E1`, giving the upstream entry's file before it when it is in another file, as in `--settled-by <that file> E1`: the program records the attempt and settles it as that entry was settled.
 - **Related entries**, sharing one cause: make one change for all of them, and record it as one attempt under each, by naming them all in one `attempt` command for each file they are in.
 - **Independent entries**: handle each on its own.
 

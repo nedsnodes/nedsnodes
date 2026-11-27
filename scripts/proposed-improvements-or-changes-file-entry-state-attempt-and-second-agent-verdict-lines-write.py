@@ -52,7 +52,14 @@ Subcommands, each on one file; attempt also reads the GHI-MD's other files:
                   <time>: <how>". "not worth doing" is refused unless the
                   entry's last verdict is an agreement and no Attempt line
                   follows it; "new GHI filed" is refused unless <how> holds a
-                  GHI's link.
+                  GHI's link. With `--settled-by [<file>] <upstream entry>`
+                  in place of --kind and --how, for an entry the upstream
+                  entry's change settled: adds an attempt under the entry,
+                  as attempt --outcome settles does, naming the upstream
+                  entry's file as its source, and settles the entry as done,
+                  each line quoting the upstream entry's State line; refused
+                  unless the upstream entry is settled as done. <file> is
+                  the upstream entry's file when it is not the given one.
   needs-the-user  rewrites the State line as "needs the user — <by>, <time>:
                   <why>"; `--because three-attempts` is refused unless the
                   entry has MAXIMUM_ATTEMPTS attempts since its last user-ruling
@@ -86,7 +93,7 @@ design's open question 2): the file is read, changed and replaced whole, so the 
 writer's replacement drops the earlier writer's lines.
 
 Failures: a value holding a line break, a refused change, a missing file or entry, a file that cannot be
-read or written, another file of the GHI-MD that cannot be read, a log-store directory that cannot be listed, or a second agent that cannot be run, exits nonzero, runs past
+read or written, an upstream entry's file that cannot be read, another file of the GHI-MD that cannot be read, a log-store directory that cannot be listed, or a second agent that cannot be run, exits nonzero, runs past
 SECOND_AGENT_TIMEOUT_SECONDS or ends its reply with a line other than
 "VERDICT: agrees" or "VERDICT: disagrees", is printed to stderr with what to
 do, and the program exits 1 without changing the file. Exit 0: done.
@@ -164,6 +171,7 @@ NEEDS_THE_USER_REASONS = {
     "user-ruling-change": "a question whether a user-ruling should change",
     "three-attempts": "still open after {attempts} attempts",
 }
+DONE_STATE_OPENING = f"State: settled, {SETTLED_KINDS['done']} — "
 # Not in SETTLED_KINDS, so `settle --kind` cannot claim a ruling the user never made.
 USER_RULING_SETTLED_KIND = "by the user's ruling"
 NEEDS_THE_USER_STATE_OPENING = "State: needs the user"
@@ -465,6 +473,31 @@ def settle(lines, entry, kind, by, how):
     return lines
 
 
+def settle_by_upstream_entry(lines, path: Path, named: str, entry, by, settled_by, argv):
+    """settle --settled-by: an attempt under the entry and its done State line, citing the upstream entry."""
+    if len(settled_by) == 2:
+        upstream_file, upstream = settled_by
+        try:
+            upstream_lines = local_path(upstream_file, argv).read_text(encoding="utf-8").splitlines()
+        except OSError as failure:
+            raise Failed(f"{upstream_file}, the file of upstream entry {upstream}, could not be read: {failure}")
+        cited = f"{upstream} of {upstream_file}"
+    else:
+        upstream_file, upstream, upstream_lines, cited = named, settled_by[0], lines, settled_by[0]
+    spans = entry_spans(upstream_lines)
+    if upstream not in spans:
+        raise Refused(f"{upstream_file} has no entry {upstream}; its entries are: {', '.join(spans) or 'none'}. Nothing was changed.\n"
+                      "Give the upstream entry's file before the entry when the entry is in another file.")
+    upstream_state = state_line(entry_lines(upstream_lines, spans, upstream))
+    if upstream_state is None or not upstream_state.startswith(DONE_STATE_OPENING):
+        raise Refused(
+            f"Upstream entry {cited} is not settled as done ({upstream_state or 'no State line'}), so entry {entry} was not settled and nothing was changed.\n"
+            "Only a change that was made settles another entry: settle the upstream entry as done first, or work on this entry in its own attempt.")
+    cites = f"settled by the change that settled {cited}: {upstream_state}"
+    lines, _ = add_attempt(lines, [entry], by, cites, [upstream_file], "settles", path)
+    return settle(lines, entry, "done", by, cites)
+
+
 def needs_the_user(lines, entry, because, by, why):
     spans = entry_spans(lines)
     block = entry_lines(lines, spans, entry)
@@ -541,9 +574,12 @@ def parser():
     command = commands.add_parser("settle")
     command.add_argument("file")
     command.add_argument("entry")
-    command.add_argument("--kind", required=True, choices=sorted(SETTLED_KINDS))
+    command.add_argument("--kind", choices=sorted(SETTLED_KINDS))
     command.add_argument("--by", required=True)
-    command.add_argument("--how", required=True)
+    command.add_argument("--how")
+    command.add_argument("--settled-by", nargs="+", metavar="FILE-OR-ENTRY",
+                         help="[<file>] <upstream entry>, in place of --kind and --how: the upstream entry whose change "
+                              "settled this one, after its file when that is not the given file")
     command = commands.add_parser("needs-the-user")
     command.add_argument("file")
     command.add_argument("entry")
@@ -563,12 +599,12 @@ def parser():
 def main(argv=None) -> int:
     arguments = parser().parse_args(argv)
     try:
-        for name in ("found", "how", "why", "by", "source", "where", "words"):
+        for name in ("found", "how", "why", "by", "source", "where", "words", "settled_by"):
             value = getattr(arguments, name, None)
             if value is not None and any("\n" in part or "\r" in part
                                          for part in (value if isinstance(value, list) else [value])):
                 raise Refused(
-                    f"--{name} holds a line break, so nothing was changed: each value is written as part of one line,\n"
+                    f"--{name.replace('_', '-')} holds a line break, so nothing was changed: each value is written as part of one line,\n"
                     "and a second line could be read as a State, Attempt or Second agent line. Give it on one line.")
         for name in ("where", "words"):
             value = getattr(arguments, name, None)
@@ -579,6 +615,16 @@ def main(argv=None) -> int:
                 raise Refused(
                     f"--source {source!r} is empty or holds \"{ATTEMPT_SOURCES_SEPARATOR.strip()}\", which separates the sources on the Attempt line, so nothing was changed.\n"
                     "Give each source in its own --source, without that character.")
+        if arguments.command == "settle":
+            if arguments.settled_by is None and (arguments.kind is None or arguments.how is None):
+                raise Refused("settle needs both --kind and --how, or --settled-by in place of both, so nothing was changed.")
+            if arguments.settled_by is not None and (arguments.kind is not None or arguments.how is not None):
+                raise Refused("--settled-by settles the entry as the upstream entry was settled, so it takes no --kind or --how; nothing was changed.\n"
+                              "Give --settled-by alone, or --kind and --how alone.")
+            if arguments.settled_by is not None and len(arguments.settled_by) > 2:
+                raise Refused(f"--settled-by takes the upstream entry, after its file when it is in another file, and was given "
+                              f"{len(arguments.settled_by)} values, so nothing was changed.\n"
+                              "Give it as --settled-by E1, or --settled-by <that file> E1.")
         argv = sys.argv[1:] if argv is None else argv
         # A GHI-MD's name holds no directory and no extension.
         if arguments.command == "show" and "/" not in arguments.file and not arguments.file.endswith(".md"):
@@ -611,6 +657,9 @@ def main(argv=None) -> int:
             lines, marked_for_the_user = add_verdict(
                 text.splitlines(), arguments.entry, agrees,
                 f"{SECOND_AGENT_MODEL} run through `claude -p` for {arguments.by}", arguments.by)
+        elif arguments.command == "settle" and arguments.settled_by is not None:
+            lines = settle_by_upstream_entry(lines, path, arguments.file, arguments.entry, arguments.by,
+                                             arguments.settled_by, argv)
         elif arguments.command == "settle":
             lines = settle(lines, arguments.entry, arguments.kind, arguments.by, arguments.how)
         elif arguments.command == "user-ruling":
