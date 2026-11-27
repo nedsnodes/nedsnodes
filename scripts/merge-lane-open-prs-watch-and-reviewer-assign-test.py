@@ -2460,6 +2460,65 @@ def run_poll_once_merge_batch_start_cases(scratch_root, token_file):
           and "cannot be read" in tasks[0]["subject"]
           and str(machine.merge_queue_file) in tasks[0]["description"], f"{code} {tasks}")
 
+    machine = machine_for("merge-batch-stacked-line-waits", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.run()
+    code = machine.run()
+    check("a line still waiting on a second poll, with the queue file and the open pull requests "
+          "unchanged, as a stacked line the first batch passed over is, starts no second batch",
+          len(machine.merge_queue_program_call_lines()) == 1 and silent(machine, code),
+          f"{code} {machine.merge_queue_program_call_lines()} {machine.tasks_read()} {machine.output!r}")
+    machine.poll = []
+    code = machine.run()
+    check("once an open pull request leaves the open list, as the stacked line's parent does when it "
+          "merges, the next poll starts a batch again",
+          len(machine.merge_queue_program_call_lines()) == 2 and code == 0,
+          f"{code} {machine.merge_queue_program_call_lines()}")
+    with machine.merge_queue_file.open("a", encoding="utf-8") as queue:
+        queue.write(f"8 {'c' * 40} 2026-11-26T06:00:00Z nedlern (approved)\n")
+    code = machine.run()
+    check("a line appended to the queue file makes the next poll start a batch again",
+          len(machine.merge_queue_program_call_lines()) == 3 and code == 0,
+          f"{code} {machine.merge_queue_program_call_lines()}")
+
+    machine = machine_for("merge-batch-start-not-recorded", WAITING_MERGE_QUEUE_LINE + "\n")
+    saved_write = watcher_module.poll_state_write
+
+    def write_refused_once_it_records_a_start(path, state):
+        if "merge_batch_started_for" in state:
+            raise OSError("disk full")
+        saved_write(path, state)
+
+    watcher_module.poll_state_write = write_refused_once_it_records_a_start
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.poll_state_write = saved_write
+    tasks = machine.tasks_read()
+    check("a merge batch start that cannot be recorded in the state file makes --poll-once exit 1 "
+          "and open one task saying every run starts a batch until it can",
+          code == 1 and len(tasks) == 1 and "record the merge batch start" in tasks[0]["subject"]
+          and "disk full" in tasks[0]["description"], f"{code} {tasks}")
+
+    machine = machine_for("merge-queue-size-unreadable", WAITING_MERGE_QUEUE_LINE + "\n")
+    saved_getsize = watcher_module.os.path.getsize
+
+    def getsize_refused(path):
+        if Path(path) == machine.merge_queue_file:
+            raise OSError("input/output error")
+        return saved_getsize(path)
+
+    watcher_module.os.path.getsize = getsize_refused
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.os.path.getsize = saved_getsize
+    tasks = machine.tasks_read()
+    check("a merge queue file whose size cannot be read starts nothing, makes --poll-once exit 1 "
+          "and opens one task naming the file",
+          code == 1 and not machine.merge_queue_program_call_lines() and len(tasks) == 1
+          and "cannot be read" in tasks[0]["subject"]
+          and "input/output error" in tasks[0]["description"], f"{code} {tasks}")
+
 
 if __name__ == "__main__":
     run_unit_cases()

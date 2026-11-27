@@ -131,7 +131,9 @@ failure reaches only the cron log. With another --repo, --poll-once needs its ow
 With the default --repo, each --poll-once run then starts the merge queue's merges:
 when the merge queue file holds a waiting line, it runs the merge queue program's
 merge-batch-start --quiet, which starts nothing while a merge batch runs or the stop
-file exists. A run with no waiting line, or whose merge-batch-start prints nothing,
+file exists. It starts one only when the queue file's size or an open pull request's
+nn-head-commit, or the set of open pull requests, has changed since the last start, so a
+stacked line the last batch passed over waits for its parent's merge. A run with no waiting line, or whose merge-batch-start prints nothing,
 writes no task and sends no message; an unreadable queue file, or a merge-batch-start
 that fails or hangs, opens one task.
 A cron run, the loop watcher and the seed each hold a lock file
@@ -1126,9 +1128,19 @@ def merge_queue_program_module():
     return module
 
 
-def merge_batch_started_when_lines_wait(arguments, task_list_directory):
+def merge_batch_start_inputs(arguments, state):
+    """What a merge batch acts on: the merge queue file's size and each open pull request's
+    nn-head-commit. A batch passes a stacked pull request over without appending a line, so
+    its line keeps waiting; a batch started again with these unchanged would only pass it over
+    again."""
+    return [os.path.getsize(arguments.merge_queue_file),
+            sorted([int(number), seen["head_sha"]] for number, seen in state["pull_requests"].items())]
+
+
+def merge_batch_started_when_lines_wait(arguments, task_list_directory, state, state_path):
     """Run the merge queue program's merge-batch-start --quiet when the merge queue file holds
-    a waiting line, and return the exit status. Nothing waiting, a merge batch already running
+    a waiting line and something the batch acts on has changed since the last start, and
+    return the exit status. Nothing waiting, nothing changed, a merge batch already running
     and a stop file all print nothing and write no task, so merge-lane-2 hears only of a
     failure."""
     queue = merge_queue_program_module()
@@ -1141,6 +1153,14 @@ def merge_batch_started_when_lines_wait(arguments, task_list_directory):
                                 f"{arguments.merge_queue_file}: {error}. No merge batch starts "
                                 f"until it can be read; repair it, and the next run starts one.")
     if not waiting:
+        return 0
+    try:
+        inputs = merge_batch_start_inputs(arguments, state)
+    except OSError as error:
+        return failure_reported(task_list_directory, "the merge queue file cannot be read",
+                                f"{arguments.merge_queue_file}: {error}. No merge batch starts "
+                                f"until it can be read; repair it, and the next run starts one.")
+    if state.get("merge_batch_started_for") == inputs:
         return 0
     command = [sys.executable, str(arguments.merge_queue_program),
                "--merge-queue-file", str(arguments.merge_queue_file),
@@ -1164,6 +1184,13 @@ def merge_batch_started_when_lines_wait(arguments, task_list_directory):
         return failure_reported(task_list_directory, "merge-batch-start failed",
                                 f"{shlex.join(command)} exited {completed.returncode}: "
                                 f"{one_line_snippet(output or 'no output', FAILURE_REASON_SNIPPET_CHARS)}")
+    state["merge_batch_started_for"] = inputs
+    try:
+        poll_state_write(state_path, state)
+    except OSError as error:
+        return failure_reported(task_list_directory, "it could not record the merge batch start",
+                                f"{state_path}: {error}. Until it can, every run starts a merge "
+                                f"batch while a line waits, even when nothing has changed.")
     return 0
 
 
@@ -1234,7 +1261,7 @@ def poll_once(arguments, assignments_file, options_in_use):
                                     f"recorded its events, so the first run after this is repaired "
                                     f"finds this run's events again; lines already in "
                                     f"{events_path} reach a later events task.")
-        merge_batch_status = (merge_batch_started_when_lines_wait(arguments, task_list_directory)
+        merge_batch_status = (merge_batch_started_when_lines_wait(arguments, task_list_directory, state, state_path)
                               if arguments.merge_queue_file is not None else 0)
         if reason is None:
             return merge_batch_status
