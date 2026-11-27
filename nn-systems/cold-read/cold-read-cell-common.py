@@ -858,8 +858,12 @@ def run_model_chain(
     recognised_failure_texts=(), child_environment=None,
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
+    agent_binary_stdout_to_response_text=None,
 ) -> int:
-    """Try models until one produces a report, then stamp the report."""
+    """Try models until one produces a report, then stamp the report.
+
+    agent_binary_stdout_to_response_text, when given, turns each run's stdout into the
+    response text, for an agent-binary whose stdout is stream events, before anything reads it."""
     # parse_agent_binary_final_result_from_stdout_line takes effect only with per_model_run_timeout_seconds.
     # build_invocation must apply the same per-model effort mapping used by the stamp.
     failed_attempts: list[str] = []
@@ -905,6 +909,8 @@ def run_model_chain(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
                 start_error=str(error))), file=sys.stderr)
             continue
+        if agent_binary_stdout_to_response_text is not None and completed.stdout:
+            completed.stdout = agent_binary_stdout_to_response_text(completed.stdout)
         if completed.stderr:
             print(completed.stderr, file=sys.stderr, end="")
         if isinstance(completed, ReviewerRunEndedByResultLine):
@@ -1018,6 +1024,7 @@ def run_cell(
     cold_read_cell_launcher_own_command_line_options_adder=None,
     pass_cold_read_tier_to_invocation_builder: bool = False,
     per_model_run_timeout_seconds_from_parsed_arguments_getter=None,
+    agent_binary_stdout_to_response_text=None,
 ) -> int:
     """cold_read_cell_launcher_own_command_line_options_adder, when given, adds
     one launcher's own options to the parser, and invocation_builder then also
@@ -1102,6 +1109,7 @@ def run_cell(
             per_model_run_timeout_seconds=per_model_run_timeout_seconds,
             parse_agent_binary_final_result_from_stdout_line=parse_agent_binary_final_result_from_stdout_line,
             report_wait_after_result_line_seconds=report_wait_after_result_line_seconds,
+            agent_binary_stdout_to_response_text=agent_binary_stdout_to_response_text,
         )
         if exit_code == 0 and staging_directory is not None:
             exit_code = move_staged_report(program, reviewer_report, report)
