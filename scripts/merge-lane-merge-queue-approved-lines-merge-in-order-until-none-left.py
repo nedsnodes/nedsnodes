@@ -356,10 +356,14 @@ class MergeQueuePullRequestMergeBatchRunner:
             if fetch.returncode:
                 raise Stop(f"git fetch of {' '.join(missing)} in {repository} exited "
                            f"{fetch.returncode}: {fetch.stderr.strip()}")
+        # Naming every changed file has the plan class each Markdown file by its fenced code,
+        # whether or not the description asks for that code's review.
+        changed_paths = frozenset(path for _, path in review_plan.changed_file_statuses_and_paths(
+            repository, merge_base, head))
         return all(entry["path"].startswith("docs/") and entry["path"].endswith(".md")
                    and entry["class"] == "prose"
                    for entry in review_plan.changed_files_with_classes_and_tiers(
-                       repository, merge_base, head))
+                       repository, merge_base, head, code_review_markdown_paths=changed_paths))
 
     def prose_only_merges_in_a_row(self):
         try:
