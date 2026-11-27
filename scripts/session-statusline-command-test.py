@@ -200,7 +200,7 @@ with tempfile.TemporaryDirectory() as label_home:
     os.environ["HOME"] = label_home
     try:
         def label_shown(environment, label_payload=payload):
-            return statusline.status_line_remote_control_label_segment(label_payload, environment)
+            return statusline.status_line_agent_seat_remote_control_session_name_segment(label_payload, environment)
 
         check("a launched agent-session with no stored label shows its agent-seat name",
               label_shown(launched_environment) == statusline.colored("seat-a", statusline.MAGENTA_BOLD),

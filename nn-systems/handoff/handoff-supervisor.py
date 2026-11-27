@@ -2587,7 +2587,7 @@ def handoff_supervisor_remote_control_name_choose_for_agent_session_launch(agent
         return agent_seat
 
 
-def handoff_supervisor_claude_ai_rename_in_last_turn_save_as_remote_control_label_or_add_failure_to_successor_notice(
+def handoff_supervisor_claude_ai_session_rename_missed_by_stop_hook_save_as_remote_control_name_or_report_failure_in_successor_notice(
         settings: SupervisorSettings, successor_notice: str, launched_session_id: Optional[str]) -> str:
     """Store as the label a rename the launched agent-session's last turn end did not; when that
     cannot be checked, report it to the console and add it to the successor's notice."""
@@ -2609,7 +2609,7 @@ def handoff_supervisor_claude_ai_rename_in_last_turn_save_as_remote_control_labe
     return successor_notice
 
 
-def handoff_supervisor_address_given_back_at_launch_instruction_or_empty(agent_seat: str) -> str:
+def handoff_supervisor_announced_addresses_record_read_and_old_address_now_seat_name_instruction_build_or_empty(agent_seat: str) -> str:
     """Return the instruction to tell the other agent-seats that this launch, under the agent-seat
     name, gives back each address a claude.ai rename gave the agent-seat since its last launch, or ""."""
     try:
@@ -2619,11 +2619,11 @@ def handoff_supervisor_address_given_back_at_launch_instruction_or_empty(agent_s
               f"agent-session is addressed as {agent_seat}, because the names it was announced under "
               f"since its last launch could not be read: {error}", file=sys.stderr)
         return ""
-    old_names = remote_control_name_common.handoff_agent_seat_address_given_back_at_launch_old_names_to_announce(
+    old_names = remote_control_name_common.handoff_agent_seat_launch_old_addresses_to_announce_as_now_seat_name(
         agent_seat, announced_names)
     if not old_names:
         return ""
-    return remote_control_name_common.handoff_agent_seat_address_given_back_at_launch_message_other_agent_seats_instruction_build(
+    return remote_control_name_common.handoff_agent_seat_launch_tell_other_agent_seats_each_old_address_is_now_seat_name_instruction_build(
         old_names, agent_seat)
 
 
@@ -2812,7 +2812,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
             retiring_session_id = (
                 retiring_session_id_from_handoff_writer_or_tracked_launch(tracked_session_id, boot_fields)
                 if tracked_session_id else None)
-            successor_notice = handoff_supervisor_claude_ai_rename_in_last_turn_save_as_remote_control_label_or_add_failure_to_successor_notice(
+            successor_notice = handoff_supervisor_claude_ai_session_rename_missed_by_stop_hook_save_as_remote_control_name_or_report_failure_in_successor_notice(
                 settings, successor_notice, tracked_session_id)
             successor_session_id, ignition_plan = (
                 carry_over_to_successor(settings, retiring_session_id, boot_fields, generation)
@@ -2870,7 +2870,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                       "generation": generation})
         # Every launch, a resume included, is addressed by the agent-seat name, giving back any address
         # a claude.ai rename gave the agent-seat since its last launch.
-        address_given_back_instruction = handoff_supervisor_address_given_back_at_launch_instruction_or_empty(settings.agent)
+        address_given_back_instruction = handoff_supervisor_announced_addresses_record_read_and_old_address_now_seat_name_instruction_build_or_empty(settings.agent)
         try:
             remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name(
                 settings.agent, settings.agent)
@@ -3037,7 +3037,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
 
         retiring_session_id = retiring_session_id_from_handoff_writer_or_tracked_launch(
             session_id, handoff_fields)
-        successor_notice = handoff_supervisor_claude_ai_rename_in_last_turn_save_as_remote_control_label_or_add_failure_to_successor_notice(
+        successor_notice = handoff_supervisor_claude_ai_session_rename_missed_by_stop_hook_save_as_remote_control_name_or_report_failure_in_successor_notice(
             settings, successor_notice, session_id)
         successor_session_id, ignition_plan = carry_over_to_successor(
             settings, retiring_session_id, handoff_fields, generation

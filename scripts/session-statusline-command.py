@@ -144,7 +144,7 @@ def module_from_path(module_name: str, path: Path):
     return module
 
 
-def status_line_remote_control_label_segment(payload: dict, environment=None) -> str:
+def status_line_agent_seat_remote_control_session_name_segment(payload: dict, environment=None) -> str:
     """Return the name Remote Control lists the agent-seat under, in the agent-session a
     handoff-supervisor launched; else, or when the label cannot be read, nothing."""
     try:
@@ -274,7 +274,7 @@ def status_line_text(payload: dict) -> str:
     segments = [
         backup_health_segment(),
         location_segment(working_directory),
-        status_line_remote_control_label_segment(payload),
+        status_line_agent_seat_remote_control_session_name_segment(payload),
         agent_segment(payload),
         model_segment(payload),
         consumption_segment(payload),

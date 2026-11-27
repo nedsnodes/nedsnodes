@@ -1395,11 +1395,11 @@ with tempfile.TemporaryDirectory() as rename_directory:
             json.dumps({"type": "custom-title", "customTitle": title}) + "\n", encoding="utf-8")
 
     def carry(notice):
-        return supervisor.handoff_supervisor_claude_ai_rename_in_last_turn_save_as_remote_control_label_or_add_failure_to_successor_notice(
+        return supervisor.handoff_supervisor_claude_ai_session_rename_missed_by_stop_hook_save_as_remote_control_name_or_report_failure_in_successor_notice(
             rename_settings, notice, "retiring")
 
     def given_back():
-        return supervisor.handoff_supervisor_address_given_back_at_launch_instruction_or_empty("seat-a")
+        return supervisor.handoff_supervisor_announced_addresses_record_read_and_old_address_now_seat_name_instruction_build_or_empty("seat-a")
 
     stop_hook_transcript = Path(rename_directory) / "stop-hook-transcript.jsonl"
 
@@ -1431,7 +1431,7 @@ with tempfile.TemporaryDirectory() as rename_directory:
               rename == common.RemoteControlRename("seat-a", "--renamed")
               and name_file.read_text(encoding="utf-8").strip() == "--renamed"
               and "The agent-seat seat-a is now --renamed in Remote Control; send it messages under that name." in instruction
-              and "Until its next session-handoff" in instruction
+              and "Until the handoff-supervisor next launches this agent-seat" in instruction
               and stop_hook_stores("--renamed") is None, instruction)
         retiring_title("--renamed")
         notice = carry("")

@@ -29,9 +29,10 @@ CUSTOM_TITLE_RECORD_TYPE = "custom-title"
 # Messages below follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 REMOTE_CONTROL_RENAME_LINE_TEMPLATE = "The agent-seat {old_name} is now {new_name} in Remote Control; send it messages under that name."
 REMOTE_CONTROL_RENAMED_IN_CLAUDE_AI_REASON_TEMPLATE = (
-    "The user renamed this agent-session in claude.ai from {old_names} to {new_name}. Until its next "
-    "session-handoff the other agent-seats must message it as {new_name}, so a message sent to "
-    "{the_old_name} may reach no one.")
+    "The user renamed this agent-session in claude.ai from {old_names} to {new_name}. Until the "
+    "handoff-supervisor next launches this agent-seat, at its session-handoff or after a crash, the "
+    "other agent-seats must message it as {new_name}, so a message sent to {the_old_name} may reach "
+    "no one.")
 REMOTE_CONTROL_ADDRESS_GIVEN_BACK_AT_LAUNCH_REASON_TEMPLATE = (
     "This agent-session was launched under its agent-seat name, {new_name}, and the other agent-seats "
     "message it as {new_name}: a claude.ai rename of an earlier agent-session of this agent-seat changes "
@@ -160,7 +161,7 @@ def handoff_remote_control_rename_message_other_agent_seats_instruction_build(re
         REMOTE_CONTROL_RENAMED_IN_CLAUDE_AI_REASON_TEMPLATE, [rename.old_name], rename.new_name)
 
 
-def handoff_agent_seat_address_given_back_at_launch_old_names_to_announce(agent_seat: str, announced_names: list) -> list:
+def handoff_agent_seat_launch_old_addresses_to_announce_as_now_seat_name(agent_seat: str, announced_names: list) -> list:
     """The addresses, oldest first and each once, that the others may know the agent-seat by and
     that a launch under its agent-seat name gives back."""
     old_names = []
@@ -170,7 +171,7 @@ def handoff_agent_seat_address_given_back_at_launch_old_names_to_announce(agent_
     return old_names
 
 
-def handoff_agent_seat_address_given_back_at_launch_message_other_agent_seats_instruction_build(old_names: list, agent_seat: str) -> str:
+def handoff_agent_seat_launch_tell_other_agent_seats_each_old_address_is_now_seat_name_instruction_build(old_names: list, agent_seat: str) -> str:
     """The instruction to send one line for each address the launch gave back, oldest first."""
     return _old_name_lines_send_instruction_build(
         REMOTE_CONTROL_ADDRESS_GIVEN_BACK_AT_LAUNCH_REASON_TEMPLATE, old_names, agent_seat)
