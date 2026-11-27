@@ -275,7 +275,8 @@ way: a path written from the current directory ("./x.md", "../x.md") is taken
 from the current directory; any other relative <path> is repo-relative, placed
 under the top level of the repository --repo is in, or under --repo itself
 when that is in no repository; so give the file's repo-relative or absolute
-path, not a fragment of it.
+path, not a fragment of it. --restore refuses a <path> that ends in /, . or ..,
+since it names a directory.
 
 <path> may be repo-relative ("docs/issues/46-x.md"), absolute, or any trailing
 fragment of a path ("dispositions.md"). A fragment matches whole trailing
@@ -718,7 +719,11 @@ def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
         home = locator.KNOWN_HOST_HOMES.get(host.split(".")[0])
         inside = path[2:] if path.startswith("~/") else ("" if path == "~" else path)
         if home:
-            return os.path.normpath(home + ("/" + inside if inside else ""))
+            placed = home + ("/" + inside if inside else "")
+            if _names_this_machine(host):
+                return _placed_as_the_system_places_it(placed)
+            # Another machine's symlinks cannot be read from here.
+            return os.path.normpath(placed)
         if "/" in inside.rstrip("/") or not fragment_allowed:
             raise CitedQueryCannotBePlaced(
                 "Give the file's absolute path on %s: this program does not know that host's home directory." % host)
@@ -735,7 +740,20 @@ def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
             raise CitedQueryCannotBePlaced(
                 "Give the file's absolute path: the current directory no longer exists, so %r cannot be placed "
                 "from it." % query)
-    return os.path.normpath(os.path.join(cwd, path))
+    return _placed_as_the_system_places_it(os.path.join(cwd, path))
+
+
+def _names_this_machine(host):
+    return host.split(".")[0] == socket.gethostname().split(".")[0]
+
+
+def _placed_as_the_system_places_it(path):
+    # realpath, not normpath: ".." must climb from the directory a symlink leads to, as the system does. The
+    # file name is kept as given, so a symlink at the path itself is replaced, not the file it leads to.
+    parent, name = os.path.split(path)
+    if name in ("", ".", ".."):
+        return os.path.realpath(path)
+    return os.path.join(os.path.realpath(parent), name)
 
 
 
@@ -2558,9 +2576,9 @@ def main(argv=None, runner=run_command):
                              "current directory. A <path> written from the current directory, with ./ or .., is placed from "
                              "there, as a search reads it; any other relative <path> is placed under the top level "
                              "of the repository --repo is in, or under --repo when that is in no repository, so give "
-                             "the file's repo-relative or absolute path, not a fragment of it; a git blob id is "
-                             "refused as a usage error. Exits 0 when the copy was made, and 1 when it was not, "
-                             "printing what failed on stderr")
+                             "the file's repo-relative or absolute path, not a fragment of it; a git blob id, or a "
+                             "<path> ending in /, . or .., is refused as a usage error. Exits 0 when the copy was "
+                             "made, and 1 when it was not, printing what failed on stderr")
     parser.add_argument("--prompt-for-root", action="store_true",
                         help="mount the Time Machine snapshot from here, letting sudo ask for your "
                              "password in this terminal, instead of printing the command. Only ever "
@@ -2571,6 +2589,10 @@ def main(argv=None, runner=run_command):
     if args.restore is not None:
         if is_git_blob_id(args.path):
             parser.error("--restore needs the path the file was deleted from, not a git blob id")
+        if os.path.basename(locator.split_host(args.path)[1]) in ("", ".", ".."):
+            # Placing such a path would follow a symlink at it and overwrite the file the symlink leads to.
+            parser.error("--restore needs the path of a file, and %r ends in /, . or .., which names a directory; "
+                         "give the file's own path" % args.path)
         try:
             named = _plain_path_from_cited_query(args.path, fragment_allowed=False)
         except CitedQueryCannotBePlaced as refusal:
