@@ -2172,7 +2172,8 @@ def failed_suites_kept_in_view_cases(scratch):
           and worked_after and "scripts/x-test.py" in left_after,
           f"{left}\n{left_after}\n{output}")
 
-    def newest_passing_written_directly(held, merge_commit, hold_the_lock_for=0.0):
+    def newest_passing_written_directly(held, merge_commit, hold_the_lock_for=0.0,
+                                        git_returncode=None):
         run = next(runs)
         home = scratch / f"suite-selection-main-commit-home-{run}"
         saved_home = os.environ.get("HOME")
@@ -2184,6 +2185,9 @@ def failed_suites_kept_in_view_cases(scratch):
                 path.write_text(held + "\n")
 
             def git(*arguments):
+                if git_returncode is not None:
+                    return subprocess.CompletedProcess(["git", *arguments], git_returncode, "",
+                                                       "fatal: git was killed\n")
                 return subprocess.run(["git", "-C", str(author_repository), *arguments],
                                       capture_output=True, text=True, env=GIT_ENVIRONMENT,
                                       stdin=subprocess.DEVNULL)
@@ -2226,6 +2230,19 @@ def failed_suites_kept_in_view_cases(scratch):
     written, held, output, _ = newest_passing_written_directly("0" * 40, older)
     check("a commit git cannot place in the suite selection main commit record is replaced, since no run "
           "uses it", written and held == older, f"{written} {held}\n{output}")
+    written, held, output, _ = newest_passing_written_directly(newer, older, git_returncode=-15)
+    check("a git failure while comparing the merge commit with the record is printed with "
+          "git's error and what the program did with the record",
+          written and held == older
+          and f"git could not say whether {older[:12]} is an ancestor of {newer[:12]}" in output
+          and "fatal: git was killed" in output
+          and f"The program replaces the record with {older[:12]}" in output,
+          f"{written} {held}\n{output}")
+    written, held, output, _ = newest_passing_written_directly(older, newer, git_returncode=1)
+    check("exit 1 from git merge-base --is-ancestor means not an ancestor, so the record moves "
+          "forward with no git error printed",
+          written and held == newer and "git could not say" not in output,
+          f"{written} {held}\n{output}")
     _, held, output, waited = newest_passing_written_directly(older, newer, hold_the_lock_for=0.3)
     check("the suite selection main commit record is read and written under its lock, so a run that finishes "
           "while another holds it waits, then writes",

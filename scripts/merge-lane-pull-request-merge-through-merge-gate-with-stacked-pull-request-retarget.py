@@ -1309,8 +1309,16 @@ def after_merge_test_run_suite_selection_main_commit_written(merge_commit, git):
             # Only "merge_commit is an ancestor of the held commit" keeps the record: an
             # unrelated or unreadable commit is never used, and moving the record back only
             # makes the next run select more suites.
-            if (len(held) == 40 and all(character in "0123456789abcdef" for character in held)
-                    and git("merge-base", "--is-ancestor", merge_commit, held).returncode == 0):
+            ancestor = None
+            if len(held) == 40 and all(character in "0123456789abcdef" for character in held):
+                ancestor = git("merge-base", "--is-ancestor", merge_commit, held)
+            if ancestor is not None and ancestor.returncode not in (0, 1):
+                print(f"git could not say whether {merge_commit[:12]} is an ancestor of "
+                      f"{held[:12]}, which {path} names: {git_error(ancestor)}. The program "
+                      f"replaces the record with {merge_commit[:12]}; if {held[:12]} was a later "
+                      f"commit of main, the next after-merge test run compares with the older "
+                      f"{merge_commit[:12]} and runs more suites than it needs.")
+            if ancestor is not None and ancestor.returncode == 0:
                 print(f"the merge commit {merge_commit[:12]} was not recorded in {path}: it "
                       f"names {held[:12]}, which is {merge_commit[:12]} or a later commit of "
                       f"main whose after-merge test run finished first, and the suite selection main commit "
