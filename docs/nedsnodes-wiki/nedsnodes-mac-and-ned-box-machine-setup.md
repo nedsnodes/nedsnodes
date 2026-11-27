@@ -55,6 +55,10 @@ Verified 2026-09-14. The checkout path is also pinned by the repository's own te
 
 Two naming notes that hold on both machines. A handoff file is `<agent>-handoff.md` for the current one and `<agent>-handoff-<NNNN>.md` for numbered earlier ones, with `<agent>-dialog-<NNNN>.md` beside them; the `<session-uuid>-handoff-asked` and `-handoff-deferred` files in the same directory are markers, not handoffs. A task worktree is named for its job when a person made it and `agent-<id>` when a subagent did.
 
+## Working in a fresh clone
+
+Each agent-seat's commits carry its own name: its launcher, `scripts/launch-claude-ubuntu` or `scripts/launch-claude-mac`, sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, which outrank any git config. Each clone's own config holds the identity `unconfigured-agent <unconfigured-agent@nedschorus.invalid>`, set by the user, which the pre-commit hook, `scripts/git-client-side-hooks/pre-commit`, refuses, so an agent-session started without its launcher cannot commit. Do not run `git config user.name` or `git config user.email`: every worktree of a clone shares one `.git/config`, so the change replaces that identity for every worktree, and an agent-session started without its launcher could then commit under the new one. If the pre-commit hook refuses a commit, do what its message says.
+
 ## Commands, and the machine each runs on
 
 | Goal | Type it on | Command |

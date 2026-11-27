@@ -1,6 +1,6 @@
 # Notes on using the Codex and Gemini (Antigravity) agents from an agent-seat
 
-This page tells an agent-seat how to run Codex and Gemini, and what to expect from them. Facts about an installed program say which machine and date they were checked on, because the programs update often. Measurements the cold-read-research agent-seat made from 2026-09-03 to 2026-09-07 are in their own section near the end, and the campaign's data is in the record `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/2026-09-03-cold-read-tier-roster-campaign/`. Claude Code, the program the agent-seats themselves run in, is covered elsewhere; it appears here only where it was measured beside the other two or where it broke their runs.
+This page tells an agent-seat how to run Codex and Gemini, and what to expect from them. Facts about an installed program say which machine and date they were checked on, because the programs update often. Measurements the cold-read-research agent-seat made from 2026-09-03 to 2026-09-07 are in `measured-2026-09-03-to-2026-09-07.md`, and the campaign's data beside it, in the record `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/2026-09-03-cold-read-tier-roster-campaign/`. Claude Code, the program the agent-seats themselves run in, is covered elsewhere; it appears here only where it was measured beside the other two or where it broke their runs.
 
 ## Run them through the project's programs
 
@@ -35,14 +35,6 @@ This page tells an agent-seat how to run Codex and Gemini, and what to expect fr
 5. `--print-timeout` defaults to `0s`, no limit; the launcher sets `15m` for the cold-read-fast-read and `40m` for the cold-read-grid's Gemini cell, so a run that hangs is stopped.
 
 **Its own documentation.** On ned-box, agy's customization guide is `~/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md`, with the rule-loading details in `~/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/rules.md`. Read it before asking agy about itself: asked about itself, agy may spend its whole run on experiments and time out.
-
-## Measured from 2026-09-03 to 2026-09-07
-
-These are the cold-read-research agent-seat's results, on the models and CLI versions of those days; the campaign record above holds the data for all but the result of 2026-09-07.
-
-- A Codex run at `max` effort on a document of 1,500 to 2,300 words took 13 to 32 minutes (`gpt-6-astra` and `gpt-5.6-sol`).
-- Codex hit no account limit in the campaign; Claude hit its limit three times in one day.
-- `gemini-3.8-flash-low` read a 700 to 1,500-word skill in 21 to 31 seconds, found as many of the known defects as `gpt-5.6-terra` at low effort in a quarter of the time, and found no defect that no other reviewer found. Measured on 2026-09-07, as `nn-systems/cold-read/cold-read-agy-cell.py` records: on one defect list, `gemini-3.8-flash-medium` found 42% and low 19%, which is why the cold-read-fast-read ran on medium until it moved to `gemini-4-neon-low`.
 
 ## Things that went wrong once and will again
 
