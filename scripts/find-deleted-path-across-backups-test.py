@@ -4423,6 +4423,53 @@ with tempfile.TemporaryDirectory() as tmp:
           and not (tmp / "elsewhere.md").exists(),
           "exit=%s\n%s\n%s" % (code, out, errors))
 
+    # A path ending in /, . or .. names a directory; placing "./note.md/" followed the symlink note.md and
+    # overwrote the file it leads to.
+    link_target = tmp / "real" / "link-target.md"
+    link_target.write_bytes(b"the symlink's target\n")
+    note = tmp / "real" / "note.md"
+    note.symlink_to(link_target)
+    listing_before = sorted(os.listdir(str(tmp / "real")))
+    os.chdir(str(tmp / "real"))
+    try:
+        for given in ("./note.md/", "./note.md/.", "./note.md/..", "note.md/", ".", "nedlern@ned-box:~/x/.."):
+            code, out, errors, calls = run_restore([given, "--restore", str(copy)])
+            check("--restore of %s, which names a directory, is a usage error, exit 2, writing nothing" % given,
+                  code == 2 and "ends in /, . or .., which names a directory" in errors and calls == []
+                  and note.is_symlink() and link_target.read_bytes() == b"the symlink's target\n"
+                  and sorted(os.listdir(str(tmp / "real"))) == listing_before,
+                  "exit=%s calls=%s listing=%s\n%s\n%s"
+                  % (code, calls, sorted(os.listdir(str(tmp / "real"))), out, errors))
+    finally:
+        os.chdir(directory_before)
+
+    # The scp form naming this machine is placed as the system places it, so ".." climbs from where a
+    # symlink leads; another machine's path keeps the lexical form, since its symlinks cannot be read here.
+    home = tmp / "home"
+    (home / "nedsnodes").mkdir(parents=True)
+    (home / "config").mkdir()
+    (home / "config" / "nedschorus").symlink_to(home / "nedsnodes" / "inner")
+    (home / "nedsnodes" / "inner").mkdir()
+    known_homes_before = dict(finder.locator.KNOWN_HOST_HOMES)
+    real_gethostname = finder.socket.gethostname
+    finder.locator.KNOWN_HOST_HOMES["ned-box"] = str(home)
+    try:
+        finder.socket.gethostname = lambda: "ned-box"
+        code, out, errors, calls = run_restore(["nedlern@ned-box:~/config/nedschorus/../x.md", "--restore", str(copy)])
+        on_this_machine = (code, errors, (home / "nedsnodes" / "x.md").is_file(), (home / "config" / "x.md").exists())
+        finder.socket.gethostname = lambda: "Els-MacBook-Pro.local"
+        from_another_machine = plain("nedlern@ned-box:~/config/nedschorus/../x.md")
+    finally:
+        finder.socket.gethostname = real_gethostname
+        finder.locator.KNOWN_HOST_HOMES.clear()
+        finder.locator.KNOWN_HOST_HOMES.update(known_homes_before)
+    check("--restore of the scp form naming this machine resolves .. through a symlink as the system does, "
+          "not lexically",
+          on_this_machine[0] == 0 and on_this_machine[2] and not on_this_machine[3], repr(on_this_machine))
+    check("cited query: the scp form naming another machine collapses .. lexically, since that machine's "
+          "symlinks cannot be read from here",
+          from_another_machine == str(home / "config" / "x.md"), repr(from_another_machine))
+
     real_expanduser = os.path.expanduser
     os.path.expanduser = lambda given: given
     try:
