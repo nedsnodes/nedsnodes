@@ -105,7 +105,7 @@ Every answer but O2, O3, --moved-on-no-decision, --already-decided and
 --moved-on needs the item's
 `#case_against` line, the first line of the item, outside fenced code, whose
 first word after any list, quotation or emphasis marker is `#case_against`,
-followed by a rating: none, weak, medium, strong or very strong. When the item
+followed by a rating: none, weak, medium or strong. When the item
 has that line, CHECK writes its rating into the answer line, whatever the
 answer, as a hashtag right after the answer, as in
 `approved #approved_obvious #case_against_weak`, so that one search finds every
@@ -654,7 +654,7 @@ MARKER_END = r"#?(?=[*_`]*(?:[:\s]|$))"
 # quotation marks; only that rule is shared, and each marker keeps its own emphasis rule.
 LINE_OPENING_MARKERS = rf"^\s*{load_walk_finder().MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*[*_`]*"
 CASE_AGAINST_LINE = re.compile(rf"{LINE_OPENING_MARKERS}#case_against{MARKER_END}[*_`]*[:\s]*(.*)$")
-CASE_AGAINST_RATING = re.compile(r"(very strong|none|weak|medium|strong)\b", re.I)
+CASE_AGAINST_RATING = re.compile(r"(none|weak|medium|strong)\b", re.I)
 CASE_AGAINST_HASHTAG = " #case_against_{rating}"
 NOT_ASKED_RATINGS = ("none", "weak")
 NOT_ASKED_WEAK_CASE_AGAINST_THAT_SETTLES = ("weak with a case against that names only cost, or only that the change "
@@ -821,7 +821,7 @@ NOT_ASKED_FLAG, ALREADY_DECIDED_FLAG = "--not-asked", "--already-decided"
 NOT_ASKED_ANY_RATING = (NOT_ASKED_RATED_NONE, NOT_ASKED_RATED_WEAK)
 NOT_ASKED_ADDS_NOTHING = "adds-nothing"
 NOT_ASKED_ADDS_NOTHING_LABEL = "adds nothing"
-EVERY_RATING = ("none", "weak", "medium", "strong", "very strong")
+EVERY_RATING = ("none", "weak", "medium", "strong")
 DROPPED_PROPOSAL_VALUE = "proposed-check-dropped-search-found-no-case"
 DROPPED_PROPOSAL_GROUND = "that the problem the dropped proposal guarded against may still come, at any rating"
 HANDOFF_INTERNALS_VALUE = "handoff-internals"
@@ -1309,7 +1309,7 @@ CASE_AGAINST_MISSING = (
     "nothing written: {item} in {document} has no `#case_against` line, and every answer records the item's "
     "case-against rating beside it in the minutes, so the ratings can later be compared with the user's answers.\n"
     "Add one line to {item}, just before its recommendation, that opens with `#case_against` and your rating of "
-    "its strongest case against, none, weak, medium, strong or very strong, as in "
+    "its strongest case against, none, weak, medium or strong, as in "
     "`#case_against weak: the fix costs an hour of fast reads.` or `#case_against none.`; the rating is yours, so "
     "the user need not see the item again for it.\n"
     "Then run `{command}` again.\n"
@@ -1317,7 +1317,7 @@ CASE_AGAINST_MISSING = (
 CASE_AGAINST_UNRATED = (
     "nothing written: the `#case_against` line of {item} in {document}, `{line}`, does not open with a rating, "
     "so no rating can be recorded beside the answer.\n"
-    "Change that line so that `#case_against` is followed by one of none, weak, medium, strong or very strong, "
+    "Change that line so that `#case_against` is followed by one of none, weak, medium or strong, "
     "as in `#case_against weak: the fix costs an hour of fast reads.`, then run `{command}` again.")
 USER_WORDS_MISSING = (
     "nothing written: check was given no --user-reply-as-typed, so the walk-minutes would record the answer "
@@ -2572,7 +2572,7 @@ def check_words(arguments):
 
 
 def case_against_rating(lines, item, document, arguments, top):
-    """Return the rating on the item's first `#case_against` line, as in `very strong`, or None when the item
+    """Return the rating on the item's first `#case_against` line, as in `strong`, or None when the item
     has none and the answer, O2, O3 or --moved-on-no-decision, does not need one; raise Failure when an answer that needs one finds
     none, or a line that opens with no rating."""
     for line in lines:
@@ -2829,7 +2829,7 @@ def check(arguments):
     document, lines, marks, unreadable, tag_comments_kept = item_lines(walk_finder, minutes, value, numbers, total,
                                                                        parser)
     rating = case_against_rating(lines, item, document, arguments, top)
-    rated = CASE_AGAINST_HASHTAG.format(rating=rating.replace(" ", "_")) if rating else ""
+    rated = CASE_AGAINST_HASHTAG.format(rating=rating) if rating else ""
     recommendation = walk_finder.approval_walk_item_last_recommendation_text_from_item_lines(lines)
     if arguments.moved_on_no_decision and recommendation is not None:
         raise Failure(MOVED_ON_NO_DECISION_REFUSED.format(
@@ -2853,7 +2853,7 @@ def check(arguments):
         raise Failure(UNREADABLE_NEW_MARKS.format(item=item, document=document, problems="\n".join(unreadable),
                                                   command=check_command_with_cwd(top, *check_words(arguments))))
     if arguments.not_asked is not None:
-        if arguments.not_asked == NOT_ASKED_RATED_NONE and rating == NOT_ASKED_RATED_WEAK:  # pragma: no mutate, no rating sorts after "weak" ("very strong" sorts before it), so >= matches only weak
+        if arguments.not_asked == NOT_ASKED_RATED_NONE and rating == NOT_ASKED_RATED_WEAK:  # pragma: no mutate, no rating sorts after "weak", so >= matches only weak
             raise Failure(NOT_ASKED_WEAK_GROUND_NOT_NAMED.format(item=item, weak_ground_choices="\n".join(
                 NOT_ASKED_WEAK_GROUND_CHOICE.format(ground=ground,
                                                     command=check_command_with_cwd(top, "--not-asked", value))

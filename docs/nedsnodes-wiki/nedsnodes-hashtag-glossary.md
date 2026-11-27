@@ -16,11 +16,10 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#canary_fail#` — the last line an nn-canary-test prints, with exit 1, when the outside program it checks did not behave as the project relies on.
 - `#canary_no_answer#` — the last line an nn-canary-test prints, with exit 2, when it could not tell whether the outside program behaves as relied on.
 - `#canary_pass#` — the last line an nn-canary-test prints, with exit 0, when the outside program it checks behaved as the project relies on.
-- `#case_against#` — the approval-walk item line, just before the alternative, that states the strongest case against the recommendation with its rating: none, weak, medium, strong or very strong.
+- `#case_against#` — the approval-walk item line, just before the alternative, that states the strongest case against the recommendation with its rating: none, weak, medium or strong.
 - `#case_against_medium#` — written in the walk-minutes beside the user's answer when the item's case against was rated medium.
 - `#case_against_none#` — written in the walk-minutes beside the user's answer when the item's case against was rated none.
 - `#case_against_strong#` — written in the walk-minutes beside the user's answer when the item's case against was rated strong.
-- `#case_against_very_strong#` — written in the walk-minutes beside the user's answer when the item's case against was rated very strong.
 - `#case_against_weak#` — written in the walk-minutes beside the user's answer when the item's case against was rated weak.
 - `#code#` — a project glossary label: the term of the entry it ends covers code.
 - `#cold_read_fast_read_sonnet_backup_ran#` — the line a cold-read-fast-read report carries when the Sonnet backup wrote it in place of the first model, with the reason.

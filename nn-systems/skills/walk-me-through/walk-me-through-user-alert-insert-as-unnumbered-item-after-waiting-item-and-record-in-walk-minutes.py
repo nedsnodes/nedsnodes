@@ -97,7 +97,7 @@ NEXT_STEPS_LINES = (
     "item it must follow, as the walk-me-through skill's section \"Re-planning\" says; the walk check program's "
     "close step refuses to move the walk on until each has its category line.",
     "At the end of each item added to the walk-document, write a line `#case_against <rating>: <the strongest case against your "
-    "recommendation>`, the rating one of weak, medium, strong or very strong, or the line `#case_against none.` "
+    "recommendation>`, the rating one of weak, medium or strong, or the line `#case_against none.` "
     "when there is no case against; then a line `The alternative: <what you will do if the user disapproves>`; then a line "
     "`Recommendation: "
     "<what you will do on ned-box, or what the user does and where>`, as the walk-me-through skill's section "
