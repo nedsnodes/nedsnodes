@@ -471,8 +471,51 @@ def findings_record_cases(scratch):
           result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr,
           result.detail)
 
+    def one_finding_report(*entry_lines):
+        return "<!-- provenance -->\n\n" + "\n\n".join(
+            f"- [Codex priority P1 (P0 highest)] {on_main}\n  Body.\n" + "\n".join("  " + line for line in lines.splitlines())
+            for lines in entry_lines) + "\n"
+
+    worded_lines = main_lines.replace("`#defect_already_on_main` `yes`", "`#defect_already_on_main` yes (on main)") \
+        .replace("`#pull_request_triggers_the_defect` `no`", "`#pull_request_triggers_the_defect` No, it does not.")
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, one_finding_report(worded_lines)),), findings_record_match={"match": same})
+    check("an answer's first word decides it: `yes (on main)` sends the finding to match, and `No, it does not.` "
+          "lets the held row stand without a grade",
+          result.code == 0 and [entry["finding_id"] for entry in result.match_calls[0][1]] == [main_id]
+          and f"- {main_id}: the same defect as findings record row 17" in (result.posted or {}).get("body", ""),
+          result.detail)
+    dotted_lines = main_lines.replace("`#pull_request_triggers_the_defect` `no`",
+                                      "`#pull_request_triggers_the_defect` `Yes.`")
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, one_finding_report(dotted_lines)),), findings_record_match={"match": same})
+    check("a held finding whose entry answers that this pull request makes it happen `Yes.` still needs a grade",
+          result.code == 2 and result.posted is None and "have no grade" in result.stderr, result.detail)
+    lineless = "\n".join(line for line in main_lines.splitlines() if "#pull_request_triggers_the_defect" not in line)
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, one_finding_report(main_lines, lineless)),),
+                         findings_record_match={"match": same})
+    check("a held finding with one entry answering that this pull request makes it happen no, and another entry "
+          "with no such line, still needs a grade",
+          result.code == 2 and result.posted is None and "have no grade" in result.stderr, result.detail)
+    not_on_main_lines = main_lines.replace("`#defect_already_on_main` `yes`", "`#defect_already_on_main` `no`")
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, one_finding_report(not_on_main_lines, main_lines)),),
+                         findings_record_match={"match": same})
+    sent = result.match_calls[0][1][0]["text"] if result.match_calls else ""
+    check("when only a later entry of a finding says main has it, that entry's text goes to match",
+          "`#defect_already_on_main` `yes`" in sent and "`#defect_already_on_main` `no`" not in sent, result.detail)
+
     fixed = (0, json.dumps({main_id: {"answer": "SAME", "record": {**row, "state": "fixed", "decision": None},
                                       "possible_regression": True}}), "")
+    result = run_program(scratch, file([main_grade], [main_comment]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, both_report),), findings_record_match={"match": fixed})
+    body = (result.posted or {}).get("body", "")
+    check("a graded finding matched to a fixed row posts with its grade and with the row and its possible-regression "
+          "warning in the body",
+          result.code == 0 and f"- {main_id} (P1): file-for-later" in body
+          and f"- {main_id}: the same defect as findings record row 17, state fixed" in body
+          and "a possible regression, since the row is fixed" in body, result.detail)
     result = posting(file([pull_request_grade]), match=fixed)
     check("a match to a fixed row is reported as a possible regression in the body and the success line",
           result.code == 0 and "state fixed, grade fix-in-maintenance; a possible regression, since the row is "
