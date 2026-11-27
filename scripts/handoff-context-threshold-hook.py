@@ -37,6 +37,7 @@ The transcript supplies usage for both interactive and headless sessions."""
 import argparse
 import importlib.util
 import json
+import math
 import os
 import re
 import socket
@@ -1079,10 +1080,15 @@ def send_handoff_get_ready_notice(session_id, used, share, arguments) -> int:
     lines = [HANDOFF_GET_READY_NOTICE.format(share=share, threshold=arguments.threshold_used_percentage,
                                              get_ready=arguments.get_ready_used_percentage)]
     record = handoff_get_ready_notice_sent_marker_path(session_id)
+    # Written beside the record and renamed into place: a write that fails part way must leave no
+    # record, or the next stop would read the notice as sent and stay silent.
+    partial = record.with_name(record.name + ".partial")
     try:
         HANDOFF_DIRECTORY.mkdir(parents=True, exist_ok=True)
-        record.write_text(f"{used:.1f}\n", encoding="utf-8")
+        partial.write_text(f"{used:.1f}\n", encoding="utf-8")
+        os.replace(partial, record)
     except OSError as problem:
+        partial.unlink(missing_ok=True)
         lines.append(HANDOFF_GET_READY_NOTICE_NOT_RECORDED_LINE.format(
             path=record, problem=problem, threshold=arguments.threshold_used_percentage,
             host=socket.gethostname()))
@@ -1131,9 +1137,11 @@ def main(argv=None) -> int:
     used_tokens, window, model = reading
     dropped_tokens = compaction_dropped_tokens_from_transcript(transcript_path)
     used = 100.0 * (used_tokens + dropped_tokens) / window
+    # Below the threshold the share is rounded down, so 32.6% never prints as a 33% threshold.
+    shown = math.floor(used) if used < arguments.threshold_used_percentage else used
     share = (SHARE_WITH_COMPACTION_DROPPED.format(
-                 used_percentage=100.0 * used_tokens / window, used_plus_dropped_percentage=used)
-             if dropped_tokens else f"{used:.0f}%")
+                 used_percentage=100.0 * used_tokens / window, used_plus_dropped_percentage=shown)
+             if dropped_tokens else f"{shown:.0f}%")
     if (arguments.get_ready_used_percentage <= used < arguments.threshold_used_percentage
             and not deferred_marker_path(session_id).exists()
             and not handoff_asked_marker_path(session_id).exists()
