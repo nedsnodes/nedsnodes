@@ -50,10 +50,9 @@ any heading other than `##`, as in `## Part 2` headings over `### Item 2 of
 3` items, has no unnumbered items: its `##`
 headings are parts or sections. A dotted count, as in a `### Item 1.1 of 3`
 sub-step, does not decide this. The answer program's close step numbers an
-unnumbered item when it is shown. M is display only: approval_walk_item_total_shown_and_waiting_counted_from_walk_document counts it from the
-walk-document, the whole numbers its item headings hold, a dotted number
-counting as the item before its first dot, or the highest of them when that is
-more, plus its unnumbered items, so an item added changes no other heading. The close step writes it into the
+unnumbered item when it is shown. M is display only, counted as
+approval_walk_item_total_shown_and_waiting_counted_from_walk_document says, so an
+item added changes no other heading. The close step writes it into the
 `#next_to_present` line, and the hooks show the M that line gives; no M is
 compared, and an `of M` a heading or the minutes give is read only to choose
 between two headings that name the same item. A
