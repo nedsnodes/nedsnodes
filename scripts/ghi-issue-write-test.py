@@ -3085,6 +3085,25 @@ def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
                   for line in lines),
           (outcome, dated.calls, lines))
 
+    other_repo = "owner/repo"
+    other_placeholder = tool.placeholder_body(tool.pairing_key(local),
+                                              other_repo)
+    elsewhere = Recorder({
+        f"gh issue view 570 --repo {other_repo} --json title": Completed(
+            json.dumps({"title": "Handoff dialog: older words"})),
+        "gh issue view 570": issue_json("Handoff dialog: older words",
+                                        other_placeholder),
+        main_copy: Completed(dated_text),
+        "git ls-tree": Completed(EDIT_RELATIVE + "\0")})
+    lines = []
+    outcome = tool.create(source, other_repo, scratch, elsewhere, lines.append)
+    check("a dated heading in another repository is told to clear the date "
+          "with an edit command that carries that repository's --repo",
+          outcome == (570, True)
+          and any(f"scripts/ghi-issue-write.py edit {EDIT_RELATIVE} "
+                  f"--repo {other_repo}" in line for line in lines),
+          (outcome, elsewhere.calls, lines))
+
     reviewed_heading = "Handoff dialog: words review chose"
     reviewed = tool.with_issue_frontmatter(
         FILE_TEXT.replace(f"# {EDIT_TITLE}", f"# {reviewed_heading}"),
@@ -3164,6 +3183,36 @@ def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
           staging.ran("git worktree add")
           and not isinstance(outcome, tool.Refused),
           (outcome, staging.calls, lines))
+    emptied, lines, outcome = rerun_on_original_after_review_renamed(
+        True, on_main=())
+    check("a rerun whose filing pull request merged, with no file for the "
+          "issue left on main, says main holds none, prints no rerun "
+          "command, and lands and links nothing",
+          outcome == (570, False)
+          and any("main holds no file for issue 570" in line
+                  for line in lines)
+          and not any("rerun" in line.lower() and "ghi-issue-write.py create"
+                      in line for line in lines)
+          and not emptied.ran("git worktree add")
+          and not emptied.ran("gh pr create")
+          and not emptied.ran("gh issue edit"),
+          (outcome, emptied.calls, lines))
+    asked_prefixes = []
+    reporting = tool.report_open_ruling_questions
+    tool.report_open_ruling_questions = (
+        lambda number, done, prefixes, runner, report:
+        asked_prefixes.append(list(prefixes)))
+    try:
+        rerun_on_original_after_review_renamed(
+            True, on_main=(second_file, EDIT_RELATIVE))
+    finally:
+        tool.report_open_ruling_questions = reporting
+    filed_stem = Path(EDIT_RELATIVE).stem
+    check("a rerun whose filing pull request merged, with another file for "
+          "the issue listed first on main, looks for ruling questions under "
+          "the filed GHI-MD's name",
+          asked_prefixes == [[filed_stem, filed_stem[len("570-"):]]],
+          asked_prefixes)
     unmerged, lines, outcome = rerun_on_original_after_review_renamed(False)
     check("and with no merged filing pull request the rerun lands the file "
           "as before",
