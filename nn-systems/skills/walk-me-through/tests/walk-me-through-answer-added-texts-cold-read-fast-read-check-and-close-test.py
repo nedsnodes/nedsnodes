@@ -6269,10 +6269,10 @@ Recommendation: close the issue.
 """
 
 
-def close_the_issue_case(touches="", recorded=""):
+def close_the_issue_case(touches="", recorded="", root_name_suffix=""):
     document = ("# A walk\n\n" + CLOSE_THE_ISSUE_ITEM.format(touches=touches)
                 + "\n## Item 23 of 26: a later item\n\n#case_against weak: a line more.\n\nRecommendation: add it.\n")
-    case = Case(next_to_present="item 22 of 26", document=document)
+    case = Case(next_to_present="item 22 of 26", document=document, root_name_suffix=root_name_suffix)
     case.minutes.write_text(f"# Minutes\n\n{recorded}#next_to_present item 22 of 26\n")
     return case
 
@@ -6303,6 +6303,18 @@ def test_the_read_step_says_an_item_rated_none_that_asks_a_decision_is_not_shown
           settled.returncode == 0
           and "item 22 of 26 is recorded as settled without asking the user, case against none;" in settled.stdout,
           described(settled))
+
+
+def test_the_read_step_prints_a_brace_pair_in_a_no_answer_row_as_it_is():
+    # {review} names no placeholder and crashed the step; {item} names one and was silently replaced.
+    for suffix in ("{review}", "{item}"):
+        case = close_the_issue_case(root_name_suffix=suffix)
+        result = case.run(WAITING_ITEM_READ)
+        rows = [line for line in result.stdout.splitlines() if "--cwd" in line]
+        check(f"the read step, on an item rated none whose checkout path holds {suffix}, exits 0 and prints the path "
+              "unchanged in every line that holds --cwd",
+              result.returncode == 0 and rows and all(str(case.checkout) in line for line in rows),
+              described(result))
 
 
 def test_the_read_step_presents_an_item_rated_none_that_is_shown_all_the_same():
