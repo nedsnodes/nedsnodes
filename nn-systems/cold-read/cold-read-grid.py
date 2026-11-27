@@ -289,7 +289,7 @@ AGENT_BINARY_DOWN_PREFIX = "AGENT-BINARY DOWN:"
 STRAY_WRITE_RESTORE_ARGUMENTS = "restore --staged --worktree --"
 STOPPED_CELL_WRITE_CHECK_LINE = (
     "The {cell} cell was stopped, so any check it made for files it wrote outside its "
-    "report is not used, and the grid could not check for it, because {reason}; that is "
+    "report is not used, and the grid could not check for such files, because {reason}; that is "
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
     + ".\nBefore "
     "you do anything else, read `git status` against the edits you know are your own. "
@@ -1099,7 +1099,10 @@ def lift_cell_status_lines(report_path: pathlib.Path, log_lines: list,
                            stray_write_lines: bool = True) -> None:
     """Print cell status lines before successful-attempt logs are deleted,
     each followed by the line that says what to do about it; without
-    stray_write_lines, leave out the STRAY WRITE and WRITE CHECK DID NOT RUN kinds."""
+    stray_write_lines, leave out the STRAY WRITE and WRITE CHECK DID NOT RUN kinds.
+    Not handled: a stopped retry's own check can see a write the grid's check cannot,
+    when the retry restored a path that someone else changed after the grid launched;
+    the grid compares with its launch snapshot, so no line names that path."""
     for line in log_lines:
         if stray_write_lines and cell_status_line(line, cell_common.STRAY_WRITE_PHRASE):
             print(f"STRAY WRITE: {line.strip()}", flush=True)

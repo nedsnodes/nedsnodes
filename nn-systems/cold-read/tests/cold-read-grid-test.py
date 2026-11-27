@@ -451,17 +451,17 @@ def write_target(repository, relative_path):
 
 # Runs the grid with its clock jumped past any attempt time limit once the record holds
 # this many nonempty reports, so a limit cannot expire before a slow cell has written.
-GRID_WITH_CLOCK_JUMPED_ONCE_FILES_EXIST = r'''import glob, pathlib, runpy, sys, time
-grid, watched_glob, file_count, jump_seconds = sys.argv[1:5]
+GRID_WITH_CLOCK_JUMPED_ONCE_FILES_EXIST = r'''import pathlib, runpy, sys, time
+grid, watched_directory, watched_pattern, file_count, jump_seconds = sys.argv[1:6]
 real_monotonic = time.monotonic
 jumped = False
 def monotonic():
     global jumped
-    jumped = jumped or sum(pathlib.Path(path).stat().st_size > 0 for path in glob.glob(watched_glob)
-                           if pathlib.Path(path).name != "cold-read-reference-check.md") >= int(file_count)
+    jumped = jumped or sum(path.stat().st_size > 0 for path in pathlib.Path(watched_directory).glob(watched_pattern)
+                           if path.name != "cold-read-reference-check.md") >= int(file_count)
     return real_monotonic() + (float(jump_seconds) if jumped else 0)
 time.monotonic = monotonic
-sys.argv = [grid, *sys.argv[5:]]
+sys.argv = [grid, *sys.argv[6:]]
 sys.path.insert(0, str(pathlib.Path(grid).parent))
 runpy.run_path(grid, run_name="__main__")
 '''
@@ -472,7 +472,7 @@ def run_grid(repository, stub_directory, environment_overrides=None,
              current_directory=None, launcher_arguments_before_grid=None, timeout_seconds=None):
     """The grid in `repository` as a subprocess, run from `current_directory`,
     by default `repository`. `launcher_arguments_before_grid`, when given, is
-    (launcher file, glob of the watched files, their count, jump seconds) for
+    (launcher file, watched directory, glob of the watched files inside it, their count, jump seconds) for
     GRID_WITH_CLOCK_JUMPED_ONCE_FILES_EXIST. Past `timeout_seconds` the grid is
     killed and subprocess.TimeoutExpired raised; its cells keep running."""
     stub_directory.mkdir(parents=True, exist_ok=True)
@@ -613,7 +613,7 @@ def run_grid_with_every_stub_timed_out_once_all_are_reading(repository, stub_dir
         "COLD_READ_GRID_TEST_STUB_STARTED_READING_MARKER_DIRECTORY": str(started_reading_markers),
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds),
         **environment_overrides}, 240,
-        launcher_arguments_before_grid=(clock_launcher, started_reading_markers / "*", 8, attempt_limit_seconds))
+        launcher_arguments_before_grid=(clock_launcher, started_reading_markers, "*", 8, attempt_limit_seconds))
 
 
 def wrote_then_hung_checks(result, left_running, repository, elapsed):
@@ -1287,11 +1287,25 @@ try:
     result, left_running = run_grid_stopped_at_deadline(repository, hung_after_writing_stubs, {
         "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)}, grid_deadline_seconds,
-        launcher_arguments_before_grid=(clock_launcher, repository / "cold-read-records" / "*" / "*.md", 8,
+        launcher_arguments_before_grid=(clock_launcher, repository / "cold-read-records", "*/*.md", 8,
                                         attempt_limit_seconds))
     for case_name, condition, detail in wrote_then_hung_checks(
             result, left_running, repository, time.monotonic() - started):
         check(case_name, condition, detail)
+
+    # --- The clock launcher finds its watched files in a directory whose name is a glob pattern ---
+    bracketed_directory = scratch / "watched[local]"
+    bracketed_directory.mkdir()
+    (bracketed_directory / "report.md").write_text("written\n", encoding="utf-8")
+    clock_probe = scratch / "print-whether-the-clock-jumped.py"
+    clock_probe.write_text("import time\nprint(time.monotonic() > 10**8)\n", encoding="utf-8")
+    bracket_launcher = scratch / "grid-with-clock-jumped-once-files-exist-in-bracketed-directory.py"
+    bracket_launcher.write_text(GRID_WITH_CLOCK_JUMPED_ONCE_FILES_EXIST, encoding="utf-8")
+    probe = subprocess.run(
+        [sys.executable, str(bracket_launcher), str(clock_probe), str(bracketed_directory), "*.md", "1",
+         str(10**9)], capture_output=True, text=True, timeout=60)
+    check("the clock launcher counts the watched files in a directory whose name holds [ and ]",
+          probe.stdout.strip() == "True", f"stdout {probe.stdout!r} stderr {probe.stderr[-500:]!r}")
 
     # --- The deadline passes before the grid has made a record -----------------
     repository = build_scratch_repository(scratch, "checkout-deadline-before-any-record")
@@ -1304,7 +1318,7 @@ try:
     deadline_seconds = 2
     result, left_running = run_grid_stopped_at_deadline(
         repository, deadline_stubs, {}, deadline_seconds,
-        launcher_arguments_before_grid=(holding_launcher, "", 0, 0))
+        launcher_arguments_before_grid=(holding_launcher, "", "", 0, 0))
     deadline_checks = wrote_then_hung_checks(result, left_running, repository, deadline_seconds)
     check("a grid stopped at the deadline before making a record fails on the deadline alone",
           result.returncode == -signal.SIGKILL and record_directory_of(repository) is None
