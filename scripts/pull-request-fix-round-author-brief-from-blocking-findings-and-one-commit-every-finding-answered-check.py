@@ -812,8 +812,12 @@ def hand_merge_of_origin_main_start(worktree, frozen_head):
         return conflicted
     if round_merge_of_origin_main(worktree, git(["-C", str(worktree), "rev-parse", "HEAD"]).strip(), frozen_head):
         return []
+    # Such as a fast-forward when origin/main moved after the conflict check; the frozen-head is what the round needs.
+    git(["-C", str(worktree), "reset", "--quiet", "--hard", frozen_head])
     raise StepFailed(f"git merge --no-edit origin/main in {worktree} left neither a merge nor a conflict to "
-                     "resolve, so the round's hand-merge did not start")
+                     f"resolve, so the round's hand-merge did not start. This program put {worktree} back at the "
+                     f"frozen-head {frozen_head}.\n"
+                     "Run this same command again, which runs the conflict check afresh")
 
 
 def topic_worktree_of_branch(branch):

@@ -7,7 +7,8 @@ prefix of them when the key ends with "*"; it exits 1 on an unarranged call, and
 call's arguments to the calls file. A fake `git` beside it answers `git ls-remote` with FAKE_GIT_LS_REMOTE_STDOUT,
 FAKE_GIT_LS_REMOTE_STDERR and FAKE_GIT_LS_REMOTE_EXIT, by default origin's branch at the head and branch the case's gh pr view route
 names; FAKE_GIT_MERGE_TREE_EXIT makes `git merge-tree` fail with that exit code, and FAKE_GIT_MERGE_EXIT makes `git merge`
-exit with that code without merging; it hands every other git command to the real git.
+exit with that code without merging, FAKE_GIT_MERGE_RESET_TO makes it reset FAKE_GIT_MERGE_RESET_IN's branch
+to that commit instead; it hands every other git command to the real git.
 
 Run: python3 scripts/pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-answered-check-test.py
 """
@@ -85,6 +86,10 @@ for argument in "$@"; do
     if [ "$argument" = merge-tree ] && [ -n "$FAKE_GIT_MERGE_TREE_EXIT" ]; then
         printf 'fatal: the fake merge-tree failed\n' >&2
         exit "$FAKE_GIT_MERGE_TREE_EXIT"
+    fi
+    if [ "$argument" = merge ] && [ -n "$FAKE_GIT_MERGE_RESET_TO" ]; then
+        REAL_GIT -C "$FAKE_GIT_MERGE_RESET_IN" reset -q --hard "$FAKE_GIT_MERGE_RESET_TO"
+        exit 0
     fi
     if [ "$argument" = merge ] && [ -n "$FAKE_GIT_MERGE_EXIT" ]; then
         printf 'fatal: the fake merge failed\n' >&2
@@ -3456,6 +3461,14 @@ def hand_merge_cases(root, repository, _base, frozen_head):
         code, out, err = run(root, repository, routes, environment_extra={**conflict, "FAKE_GIT_MERGE_EXIT": exit_code})
         check(f"hand-merge: git merge exiting {exit_code} without merging fails with exit 2, saying why, and prints "
               "no brief", code == 2 and err.startswith("FAILED: ") and said in err and out == "", err + out)
+
+    code, out, err = run(root, repository, routes, environment_extra={
+        **conflict, "FAKE_GIT_MERGE_RESET_TO": main_tip, "FAKE_GIT_MERGE_RESET_IN": str(repository)})
+    check("hand-merge: a merge that moves the branch to a commit that is no merge puts the topic-worktree back at "
+          "the frozen-head and says to run the command again",
+          code == 2 and git(repository, "rev-parse", "HEAD") == frozen_head
+          and f"put {repository} back at the frozen-head {frozen_head}" in err
+          and "Run this same command again, which runs the conflict check afresh" in err, err + out)
 
     code, out, err = run(root, repository, routes, environment_extra=conflict)
     check("hand-merge: the brief starts the merge of origin/main in the topic-worktree and leaves its conflict",
