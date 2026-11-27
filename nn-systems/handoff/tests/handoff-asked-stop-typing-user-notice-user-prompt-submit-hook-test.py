@@ -137,24 +137,24 @@ with tempfile.TemporaryDirectory() as workspace:
     marker("s-once").write_text("40.0\n", encoding="utf-8")
     os.utime(marker("s-once"), ns=(1_000_000_000_000, 1_000_000_000_000))
     payload = {"session_id": "s-once", "transcript_path": str(titled)}
-    result = run_hook(payload, home, agent_seat_name="seat-a")
-    check("marker file present: the line names the last custom-title, exit 0",
+    result = run_hook(payload, home)
+    check("marker file present, in an agent-session no handoff-supervisor launched: the line names the last custom-title, exit 0",
           result.returncode == 0 and shown_notice(result) == expected_named("efficiency-renamed"),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     check("marker file present: the file recording the shown notice holds the marker file's modification time",
           (handoffs / "s-once-handoff-asked-user-notice-shown").read_text(encoding="utf-8").strip()
           == "1000000000000")
 
-    result = run_hook(payload, home, agent_seat_name="seat-a")
+    result = run_hook(payload, home)
     check("second message, same marker file: no output, exit 0", silent(result),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
     os.utime(marker("s-once"), ns=(2_000_000_000_000, 2_000_000_000_000))
-    result = run_hook(payload, home, agent_seat_name="seat-a")
+    result = run_hook(payload, home)
     check("a newer marker file: the line again",
           result.returncode == 0 and shown_notice(result) == expected_named("efficiency-renamed"),
           f"code {result.returncode}, stdout {result.stdout!r}")
-    result = run_hook(payload, home, agent_seat_name="seat-a")
+    result = run_hook(payload, home)
     check("a newer marker file, second message: no output", silent(result),
           f"stdout {result.stdout!r}")
 
@@ -171,7 +171,14 @@ with tempfile.TemporaryDirectory() as workspace:
     marker("s-stored").write_text("40.0\n", encoding="utf-8")
     result = run_hook({"session_id": "s-stored", "transcript_path": str(untitled)}, home,
                       agent_seat_name="seat-a")
-    check("no title record and a stored Remote Control name: the line names the stored name",
+    check("no title record and a stored Remote Control label: the line names the stored label",
+          result.returncode == 0 and shown_notice(result) == expected_named("seat-a-renamed"),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    marker("s-labelled").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-labelled", "transcript_path": str(titled)}, home,
+                      agent_seat_name="seat-a")
+    check("a launched agent-session whose title is not its stored Remote Control label: the line "
+          "names the label, which claude.ai lists the successor under",
           result.returncode == 0 and shown_notice(result) == expected_named("seat-a-renamed"),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     (handoffs / "seat-a-remote-control-name").unlink()

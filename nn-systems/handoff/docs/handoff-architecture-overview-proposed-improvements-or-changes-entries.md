@@ -1257,3 +1257,25 @@ The claim check's evidence:
 > - The writer takes them from the supervisor, not from the module: handoff-write-and-check-supervisor.py:152-154.
 > - Ranked fix-later: renaming one of these fields still takes one edit, in handoff-supervisor.py, and a search finds it.
 State: open
+
+## E108 — possible problem: an assertion of the overview is unsupported
+
+Claim: The handoff-supervisor holds the agent-seat's lock, heartbeats into its state file, and launches `claude` with the agent-seat name as its address, "the name in the pane that agents on either machine message the agent-seat by", and with the stored label, or the agent-seat name, as the name Remote Control lists it under.
+Found by: the overview claim check of 2026-11-27 against commit d371aeb619e6004ddd64a0b58b41f708fb96c552; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/0ee1adfdaf8bf63876f07246aab126db74116b55-2026-11-27T01-42-34-127877Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The lock, the heartbeat and the two names are supported: `nn-systems/handoff/handoff-supervisor.py:2347` `fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)`, `:742` `state["last_poll_at"] = datetime.now(timezone.utc).isoformat()`, `:2247-2248` `f"--remote-control={remote_control_name or handoff_supervisor_agent_name}",` / `f"--name={handoff_supervisor_agent_name}",`.
+> - Nothing bears out "the name in the pane". The code says the address is what `--name` sets: `nn-systems/handoff/handoff-supervisor.py:2238` `--name sets the address peers message`. No tmux pane name is involved. I read `handoff-supervisor.py:2228-2268` and the common module's docstring (`:1-16`).
+State: open
+
+## E109 — possible problem: an assertion of the overview is contradicted
+
+Claim: At most one handoff-supervisor per name runs on a machine because of the lock; a second machine may run the name too, "although both then register the same address and Remote Control label".
+Found by: the overview claim check of 2026-11-27 against commit d371aeb619e6004ddd64a0b58b41f708fb96c552; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/0ee1adfdaf8bf63876f07246aab126db74116b55-2026-11-27T01-42-34-127877Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The lock part holds (`nn-systems/handoff/handoff-supervisor.py:2347`).
+> - The label part does not. Each machine reads its own label file: `nn-systems/handoff/handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py:57` `return Path.home() / ".claude" / "handoffs" / f"{agent_seat}{REMOTE_CONTROL_NAME_FILE_SUFFIX}"`. A claude.ai rename stores the new label only on the machine whose agent-session was renamed (`:142-144`). So the two machines can list the same name under different labels. Only the address (`--name`, `nn-systems/handoff/handoff-supervisor.py:2248`) is always the same.
+State: open

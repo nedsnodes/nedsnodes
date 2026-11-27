@@ -1767,14 +1767,15 @@ with tempfile.TemporaryDirectory() as temporary:
         check("supervisor plain launch tells the session the id it launches",
               launched and launched[0][2] == "abc-123", launched)
         launched.clear()
-        # nedschorus#142 lane: a seat launched with its own name pins the title
-        # it answers to across machines, and turns Remote Control on so it is
-        # reachable at all. The name sits before the prompt positional.
+        # A seat launched with its own name pins the address it answers to across
+        # machines, and turns Remote Control on, under its label, so it is reachable
+        # at all. The names sit before the prompt positional.
         supervisor_module.launch_agent_session("claude", "abc-123", Path("/tmp"),
-                                               "the prompt", remote_control_name="prof")
+                                               "the prompt", remote_control_name="prof-label",
+                                               handoff_supervisor_agent_name="prof")
         check("supervisor launch names the seat for cross-machine messaging",
               launched and launched[0][0] == ["claude", "--session-id", "abc-123",
-                                              "--remote-control=prof",
+                                              "--remote-control=prof-label",
                                               "--name=prof",
                                               "--remote-control-session-name-prefix=prof",
                                               "the prompt"],
