@@ -8,6 +8,7 @@
     {"path": ".claude/guard-hooks/claude-code-tmux-kill-server-and-kill-session-missing-server-selection-refusal-hook.py", "timeout_seconds": 30},
     {"path": ".claude/guard-hooks/pkill-killall-and-process-name-pattern-kill-refusal-hook.py", "timeout_seconds": 30},
     {"path": ".claude/guard-hooks/hand-typed-codex-exec-command-refusal-hook.py", "timeout_seconds": 30},
+    {"path": ".claude/guard-hooks/gh-api-graphql-paginate-without-endcursor-variable-refusal-hook.py", "timeout_seconds": 30},
     {"path": "nn-systems/general-tools/claude-code-bash-git-push-of-markdown-change-citation-checks-reminder-hook.py", "timeout_seconds": 30},
     {"path": ".claude/guard-hooks/ghi-md-whole-file-replacement-soft-block.py", "timeout_seconds": 30},
     {"path": ".claude/guard-hooks/handoff-deferral-cold-read-full-run-launch-refusal-hook.py", "timeout_seconds": 30},
