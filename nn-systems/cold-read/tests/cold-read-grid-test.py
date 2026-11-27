@@ -1577,6 +1577,22 @@ try:
           and markers_in(record_directory, "<!-- INCOMPLETE SET:") == [],
           markers_in(record_directory, "<!-- INCOMPLETE SET:") if record_directory else "no record")
 
+    # --- A skipped Gemini cell beside an absent one: counts stay of seven -----
+    repository = build_scratch_repository(scratch, "checkout-agy-cell-gemini-quota-and-one-absent")
+    result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
+        [{"fragment": "agy-hunt-gemini-4-neon-high.md", "attempts": 2,
+          "stderr": gemini_quota_agy_error_line},
+         {"fragment": "claude-terminology-deep.md", "attempts": 2}])})
+    record_directory = record_directory_of(repository)
+    check("a skipped Gemini cell and an absent cell: 5 of 7 landed, marker 1 of 7, the skip sentence, exit 1",
+          result.returncode == 1 and "5 of 7 reports landed in" in result.stdout
+          and record_directory is not None
+          and len(markers_in(record_directory, "<!-- INCOMPLETE SET: 1 of 7 reports absent — "
+                                               "claude-terminology-deep (")) == 7
+          and any(line.startswith(gemini_quota_skipped_sentence_opening)
+                  for line in result.stdout.splitlines()),
+          f"exit {result.returncode}; stdout={result.stdout!r}")
+
     # --- Another agy error is retried and absent, as any failure is ----------
     repository = build_scratch_repository(scratch, "checkout-agy-cell-other-agy-error")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
