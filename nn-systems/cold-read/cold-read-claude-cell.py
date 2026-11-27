@@ -104,7 +104,9 @@ def credential_read_deny_rules(platform: str = sys.platform) -> list:
 
 
 CREDENTIAL_READ_DENY_RULES = credential_read_deny_rules()
-SETTINGS = {"disableAllHooks": True, "permissions": {"deny": CREDENTIAL_READ_DENY_RULES}}
+# Auto-memory would hand the cell the launching agent-seat's MEMORY.md and its memory instructions.
+SETTINGS = {"disableAllHooks": True, "autoMemoryEnabled": False,
+            "permissions": {"deny": CREDENTIAL_READ_DENY_RULES}}
 PROMPT_CACHE_FIVE_MINUTE_TTL_SETTINGS = {"promptCacheTtl": "5m"}
 
 
