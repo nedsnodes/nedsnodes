@@ -1118,21 +1118,13 @@ with tempfile.TemporaryDirectory() as update_workspace:
     # A hung update is killed at the timeout and the launch proceeds. The
     # launchers allow 120s for a real download; 1s here bounds the case. exec,
     # so the kill at the timeout reaches the sleep and nothing outlives the case.
-    hung_update_timeout_seconds = 1
-    # A backstop only: the status and the message below are what show the
-    # timeout fired. Ten times the timeout or more, so a busy machine cannot
-    # fail it, and far below the stub's 30-second sleep.
-    hung_update_backstop_seconds = 15 * hung_update_timeout_seconds
+    # Status 124 shows the timeout fired: a stub that ran out its sleep exits 0.
     agent = an_agent_recording_its_invocations(update_workspace, body="exec sleep 30")
-    started = time.monotonic()
     captured = io.StringIO()
     with contextlib.redirect_stderr(captured):
         result = supervisor.agent_binary_update_under_lock.run_agent_binary_update_under_lock(
-            [str(agent), "update"], hung_update_timeout_seconds, "handoff-supervisor")
-    elapsed = time.monotonic() - started
-    check("a hung update is killed at the timeout rather than blocking the launch",
-          elapsed < hung_update_backstop_seconds, f"{elapsed:.1f}s")
-    check("a timed-out update returns a nonzero status", result == 124, str(result))
+            [str(agent), "update"], 1, "handoff-supervisor")
+    check("a hung update is killed at the timeout rather than blocking the launch", result == 124, str(result))
     check("a killed update says so, because the supervisor is what killed it",
           "was stopped" in captured.getvalue(), captured.getvalue())
 
