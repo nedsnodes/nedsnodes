@@ -1699,7 +1699,7 @@ def restore(pairs):
                         store.approve(path, DELETED)
                     message = f"Deleted {path}: it has no approved version."
                 else:
-                    saved_copy_put_back().saved_copy_put_back_at_path(content, path)
+                    saved_copy_put_back().saved_copy_put_back_at_path(content, path, follow_symlink=False)
                     restored = newest[0]
                     message = f"Put back the approved version {restored} of {path}."
                 log_line(store, path, "restored", "command-line", "", key, restored)

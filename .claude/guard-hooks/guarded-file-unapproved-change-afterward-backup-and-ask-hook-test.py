@@ -532,6 +532,21 @@ def cases(scratch):
     check("--restore keeps the current version before it restores",
           result.returncode == 0 and key in world.versions(claude), world.versions(claude))
 
+    world = fresh(scratch, "restore-declined-symlink")
+    claude = world.repo / "CLAUDE.md"
+    unrelated = world.scratch / "unrelated.txt"
+    unrelated.write_text("unrelated\n")
+    claude.unlink()
+    claude.symlink_to(unrelated)
+    declined = world.key(claude)
+    world.run()
+    result = world.command("--restore", claude, declined)
+    check("--restore of a guarded file replaced by a symlink puts an ordinary file with the approved "
+          "version at the path and leaves the file the symlink pointed to as it was",
+          result.returncode == 0 and not claude.is_symlink() and claude.read_text() == "project v1\n"
+          and unrelated.read_text() == "unrelated\n",
+          (result.stderr, claude.is_symlink(), unrelated.read_text()))
+
     world = fresh(scratch, "restore-branch-unreadable")
     claude = world.repo / "CLAUDE.md"
     claude.write_text("project v2, committed\n")

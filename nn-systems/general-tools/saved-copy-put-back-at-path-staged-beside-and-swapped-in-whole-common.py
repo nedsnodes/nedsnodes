@@ -6,7 +6,9 @@ file it replaces and swaps it in with os.replace, so a write that fails partway
 leaves the file already there as it was. It creates missing parent
 directories and keeps the permission bits of the file it replaces. When the
 path is a symlink, the file the symlink points to is replaced and the symlink
-is kept.
+is kept, unless the caller passes follow_symlink=False, which replaces the
+symlink itself with a regular file. A symlink that points to itself, directly
+or through others, is replaced, not kept, either way.
 
 It refuses:
 - a copy that is the file at the path, through a symlink or a hard link too,
@@ -42,8 +44,11 @@ class SavedCopyPutBackFailedWithStagedFileLeftBehind(OSError):
         self.staged = staged
 
 
-def saved_copy_put_back_at_path(saved_copy, path):
+def saved_copy_put_back_at_path(saved_copy, path, follow_symlink=True):
     """Write saved_copy, given as bytes or as the path of a file, to path.
+
+    With follow_symlink=False, a symlink at path is itself replaced, and the
+    file it points to is left as it was.
 
     Raise OSError when it cannot, with any file already at path left as it was:
     shutil.SameFileError when saved_copy is the file at path, PermissionError
@@ -51,10 +56,12 @@ def saved_copy_put_back_at_path(saved_copy, path):
     temporary file could not be removed after a failure.
     """
     in_memory = isinstance(saved_copy, bytes)
-    target = os.path.realpath(path) if os.path.islink(path) else path
+    replaces_symlink = not follow_symlink and os.path.islink(path)
+    target = os.path.realpath(path) if os.path.islink(path) and follow_symlink else path
     # Opened first, so a copy that cannot be read leaves no new directories behind.
     with io.BytesIO(saved_copy) if in_memory else open(saved_copy, "rb") as source:
-        exists = os.path.exists(target)
+        # A symlink being replaced gives no permission bits to keep, and its target's are not the path's own.
+        exists = not replaces_symlink and os.path.exists(target)
         if not in_memory and exists and os.path.samefile(saved_copy, target):
             raise shutil.SameFileError(
                 "the saved copy %s and %s are one file, reached by the same path, a symlink or a hard link, so "

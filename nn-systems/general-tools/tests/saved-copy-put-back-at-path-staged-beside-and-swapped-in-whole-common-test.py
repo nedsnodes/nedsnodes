@@ -120,6 +120,18 @@ with tempfile.TemporaryDirectory() as scratch:
           and linked_target.read_bytes() == content and stat.S_IMODE(linked_target.stat().st_mode) == 0o640
           and names_in(linked_target.parent) == ["real.md"], error)
 
+    linked_target.write_bytes(b"before\n")
+    error = None
+    try:
+        put_back.saved_copy_put_back_at_path(copy, link, follow_symlink=False)
+    except OSError as raised:
+        error = raised
+    check("with follow_symlink=False, a symlink at the path is replaced by a regular file holding the copy, "
+          "with a new file's mode, and the file it pointed to is left as it was",
+          error is None and not link.is_symlink() and link.read_bytes() == content
+          and stat.S_IMODE(link.stat().st_mode) == 0o666 & ~umask()
+          and linked_target.read_bytes() == b"before\n" and names_in(link.parent) == ["link.md"], error)
+
     if os.geteuid() == 0:
         print("SKIP  a read-only file at the path is refused: root can write any file")
     else:
