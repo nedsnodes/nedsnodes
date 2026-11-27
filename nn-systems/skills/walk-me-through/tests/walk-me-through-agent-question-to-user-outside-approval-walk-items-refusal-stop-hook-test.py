@@ -530,6 +530,8 @@ def test_a_line_about_only_the_waiting_items_decision_passes():
     check("a hashtag marker is dropped only when a word character follows `#`, so a heading keeps its text",
           hook.normalized("#new_if_d Alternative: x") == "alternative: x" and hook.normalized("## Item 3") == "item 3"
           and hook.normalized("#9 is closed") == "is closed", hook.normalized("#new_if_d Alternative: x"))
+    check("a hashtag marker in the closed form, with the closing `#`, is dropped too",
+          hook.normalized("#new_if_d# Alternative: x") == "alternative: x", hook.normalized("#new_if_d# Alternative: x"))
 
 
 def test_while_a_sub_step_waits_the_interruption_item_goes_after_the_whole_item():
