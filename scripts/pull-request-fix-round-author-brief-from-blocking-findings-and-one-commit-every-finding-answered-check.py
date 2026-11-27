@@ -239,6 +239,7 @@ ROUND_RECORD_PATTERN = re.compile(r"Fix-round answered without a commit: frozen-
 # such line is refused rather than guessed at. A wrapped answer's line opening with a decimal, such as "3.12.4 (", is
 # no such line, so it stays part of the answer.
 ANSWER_NUMBERED_LINE_PATTERN = re.compile(r"^\d+\.(?=\s|$|\()")
+ANSWER_NUMBERED_LINE_WORDS = "opening \"<n>.\" followed by whitespace, \"(\" or the line's end"
 ANSWER_START_PATTERN = re.compile(r"^(\d+)\. \(finding ([^()\s]+)\)(?:\s+(.*))?$")
 ANSWER_FINDING_TAG_FORMAT = "(finding {finding_id})"
 MOVED_TO_PULL_REQUEST_PREFIX = "Moved to pull request "
@@ -1224,7 +1225,8 @@ def print_brief(number, reviewer_login):
         "ID>) \" for each finding above, followed by any answer an earlier run kept for it: after each line's "
         "tag, on the same line, write what you fixed, why the finding does not hold, "
         "or, for a change moved as step 3 says, the new pull request; further lines of an entry may follow. "
-        "Keep each line's start as this program wrote it: the check refuses any other line opening \"<n>.\". "
+        "Keep each line's start as this program wrote it: the check refuses any other line "
+        f"{ANSWER_NUMBERED_LINE_WORDS}. "
         "Never commit it: "
         "the branch's .gitignore may not leave it out, and the check in step 6 refuses a commit "
         "that holds it.",
@@ -1264,7 +1266,7 @@ def default_answers_path(number):
 
 
 def answer_starts_lines(finding_ids):
-    # An answers file an earlier version of the brief wrote holds no tags to copy.
+    # The answers file may hold no tags to copy from.
     return "\n".join(f"  {answer_start(number, finding_id)}" for number, finding_id in enumerate(finding_ids, 1))
 
 
@@ -1276,8 +1278,8 @@ def read_answers(path, finding_ids, blocking_count, nit_count):
     answers, repeated, unknown_tags, malformed = answer_entries(text, finding_ids)
     if malformed:
         lines = "\n".join(f"  {line}" for line in malformed)
-        raise Refused(f"The answers file {path} has {len(malformed)} line(s) opening \"<n>.\" that are not an "
-                      f"entry's start, so the check cannot tell which finding each answers:\n{lines}\n"
+        raise Refused(f"The answers file {path} has {len(malformed)} line(s) {ANSWER_NUMBERED_LINE_WORDS} that "
+                      f"are not an entry's start, so the check cannot tell which finding each answers:\n{lines}\n"
                       f"Write each entry as \"<n>. {ANSWER_FINDING_TAG_FORMAT.format(finding_id='<comment ID>')} "
                       "<answer text>\", starting each with its finding's start below, and run the check again:\n"
                       + answer_starts_lines(finding_ids))
