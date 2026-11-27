@@ -1539,6 +1539,116 @@ def cases(scratch):
           result is not None and result.returncode == 0 and brief.read_bytes() == b"seat v1\r\n",
           (message[:400], result and (result.returncode, result.stdout, result.stderr)))
 
+    world = World(Path(scratch) / "agent-seat-file-declined-version-committed-under-filter")
+    world.git("config", "core.autocrlf", "true")
+    brief = world.repo / "CLAUDE.local.md"
+    brief.write_bytes(b"seat v1\r\n")
+    world.git("add", str(brief))
+    world.git("commit", "-q", "-m", "seat v1")
+    world.run()
+    brief.write_bytes(b"seat v2\r\n")
+    world.git("commit", "-q", "-am", "seat v2")
+    message = world.run()
+    result = world.command("--restore", brief, blob_id(b"seat v2\r\n"))
+    check("--restore says a declined agent-seat file's version is in a commit when git's "
+          "line-ending filter keys it differently in HEAD",
+          result.returncode == 0 and "The declined version is in a commit" in result.stdout,
+          (message[:300], result.returncode, result.stdout, result.stderr))
+
+    def write_checkout_mode_history(world, path, data, approved):
+        """The store as the checkout group left it for path before agent-seat files moved to the
+        outside group: one version, keyed by git's filtered blob id, approved or seen unapproved."""
+        hook = load_hook_in_this_process()
+        filtered = world.key(path)
+        saved_environment = dict(os.environ)
+        try:
+            os.environ.update(world.environment())
+            store = hook.Store(world.machine)
+            store.copy(str(path), filtered, data)
+            hook.log_seen(store, str(path), "older-session", "older-owner", filtered, filtered,
+                          hook.HOW_STOCK if approved else "", blob_id(data))
+            if approved:
+                store.approve(str(path), filtered)
+        finally:
+            os.environ.clear()
+            os.environ.update(saved_environment)
+        return filtered
+
+    for approved_before in (True, False):
+        world = World(Path(scratch) / f"agent-seat-file-filtered-id-{approved_before}")
+        world.git("config", "core.autocrlf", "true")
+        world.run()
+        brief = world.repo / "CLAUDE.local.md"
+        brief.write_bytes(b"seat v1\r\n")
+        filtered = write_checkout_mode_history(world, brief, b"seat v1\r\n", approved_before)
+        forget_agent_seat_files_stocked(world, brief)
+        message = world.run(cwd=Path(scratch))
+        approved = world.store_file(brief, "approved")
+        raw_approved = blob_id(b"seat v1\r\n") in approved
+        if approved_before:
+            check("an agent-seat file whose bytes the checkout group approved under git's filtered "
+                  "blob id is not asked about again when the outside group stocks it",
+                  filtered != blob_id(b"seat v1\r\n") and str(brief) not in message
+                  and raw_approved, (message[:300], approved))
+        else:
+            check("an agent-seat file whose bytes the checkout group asked about under git's "
+                  "filtered blob id is not approved when the outside group stocks it",
+                  str(brief) in message and not raw_approved, (message[:300], approved))
+
+    world = World(Path(scratch) / "agent-seat-file-edit-after-outside-state-lost")
+    other = world.agents / "other"
+    other.mkdir()
+    other_brief = other / "CLAUDE.local.md"
+    other_brief.write_text("other brief v1\n")
+    world.run(cwd=Path(scratch))
+    other_brief.write_text("other brief v2, by a shell command\n")
+    asked = world.run(cwd=Path(scratch))
+    next((world.scratch / "cache").glob("*.json")).unlink()
+    other_brief.write_text("other brief v3, by an Edit\n")
+    message = world.run(cwd=Path(scratch), tool="Edit", file_path=other_brief)
+    check("an Edit made on an unapproved version is asked about though the outside state file "
+          "is gone",
+          str(other_brief) in asked and str(other_brief) in message
+          and world.key(other_brief) not in world.store_file(other_brief, "approved"),
+          (asked, message, world.store_file(other_brief, "approved")))
+
+    world = World(Path(scratch) / "never-approved-agent-seat-file-edited-on-asked-version")
+    world.run(cwd=Path(scratch))
+    other = world.agents / "other"
+    other.mkdir()
+    other_brief = other / "CLAUDE.local.md"
+    other_brief.write_text("other brief v1, by a shell command\n")
+    asked = world.run(cwd=Path(scratch))
+    forget_agent_seat_files_stocked(world, other_brief)
+    other_brief.write_text("other brief v2, by an Edit\n")
+    message = world.run(cwd=Path(scratch), tool="Edit", file_path=other_brief)
+    check("an Edit of a never-approved agent-seat file, made on a version a run asked about, is "
+          "asked about when the agent-seat files are first stocked",
+          str(other_brief) in asked and str(other_brief) in message
+          and not world.store_file(other_brief, "approved"),
+          (asked, message, world.store_file(other_brief, "approved")))
+
+    world = World(Path(scratch) / "agent-seat-file-edit-after-restore-with-state-lost")
+    other = world.agents / "other"
+    other.mkdir()
+    other_brief = other / "CLAUDE.local.md"
+    other_brief.write_text("other brief v1\n")
+    world.run(cwd=Path(scratch))
+    other_brief.write_text("other brief v2, declined\n")
+    asked = world.run(cwd=Path(scratch))
+    restored = world.command("--restore", other_brief, world.key(other_brief))
+    outside_state = next((world.scratch / "cache").glob("*.json"))
+    state = json.loads(outside_state.read_text())
+    state["files"].pop(str(other_brief))
+    outside_state.write_text(json.dumps(state))
+    other_brief.write_text("other brief v1, then an Edit\n")
+    message = world.run(cwd=Path(scratch), tool="Edit", file_path=other_brief)
+    check("an Edit made on the version --restore put back is approved though the outside state "
+          "lost the file's entry",
+          str(other_brief) in asked and restored.returncode == 0 and message == ""
+          and world.key(other_brief) in world.store_file(other_brief, "approved"),
+          (asked, restored.stdout, message, world.store_file(other_brief, "log")[-600:]))
+
     # -- the store cannot be written
     world = fresh(scratch, "unwritable")
     claude = world.repo / "CLAUDE.md"

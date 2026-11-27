@@ -127,6 +127,7 @@ HOW_PRE_APPROVED = "pre-approved"
 HOW_STOCK = "stock"
 HOW_RENAME = "rename"
 HOW_DELETION = "deletion"
+HOW_SAME_BYTES = "same-bytes"
 
 # An approval that is not the user's either always adds its version, or adds it only when no
 # run has seen that version: a version the log records as seen and not approved enters the set
@@ -718,11 +719,22 @@ def seen_lines(log, key):
 
 
 def last_seen_key(log, excluded):
-    """The key of the last version the log records as seen, other than excluded, or None."""
+    """The key of the last version the log records as seen or as put back by --restore, other
+    than excluded, or None."""
     for fields in reversed(log):
         if fields[0] == "seen" and len(fields) >= 7 and fields[4] != excluded:
             return fields[4]
+        if fields[0] == "restored" and len(fields) >= 6 and fields[5] != excluded:
+            return fields[5]
     return None
+
+
+def keys_of_same_bytes(log, key):
+    """key, and each key the log records for the bytes whose blob id is key: a checkout's run
+    keys a file by git's blob id, which a line-ending filter makes differ from its bytes' own,
+    and logs the bytes' id beside it."""
+    return {key} | {fields[4] for fields in log
+                    if fields[0] == "seen" and len(fields) >= 8 and fields[7] == key}
 
 
 def first_seen_time(log, key):
@@ -824,9 +836,9 @@ def is_settings_file(path: str):
     return path == str(home_directory() / ".claude" / "settings.json")
 
 
-def git_text(checkout, *arguments, input_text=None, timeout=60):
+def git_text(checkout, *arguments, input_text=None, input_bytes=None, timeout=60):
     result = subprocess.run(["git", "-C", str(checkout), *arguments], capture_output=True,
-                            input=None if input_text is None else input_text.encode(),
+                            input=input_bytes if input_text is None else input_text.encode(),
                             timeout=timeout, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(arguments)} in {checkout} exited {result.returncode}: "
@@ -1432,11 +1444,23 @@ def run_hook(payload):
                 # write after the scan is not approved in its place.
                 seat_stocking = (kind == "outside" and stock_agent_seat_files
                                  and path in seat_files and not store.approved(path))
+                approved = store.approved(path) if kind == "outside" or stocking else set()
+                log = (store.log(path) if stocking or seat_stocking
+                       or (kind == "outside" and key not in approved) else [])
+                same_bytes = keys_of_same_bytes(log, key)
                 if main_blobs.get(path) == key:
                     how = HOW_ORIGIN_MAIN
+                elif key not in approved and same_bytes & approved:
+                    # Bytes a checkout's run approved under git's filtered blob id, before the
+                    # agent-seat files moved to the outside group, which keys them by the bytes.
+                    how = HOW_SAME_BYTES
+                elif (stocking or seat_stocking) and edit_succeeded and written == path \
+                        and any(fields[0] == "seen" for fields in log):
+                    # A path a run has seen before: the state lost its entry, and the Edit rule
+                    # still checks the version the Edit was made on.
+                    how = HOW_EDIT
                 elif stocking or seat_stocking:
-                    log = store.log(path)
-                    if not (key not in store.approved(path) and seen_lines(log, key)):
+                    if not any(seen_lines(log, same) for same in same_bytes - approved):
                         how = HOW_STOCK
                 elif edit_succeeded and written == path:
                     how = HOW_EDIT
@@ -1753,7 +1777,10 @@ def restore(pairs):
                          f"If the declined version is in a commit, run: {commit_command}")
             continue
         tree = listed.stdout.split()
-        if len(tree) >= 3 and tree[2] == current[path][1]:
+        # HEAD holds git's blob id, its filters applied; an outside file's key is its bytes' own.
+        if len(tree) >= 3 and tree[2] == git_text(
+                checkout, "hash-object", "--stdin", "--path", relative,
+                input_bytes=current[path][2]).strip():
             lines.append(f"The declined version is in a commit; run: {commit_command}")
     if failed:
         raise RestoreIncomplete(lines)
