@@ -7,7 +7,7 @@ Every other case runs the program as a subprocess against folders this suite mad
 a handoff directory, agents, projects and tasks roots, a ~/.claude.json, a log file, a state
 directory and HOME, under which user-alerts are written. `claude` is a fake placed first on PATH:
 it answers each call with the next scripted answer, as stream-json, and records the call's
-arguments and prompt. `gh` is never reached: the one case that gives a task prerequisites runs the
+arguments and prompt. `gh` is never reached: each case that gives a task prerequisites runs the
 program through GITHUB_BUDGET_SPENT_RUNNER, which starts the GitHub budget spent. Each invocation
 fixes the time with --now.
 """
@@ -4562,6 +4562,61 @@ check("an escalation sender that drops an older owed sentence: the fresh promise
       "message",
       [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
       machine.events("message_sent"))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script({"sends": [send_to(EVENTS_SEAT, is_error=True)],
+                "answer": {"sent": False, "reason": "r"}})
+machine.run(0)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(16)
+machine.script()
+machine.run(32)
+told = [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
+machine.script()
+machine.run(34)
+check("an events task's wake whose send failed, its wait past the user-alert: the same task's wake "
+      "is not sent again and the wait stays open",
+      told and [event["step"] for event in machine.events("wait_step")]
+      == ["nudge", "escalate", "tell_user"]
+      and not machine.events("wait_ended"),
+      (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant(PROMISE, at(1)), turn_end(at(1)))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(7)
+events_task(machine, task_id="9", subject="other work")
+events_task(machine, blockedBy=["9"])
+machine.script(rechecked(False), sent_ok(EVENTS_SEAT))
+machine.run(16)
+check("an events task held by an open blocker after a promise message on its wake's wait: the "
+      "escalation does not say it is no longer open",
+      machine.events("message_sent")[-1]["step"] == "escalate"
+      and "is no longer open on your task list" not in machine.events("message_sent")[-1]["text"],
+      machine.events("message_sent"))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(9.5)),
+               assistant(tool=("Read", {"file_path": "x"}), when=at(10)),
+               assistant("Still waiting.", when=at(10)), turn_end(at(10)))
+events_task(machine, metadata={"prerequisites": [{"pr_merged": 927}]})
+machine.script()
+machine.run(20, github_budget_spent=True)
+check("a deferred handoff already reminded of, nothing running, and the only open task an events "
+      "task whose prerequisites are not known to hold: no judge runs and nothing is sent",
+      not machine.claude_calls() and len(machine.events("message_sent")) == 1,
+      (machine.claude_calls(), machine.events("message_sent")))
 
 if failures:
     print(f"{len(failures)} case(s) failed")
