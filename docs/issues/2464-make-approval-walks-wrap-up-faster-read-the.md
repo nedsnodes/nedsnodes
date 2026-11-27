@@ -45,6 +45,27 @@ The design settles these points, which the GHI-MD's own fast read raised:
 - How code tells that a change touches a program name. One rule the fast read proposed: a changed word counts when it is in backquotes, ends in a file extension, or is a path or file name that `git ls-files` lists; any changed digit counts as a number.
 - Whether change 3 also rewrites `/Volumes/nedhome/` written without `file://`, and whether a finding that quotes a rewritten path is shown with the path as the item has it. One function that both programs import keeps the two rewrites the same.
 
+## The next item at once after N, A, AO or D
+
+On 2026-11-26 the user asked, in an approval-walk of the agent-seat pr-review-maintenance-findings-batch-fix-agent: "When I type n can we just send the next part using code? Why the delay". He then asked: "If we can go to the next item with mostly code after an N, could we also go to the next item with a pure A? Isn't that what we're assuming is going to happen? So the walk would be correctly structured. I guess we could, in other words, it would immediately, the next item would immediately appear, but if the A takes time to process, that would happen in the background. Do I misunderstand something? N obviously is just doesn't actually do anything besides show the next item, so that might be a simpler case." He approved, as obvious ("ao"), item 5 of that walk, timeshift-search-timeout-and-maintenance-agent-seat-names-approval-walk-2026-11-25, whose recommendation was: "file a GHI asking the walk check program to check the next item and publish its page while the current item waits, so that N, A, AO and D each show the next item at once, with the work an answer approves running in the background." Walk-document: `/home/nedlern/agents/pr-review-maintenance-findings-batch-fix-agent/docs/walk/timeshift-search-timeout-and-maintenance-agent-seat-names-approval-walk-2026-11-25.md` on ned-box, section "Item 5 of 6"; walk-minutes: the `-minutes.md` file beside it.
+
+The case that prompted it: after his N on item 3, item 4 took several minutes to appear. The walk check program named item 2 next and gave it a fresh read, since its heading's count had changed; the agent then bumped item 4, a question added to the walk earlier, ahead of item 2 with `check --bump`. No read ahead covered item 4, so its first cold-read-fast-read ran only then, each fix to it set off another read, three reads of it in all, and its item page was then built and published.
+
+Changes 1 and 2 above are in the walk check program on main: its docstring's section "READ AHEAD" and its `--after-fixes-reread-only-when-facts-change` flag (checked with grep on main, 2026-11-26). What this ruling adds, to the three changes above; N needs only changes 4 and 5, since it approves nothing:
+
+4. **Read ahead an item as soon as it is added or bumped.** An item added to the walk while another is shown, or moved up by `check --bump`, gets its read started at once, so it is ready when its turn comes.
+5. **Build and publish the next item's page ahead.** The next item's page is built and published while the current item waits, so that showing it needs no page step.
+6. **Show the next item at once after A, AO or D.** The answer is recorded at once and the next item is shown; the fast read of the texts the answer adds and the work the answer approves both start at once, in the background. A finding that would change what the user approved comes back to him as a new item, as it does today. This changes two rules of `.claude/skills/walk-me-through/SKILL.md`: "an answer that makes a change takes effect only after check has given every text the change adds a fast read" and "An answer that makes a change advances the approval-walk only once the check step has finished." The new wording goes to the user for approval before it merges, as every standing instruction does.
+
+cold-read-improvement, this GHI's owner, designs and builds changes 4 to 6 too. The design settles these points, which this section's fast read raised:
+
+- What starts the read of an item the agent writes into the walk-document without `check --bump`, such as a finding that comes back as a new item. One way: every `check`, `close` and waiting-item step starts a read for each waiting item that has none.
+- Who publishes the page ahead. Publishing needs the Artifact tool, which only the agent has, so the program can build the page and print the publish as the agent's next step in the turn that shows the current item.
+- A read ahead or page that is still running, has failed, or is stale because the item changed, when the user answers.
+- How the program records the background read of an answer's texts and brings its findings back, so that nothing depends on the agent remembering; who applies the findings that do not change what he approved; and what happens when a finding lands after he has answered later items that build on the approved text.
+- How Aa, which waits for the advisor, Z, O2 and O3 behave under change 6.
+
+
 ## Not in this GHI
 
 The user's further ideas, given with his approval, are not decided and are not part of this work: a ready pool of warm readers, trying other reader models, and having readers name the instruction behind each finding. A separate research GHI, which links to this one, holds them.
