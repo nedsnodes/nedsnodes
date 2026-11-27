@@ -9,7 +9,11 @@ Usage:
 
 The file holds a JSON list. Each entry has tag, number, title, author, head,
 main, tests and hazards, and may have overlaps. A fix-round entry also has
-reviewed_before, previous_reviews, new_commits and answer.
+reviewed_before, previous_reviews, new_commits and answer. A fix-round's
+files-touched fact lists the files changed since reviewed_before; but when the
+first-parent commits since it hold a merge commit, as when the author merged
+main, or the head does not descend from it, the fact lists the whole pull
+request's files from the merge base, so it names none of main's changes.
 
 Each brief is three parts: the standing text, composed by --review-tools-worktree-at-main's
 scripts/compose-pull-request-reviewer-brief.py with the reviewing
@@ -281,9 +285,16 @@ def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pu
         facts.append(f"- This nn-head-commit is a fix-round. nn-head-commit reviewed before: "
                      f"`{spec['reviewed_before']}` ({spec['previous_reviews']}). "
                      f"{spec['new_commits']}")
-        facts.append("- Files the new commit touches: "
-                     + files_touched_text(review_tools_worktree, spec["reviewed_before"], head)
-                     + ".")
+        reviewed_whole_because = common.fix_round_reviewed_whole_because(
+            git, review_tools_worktree, spec["reviewed_before"], head)
+        if reviewed_whole_because:
+            facts.append(f"- Files the whole pull request touches, from the merge base, because "
+                         f"{reviewed_whole_because}: "
+                         + files_touched_text(review_tools_worktree, merge_base, head) + ".")
+        else:
+            facts.append("- Files the new commit touches: "
+                         + files_touched_text(review_tools_worktree, spec["reviewed_before"], head)
+                         + ".")
         facts.append(f"- The author's answer to each finding: {spec['answer']}")
         facts.append("- Test files the whole pull request touches: "
                      + ", ".join(f"`{t}`" for t in spec["tests"]) + ".")

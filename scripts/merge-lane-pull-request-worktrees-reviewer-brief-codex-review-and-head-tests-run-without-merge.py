@@ -216,25 +216,6 @@ def review_tools_worktree_at_main_step_script_missing_refusal_message(step, chec
              f"If main's copy refuses the same way, tell the user this message."))
 
 
-def fix_round_reviewed_whole_because(checkout, head_reviewed_before, head):
-    """Return why a fix-round's Codex review must run from the merge base, or None.
-
-    The same two checks as pull-request-review-plan.py's for reviewing a fix-round
-    whole: a diff from the earlier head across a merge of main holds main's
-    changes, and one from a commit the head does not descend from holds the rewrite.
-    """
-    merges = git(checkout, "rev-list", "--merges", "--first-parent",
-                 f"{head_reviewed_before}..{head}").split()
-    if merges:
-        return (f"the commits since the nn-head-commit reviewed before hold merge commit(s) "
-                f"{', '.join(merge[:12] for merge in merges)}")
-    # merge-base exits 1 when the two commits share no history.
-    if git(checkout, "merge-base", head_reviewed_before, head,
-           accepted_exit_codes=(0, 1)) != head_reviewed_before:
-        return "the head does not descend from the nn-head-commit reviewed before"
-    return None
-
-
 def brief_specification_disagreement(checkout, specifications, number, head, main,
                                      head_reviewed_before):
     """Return (what is wrong with the brief specifications, what to do), or None."""
@@ -380,8 +361,8 @@ def main(argv=None):
                                 f"--head-commit-reviewed-before set to the nn-head-commit that "
                                 f"was reviewed before.")
             base, base_kind = head_reviewed_before, "nn-head-commit reviewed before"
-            reviewed_whole_because = fix_round_reviewed_whole_because(
-                checkout, head_reviewed_before, head_commit)
+            reviewed_whole_because = common.fix_round_reviewed_whole_because(
+                git, checkout, head_reviewed_before, head_commit)
             if reviewed_whole_because:
                 base = git(checkout, "merge-base", main_commit, head_commit)
                 base_kind = f"merge base, because {reviewed_whole_because}"

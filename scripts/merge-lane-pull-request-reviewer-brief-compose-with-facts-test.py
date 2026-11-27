@@ -440,6 +440,37 @@ def main():
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
               f"\n--- brief ---\n{brief}")
 
+        # New branches only: the cases above and below read main and topic as they stand.
+        git(repository, "checkout", "-q", "-b", "main-advanced", main_commit)
+        advanced_main = commit_file(repository, "docs/mains-own.md", "main\n", "main's own change")
+        git(repository, "checkout", "-q", "-b", "topic-merged-main", rename_head)
+        git(repository, "merge", "-q", "--no-ff", "-m", "merge main", "main-advanced")
+        merged_main_head = commit_file(repository, "scripts/round-fix.py", "fix\n", "fix after merging main")
+        git(repository, "checkout", "-q", "-b", "topic-rewritten", main_commit)
+        rewritten_head = commit_file(repository, "scripts/rewritten.py", "rewritten\n", "rewritten head")
+        git(repository, "checkout", "-q", "main")
+        for name, spec, reason, files in (
+                ("a fix-round whose head merged main lists the whole pull request's files from the merge base, "
+                 "none of main's",
+                 {"tag": "7r4", "head": merged_main_head, "main": advanced_main, "reviewed_before": rename_head},
+                 "the commits since the nn-head-commit reviewed before hold merge commit(s) ",
+                 "`docs/côté notes.md` (+1/-0), `scripts/round-fix.py` (+1/-0), `scripts/thing renamed.py` (+2/-0)"),
+                ("a fix-round whose head does not descend from the nn-head-commit reviewed before lists the whole "
+                 "pull request's files from the merge base",
+                 {"tag": "7r5", "head": rewritten_head, "reviewed_before": rename_head},
+                 "the head does not descend from the nn-head-commit reviewed before",
+                 "`scripts/rewritten.py` (+1/-0)")):
+            completed = run_program(scratch, helpers, [{**fix_round, **spec}])
+            brief_file = helpers / "briefs" / f"brief-{spec['tag']}-mac-claude.md"
+            brief = brief_file.read_text() if brief_file.exists() else ""
+            fact = next((line for line in brief.splitlines() if line.startswith("- Files the ")), "")
+            check(name,
+                  completed.returncode == 0
+                  and fact.startswith("- Files the whole pull request touches, from the merge base, because "
+                                      + reason)
+                  and fact.endswith(": " + files + "."),
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- fact ---\n{fact}")
+
         completed = run_program(scratch, helpers, [{**first_round, "tag": "8", "number": 8}])
         check("a pull request with no merged worktree exits 1, writing no brief",
               completed.returncode == 1 and "brief not composed" in completed.stderr
