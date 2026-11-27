@@ -115,7 +115,13 @@ shipped. A removal in another repository, given by git's --git-dir,
 names none of the worktrees of the repository the hook's cwd is in, so the
 hook cannot place it and ships the records of every worktree of the cwd's
 repository, not of that one; one given by -C is matched against the
-worktrees git lists in the -C directory. On the Mac each record is
+worktrees git lists in the -C directory. A chain of -C options is joined
+as os.path.join joins it, so in `git -C /gone -C /a/repo worktree remove x`,
+where /gone does not exist and git stops there, the hook lists /a/repo's
+worktrees: such a chain is not handled. Each `git worktree list` has its
+own GIT_TIMEOUT_SECONDS, which the shipping budget does not cut short, so a
+command with many removals, each with a different -C, on a slow filesystem
+can run its listings past the hook's timeout. On the Mac each record is
 checked against the store over ssh, one record at a time, so with many
 records the budget can run out and refuse the removal; a run after that
 skips the records already shipped. When the worktree's directory cannot be
@@ -538,7 +544,7 @@ def worktrees_removed_or_unresolved_reason(command, cwd, worktrees_of, outer_com
             return None, reason
         if directory and changes_directory and not os.path.isabs(directory):
             return None, f"the command changes directory, and the -C directory {directory} is a relative path"
-        worktrees, reason = worktrees_of(os.path.join(cwd, directory))
+        worktrees, reason = worktrees_of(os.path.join(cwd, directory) if directory else cwd)
         if worktrees is None:
             return None, f"git could not list the worktrees of the directory the removal runs in: {reason}"
         worktree = worktree_named_by_path_suffix(argument, worktrees)
