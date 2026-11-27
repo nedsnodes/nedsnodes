@@ -1095,14 +1095,16 @@ COLD_READ_CELL_NEAR_MISS_REPORT_RECOVERED_STATUS_LINE_NEXT_STEP_INSTRUCTION = (
     "The report is intact and now in place, so triage it as usual; nothing else needs doing.")
 
 
-def lift_cell_status_lines(report_path: pathlib.Path, log_lines: list) -> None:
+def lift_cell_status_lines(report_path: pathlib.Path, log_lines: list,
+                           stray_write_lines: bool = True) -> None:
     """Print cell status lines before successful-attempt logs are deleted,
-    each followed by the line that says what to do about it."""
+    each followed by the line that says what to do about it; without
+    stray_write_lines, leave out the STRAY WRITE and WRITE CHECK DID NOT RUN kinds."""
     for line in log_lines:
-        if cell_status_line(line, cell_common.STRAY_WRITE_PHRASE):
+        if stray_write_lines and cell_status_line(line, cell_common.STRAY_WRITE_PHRASE):
             print(f"STRAY WRITE: {line.strip()}", flush=True)
             print(COLD_READ_CELL_STRAY_WRITE_STATUS_LINE_NEXT_STEP_INSTRUCTION, flush=True)
-        if cell_status_line(line, cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE):
+        if stray_write_lines and cell_status_line(line, cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE):
             print(f"WRITE CHECK DID NOT RUN: {report_path.name} — "
                   f"{line.strip()}", flush=True)
             print(COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_STATUS_LINE_NEXT_STEP_INSTRUCTION, flush=True)
@@ -1211,8 +1213,7 @@ def wait_for_cells(running: dict,
             log_lines = attempt.stderr_path.read_text(encoding="utf-8").splitlines()
             # A stopped cell may have logged its own write check before the stop, and
             # print_stopped_cells_write_check reports that cell's writes instead.
-            if not timed_out:
-                lift_cell_status_lines(report_path, log_lines)
+            lift_cell_status_lines(report_path, log_lines, stray_write_lines=not timed_out)
             has_report = (
                 report_path.is_file()
                 and report_path.read_text(encoding="utf-8").strip() != ""
@@ -1265,6 +1266,10 @@ def wait_for_cells(running: dict,
                 for report_path, attempt in running.items():
                     report_deleted = stop_attempt_and_delete_unfinished_report(attempt, report_path)
                     outcome.stopped.append(cell_name_of(report_path))
+                    log_lines = (attempt.stderr_path.read_text(encoding="utf-8").splitlines()
+                                 if attempt.stderr_path.is_file() else [])
+                    # print_stopped_cells_write_check reports this cell's writes.
+                    lift_cell_status_lines(report_path, log_lines, stray_write_lines=False)
                     print(STOPPED_CELL_LINE.format(
                         report=report_path.name,
                         deleted=STOPPED_CELL_UNFINISHED_REPORT_DELETED_PHRASE if report_deleted else ""),

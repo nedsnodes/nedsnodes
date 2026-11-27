@@ -2673,10 +2673,14 @@ try:
         printed_lines = printed.getvalue().splitlines()
         unchecked_lines = [line for line in printed_lines if line.startswith("WRITE CHECK DID NOT RUN:")]
         check(f"a cell stopped {case_label} after its own write check ran gets one WRITE CHECK DID NOT RUN "
-              "line, the grid's, and none of its own status lines",
+              "line, the grid's, and none of its own STRAY WRITE lines",
               len(unchecked_lines) == 1 and grid_stopped_without_snapshot_reason in unchecked_lines[0]
-              and not any(line.startswith(("STRAY WRITE:", "FELL BACK:")) for line in printed_lines),
+              and not any(line.startswith("STRAY WRITE:") for line in printed_lines),
               repr(printed_lines))
+        check(f"a cell stopped {case_label} still has the FELL BACK line from its log printed",
+              any(line.startswith(f"FELL BACK: {own_check_report.name} — cold-read-claude-cell: "
+                                  f"{grid_module.cell_common.FELL_BACK_PHRASE}")
+                  for line in printed_lines), repr(printed_lines))
 
     # --- The reference pre-pass: a web link is not a path, a bare name is looked up --
     reference_directory = scratch / "reference-pre-pass"
