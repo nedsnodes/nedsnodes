@@ -188,6 +188,7 @@ record_shipper = load_sibling_module("cold_read_record_ship",
 SESSION_DIALOG_FILE_NAME_SUFFIX = refresh_common.SESSION_DIALOG_FILE_NAME_SUFFIX
 
 PROGRAM_FILE_NAME = "log-store-past-discussions-regex-search-newest-first.py"
+PROGRAM_NAME = PROGRAM_FILE_NAME.removesuffix(".py")
 DEFAULT_LOG_STORE_ROOT = Path("/home/nedlern/nedsnodes-logs")
 NED_BOX_HOSTNAME = "ned-box"
 NED_BOX_SSH_TARGET = "nedlern@ned-box"
@@ -268,6 +269,13 @@ OTHER_EXTRACTOR_RECORDED_NOTE = (
     "main, the recorded digest never matches them, since the refresher records the digest of main's: for a search "
     "of up-to-date dialogs, run " + NED_BOX_PROGRAM_PATH + " with the same pattern and options instead.")
 
+
+_search_ending_spec = importlib.util.spec_from_file_location(
+    "search_program_ending_search_complete_or_search_incomplete_hashtag_line_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "search-program-ending-search-complete-or-search-incomplete-hashtag-line-common.py")
+search_ending = importlib.util.module_from_spec(_search_ending_spec)
+_search_ending_spec.loader.exec_module(search_ending)
 
 _claude_code_session_transcript_lookup_and_text_search_common_spec = importlib.util.spec_from_file_location(
     "claude_code_session_transcript_lookup_and_text_search_common",
@@ -1134,6 +1142,17 @@ def argument_parser():
 
 
 def main(argv=None):
+    exit_code = search_and_print_hits(argv)
+    # A run forwarded to ned-box prints ned-box's line first; this one, last, also counts this machine's failures.
+    if exit_code == EXIT_FAILED:
+        print(search_ending.search_ending_hashtag_line(
+            PROGRAM_NAME, "the FAILED lines name what was not searched or not dated"), flush=True)
+    else:
+        print(search_ending.search_ending_hashtag_line(PROGRAM_NAME), flush=True)
+    return exit_code
+
+
+def search_and_print_hits(argv=None):
     arguments = sys.argv[1:] if argv is None else argv
     parsed = argument_parser().parse_args(arguments)
     root_override = os.environ.get(ROOT_OVERRIDE)

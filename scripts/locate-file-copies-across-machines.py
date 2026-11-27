@@ -15,6 +15,7 @@ import concurrent.futures
 import datetime
 import hashlib
 import json
+import importlib.util
 import os
 import pathlib
 import shlex
@@ -50,10 +51,9 @@ BACKUP_SEARCH_PROGRAM_NAME = "find-deleted-path-across-backups.py"
 BACKUP_SEARCH_PROGRAM_VARIABLE = (
     "LOCATE_FILE_COPIES_ACROSS_MACHINES_BACKUP_SEARCH_PROGRAM")
 BACKUP_SEARCH_SURFACES_ALREADY_SEARCHED = ("git", "reflog")
-# Without a summary line, the backup search did not finish.
-BACKUP_SEARCH_SUMMARY_OPENINGS = (
-    "Recoverable from: ", "No surface that could be searched has it.")
-BACKUP_SEARCH_UNSEARCHED_OPENING = "Could NOT search: "
+BACKUP_SEARCH_PROGRAM = BACKUP_SEARCH_PROGRAM_NAME.removesuffix(".py")
+SEARCH_ENDING_COMMON_FILE = (
+    "search-program-ending-search-complete-or-search-incomplete-hashtag-line-common.py")
 BACKUP_SEARCH_FOUND_EXIT = 0
 BACKUP_SEARCH_INCOMPLETE_EXIT = 3
 BACKUP_SEARCH_FOUND_BUT_NOT_COPIED_EXIT = 4
@@ -843,6 +843,20 @@ def render_group(group, lines):
                      f"{describe(member['hit'], member['machine'])}")
 
 
+def searched_in_part(results):
+    """Each place a machine's search could not finish, as "<machine> <surface>: <failure>"."""
+    failed = []
+    for result in results:
+        machine = result["machine"]
+        for report in result["surfaces"]:
+            failed += [f"{machine} {report['name']}: {failure}"
+                       for failure in report["failures"]]
+        git = result.get("git")
+        if git:
+            failed += [f"{machine} git: {failure}" for failure in git["failed"]]
+    return failed
+
+
 def render(query, target, results, not_searched, elapsed):
     """Return (report text, exit code, the distinct names of the candidates) for both machines."""
     stem = query_stem(query)
@@ -926,7 +940,6 @@ def render(query, target, results, not_searched, elapsed):
             lines.append(f"  ... and {len(other) - MAX_ENTRIES_PER_LIST} "
                          f"more not shown")
 
-    failed = []
     lines += ["", "Searched:"]
     for result in results:
         machine = result["machine"]
@@ -938,15 +951,11 @@ def render(query, target, results, not_searched, elapsed):
             listed_text = (", and the worktree(s) the main clone lists "
                            "outside them: " + ", ".join(listed)) if listed else ""
             lines.append(f"  {machine} {report['name']}: {roots}{listed_text}")
-            failed += [f"{machine} {report['name']}: {failure}"
-                       for failure in report["failures"]]
         git = result.get("git")
         if git:
             lines.append(f"  {machine} git: every commit a branch or a reflog "
                          f"reaches, in the {git['clones']} clone(s) under "
                          f"{', '.join(git['under'])}")
-            failed += [f"{machine} git: {failure}"
-                       for failure in git["failed"]]
             if git.get("candidates_cut"):
                 truncated = candidates_cut = True
                 lines.append(f"  {machine} git: every path named {name} was "
@@ -959,6 +968,7 @@ def render(query, target, results, not_searched, elapsed):
                          f"matched; every one named {name} was kept, and "
                          f"only the newest {MAX_FILE_HITS_PER_MACHINE} of the "
                          f"others were considered")
+    failed = searched_in_part(results)
     if failed or not_searched:
         lines += ["", "NOT searched, or searched only in part:"]
         lines += [f"  {machine}: {reason}" for machine, reason in not_searched]
@@ -1022,8 +1032,21 @@ def write_text(text):
     sys.stdout.flush()
 
 
+def search_ending_module():
+    """The module that writes and reads a search program's ending hashtag line."""
+    # Loaded here, not at the top, since the copy run over ssh from its source has no repository beside it.
+    spec = importlib.util.spec_from_file_location(
+        "search_program_ending_search_complete_or_search_incomplete_hashtag_line_common",
+        pathlib.Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+        / SEARCH_ENDING_COMMON_FILE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def run_backup_search_after_nothing_found(query, git_search_complete):
-    """Run the backup search and return closing lines describing the result."""
+    """Run the backup search and return (closing lines describing the result, and whether it searched every
+    place: True, False, or None when it did not finish)."""
     # Run as a subprocess to avoid circular imports; keep absolute paths to avoid matching another seat.
     # Backup transcript hits can name files that never existed, so they cannot change the locator exit code.
     program = (os.environ.get(BACKUP_SEARCH_PROGRAM_VARIABLE)
@@ -1046,23 +1069,26 @@ def run_backup_search_after_nothing_found(query, git_search_complete):
             env=environment_without_git_redirecting_variables())
     except OSError as error:
         return [f"The backup search could not start ({error}): tell the user "
-                f"it did not run, and do not say the file does not exist."]
-    summary_printed = False
-    some_place_unsearched = False
+                f"it did not run, and do not say the file does not exist."], None
+    search_ending = search_ending_module()
+    # Without its ending line, the backup search did not finish.
+    backup_complete = None
     for line in process.stdout:
         text = line.decode("utf-8", "replace")
         write_text(text)
-        summary_printed = summary_printed or text.startswith(
-            BACKUP_SEARCH_SUMMARY_OPENINGS)
-        some_place_unsearched = some_place_unsearched or text.startswith(
-            BACKUP_SEARCH_UNSEARCHED_OPENING)
+        said = search_ending.search_was_complete_by_ending_hashtag_line(
+            BACKUP_SEARCH_PROGRAM, text)
+        if said is not None:
+            backup_complete = said
+    summary_printed = backup_complete is not None
+    some_place_unsearched = backup_complete is False
     code = process.wait()
     if not summary_printed:
         how = (f"it was stopped by signal {-code}" if code < 0
                else f"it exited {code}")
         return [f"The backup search did not finish ({how} before its summary "
                 f"line): tell the user that the places it did not print were "
-                f"not searched, and do not say the file does not exist."]
+                f"not searched, and do not say the file does not exist."], None
     unsearched = (["It also could NOT search some places: tell the user "
                    "which, as its \"Could NOT search\" line names them."]
                   if some_place_unsearched else [])
@@ -1071,23 +1097,23 @@ def run_backup_search_after_nothing_found(query, git_search_complete):
                 "lines name, and check that one holds the file's content before "
                 "you say it can be recovered. Restore a copy to the file's own "
                 "path only when asked to, by running the backup search again "
-                "with --restore <copy>."] + unsearched
+                "with --restore <copy>."] + unsearched, backup_complete
     if code == BACKUP_SEARCH_FOUND_BUT_NOT_COPIED_EXIT:
         return ["The backup search found it but copied no version: tell the "
                 "user what its FOUND lines say, such as a \"could NOT copy\" line "
                 "or a transcript where the path may only have been typed, and do "
-                "not say the file does not exist."] + unsearched
+                "not say the file does not exist."] + unsearched, backup_complete
     if code == BACKUP_SEARCH_FOUND_COPY_COMMAND_PRINTED_EXIT:
         return ["The backup search found it but copied nothing yet: the "
                 "commands it printed under each FOUND surface copy a version "
                 "into its found-copies folder. Its \"Nothing was copied yet\" line says "
                 "which commands you run yourself and which you give the user "
                 "because their sudo may ask for his password; do as it says, and "
-                "do not say the file does not exist."] + unsearched
+                "do not say the file does not exist."] + unsearched, backup_complete
     if code == BACKUP_SEARCH_INCOMPLETE_EXIT:
         return ["Tell the user which places the backup search could NOT "
-                "search, and why: its Could NOT search line names them."]
-    return []
+                "search, and why: its Could NOT search line names them."], backup_complete
+    return [], backup_complete
 
 
 def main(argv=None) -> int:
@@ -1202,12 +1228,21 @@ def search_and_report(query, plan):
     text, code, candidate_names = render(query, target, results, not_searched,
                                          time.monotonic() - started_at)
     write_text(text)
+    # Only the other machine is ever left not searched.
+    not_searched_words = ([f"{machine}: {reason}" for machine, reason in not_searched]
+                          + searched_in_part(results))
     if code != 0:
-        closing = run_backup_search_after_nothing_found(
+        closing, backup_complete = run_backup_search_after_nothing_found(
             target.get("canonical", target["path"]), code == 1)
         if closing:
             write_text("\n" + "\n".join(closing) + "\n")
-    # Only the other machine is ever left not searched.
+        if backup_complete is None:
+            not_searched_words.append("the backup search did not finish")
+        elif not backup_complete:
+            not_searched_words.append("the places the backup search's Could NOT search line names")
+    write_text("\n" + search_ending_module().search_ending_hashtag_line(
+        PROGRAM, "NOT searched, or searched only in part: " + "; ".join(not_searched_words)
+        if not_searched_words else None) + "\n")
     unreached = next((reason for _, reason in not_searched), None)
     return code, candidate_names, unreached
 

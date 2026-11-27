@@ -662,7 +662,24 @@ def main(argv=None) -> int:
                           arguments.include_unanswered)
     report, exit_code = render_report(places, words, arguments.all_words, arguments.since)
     sys.stdout.write(report)
+    sys.stdout.write(render_ending_hashtag_line(places) + "\n")
     return exit_code
+
+
+def render_ending_hashtag_line(places):
+    """The last line of the report: incomplete when some place was not searched, or only in part."""
+    # Loaded here, not at the top, since the copy run over ssh from embedded source has no repository to load from.
+    spec = importlib.util.spec_from_file_location(
+        "search_program_ending_search_complete_or_search_incomplete_hashtag_line_common",
+        REPOSITORY_ROOT / "nn-systems" / "general-tools"
+        / "search-program-ending-search-complete-or-search-incomplete-hashtag-line-common.py")
+    search_ending = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(search_ending)
+    failed = [f"{place['place']}: {place['failure']}" for place in places if place.get("failure")]
+    if not failed:
+        return search_ending.search_ending_hashtag_line(PROGRAM)
+    return search_ending.search_ending_hashtag_line(
+        PROGRAM, "NOT searched, or searched only in part: " + "; ".join(failed))
 
 
 if __name__ == "__main__":

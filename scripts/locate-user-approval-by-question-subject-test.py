@@ -869,6 +869,10 @@ with scratch() as base:
     report, code = _program.render_report([timed_out], ["bwrap"], False, None)
     check("a timed-out ssh search makes the run exit 1 and gives the remedy",
           code == 1 and "ssh nedlern@ned-box true" in report, report)
+    ending = _program.render_ending_hashtag_line([timed_out])
+    check("a timed-out ssh search makes the ending line #search_incomplete#",
+          ending.startswith("locate-user-approval-by-question-subject: #search_incomplete# ")
+          and "did not finish within 1 s" in ending, ending)
 
 # Bad invocations and missing places.
 with scratch() as base:
@@ -883,6 +887,15 @@ with scratch() as base:
     check("a transcript directory that does not exist is reported and exits 1",
           missing.returncode == 1 and "missing-directory: the directory does not exist" in missing.stdout,
           missing.stdout)
+    check("a run with a place it could not search ends with #search_incomplete#, naming the place",
+          missing.stdout.rstrip().splitlines()[-1].startswith(
+              "locate-user-approval-by-question-subject: #search_incomplete# "
+              "NOT searched, or searched only in part: ")
+          and "missing-directory" in missing.stdout.rstrip().splitlines()[-1], missing.stdout)
+    complete = s.run("bwrap")
+    check("a run that searched every place ends with #search_complete#",
+          complete.stdout.rstrip().splitlines()[-1]
+          == "locate-user-approval-by-question-subject: #search_complete#", complete.stdout)
 
 print()
 if failures:
