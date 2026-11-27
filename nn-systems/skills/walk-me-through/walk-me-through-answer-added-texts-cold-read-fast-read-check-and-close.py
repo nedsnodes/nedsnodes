@@ -416,7 +416,8 @@ scripts/agent-reply-possibly-stale-system-status-claim-recheck-reminder-hook.py
 uses too, unless --possibly-stale-system-status-claims-rechecked says which
 commands the agent ran, and when, to recheck them; the step then prints that
 value beside the claims when it hands the item over, and repeats the flag in
-every command it prints. An empty value is refused. When the line names one item that has
+every command it prints but those that put a fresh-agent's rewrite in place,
+whose new text nothing has rechecked. An empty value is refused. When the line names one item that has
 numbered sub-steps, such as `### Item 3.1 of 9`, the walk-minutes do not all
 decide, the step then adds a `#next_to_present` line naming the first of them
 the walk-minutes do not decide, since the user is shown such an item one sub-step at a time, and
@@ -1692,7 +1693,9 @@ FRESH_AGENT_REWRITE_FLAG = "--approval-walk-item-fresh-agent-rewrite-file"
 PROPOSED_TEXT_REVISIONS_BEFORE_FRESH_AGENT_REWRITE = 3
 PROPOSED_TEXT_REVISIONS_FILE = "item-{number}-proposed-text-revisions.json"
 FRESH_AGENT_REWRITE_FILE = "item-{number}-fresh-agent-rewrite.md"
-USER_WORDS_IN_MINUTES_PHRASE = "his words"
+# The forms a walk-minutes line quotes the user in: the program's "in his words", and an agent's "the user said" or a
+# line opening "User", as in `User on item 3: “one poem per job”`, which names the item between "User" and the quote.
+USER_WORDS_IN_MINUTES = re.compile(r'(?P<phrase>his words|\b[Uu]ser said\b)|^\W*User\b[^"“`]*(?=["“`])')
 MARKDOWN_LINK_TARGET = re.compile(r"\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)|<([A-Za-z][A-Za-z0-9+.-]*:[^>\s]+)>")
 PROPOSED_TEXT_REVISIONS_UNREADABLE = (
     "{item} is not read: {path}, this program's count of the revisions of the `#new` lines of item {whole_number} and its "
@@ -3501,9 +3504,10 @@ def approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes_text, 
     for line in minutes_text.split("\n"):
         # Only the item named ahead of his words counts: his words, or an agent's note quoting another walk, can
         # name any item number.
-        naming = line.split(USER_WORDS_IN_MINUTES_PHRASE, 1)[0]
-        if naming == line:
+        words = USER_WORDS_IN_MINUTES.search(line)
+        if not words:
             continue
+        naming = line[:words.start()] if words["phrase"] else line[:words.end()]
         named = set()
         for numbers in walk_finder.WITHDRAWN_HEADING_ITEMS.finditer(naming):
             with contextlib.suppress(walk_finder.UnusableRange):
@@ -3943,7 +3947,8 @@ def waiting_item_read(arguments, sub_step_of=None):
     rechecked = arguments.possibly_stale_system_status_claims_rechecked
     if rechecked is not None and not rechecked.strip():
         raise Failure(SYSTEM_STATUS_CLAIMS_RECHECKED_EMPTY)
-    # Repeated in every command the step prints, so a rerun it asks for is not refused again for the same claims.
+    # Repeated in the commands the step prints, so a rerun it asks for is not refused again for the same claims; not
+    # in one that puts a fresh-agent's rewrite in place, whose new text nothing has rechecked.
     rechecked_words = flag_and_value_words(SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG, rechecked) if rechecked else []
     rerun = read_step_command_with_cwd(
         top, *([AFTER_FIXES_FLAG] if arguments.after_fixes_reread_only_when_facts_change else []), *rechecked_words)
@@ -3978,8 +3983,7 @@ def waiting_item_read(arguments, sub_step_of=None):
         for above in (sub_step_of[2] if sub_step_of else []):
             approval_walk_item_text_over_word_limit_refused(*above[:6], above[7], command, skipped_start=unit[3])
         # Run again, this command finds the rewrite already in place and only counts, so it is the one to repeat.
-        rewrite_command = read_step_command_with_cwd(top, FRESH_AGENT_REWRITE_FLAG, str(rewrite_file),
-                                                     *rechecked_words)
+        rewrite_command = read_step_command_with_cwd(top, FRESH_AGENT_REWRITE_FLAG, str(rewrite_file))
         for line in approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
                 walk_finder, parser, document, unit, numbers[0], rewrite_file, item, rewrite_command,
                 command_reading_again):
@@ -4023,7 +4027,7 @@ def waiting_item_read(arguments, sub_step_of=None):
             rewrite = reads / FRESH_AGENT_REWRITE_FILE.format(number=numbers[0])
             values = dict(item=item, count=revisions, whole_number=whole_number, rewrite_file=rewrite,
                           document=document, command=read_step_command_with_cwd(
-                              top, FRESH_AGENT_REWRITE_FLAG, str(rewrite), *rechecked_words),
+                              top, FRESH_AGENT_REWRITE_FLAG, str(rewrite)),
                           count_file=reads / PROPOSED_TEXT_REVISIONS_FILE.format(number=whole_number),
                           read_command=command_reading_again)
             brief = approval_walk_item_fresh_agent_rewrite_brief_lines(

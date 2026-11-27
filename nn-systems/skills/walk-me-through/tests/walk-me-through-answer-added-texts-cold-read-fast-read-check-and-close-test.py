@@ -8901,6 +8901,46 @@ def test_the_fresh_agent_brief_holds_the_bumped_item_s_raising_reply_and_not_a_n
           brief)
 
 
+def test_the_fresh_agent_brief_holds_the_user_s_words_an_agent_recorded_without_the_words_his_words():
+    """Agents record the user's words in the walk-minutes as `User on item 3: “...”` or `on item 3, the user said
+    ...: "..."`, as well as the program's "in his words"."""
+    user_line = "User on item 3: “one poem per job”"
+    said_line = 'On item 3, the user said (2026-11-25 10:00Z): "keep it short"'
+    other = "User on item 4: “a word on item 4”"
+    original = revised_item_case
+
+    def recorded_by_hand_case():
+        case = original()
+        case.minutes.write_text("# Minutes\n\n" + "\n".join((user_line, said_line, other,
+                                                              "#next_to_present item 3 of 9", "")))
+        return case
+    globals()["revised_item_case"] = recorded_by_hand_case
+    try:
+        case, results, _ = revised_item_case_revised_three_times_across_a_split()
+    finally:
+        globals()["revised_item_case"] = original
+    last = results[4]
+    brief = last.stdout.split("----- brief for the fresh-agent: start -----\n")[-1].split(
+        "----- brief for the fresh-agent: end -----")[0]
+    check("at the third revision the read step prints the brief", last.returncode == 1 and "has been revised three "
+          "times" in last.stdout, "".join(described(result) for result in results))
+    check("the brief holds the user's words on item 3 in both forms an agent records them in",
+          f"- {user_line}" in brief and f"- {said_line}" in brief, brief)
+    check("the brief leaves out his words on item 4", "a word on item 4" not in brief, brief)
+
+
+def test_the_printed_fresh_agent_rewrite_command_leaves_out_the_status_claims_rechecked_evidence():
+    case, _, _ = revised_item_case_revised_three_times_across_a_split()
+    again = case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change",
+                     "--possibly-stale-system-status-claims-rechecked", "ran gh pr view 1 at 10:00Z")
+    rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
+    command = next((line for line in again.stdout.split("\n") if shlex.join([FRESH_AGENT_REWRITE_FLAG, str(rewrite)])
+                    in line), "")
+    check("a read run with the rechecked evidence prints the rewrite command without it, since nothing has rechecked "
+          "the rewrite's own text", again.returncode == 1 and command
+          and "--possibly-stale-system-status-claims-rechecked" not in command, described(again))
+
+
 def test_the_fresh_agent_rewrite_takes_the_place_of_the_item_s_text_and_starts_the_count_again():
     case, _, _ = revised_item_case_revised_three_times_across_a_split()
     rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
