@@ -168,7 +168,7 @@ FOLLOW_UP_REQUEST_LINE_START = "#follow_up_request"
 FOLLOW_UP_REQUEST_BLOCK_SAVE_HOOK_PATH = ("nn-systems/general-tools/pull-request-follow-up-request-from-merge-lane-2-message-save-and-"
                   "forked-subagent-brief-hand-over-user-prompt-submit-hook.py")
 MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR = "the SendMessage message in which merge-lane-2 tells the pull request's author that the pull request merged"
-FOLLOW_UP_REQUEST_LINE_PATTERN = re.compile(r"^#follow_up_request pull request (\d+)[ \t]*$")
+FOLLOW_UP_REQUEST_LINE_PATTERN = re.compile(r"^#follow_up_request#? pull request (\d+)[ \t]*$")
 FINDING_LINE_PATTERN = re.compile(r"^(\d+)\.\s+(\S.*)$")
 ASCII_LINE_END_PATTERN = re.compile(r"\r\n|\r|\n")
 PULL_REQUEST_LINK_PATTERN = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
@@ -552,9 +552,10 @@ def read_title_and_description(path):
 
 def build_pull_request_description_ending_with_follow_up_request_line(description, number):
     """The description, with the line "#follow_up_request pull request <number>" added at its end unless a line of it
-    already is that line."""
+    already is that line, with or without the hashtag's closing `#`."""
     request_line = f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"
-    if any(line.rstrip() == request_line for line in description.splitlines()):
+    if any((request := FOLLOW_UP_REQUEST_LINE_PATTERN.match(line)) and int(request.group(1)) == number
+           for line in description.splitlines()):
         return description
     return description.rstrip("\n") + f"\n\n{request_line}\n"
 
@@ -1056,8 +1057,11 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
 
         # A Codex finding id is a hash of the finding's priority and heading only, so a later comment under an
         # earlier finding's id but worded differently may be that finding reworded or another defect with the
-        # same heading: refuse rather than guess.
+        # same heading: refuse rather than guess. A comment with an earlier finding's own text and id is that
+        # finding on any line, however its siblings under the id are worded.
         for comment in parsed:
+            if any(same_finding(comment, found) for found in earlier):
+                continue
             for found in earlier:
                 if (comment["finding"][0] != posting.BLOCKING_CATEGORY
                         and comment["compared"][:2] == found["compared"][:2] and comment["compared"] != found["compared"]
@@ -1079,8 +1083,8 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
             restates[index] = next((found for found in earlier if same_finding(comment, found)
                                     and not any(paired is found for paired in restates)), None)
         # A moved line range gives a restatement a new Codex finding id, and then nothing tells it from a new
-        # finding worded alike: pair it only when one earlier finding and one finding of this review are left
-        # with that text, and otherwise refuse rather than guess.
+        # finding worded alike: refuse rather than guess. Only a comment or an earlier finding with no Codex
+        # finding id pairs by its text, when one earlier finding and one finding of this review are left with it.
         for compared in dict.fromkeys(comment["compared"] for index, comment in enumerate(parsed)
                                       if restates[index] is None):
             free = [found for found in earlier if found["compared"] == compared
@@ -1096,7 +1100,8 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                     distinct.append(comment)
             if not free or not unpaired:
                 continue
-            if len(free) == 1 and len(distinct) == 1:
+            if len(free) == 1 and len(distinct) == 1 and not (distinct[0]["codex_finding_ids"]
+                                                              and free[0]["codex_finding_ids"]):
                 restates[unpaired[0][0]] = free[0]
                 continue
             category, path, text = compared

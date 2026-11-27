@@ -271,6 +271,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/style-guide-word-checker-markdown-edit-hook-hack.py", "HIT_LINE"): LATER_PART,
     ("scripts/style-guide-word-checker-markdown-edit-hook-hack.py", "MORE_HITS_LINE"): LATER_PART,
     ("scripts/uncommitted-work-snapshot-hook.py", "NOT_PROTECTED_MESSAGE"): HOOK_FAILED,
+    ("nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py", "BRANCHES_NOT_FULLY_ON_GITHUB_NEXT_STEP_MESSAGE"): LATER_PART,
 }
 
 # Hook path: why the hook prints no message for a rule.

@@ -644,10 +644,11 @@ QUOTATION_LINE = re.compile(r"^\s*>")
 QUOTATION_MARKERS = re.compile(r"^\s*(?:>\s?)*")
 ANSWER_LINE = re.compile(r"^(?P<item>items? .+?): (?P<settled>the user answered|settled without asking the user,|"
                          r"shown to the user,) "
-                         r"(?P<answered>.+?)(?: #approved_(?:obvious|after_advisor))?(?: #case_against_[a-z_]+)? "
+                         r"(?P<answered>.+?)(?: #approved_(?:obvious|after_advisor)#?)?(?: #case_against_[a-z_]+#?)? "
                          r"\([^)]*\)(?: in his words \".*\")?, which makes (?:its change\. Fast reads:|no change\.)$",
                          re.I)
-MARKER_END = r"(?=[*_`]*(?:[:\s]|$))"
+# A marker is read with or without the closing `#` a hashtag takes.
+MARKER_END = r"#?(?=[*_`]*(?:[:\s]|$))"
 # Any list or quotation marks, then any emphasis or code marks, ahead of a marker; the list and quotation mark rule is
 # the walk finder's, which the `#new` mark pattern is built from too, so every marker line takes the same list and
 # quotation marks; only that rule is shared, and each marker keeps its own emphasis rule.
@@ -963,6 +964,7 @@ def no_answer_table_text():
 
 
 HASHTAG_MARKER = re.compile(r"#[A-Za-z0-9_-]+")
+HASHTAG_MARKER_CLOSING_HASH = re.compile(r"^(#[A-Za-z0-9_-]+)#$")
 NOT_MARKDOWN_FILES = ":(exclude)*.md"
 GLOSSARY_FILES = "*-glossary.md"
 STATUS_LINE_PREFIX = "- "
@@ -1526,8 +1528,10 @@ RULING_GIVEN_DEFERRED, RULING_GIVEN_MOVED_ON, RULING_GIVEN_PART_ANSWERS = "defer
 GH_PROGRAM = "gh"
 GH_TIMEOUT_SECONDS = 60  # pragma: no mutate, a limit a second longer or shorter behaves the same
 HELD_PULL_REQUESTS_LIST = ("pr", "list", "--state", "open", "--limit", "1000", "--json", "number,reviews")
+# Reads a review line as pull_requests_held_on does. `gh --jq` runs gojq, whose regular expressions lack some of
+# jq's, such as lookahead.
 HELD_PULL_REQUESTS_BY_HAND_JQ = ('.[] | select(any(.reviews[].body | split("\\n")[] | gsub("^\\\\s+|\\\\s+$"; ""); '
-                                 '. == {line})) | .number')
+                                 '. == {line} or . == {closed_form_line})) | .number')
 RULING_GIVEN_POSTED = "The ruling on item {number} is posted as `{ruling}` on pull request {pull_request}, held on it."
 RULING_GIVEN_LOOKUP_FAILED = (
     "The minutes record the answer to item {number}, but the open pull requests merge-lane-2 holds until that item "
@@ -2494,12 +2498,34 @@ def answer_check_commands(top):
     return "\n".join(commands)
 
 
+printed_command_path_override_words = []
+
+
 def step_command_with_cwd(top, step, *words):
     """The command for one step of this program that it tells the agent to run. Every such command is built here,
     shell-quoted, because each must survive a path holding a space and must name the walk's checkout with --cwd:
     the agent may run it from another checkout, which it would otherwise act on instead. step may hold a flag, as
     `close --hold-answer-until-new-item-answered` does."""
-    return shlex.join(["python3", str(Path(__file__).resolve()), *step.split(), *words, "--cwd", str(top)])
+    return shlex.join(["python3", str(Path(__file__).resolve()), *step.split(), *words, "--cwd", str(top),
+                       *printed_command_path_override_words])
+
+
+def explicit_path_override_words(arguments):
+    """The path overrides this run was given, absolute because a printed command may run from another directory.
+    Without them a printed command would run another reader, search other records or log counts elsewhere."""
+    words = []
+    for directory in arguments.cold_read_records or []:
+        words += ["--cold-read-records", os.path.abspath(directory)]
+    if arguments.fast_read_program != FAST_READ_PROGRAM:
+        words += ["--fast-read-program", os.path.abspath(arguments.fast_read_program)]
+    if arguments.counts_log:
+        words += ["--counts-log", os.path.abspath(arguments.counts_log)]
+    return words
+
+
+def flag_and_value_words(flag, value):
+    """The words for a flag and its value; argparse rejects a separate value that opens with a dash."""
+    return [f"{flag}={value}"] if value.startswith("-") else [flag, value]
 
 
 def check_command_with_cwd(top, *words):
@@ -2528,7 +2554,7 @@ def check_words(arguments):
     if arguments.moved_on_no_decision:
         words.append("--moved-on-no-decision")
     if arguments.moved_on is not None:
-        words += ["--moved-on", arguments.moved_on]
+        words += flag_and_value_words("--moved-on", arguments.moved_on)
     if arguments.option is not None:
         words += ["--option", str(arguments.option)]
     if arguments.not_asked is not None:
@@ -2536,11 +2562,12 @@ def check_words(arguments):
     if arguments.now_over_later_already_decided:
         words.append(NOW_OVER_LATER_FLAG)
     elif ruled:
-        words += ["--already-decided", arguments.already_decided, *arguments.already_decided_answers]
+        words += [*flag_and_value_words("--already-decided", arguments.already_decided),
+                  *arguments.already_decided_answers]
     for number, letter in arguments.part_answer or []:
         words += ["--part-answer", f"{number}={letter}"]
     if (arguments.user_reply_as_typed or "").strip():
-        words += ["--user-reply-as-typed", arguments.user_reply_as_typed]
+        words += flag_and_value_words("--user-reply-as-typed", arguments.user_reply_as_typed)
     return words
 
 
@@ -2639,7 +2666,10 @@ def not_asked_problems(kind, rating, lines, marks, top, item):
 
 
 def not_system_glossary_problems(touched, top, item):
-    """Return a problem for each touched path that is not a system glossary git tracks in the checkout at top."""
+    """Return a problem for each touched path that is not a system glossary git tracks in the checkout at top.
+
+    Not handled: the hashtag glossary, which lists hashtags, not system-terms, is taken as a system glossary here, so an
+    item touching only it can settle as kind 7."""
     glossaries_listed = load_module("system_glossaries_listed_on_the_project_glossary_test",
                                     SYSTEM_GLOSSARIES_LISTED_FILE)
     project_glossary = glossaries_listed.PROJECT_GLOSSARY_RELATIVE_PATH
@@ -2678,10 +2708,13 @@ def marker_reader_pattern(marker):
 
 
 def glossary_term_or_marker_problems(found, touched, top, item):
-    """Return why a kind 6 item, a glossary term put in or a hashtag marker added to Markdown prose, cannot settle."""
+    """Return why a kind 6 item, a glossary term put in or a hashtag marker added to Markdown prose, cannot settle.
+
+    Not handled: an item that adds a hashtag no page uses yet. The hashtag glossary test then needs the hashtag
+    glossary to list it, and naming that glossary in `#not_asked_touches` is refused here, so such an item is asked."""
     problems = []
     terms = [name for value in found[GLOSSARY_TERM] for name in rename_names(value)]
-    markers = words(found[ADDED_HASHTAG_MARKER])
+    markers = [HASHTAG_MARKER_CLOSING_HASH.sub(r"\1", value) for value in words(found[ADDED_HASHTAG_MARKER])]
     if not terms and not markers:
         problems.append(MissingEvidenceLine(NOT_ASKED_NO_TERM_OR_MARKER_PROBLEM.format(term=GLOSSARY_TERM,
                                                                                        marker=ADDED_HASHTAG_MARKER)))
@@ -3911,7 +3944,7 @@ def waiting_item_read(arguments, sub_step_of=None):
     if rechecked is not None and not rechecked.strip():
         raise Failure(SYSTEM_STATUS_CLAIMS_RECHECKED_EMPTY)
     # Repeated in every command the step prints, so a rerun it asks for is not refused again for the same claims.
-    rechecked_words = [SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG, rechecked] if rechecked else []
+    rechecked_words = flag_and_value_words(SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG, rechecked) if rechecked else []
     rerun = read_step_command_with_cwd(
         top, *([AFTER_FIXES_FLAG] if arguments.after_fixes_reread_only_when_facts_change else []), *rechecked_words)
     # Before walk_document_items, which can write: a missing copy refuses with nothing written.
@@ -4757,6 +4790,11 @@ def gh_failure(command, top, gh_program, timeout):
     return result.stdout, None
 
 
+def pull_request_review_held_on_ruling_hashtag_line_rewritten_with_closing_hash_after_the_hashtag(line):
+    """line, a HELD_ON_RULING_LINE, with its hashtag in the closed form, as in `#held_on_ruling# w item 3`."""
+    return line.replace(" ", "# ", 1)
+
+
 def pull_requests_held_on(lines, top, gh_program, timeout):
     """Return ({held line: [the open pull requests whose review holds that line on a line of its own]}, None), or
     (None, what went wrong) when the open pull requests cannot be listed."""
@@ -4766,10 +4804,11 @@ def pull_requests_held_on(lines, top, gh_program, timeout):
     try:
         pull_requests = json.loads(output)
         held = {line: [] for line in lines}
+        closed_form = pull_request_review_held_on_ruling_hashtag_line_rewritten_with_closing_hash_after_the_hashtag
         for pull_request in pull_requests:
             found = {line.strip() for review in pull_request["reviews"] for line in (review["body"] or "").split("\n")}
             for line in lines:
-                if line in found:
+                if line in found or closed_form(line) in found:
                     held[line].append(pull_request["number"])
     except (ValueError, TypeError, KeyError) as error:
         return None, f"printed what is not a list of pull requests with their reviews: {error!r}"
@@ -4783,13 +4822,15 @@ def ruling_given_comments_posted(walk_name, rulings, top, gh_program, timeout):
     lines = {HELD_ON_RULING_LINE.format(walk=walk_name, number=number): (number, word) for number, word in rulings}
     held, error = pull_requests_held_on(list(lines), top, gh_program, timeout)
     in_top = f"cd {shlex.quote(str(top))} && gh "
+    closed_form = pull_request_review_held_on_ruling_hashtag_line_rewritten_with_closing_hash_after_the_hashtag
     output, failed = [], bool(error)
     for line, (number, word) in lines.items():
         body = RULING_GIVEN_LINE.format(walk=walk_name, number=number, word=word)
         values = {"number": number, "walk": walk_name, "word": word}
         if error:
-            list_command = (in_top + shlex.join(HELD_PULL_REQUESTS_LIST) + " --jq "
-                            + shlex.quote(HELD_PULL_REQUESTS_BY_HAND_JQ.format(line=json.dumps(line))))
+            jq = HELD_PULL_REQUESTS_BY_HAND_JQ.format(line=json.dumps(line),
+                                                      closed_form_line=json.dumps(closed_form(line)))
+            list_command = in_top + shlex.join(HELD_PULL_REQUESTS_LIST) + " --jq " + shlex.quote(jq)
             output += [text.format(error=error, list_command=list_command, **values,
                                    comment_command=in_top + "pr comment <number> --body " + shlex.quote(body))
                        for text in RULING_GIVEN_LOOKUP_FAILED]
@@ -4814,8 +4855,9 @@ def bump(arguments):
     top, minutes, value, parser = the_open_walk(walk_finder, arguments.cwd)
     pending = unclosed_last_answer(walk_finder, minutes, parser)
     if pending:
-        bump_command = check_command_with_cwd(top, "--bump", arguments.bump,
-                                              *(["--user-reply-as-typed", arguments.user_reply_as_typed]
+        bump_command = check_command_with_cwd(top, *flag_and_value_words("--bump", arguments.bump),
+                                              *(flag_and_value_words("--user-reply-as-typed",
+                                                                     arguments.user_reply_as_typed)
                                                 if arguments.user_reply_as_typed else []))
         raise Failure(BUMP_ANSWER_NOT_CLOSED.format(minutes=minutes, item=pending["item"],
                                                     close_command=step_command_with_cwd(top, "close"),
@@ -5075,6 +5117,7 @@ def main(argv=None):
     if len(arguments.already_decided or []) > 1:
         parser.error(ALREADY_DECIDED_REPEATED)
     arguments.already_decided, *arguments.already_decided_answers = (arguments.already_decided or [[None]])[0]
+    printed_command_path_override_words[:] = explicit_path_override_words(arguments)
     copy_problem = None if arguments.step == READ_AHEAD_WORKER_STEP else walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
     try:
         exit_code = {"check": check, "close": close, WAITING_ITEM_READ_STEP: waiting_item_read,

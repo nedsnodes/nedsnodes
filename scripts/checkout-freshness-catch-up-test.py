@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Before anything runs git: a run started with GIT_DIR set, or with another
@@ -2636,6 +2637,59 @@ with tempfile.TemporaryDirectory() as failing_git_scratch:
             raised = error
     check("a failed branch read in merge_blockers raises instead of reporting detached HEAD",
           raised is not None and INJECTED_STDERR in str(raised), str(raised))
+
+    # The never-pushed rebase is the shared rebase-or-replace answer's: a replace answer
+    # leaves the branch where it is, and the rebase answer moves it.
+    shared_answer = catch_up_module.rebase_or_replace
+    real_answer = shared_answer.pull_request_conflict_with_main_rebase_or_replace_answer
+    asked = []
+    for answer in (shared_answer.REPLACE_WITH_NEW_PULL_REQUEST, shared_answer.REBASE_ONTO_MAIN):
+        _, answered_seat = seat_behind_main(own_commit=True)
+        before = tip(answered_seat)
+
+        def injected_answer(open_pull_request_found, ever_marked_ready_read=None,
+                            answer=answer):
+            asked.append(open_pull_request_found)
+            return answer
+        shared_answer.pull_request_conflict_with_main_rebase_or_replace_answer = injected_answer
+        try:
+            catch_up_module.catch_up_session_checkout(answered_seat, 0)
+        finally:
+            shared_answer.pull_request_conflict_with_main_rebase_or_replace_answer = real_answer
+        moved = tip(answered_seat) != before
+        check(f"a never-pushed branch the shared answer gives '{answer}' is "
+              f"{'rebased' if answer == shared_answer.REBASE_ONTO_MAIN else 'left where it is'}",
+              moved == (answer == shared_answer.REBASE_ONTO_MAIN), f"{before} {tip(answered_seat)}")
+    check("checkout-freshness asks the shared answer for a branch with no open pull request",
+          asked == [False, False], repr(asked))
+
+    # The branch lock the turn-end push hook pushes under: catch-up waits for it before deciding
+    # the branch was never pushed, and a turn end that cannot take it leaves the branch as it is.
+    branch_lock = catch_up_module.branch_lock
+    _, locked_seat = seat_behind_main(own_commit=True)
+    locked_git_dir = Path(git(["rev-parse", "--absolute-git-dir"], locked_seat).stdout.strip())
+    before = tip(locked_seat)
+    real_wait = catch_up_module.CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS
+    catch_up_module.CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = 0
+    try:
+        with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(locked_git_dir, 0) as held:
+            catch_up_module.catch_up_session_checkout(locked_seat, 0)
+    finally:
+        catch_up_module.CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = real_wait
+    check("a never-pushed branch whose lock another process holds past the wait is left where it is",
+          held and tip(locked_seat) == before, f"{held} {before} {tip(locked_seat)}")
+    released = []
+    with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(locked_git_dir, 0) as held:
+        run = subprocess.Popen([sys.executable, str(SCRIPT_PATH), "--interval-seconds", "0",
+                                "--cwd", str(locked_seat)], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+        time.sleep(2)
+        tip_while_held = tip(locked_seat)
+        released.append(time.monotonic())
+    run_stdout, run_stderr = run.communicate(timeout=120)
+    check("catch-up waits while the push hook holds the branch lock, and rebases once it is released",
+          held and tip_while_held == before and tip(locked_seat) != before and run.returncode == 0,
+          f"{held} {before} {tip_while_held} {tip(locked_seat)} {run_stdout} {run_stderr}")
 
     # merges_from_main: a merge commit from main on the seat.
     _, merged_seat = seat_behind_main(own_commit=True)

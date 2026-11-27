@@ -85,10 +85,11 @@ CREDENTIAL_FILES_ON_NED_BOX = tuple(pathlib.Path.home() / path for path in (
 # the patterns only find files to ask the user about: nn-systems/cold-read/
 # cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write.py reports each file so
 # named that CREDENTIAL_FILES_ON_NED_BOX leaves out. The keychain remains accessible because masking it logs the
-# agent-binaries out. gh still fails inside the Mac sandbox, though its login is in the keychain: with GH_CONFIG_DIR
-# and XDG_CONFIG_HOME unset, gh reads its configuration directory ~/.config/gh, denied here, and exits with "failed to
-# read configuration" before it looks for a stored login. The launchers keep both variables, so when either points gh
-# at a readable directory, gh starts and can use the keychain login.
+# agent-binaries out. gh still fails inside the Mac sandbox, though its login is in the keychain: gh reads its
+# configuration directory, which is $GH_CONFIG_DIR when set, else $XDG_CONFIG_HOME/gh when that is set, else
+# ~/.config/gh, denied here, and when that directory is denied gh exits with "failed to read configuration" before it
+# looks for a stored login. The launchers keep both variables, so when the directory they select is readable, gh
+# starts; it is still not logged in unless that directory's hosts.yml names the host, or GH_TOKEN is set.
 CREDENTIAL_DIRECTORIES = (
     pathlib.Path.home() / ".config" / "nedsnodes",
     pathlib.Path.home() / ".config" / "gh",

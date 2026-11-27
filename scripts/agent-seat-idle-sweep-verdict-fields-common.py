@@ -36,6 +36,11 @@ SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY = (
 # because it holds other tasks, so it cannot back a promise about the task it updates.
 IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS = (
     "idle_sweep_verdict_field_listing_successful_task_update_tool_calls_setting_add_blocks_with_blocked_tasks")
+# [message_id], oldest first: the id each Bash call in the agent-session's own transcript passes to
+# scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py, each naming
+# an idle-sweep reminder the agent-seat marked irrelevant
+IDLE_SWEEP_VERDICT_FIELD_LISTING_REMINDER_MESSAGE_IDS_THE_AGENT_SEAT_MARKED_IRRELEVANT = (
+    "idle_sweep_verdict_field_listing_reminder_message_ids_the_agent_seat_marked_irrelevant")
 # ISO time of the newest message the user typed in the agent-session's own transcript, or null
 LAST_USER_TYPED_AT = "last_user_typed_at"
 TURN_ENDED = "turn_ended"
@@ -92,7 +97,7 @@ OPTIONAL = (DECISION, NOT_CHECKED, SUPERVISOR_LAST_POLL_AT, LAST_ACTIVITY, LAST_
             LAST_USER_TYPED_AT,
             SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY,
             IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS,
-            TURN_ENDED,
+            IDLE_SWEEP_VERDICT_FIELD_LISTING_REMINDER_MESSAGE_IDS_THE_AGENT_SEAT_MARKED_IRRELEVANT, TURN_ENDED,
             APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER, IDLE, NOT_IDLE_BECAUSE, RUNNING,
             HANDOFF_DEFERRED_MARKER,
             USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, TEXT, IF_EVERY_SENTENCE_BACKED,

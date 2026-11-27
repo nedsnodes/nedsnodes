@@ -4,12 +4,15 @@ the index file and the anchor list that hooks read.
 
 Usage:
   scripts/standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.py
-      [--log-store DIR] [--agents-directory DIR] [--repository-checkout DIR]
+      [--log-store DIR] [--agents-directory DIR] [--repository-checkout DIR] [--failures-only]
 
   --log-store            default /home/nedlern/nedsnodes-logs, the log-store on ned-box
   --agents-directory     default /home/nedlern/agents, whose agent-seats' docs/walk/*-minutes.md are read
   --repository-checkout  default the checkout this file is in; its origin/main, as last fetched, resolves the
                          repository paths and GHI-MD paths that become tags and anchors. Nothing is fetched.
+  --failures-only        print the FAILED lines and their follow-up text only: no summary line, and nothing when
+                         another run holds the lock. The exit codes are the same. Cron runs it so, each minute, from
+                         nn-systems/general-tools/scheduled-jobs-on-each-machine.json, so its log holds failures only.
 
 This is the index program of the ruling-agent design, docs/issues/2118-ruling-agent-keeps-user-rulings-
 checks-approval-walk.md, part 1 of its build order. It runs on ned-box and writes three files in
@@ -86,7 +89,7 @@ GHI-MD is on origin/main; a GHI without one has no anchor, nor has a pull reques
 "/" keeps "scripts/x.py" from matching "other-scripts/x.py". Each file is written beside itself and renamed
 over the old one, so a reader sees a whole file; the index file is written first.
 
-OUTPUT AND EXIT. One line on stdout: what was added, and the two files' entries, anchors and sizes. Each
+OUTPUT AND EXIT. One line on stdout, none with --failures-only: what was added, and the two files' entries, anchors and sizes. Each
 failure prints a line on stderr starting FAILED. Exit 0 when nothing failed; 1 when a transcript or
 walk-minutes file could not be read (the others are still added, and the next run tries it again) or the
 index file or the anchor list could not be written (the store keeps what was added); 2 when it could not
@@ -761,7 +764,7 @@ def write_whole(path, lines):
     return path.stat().st_size
 
 
-def run(log_store, agents_directory, repository_checkout):
+def run(log_store, agents_directory, repository_checkout, failures_only=False):
     store_directory = log_store / STORE_DIRECTORY_NAME
     try:
         store_directory.mkdir(parents=True, exist_ok=True)
@@ -773,7 +776,8 @@ def run(log_store, agents_directory, repository_checkout):
     try:
         fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        print(LOCK_HELD_LINE.format(lock=store_directory / LOCK_FILE_NAME))
+        if not failures_only:
+            print(LOCK_HELD_LINE.format(lock=store_directory / LOCK_FILE_NAME))
         return EXIT_LOCK_HELD
     try:
         repository = Repository(repository_checkout)
@@ -841,6 +845,8 @@ def run(log_store, agents_directory, repository_checkout):
             if its_instructions == instructions:
                 print(line, file=sys.stderr)
         print("\n".join(instructions), file=sys.stderr)
+    if failures_only:
+        return EXIT_SOURCE_OR_OUTPUT_FAILED if failures else EXIT_OK
     print(SUMMARY_LINE.format(user_words=user_words_added, walk=walk_added, set_count=set_count,
                               cleared_count=cleared_count, index=index_path,
                               entries=len(lines) - 1, index_bytes=index_bytes, anchors_path=anchor_path,
@@ -853,8 +859,10 @@ def main(argv=None):
     parser.add_argument("--log-store", type=Path, default=DEFAULT_LOG_STORE)
     parser.add_argument("--agents-directory", type=Path, default=DEFAULT_AGENTS_DIRECTORY)
     parser.add_argument("--repository-checkout", type=Path, default=HERE.parent)
+    parser.add_argument("--failures-only", action="store_true")
     arguments = parser.parse_args(argv)
-    return run(arguments.log_store, arguments.agents_directory, arguments.repository_checkout)
+    return run(arguments.log_store, arguments.agents_directory, arguments.repository_checkout,
+               failures_only=arguments.failures_only)
 
 
 if __name__ == "__main__":

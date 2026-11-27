@@ -327,6 +327,16 @@ def finding_fact_line_count_cases(scratch):
           result.code == 0 and "; 2 of 2 finding(s) lack an answered fact line: "
           "scripts/thing.py:4 lacks '#defect_evidence' | scripts/thing.py:5 lacks '#defect_evidence'"
           in result.stdout, result.detail)
+    closed = {"path": "scripts/thing.py", "line": 4, "body": (
+        "A finding.\n#defect_already_on_main# no\n- `#pull_request_triggers_the_defect#` `yes`\n"
+        "#false_report_of_success_on_failure# no\n#defect_evidence# judged from the code only")}
+    closed_bare = {"path": "scripts/thing.py", "line": 5, "body": closed["body"].replace(
+        "#defect_evidence# judged from the code only", "#defect_evidence#")}
+    result = run_program(scratch, review("APPROVE", comments=[closed, closed_bare]))
+    check("a hashtag line with the closing # counts as that hashtag's line, and one whose only text after the "
+          "hashtag is its closing # counts as lacking",
+          result.code == 0 and "; 1 of 2 finding(s) lack an answered fact line: "
+          "scripts/thing.py:5 lacks '#defect_evidence'" in result.stdout, result.detail)
     older = {"path": "scripts/thing.py", "line": 6, "body": f"A finding.\n\n{OLDER_LABEL_FACT_LINES}"}
     older_short = {"path": "scripts/thing.py", "line": 7, "body": OLDER_LABEL_FACT_LINES.replace(
         "- `Main has it:` `no`\n", "")}
@@ -420,6 +430,13 @@ def findings_record_cases(scratch):
           "row 17, state decided-not-worth-fixing, grade fix-in-maintenance, decision: the captures directory "
           "holds only captures" in (result.posted or {}).get("body", "")
           and "; findings record: 1 already held, 0 added" in result.stdout, result.detail)
+
+    closed_report = report.replace("`#defect_already_on_main` `yes`", "`#defect_already_on_main#` `yes`")
+    result = run_program(scratch, file([pull_request_grade]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, closed_report),), findings_record_match={"match": same})
+    check("a Codex finding whose #defect_already_on_main# line, with the closing #, answers yes also goes to the "
+          "findings record program's match", closed_report != report and bool(result.match_calls)
+          and [entry["finding_id"] for entry in result.match_calls[0][1]] == [main_id], result.detail)
 
     both_lines = FACT_LINES.replace("`#defect_already_on_main` `no`", "`#defect_already_on_main` `yes`")
     both_report = (f"<!-- provenance -->\n\n- [Codex priority P1 (P0 highest)] {on_main}\n  Body.\n"

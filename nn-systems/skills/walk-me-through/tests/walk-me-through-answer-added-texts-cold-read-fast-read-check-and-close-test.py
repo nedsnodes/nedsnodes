@@ -19,6 +19,7 @@ import argparse
 import contextlib
 import datetime
 import errno
+import http.server
 import importlib.util
 import io
 import json
@@ -30,6 +31,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import types
@@ -300,14 +302,23 @@ class Case:
 
     def run(self, step, *flags, mode="", counts_log=None, fast_read_program=None, environment=None,
             ignored_signal=None, reply="a", wait_for_reads_ahead=True, agent_session_id=CASE_AGENT_SESSION_ID,
-            stdout_closed=False):
+            stdout_closed=False, keep_printed_overrides=False):
         """Run the program; a check gets `--user-reply-as-typed reply` unless reply is None or the flags
         hold --not-asked or a reply of their own. Unless told not to, wait for the reads ahead it started.
         The program runs as agent-session agent_session_id, or with none set when it is None. With stdout_closed,
-        its stdout is a pipe whose reading end is closed, and the result's stdout is empty."""
+        its stdout is a pipe whose reading end is closed, and the result's stdout is empty.
+        The test doubles' path overrides, which every printed command repeats, are taken out of its output unless
+        keep_printed_overrides is true, so that a check of a printed command names only the words it is about."""
         result = self.run_only(step, *flags, mode=mode, counts_log=counts_log, fast_read_program=fast_read_program,
                                environment=environment, ignored_signal=ignored_signal, reply=reply,
                                agent_session_id=agent_session_id, stdout_closed=stdout_closed)
+        if not keep_printed_overrides:
+            overrides = " " + shlex.join([
+                "--cold-read-records", os.path.abspath(self.records),
+                "--fast-read-program", os.path.abspath(fast_read_program or self.stand_in),
+                "--counts-log", os.path.abspath(self.checkout / (counts_log or self.counts_log))])
+            result.stdout, result.stderr = (result.stdout.replace(overrides, ""),
+                                            result.stderr.replace(overrides, ""))
         if wait_for_reads_ahead:
             self.wait_for_reads_ahead()
         return result
@@ -1125,6 +1136,45 @@ def test_the_waiting_item_read_step_searches_an_item_under_a_shared_heading_by_i
     check("an item under a heading several items share is searched by its own opening's title and number too",
           result.returncode == 0 and "First answer." in result.stdout and "Not item 3." not in result.stdout,
           described(result))
+
+
+def test_every_walk_hashtag_is_read_in_its_closed_form_as_in_its_open_form():
+    program = load_program()
+    finder = program.load_walk_finder()
+    for form in ("#next_to_present", "#next_to_present#"):
+        found = finder.NEXT_MARKER.search(f"{form} item 3 of 9")
+        check(f"the walk marker `{form} item 3 of 9` gives the value `item 3 of 9`",
+              found is not None and found.group(2) == "item 3 of 9", repr(found and found.group(2)))
+        page = finder.ITEM_PAGE_LINE_PATTERN.search(f"{form.replace('next_to_present', 'item_page')} item 4 of 9 "
+                                                    "https://claude.ai/artifact/x")
+        check(f"an item page line opening `{form.replace('next_to_present', 'item_page')}` gives item 4 and its link",
+              page is not None and page.group(1) == "4" and page.group(4) == "https://claude.ai/artifact/x",
+              repr(page and page.groups()))
+    for form in ("#new", "#new#", "#new_if_d", "#new_if_d#"):
+        mark = finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(f"{form} Show every row.")
+        check(f"the mark line `{form} Show every row.` gives the mark and the text without the closing `#`",
+              mark is not None and mark.group(1) == form.rstrip("#") and mark.group(2) == "Show every row.",
+              repr(mark and mark.groups()))
+    for form in ("#case_against", "#case_against#"):
+        line = program.CASE_AGAINST_LINE.match(f"{form} weak: it costs an hour.")
+        check(f"the line `{form} weak: ...` gives its rating and reason",
+              line is not None and line.group(1) == "weak: it costs an hour.", repr(line and line.groups()))
+    for form in ("#not_asked_touches", "#not_asked_touches#"):
+        line = program.EVIDENCE_LINE.match(f"{form} scripts/a.py")
+        check(f"the evidence line `{form} scripts/a.py` gives the marker without the closing `#` and its files",
+              line is not None and line.groups() == ("#not_asked_touches", "scripts/a.py"), repr(line and line.groups()))
+    for form in ("#approval_walk_item_waits_on", "#approval_walk_item_waits_on#"):
+        line = program.WALK_WAITS_ON_LINE.match(f"{form} The first item")
+        check(f"the line `{form} The first item` gives the title waited on",
+              line is not None and line.group(1) == "The first item", repr(line and line.groups()))
+    answer = program.ANSWER_LINE.match("item 3 of 9: the user answered approved #approved_obvious# #case_against_weak# "
+                                       "(2026-11-26 01:00Z) in his words \"AO\", which makes its change. Fast reads:")
+    check("an answer line with closed hashtags gives the answer word alone",
+          answer is not None and answer.group("answered") == "approved", repr(answer and answer.groupdict()))
+    closed = program.pull_request_review_held_on_ruling_hashtag_line_rewritten_with_closing_hash_after_the_hashtag(
+        "#held_on_ruling w item 3")
+    check("a held-on-ruling line's closed form closes its hashtag alone",
+          closed == "#held_on_ruling# w item 3", repr(closed))
 
 
 def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
@@ -5044,6 +5094,7 @@ def test_a_glossary_term_put_in_or_a_marker_no_program_reads_settles_as_kind_6_a
                             ("#not_asked_glossary_term `poem index page`",
                              {"docs/poems-glossary.md": "- **poem index page** — the page that lists poems.\n"}),
                             ("#not_asked_hashtag_marker #poem_date", {"docs/about.md": "Mark a dated poem #poem_date.\n"}),
+                            ("#not_asked_hashtag_marker #poem_date#", {"docs/about.md": "Mark a dated poem #poem_date#.\n"}),
                             ("#not_asked_hashtag_marker #poem_date", {"tools/poems.py": "TAG = '#poem_date_old'\n"}),
                             ("#not_asked_hashtag_marker #poem_date-note", {"tools/poems.py": "TAG = '#poem_date-old'\n"}),
                             ("#not_asked_glossary_term poem-index\n\n#not_asked_hashtag_marker #poem_date", None)):
@@ -5082,6 +5133,10 @@ def test_kind_6_is_refused_unless_markdown_prose_outside_a_glossary_gets_a_liste
         check(f"kind 6 is refused when the marker is in {reader}, which a program runs or reads",
               *refused(kind_6_case("#not_asked_hashtag_marker #poem_date", {reader: 'if "#poem_date" in line: pass\n'}), 6,
                        f"the marker `#poem_date` is in {reader}, which are not Markdown"))
+    check("kind 6 reads a marker written with the hashtag's closing # as the marker, and is refused when a program "
+          "reads it",
+          *refused(kind_6_case("#not_asked_hashtag_marker #poem_date#", {"tools/poems.py": 'TAG = "#poem_date#"\n'}), 6,
+                   "the marker `#poem_date` is in tools/poems.py, which are not Markdown"))
     for marker, code, why in (
             ("#POEM_DATE", 'if "#poem_date" in line: pass\n', "in another letter case"),
             ("#poem_date-note", 'PAUSE = re.compile(r"#poem_date\\b")\n', "through a pattern that ends at its `-`"),
@@ -6103,6 +6158,31 @@ def test_read_step_offers_a_removal_that_lacks_only_its_touches_line_while_the_r
     check("a removal with an unused line and no touches line is offered kind 3 as lacking only the touches line",
           len(kind_3) == 1 and "Only evidence is missing" in kind_3[0] and "#not_asked_touches" in kind_3[0]
           and check_command_for(case, "--not-asked", "3") in kind_3[0], described(result))
+
+
+def test_read_step_offers_a_rename_that_lacks_only_its_touches_line_while_the_old_name_is_still_in_files():
+    case = rated_none_case(touches="#not_asked_rename poem-list poem-index\n\n", rating=WEAK_COST_ONLY)
+    (case.checkout / "docs" / "about.md").parent.mkdir(parents=True, exist_ok=True)
+    (case.checkout / "docs" / "about.md").write_text("See the poem-list.\n")
+    (case.checkout / "docs" / "poems-glossary.md").write_text("- **poem-index** — the page that lists every poem.\n")
+    result = case.run(WAITING_ITEM_READ)
+    kind_4 = [row for row in no_answer_rows_printed(result) if row.startswith("- kind 4:")]
+    check("a rename with a rename line and no touches line is offered kind 4 as lacking only the touches line",
+          len(kind_4) == 1 and "Only evidence is missing" in kind_4[0] and "#not_asked_touches" in kind_4[0]
+          and check_command_for(case, "--not-asked", "4") in kind_4[0], described(result))
+
+
+def test_read_step_row_not_offered_for_a_failed_glossary_listing_gives_git_failure_without_a_rerun_step():
+    case = rated_none_case(touches="#not_asked_touches docs/poems-glossary.md\n\n", rating=WEAK_COST_ONLY,
+                           files=("docs/poems-glossary.md",))
+    result = case.run(WAITING_ITEM_READ, environment=stubbed_git_failing_on(case, "ls-files"))
+    kind_7 = [line for line in result.stdout.splitlines() if line.startswith("- kind 7:")]
+    check("a `git ls-files` that fails while checking kind 7 is reported on that row, which is not offered",
+          result.returncode == 0 and len(kind_7) == 1 and "its evidence could not be checked" in kind_7[0]
+          and "fatal: stub ls-files failure" in kind_7[0], described(result))
+    check("the row that is not offered gives git's failure alone, with no step to run anything again",
+          "run this suite again" not in result.stdout
+          and f"{check_command_for(case, '--not-asked', '7')}` again once" not in result.stdout, described(result))
 
 
 def test_read_step_offers_the_handoff_row_only_for_an_item_naming_the_handoff():
@@ -7421,6 +7501,36 @@ def held_pull_requests(*held):
     return json.dumps([{"number": number, "reviews": [{"body": body} for body in bodies]} for number, bodies in held])
 
 
+def gh_jq_run_on(jq, response):
+    """Run `gh api --jq jq` on response, served by a local stand-in for GitHub, since `gh --jq` runs gojq, whose
+    regular expressions differ from standalone jq's."""
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = response.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *arguments):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    proxy = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with tempfile.TemporaryDirectory() as configuration:
+            # gh sends a request for the host github.localhost over plain http, so it goes through HTTP_PROXY.
+            return subprocess.run(["gh", "api", "pulls", "--jq", jq], capture_output=True, text=True, timeout=60,
+                                  env=dict(os.environ, HTTP_PROXY=proxy, http_proxy=proxy, NO_PROXY="", no_proxy="",
+                                           GH_HOST="github.localhost", GH_TOKEN="stand-in",
+                                           GH_CONFIG_DIR=configuration))
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def gh_environment(pull_requests="[]", mode="", comment_fails=""):
     return dict(os.environ, GH_STAND_IN_PULL_REQUESTS=pull_requests, GH_STAND_IN_MODE=mode,
                 GH_STAND_IN_COMMENT_FAILS=comment_fails)
@@ -7535,15 +7645,16 @@ def test_the_by_hand_lookup_command_lists_exactly_the_pull_requests_held_on_the_
     closed = case.run("close", environment=gh_environment(mode="list-fails"))
     command = re.search(r"--jq ('[^']*')", closed.stdout)
     jq = shlex.split(command.group(1))[0] if command else ""
-    program = shutil.which("jq")
-    if not program:
-        print("SKIP  the by-hand lookup's filter is run only where jq is installed")
+    if not shutil.which("gh"):
+        print("SKIP  the by-hand lookup's filter is run only where gh is installed, since it runs gh's own jq")
         return
-    listed = subprocess.run([program, "-r", jq], capture_output=True, text=True, input=held_pull_requests(
-        (101, [f"x\n  {HELD_ON_ITEM_4} \ny"]), (103, [f"#held_on_ruling {WALK_NAME} item 44"]), (106, [])))
-    check("the --jq filter the lookup failure prints picks the pull request whose review holds item 4's line, "
-          "and not one held on item 44",
-          listed.returncode == 0 and listed.stdout.split() == ["101"], described(listed) + jq)
+    listed = gh_jq_run_on(jq, held_pull_requests(
+        (101, [f"x\n  {HELD_ON_ITEM_4} \ny"]), (103, [f"#held_on_ruling {WALK_NAME} item 44"]), (106, []),
+        (108, [HELD_ON_ITEM_4.replace("#held_on_ruling ", "#held_on_ruling# ")]),
+        (109, [f"#held_on_ruling# {WALK_NAME} item 44"])))
+    check("the --jq filter the lookup failure prints picks the pull requests whose review holds item 4's line, "
+          "with or without the hashtag's closing #, and not one held on item 44",
+          listed.returncode == 0 and listed.stdout.split() == ["101", "108"], described(listed) + jq)
 
 
 def test_a_lookup_that_prints_json_of_another_shape_or_fails_silently_is_reported():
@@ -8289,6 +8400,54 @@ def test_a_forked_run_stopped_while_waiting_kills_and_reaps_its_child():
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
+
+
+def test_a_read_ahead_worker_stopped_with_an_unremovable_scratch_directory_says_the_read_step_reads_again():
+    case = Case()
+    reads = case.root / "reads"
+    reads.mkdir()
+    text_file = reads / "key.md"
+    text_file.write_text("the text\n")
+    result = case.run("approval-walk-item-cold-read-fast-read-review-background-worker", "--text-file", str(text_file),
+                      "--item", "item 3 of 9", "--name", "read-ahead", mode="stopped-unremovable SIGTERM")
+    check("a read-ahead worker a SIGTERM stops, whose scratch directory cannot be removed, ends its log saying the "
+          "read step runs the read itself",
+          result.returncode == -signal.SIGTERM and result.stderr.rstrip("\n").split("\n")[-1] == (
+              "The read step finds this read ended without an outcome, and runs the cold-read-fast-read itself."),
+          described(result))
+    for directory in case.temporary_directory.iterdir():
+        if (directory / "locked").exists():
+            (directory / "locked").chmod(0o700)  # Else the suite's own removal leaves it behind.
+
+
+def test_a_printed_recovery_command_keeps_the_explicit_path_overrides_as_absolute_paths():
+    case = Case()
+    result = case.run("check", mode="failed", counts_log=Path("relative-counts.log"), keep_printed_overrides=True)
+    words = shlex.split(printed_command_with(result, " check "))
+    expected = ["--cold-read-records", str(case.records), "--fast-read-program", str(case.stand_in),
+                "--counts-log", str(case.checkout / "relative-counts.log")]
+    check("the check a failed fast read prints keeps the records, reader and counts-log it was given, a relative "
+          "path resolved against the directory the check ran in",
+          result.returncode == 1 and words[-len(expected):] == expected, described(result))
+
+    read_case = item_read_case()
+    answered_and_closed(read_case)
+    read = read_case.run(WAITING_ITEM_READ, mode="failed", keep_printed_overrides=True)
+    read_words = shlex.split(printed_command_with(read, WAITING_ITEM_READ))
+    check("the read step's retry after a failed read keeps the reader it was given",
+          read.returncode == 1 and read_words[read_words.index("--fast-read-program") + 1] == str(read_case.stand_in),
+          described(read))
+
+
+def test_a_printed_command_gives_an_option_like_value_in_flag_equals_value_form():
+    case = Case()
+    failed = case.run("check", "--user-reply-as-typed=--no-cache", mode="failed", reply=None)
+    retry = printed_command_with(failed, " check ")
+    check("the printed check keeps an option-like reply in --flag=value form",
+          "--user-reply-as-typed=--no-cache" in shlex.split(retry), described(failed))
+    rerun = run_printed_command(case, retry)
+    check("the printed check with an option-like reply runs and records the reply",
+          rerun.returncode == 0 and "--no-cache" in case.minutes.read_text(), described(rerun))
 
 
 def stopped_by_sigterm(*_):
