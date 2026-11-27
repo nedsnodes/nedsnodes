@@ -1,5 +1,5 @@
 ---
-issue: "[The Bash guards' shared shell reader does not read inside a double-quoted command substitution](https://github.com/nedschorus/nedschorus/issues/710)"
+issue: "[The Bash guards' shared shell reader does not read inside a double-quoted command substitution](https://github.com/nedsnodes/nedsnodes/issues/710)"
 ---
 
 # The Bash guards' shared shell reader does not read inside a double-quoted command substitution
