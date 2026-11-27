@@ -151,9 +151,12 @@ def main():
               refused and refused.get("permissionDecision") == "deny"
               and "coordinating agent-seat (none named)" in refused["permissionDecisionReason"], refused)
         shown = decoded(hook.output_for(payload(), environment))
+        unreadable_error = hook.common.read_state(folder).error
         check("unreadable file: says why, and to tell the user",
-              shown and "cannot be read" in shown["additionalContext"]
-              and "Tell the user its path" in shown["additionalContext"], shown)
+              shown and (f"The emergency-stop file {stop} cannot be read: {unreadable_error}. Because that file "
+                         "exists, this hook treats an emergency stop as in force, though it cannot show the stop's "
+                         "text.\nTell the user the file's path and this error, and leave the file as it is: only "
+                         "the user repairs or moves it.") in shown["additionalContext"], shown)
 
         stop.write_text("started\n#emergency_stop_lifted all clear\n")
         session = uuid.uuid4().hex
