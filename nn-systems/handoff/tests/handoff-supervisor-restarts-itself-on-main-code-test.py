@@ -820,13 +820,31 @@ def run_real_exec_cases(workspace: Path):
     finished = subprocess.run([sys.executable, str(program), str(checkout), str(stub)],
                               capture_output=True, text=True, check=False, timeout=120,
                               env=environment)
-    check("REAL EXEC: a checkout with an uncommitted tracked change is left as is, and the "
-          "process is not replaced but told why",
+    check("REAL EXEC: a checkout with an uncommitted change to a file main changes is left as "
+          "is, and the process is not replaced but told why",
           "REPLACED " not in finished.stdout
           and "NOT RESTARTED The handoff-supervisor of this agent-seat did not restart"
           in finished.stdout
-          and 'reason: "launch-time-git-sync: main left as is — 1 uncommitted tracked change(s)"'
+          and 'reason: "launch-time-git-sync: main left as is — main changes these files, so '
+          'git cannot keep their uncommitted changes across the move: tracked.txt"'
           in finished.stdout, finished.stdout + finished.stderr)
+
+    git_in(["checkout", "--quiet", "--", "tracked.txt"], checkout)
+    (checkout / "new-here.txt").write_text("new\n", encoding="utf-8")
+    git_in(["add", "new-here.txt"], checkout)
+    finished = subprocess.run([sys.executable, str(program), str(checkout), str(stub)],
+                              capture_output=True, text=True, check=False, timeout=120,
+                              env=environment)
+    check("REAL EXEC: a checkout whose uncommitted change git keeps is fast-forwarded, with "
+          "the change kept",
+          git_in(["rev-parse", "HEAD"], checkout).stdout.strip() == tip
+          and git_in(["diff", "--cached", "--name-only"], checkout).stdout.split()
+          == ["new-here.txt"], finished.stdout + finished.stderr)
+    check("REAL EXEC: but its code is not main's, so the process is not replaced but told why",
+          "REPLACED " not in finished.stdout
+          and 'fast-forwarded to main' in finished.stdout
+          and ", but its checkout holds 1 uncommitted tracked change(s), so its code may not be "
+          "main's" in finished.stdout, finished.stdout + finished.stderr)
 
 
 with fixture.handoff_supervisor_suite_workspace() as workspace:

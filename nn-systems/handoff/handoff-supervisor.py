@@ -17,7 +17,8 @@ The cycle, per reincarnation:
      starts it again.
   2a. Unless the handoff carries ask-user-before-restart, fast-forward the checkout this
      program runs from to origin/main, and, when the checkout is then on
-     main's commit, whether it moved or was already there, replace this
+     main's commit, whether it moved or was already there, and holds no
+     uncommitted tracked change, which the fast-forward keeps, replace this
      process with a fresh start of this program from that checkout
      (os.execv, so the process ID stays, and the lock file keeps naming it).
      An ask-user-before-restart handoff skips this step, because the fresh
@@ -1572,21 +1573,30 @@ def run_git_here(arguments: list, working_directory: Path, timeout: int = 60):
 class LaunchTimeGitSyncReport(str):
     """A launch-time-git-sync report's text, with the sync's outcome beside it: whether the fetch
     of origin succeeded and the checkout then held all of main, and whether the checkout's commit
-    is now origin/main's. A plain str report has no such outcome, so it counts as neither."""
+    is now origin/main's. A plain str report has no such outcome, so it counts as neither.
+    uncommitted_tracked_change_count counts the uncommitted changes to tracked files the checkout
+    holds at main's commit, which the fast-forward keeps, or is None when git status could not
+    be read."""
 
     def __new__(cls, text: str, checkout_has_main_after_a_fetch: bool,
-                checkout_is_at_main_commit: bool = False):
+                checkout_is_at_main_commit: bool = False, uncommitted_tracked_change_count=0):
         report = super().__new__(cls, text)
         report.checkout_has_main_after_a_fetch = checkout_has_main_after_a_fetch
         report.checkout_is_at_main_commit = checkout_is_at_main_commit
+        report.uncommitted_tracked_change_count = uncommitted_tracked_change_count
         return report
 
 
+LAUNCH_TIME_GIT_SYNC_UNCOMMITTED_CHANGES_BLOCK_NEXT_STEP = (
+    "To let the checkout move to main, carry those changes to an nn-topic-branch, or undo them "
+    "if they are throwaway.")
+
+
 def launch_time_git_sync(working_directory: Path) -> str:
-    """Fast-forward a strictly behind checkout, on a branch or detached, that has no
-    uncommitted tracked change and no git operation in progress; return a report
-    without raising. Untracked files do not block: git refuses on its own to
-    overwrite one, and names it."""
+    """Fetch origin, then fast-forward the checkout, on a branch or detached, with
+    scripts/checkout-freshness-catch-up.py's
+    fast_forward_checkout_to_origin_main_keeping_uncommitted_changes, the step its Stop hook
+    takes between turns, and return a report of the outcome without raising."""
     # Only call between sessions: syncing under a live agent invalidates its view of the tree.
     # Fast-forward only; resolving a conflict requires the agent's judgment.
     git = git_machine_readable_output
@@ -1606,16 +1616,6 @@ def launch_time_git_sync(working_directory: Path) -> str:
         return git.run_git(working_directory, arguments, timeout_seconds=timeout,
                            accepted_exit_codes=accepted_exit_codes).decode().strip()
 
-    def is_ancestor(ancestor, descendant):
-        # --is-ancestor exits 1 for "no"; run_git raises for every other code.
-        try:
-            answer(["merge-base", "--is-ancestor", ancestor, descendant], 15)
-        except git.GitCommandFailed as error:
-            if error.returncode == 1:
-                return False
-            raise
-        return True
-
     branch = "the checkout"
     try:
         # --verify --quiet exits 1 for a name that does not exist.
@@ -1633,67 +1633,57 @@ def launch_time_git_sync(working_directory: Path) -> str:
 
         branch = answer(["rev-parse", "--abbrev-ref", "HEAD"], 15)
 
-        reasons = []
-        tracked_changes = checkout_freshness_catch_up.uncommitted_tracked_change_count(
-            working_directory)
-        if tracked_changes is None:
-            reasons.append("git status unreadable")
-        elif tracked_changes:
-            reasons.append(f"{tracked_changes} uncommitted tracked change(s)")
         try:
             git_dir = checkout_freshness_catch_up.git_directory(working_directory)
         except git.GitCommandFailed as error:
-            git_dir = None
-            reasons.append(f"git directory unreadable ({error})")
-        else:
-            # --show-toplevel answered above, so no git directory means git could not read it.
-            if git_dir is None:
-                reasons.append("git directory unreadable")
-        marker = (checkout_freshness_catch_up.in_progress_marker(git_dir)
-                  if git_dir is not None else None)
-        if marker is not None:
-            operation = checkout_freshness_catch_up.in_progress_operation(git_dir, marker)
-            reasons.append(f"a {operation} in progress")
-        if reasons:
-            return f"launch-time-git-sync: {branch} left as is — {'; '.join(reasons)}{fetch_note}"
+            return (f"launch-time-git-sync: {branch} left as is — git directory unreadable "
+                    f"({error}){fetch_note}")
+        # --show-toplevel answered above, so no git directory means git could not read it.
+        if git_dir is None:
+            return f"launch-time-git-sync: {branch} left as is — git directory unreadable{fetch_note}"
 
-        if is_ancestor("origin/main", "HEAD"):
-            ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
-            if ahead == "0":
-                return LaunchTimeGitSyncReport(
-                    f"launch-time-git-sync: {branch} is current with main{fetch_note}",
-                    checkout_has_main_after_a_fetch=fetched.returncode == 0,
-                    checkout_is_at_main_commit=True)
-            return LaunchTimeGitSyncReport(
-                f"launch-time-git-sync: {branch} is {ahead} commit(s) ahead of main and has all of "
-                f"it — nothing to pull{fetch_note}",
-                checkout_has_main_after_a_fetch=fetched.returncode == 0)
-
-        if not is_ancestor("HEAD", "origin/main"):
-            ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
-            behind = answer(["rev-list", "--count", "HEAD..origin/main"], 30)
-            return (f"launch-time-git-sync: {branch} is {ahead} ahead of main and {behind} "
-                    f"behind{fetch_note}")
+        # The same step the Stop hook takes between turns; what follows only reports its outcome.
+        outcome = checkout_freshness_catch_up.fast_forward_checkout_to_origin_main_keeping_uncommitted_changes(
+            working_directory, git_dir)
     except git.GitCommandFailed as error:
         return (f"launch-time-git-sync: {branch} left as is — {error}{fetch_note}\n"
                 f"{launch_time_git_sync_git_failure_next_steps(error)}")
+    fetched_main = fetched.returncode == 0
 
-    merged = run_git_here(["merge", "--ff-only", "--no-overwrite-ignore", "origin/main"],
-                          working_directory)
-    if merged.returncode != 0:
-        error = "; ".join(line.strip() for line in merged.stderr.splitlines()
-                          if line.strip())
-        return f"launch-time-git-sync: {branch} left as is — {error or 'no detail'}{fetch_note}"
+    def at_main(text, checkout_has_main_after_a_fetch=fetched_main):
+        return LaunchTimeGitSyncReport(
+            text, checkout_has_main_after_a_fetch, checkout_is_at_main_commit=True,
+            uncommitted_tracked_change_count=checkout_freshness_catch_up.uncommitted_tracked_change_count(
+                working_directory))
+
+    if outcome.kind == "current" and not outcome.ahead:
+        return at_main(f"launch-time-git-sync: {branch} is current with main{fetch_note}")
+    if outcome.kind == "current":
+        return LaunchTimeGitSyncReport(
+            f"launch-time-git-sync: {branch} is {outcome.ahead} commit(s) ahead of main and has "
+            f"all of it — nothing to pull{fetch_note}",
+            checkout_has_main_after_a_fetch=fetched_main)
+    if outcome.kind == "blocked" and outcome.operation:
+        return (f"launch-time-git-sync: {branch} left as is — a {outcome.operation} in "
+                f"progress{fetch_note}")
+    if outcome.kind == "blocked":
+        return (f"launch-time-git-sync: {branch} is {outcome.ahead} ahead of main and "
+                f"{outcome.behind} behind{fetch_note}")
+    if outcome.kind == "refused" and outcome.files_blocking_the_move:
+        return (f"launch-time-git-sync: {branch} left as is — main changes these files, so git "
+                f"cannot keep their uncommitted changes across the move: "
+                f"{', '.join(outcome.files_blocking_the_move)}{fetch_note}\n"
+                f"{LAUNCH_TIME_GIT_SYNC_UNCOMMITTED_CHANGES_BLOCK_NEXT_STEP}")
+    if outcome.kind == "refused":
+        return f"launch-time-git-sync: {branch} left as is — {outcome.git_error}{fetch_note}"
     try:
         tip = answer(["rev-parse", "--short", "HEAD"], 15)
     except git.GitCommandFailed as error:
-        return LaunchTimeGitSyncReport(
+        return at_main(
             f"launch-time-git-sync: {branch} fast-forwarded to main (its new commit could not be "
             f"read: {error}){fetch_note}\n{launch_time_git_sync_git_failure_next_steps(error)}",
-            checkout_has_main_after_a_fetch=False, checkout_is_at_main_commit=True)
-    return LaunchTimeGitSyncReport(
-        f"launch-time-git-sync: {branch} fast-forwarded to main ({tip}){fetch_note}",
-        checkout_has_main_after_a_fetch=fetched.returncode == 0, checkout_is_at_main_commit=True)
+            checkout_has_main_after_a_fetch=False)
+    return at_main(f"launch-time-git-sync: {branch} fast-forwarded to main ({tip}){fetch_note}")
 
 
 class OverviewCheckGitFailure(Exception):
@@ -2654,13 +2644,19 @@ def replace_this_process_with(arguments: list) -> None:
 
 
 def launch_time_git_sync_of_own_checkout_first_line_if_not_on_main() -> str:
-    """Return "" when the checkout holding this program is now at main's commit, else the
-    first line of the launch-time-git-sync's report, which says why not."""
+    """Return "" when the checkout holding this program is now at main's commit with no
+    uncommitted tracked change, so the program there is main's, else a line saying why not:
+    the first line of the launch-time-git-sync's report, or the changes it kept."""
     report = launch_time_git_sync(REPOSITORY_ROOT)
     print(f"handoff-supervisor: its own checkout {REPOSITORY_ROOT}: {report}")
-    if getattr(report, "checkout_is_at_main_commit", False):
+    if not getattr(report, "checkout_is_at_main_commit", False):
+        return report.splitlines()[0]
+    # The fast-forward keeps uncommitted changes, and changed code is not main's.
+    changes = report.uncommitted_tracked_change_count
+    if changes == 0:
         return ""
-    return report.splitlines()[0]
+    held = "git status unreadable" if changes is None else f"{changes} uncommitted tracked change(s)"
+    return f"{report.splitlines()[0]}, but its checkout holds {held}, so its code may not be main's"
 
 
 def handoff_supervisor_not_restarted_notice_and_console_line(

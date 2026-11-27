@@ -3,7 +3,7 @@
 
 User-walked 2026-08-17 (git-infra rules walk, deployment-boundary item). The
 fleet already had the between-sessions half: handoff-supervisor.py's
-launch_time_git_sync fast-forwards a clean seat branch at launch,
+launch_time_git_sync fast-forwards a seat's checkout at launch,
 and its own docstring names the gap — "a long-lived session drifts
 arbitrarily far from main with nothing announcing it." This script is the
 announcing, and where safe the catching up, DURING a session:
@@ -44,14 +44,18 @@ Wired as a Stop hook, so it runs at every turn boundary. Each run:
      `git diff --name-only --no-renames HEAD...origin/main`, never assumed —
      and to leave the branch alone and cut its next topic from origin/main.
   5b. If HEAD is detached and behind, and the checkout is an agent-home, which
-     the file agent-home-marker in its own git directory marks, and
-     it holds no commits of its own, no uncommitted tracked change and no
-     operation in progress, fast-forwards it to origin/main, because CLAUDE.md,
-     the skills and the hooks load from an agent-home. An agent-home with a
-     commit of its own, an uncommitted tracked change or an operation in
-     progress is not moved, and the agent is told why and what to do,
-     once per update of main; a refusal git gives for anything but an
-     untracked file is also a user line, once per distinct error. Any other
+     the file agent-home-marker in its own git directory marks, fast-forwards
+     it to origin/main with
+     fast_forward_checkout_to_origin_main_keeping_uncommitted_changes, the
+     step the handoff-supervisor's launch-time-git-sync also runs first,
+     because CLAUDE.md, the skills and the hooks load from an agent-home. It
+     moves when the checkout holds no commits of its own and no operation is
+     in progress, and git keeps every uncommitted change as it is, which it
+     does for a file that is the same in HEAD and origin/main. An agent-home
+     that is not moved is told why and what to do, naming the files whose
+     uncommitted changes block the move, once per update of main; a refusal
+     git gives for anything but an untracked file or an uncommitted change
+     is also a user line, once per distinct error. Any other
      detached checkout is left where it is and nothing is told, because it
      is detached at that commit on purpose: a pull request's review worktree
      pinned at the commit under review has the same shape as an agent-home.
@@ -131,6 +135,7 @@ import shlex
 import sys
 import time
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
@@ -284,7 +289,7 @@ AGENT_HOME_MARKER_FILE_NAME = "agent-home-marker"
 # runs the agent under stale instructions.
 DETACHED_MOVED_ADVICE = (
     "This checkout's detached HEAD was moved forward to origin/main: it held no commits "
-    "of its own and no uncommitted tracked changes, so nothing was lost.\n"
+    "of its own, and git kept every uncommitted change as it was, so nothing was lost.\n"
     "CLAUDE.md and the skills load from this checkout, so what you read from them earlier "
     "in this session may be out of date; the hooks already run from the new files.\n"
     "If CLAUDE.md is listed above, read it again before your next action.\n"
@@ -312,9 +317,20 @@ DETACHED_FAST_FORWARD_REFUSED_LINES = (
     "If git names anything else, leave the checkout as it is: the refusal has been "
     "reported to the user."
 )
-# Git's wording when a fast-forward would overwrite an untracked file: the one
-# refusal the agent can clear, so the one not sent to the user.
+DETACHED_FAST_FORWARD_BLOCKED_BY_UNCOMMITTED_CHANGES_MAIN_ALSO_CHANGES_MESSAGE_LINES = (
+    "Main changes these files too, so git cannot keep your uncommitted changes to them "
+    "across the move: {files}\n"
+    "This checkout is an agent-home, so git refuses commits in it: carry those changes to "
+    "a worktree of your own on an nn-topic-branch, as the refusal of `git commit` here says "
+    "how, or undo them if they are throwaway; the next turn's end moves the checkout forward."
+)
+# Git's wording when a fast-forward would overwrite an untracked file: a
+# refusal the agent can clear, so one not sent to the user.
 GIT_UNTRACKED_FILE_WOULD_BE_OVERWRITTEN_TEXT = "untracked working tree files would be overwritten"
+# Git's heading for the uncommitted changes a fast-forward would overwrite; the
+# file names follow it on lines that start with a tab. Read under LC_ALL=C.
+GIT_LOCAL_CHANGES_WOULD_BE_OVERWRITTEN_TEXT = (
+    "Your local changes to the following files would be overwritten")
 # A git command failed where this script needed its answer: the run stops
 # there, having moved nothing past what it already reported. The next-step
 # lines depend on the reader and on when the hook runs again: the Stop
@@ -1078,40 +1094,71 @@ def in_progress_operation(git_dir: Path, marker: str) -> str:
     return GIT_IN_PROGRESS_OPERATION_BY_MARKER[marker]
 
 
-def move_detached_checkout_forward(checkout: Path, git_dir: Path, ahead: int):
-    """Fast-forward an agent-home's detached HEAD to origin/main when it holds
-    no work of its own and no operation is in progress, or say why not.
+class CheckoutFastForwardOutcome(NamedTuple):
+    """What fast_forward_checkout_to_origin_main_keeping_uncommitted_changes did.
 
-    Returns (outcome, reasons, condition_lines, error): "moved"; "blocked" with
-    every condition that holds and its lines, the in-progress line alone while an
-    operation is in progress; or "refused" with git's
-    error, which is the only outcome where git was asked to move.
+    kind: "current" when HEAD already holds all of origin/main, so nothing was done;
+    "blocked" when a git operation is in progress or HEAD holds commits origin/main
+    lacks, so git was not asked to move; "moved"; or "refused" when git refused the
+    fast-forward, with git_error saying why.
+    behind and ahead count HEAD's commits against origin/main.
+    operation names the git operation in progress, or is "".
+    files_blocking_the_move names, on a refusal, each file whose uncommitted change
+    git would not overwrite because origin/main changes the file too.
     """
-    reasons, lines = [], []
+    kind: str
+    behind: int = 0
+    ahead: int = 0
+    operation: str = ""
+    files_blocking_the_move: tuple = ()
+    git_error: str = ""
+
+
+def files_named_after_git_local_changes_heading(stderr: str) -> tuple:
+    """The tab-indented file names git lists under its local-changes heading."""
+    files, listing = [], False
+    for line in stderr.splitlines():
+        if GIT_LOCAL_CHANGES_WOULD_BE_OVERWRITTEN_TEXT in line:
+            listing = True
+        elif listing and line.startswith("\t"):
+            files.append(line.strip())
+        else:
+            listing = False
+    return tuple(files)
+
+
+def fast_forward_checkout_to_origin_main_keeping_uncommitted_changes(
+        checkout: Path, git_dir: Path) -> CheckoutFastForwardOutcome:
+    """Fast-forward the checkout's HEAD, on a branch or detached, to origin/main,
+    keeping every uncommitted change, or say why not.
+
+    Git keeps an uncommitted change, staged or not, to a file that is the same in
+    HEAD and origin/main, and refuses the fast-forward, naming the files, when
+    origin/main changes a file that has one; it also refuses to overwrite an
+    untracked file, and, with --no-overwrite-ignore, an ignored one. Raises
+    GitCommandFailed when git cannot count HEAD's commits against origin/main.
+    """
+    behind, ahead = (
+        int(run_git_or_raise(["rev-list", "--count", commits], checkout, timeout=30).stdout)
+        for commits in ("HEAD..origin/main", "origin/main..HEAD"))
+    # Before "current": mid-operation, HEAD is not what it will be once the operation ends.
     marker = in_progress_marker(git_dir)
-    if marker is not None:
-        operation = in_progress_operation(git_dir, marker)
-        reasons.append(f"a {operation} in progress")
-        lines.append(DETACHED_OPERATION_IN_PROGRESS_LINE.format(operation=operation))
-    tracked_changes = uncommitted_tracked_change_count(checkout)
+    operation = in_progress_operation(git_dir, marker) if marker is not None else ""
+    if operation:
+        return CheckoutFastForwardOutcome("blocked", behind, ahead, operation)
+    if not behind:
+        return CheckoutFastForwardOutcome("current", behind, ahead)
     if ahead:
-        reasons.append(f"{ahead} commit(s) of its own")
-    if tracked_changes is None:
-        reasons.append("git status unreadable")
-    elif tracked_changes:
-        reasons.append(f"{tracked_changes} uncommitted tracked change(s)")
-    # Mid-operation, the other conditions are not yet what they will be once it
-    # ends, and `git switch -c` inside a rebase is the wrong move.
-    if (ahead or tracked_changes) and marker is None:
-        lines.append(DETACHED_WORK_OF_ITS_OWN_LINE)
-    if reasons:
-        return "blocked", reasons, lines, ""
+        return CheckoutFastForwardOutcome("blocked", behind, ahead)
     moved = run_git(["merge", "--ff-only", "--no-overwrite-ignore", "origin/main"], checkout, timeout=120)  # pragma: no mutate, a limit a second longer or shorter on a fast-forward changes nothing a test can see without a git merge that runs for two minutes
     if moved.returncode == 0:
-        return "moved", [], [], ""
-    # Every line, not the first: git names the untracked file on a later line.
+        return CheckoutFastForwardOutcome("moved", behind, ahead)
+    # Every line, not the first: git names the files on later lines.
     error = "; ".join(line.strip() for line in moved.stderr.splitlines() if line.strip())
-    return "refused", ["git refused the fast-forward"], [], error or "no detail"
+    return CheckoutFastForwardOutcome(
+        "refused", behind, ahead,
+        files_blocking_the_move=files_named_after_git_local_changes_heading(moved.stderr),
+        git_error=error or "no detail")
 
 
 def drift_facts(checkout: Path, stamp: dict, branch: str, state_key: str, state_text: str):
@@ -1646,9 +1693,14 @@ def catch_up_session_checkout_branch_under_lock(checkout: Path, git_dir: Path, s
         save_stamp_with_queued_notes(stamp_path, stamp)
         return
     if state_key == "detached":
-        outcome, reasons, lines, error = move_detached_checkout_forward(
-            checkout, git_dir, parts["ahead"])
-        if outcome == "moved":
+        outcome = fast_forward_checkout_to_origin_main_keeping_uncommitted_changes(
+            checkout, git_dir)
+        reasons, lines, error = [], [], outcome.git_error
+        if outcome.kind == "current":
+            stamp["last_action"] = "detached HEAD already holds origin/main"
+            save_stamp_with_queued_notes(stamp_path, stamp)
+            return
+        if outcome.kind == "moved":
             stamp["behind"], stamp["ahead"] = 0, 0
             stamp["last_action"] = f"moved a detached HEAD forward {parts['behind']}"
             stamp.pop("last_told", None)
@@ -1660,7 +1712,14 @@ def catch_up_session_checkout_branch_under_lock(checkout: Path, git_dir: Path, s
                 tell(f"{heading}{changed_on_main_clause}\n{DETACHED_MOVED_ADVICE}")
             save_stamp_with_queued_notes(stamp_path, stamp)
             return
-        if outcome == "refused":
+        if outcome.kind == "refused" and outcome.files_blocking_the_move:
+            # The agent's own changes block the move: the agent clears it, not the user.
+            reasons.append("main changes files that hold uncommitted changes here")
+            lines.append(DETACHED_FAST_FORWARD_BLOCKED_BY_UNCOMMITTED_CHANGES_MAIN_ALSO_CHANGES_MESSAGE_LINES.format(
+                files=", ".join(outcome.files_blocking_the_move)))
+            stamp["last_action"] = f"detached fast-forward refused: {error}"
+        elif outcome.kind == "refused":
+            reasons.append("git refused the fast-forward")
             stamp["last_action"] = f"detached fast-forward refused: {error}"
             lines = [DETACHED_FAST_FORWARD_REFUSED_LINES.format(error=error)]
             if (GIT_UNTRACKED_FILE_WOULD_BE_OVERWRITTEN_TEXT not in error
@@ -1669,6 +1728,16 @@ def catch_up_session_checkout_branch_under_lock(checkout: Path, git_dir: Path, s
                        f"could not fast-forward: {error}")
             stamp["last_detached_refusal"] = error
         else:
+            if outcome.operation:
+                reasons.append(f"a {outcome.operation} in progress")
+                lines.append(DETACHED_OPERATION_IN_PROGRESS_LINE.format(
+                    operation=outcome.operation))
+            if outcome.ahead:
+                reasons.append(f"{outcome.ahead} commit(s) of its own")
+            # Mid-operation, the commit count is not yet what it will be once the
+            # operation ends, and `git switch -c` inside a rebase is the wrong move.
+            if outcome.ahead and not outcome.operation:
+                lines.append(DETACHED_WORK_OF_ITS_OWN_LINE)
             stamp["last_action"] = f"detached HEAD not moved: {'; '.join(reasons)}"
         if not already_told:
             stamp["last_told"] = told

@@ -1257,3 +1257,63 @@ The claim check's evidence:
 > - The writer takes them from the supervisor, not from the module: handoff-write-and-check-supervisor.py:152-154.
 > - Ranked fix-later: renaming one of these fields still takes one edit, in handoff-supervisor.py, and a search finds it.
 State: open
+
+## E108 — possible problem: an assertion of the overview is contradicted
+
+Claim: naming the new agent-session by the title the user gave the current agent-session in claude.ai, which the new one keeps, or else by the agent-seat's name
+Found by: the overview claim check of 2026-11-25 against commit 2dc7696c3e63ac8e679c4df3714a97689cee122e; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4661ff1741ba75f58a2959428cf5f5059eeafa16-2026-11-25T23-07-01-281195Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:96 `return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`
+> - With no title in the transcript, the hook names the agent-seat's stored Remote Control name. That name differs from the agent-seat's name after a rename in an earlier agent-session. It falls back to the agent-seat's name only when no name is stored (remote-control-name common:76) or the stored name is unreadable (line 98).
+> - Overview line 39 describes this correctly, so this is loose wording in line 37.
+State: open
+
+## E109 — possible problem: an assertion of the overview is contradicted
+
+Claim: When the checkout still cannot be brought to main's commit, or the replacement fails, it carries on with its old code, and the successor's initial-agent-instructions say why and name the program to run
+Found by: the overview claim check of 2026-11-25 against commit 2dc7696c3e63ac8e679c4df3714a97689cee122e; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4661ff1741ba75f58a2959428cf5f5059eeafa16-2026-11-25T23-07-01-281195Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - handoff-supervisor.py:2643-2647 `changes = report.uncommitted_tracked_change_count` / `if changes == 0:` / `return ""` / ... `return f"{report.splitlines()[0]}, but its checkout holds {held}, so its code may not be main's"`
+> - A checkout already at main's commit that holds uncommitted tracked changes is not restarted either. The overview's list of reasons leaves this case out.
+> - handoff-supervisor.py:2666 `if report and REPOSITORY_ROOT == REFERENCE_CHECKOUT:`. For the reference-checkout this case also triggers `put_reference_checkout_back_on_main`, which the overview attributes only to a checkout that "will not fast-forward".
+> - The successor's notice quotes the actual reason, so no agent acts wrongly.
+State: open
+
+## E110 — possible problem: an assertion of the overview is contradicted
+
+Claim: read through the same module by the handoff-supervisor at each launch and by the Remote Control reconnect watcher.
+Found by: the overview claim check of 2026-11-25 against commit 2dc7696c3e63ac8e679c4df3714a97689cee122e; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4661ff1741ba75f58a2959428cf5f5059eeafa16-2026-11-25T23-07-01-281195Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py:113 `old_name = handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`. This runs on every call from the rename hook (rename hook:63).
+> - handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:96 reads the file through the same module.
+> - So the rename hook and the stop-typing hook also read `<seat>-remote-control-name`, and the shared-state entry's reader list omits them.
+> - Separately, the sibling file `<seat>-remote-control-names-announced-since-launch` (common:19, written at handoff-supervisor.py:2860 and common:121, read at handoff-supervisor.py:2592) is shared state the overview does not mention.
+State: open
+
+## E111 — possible problem: an assertion of the overview is contradicted
+
+Claim: `claude-code-session-transcript-lookup-and-text-search-common.py` finds transcript folders and transcripts for the handoff-supervisor, the writer script, `recover-crashed-seats.py` and the reconnect watcher; the extractor keeps its own copy, which the module's test holds equal.
+Found by: the overview claim check of 2026-11-27 against commit 5d380c5b4acb76816aa6d2120f7a3ce4b06e7945; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/552c45c2037466ed2883680c96800a8a1587ecbc-2026-11-27T12-57-52-804999Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The listed users and the extractor's copy are borne out: handoff-extract-conversation.py:139-141 `Same rule as claude-code-session-transcript-lookup-and-text-search-common.py, copied ... that module's test fails if the two disagree.`
+> - The list leaves out another component of this overview that loads the module: scripts/worktree-owner-file-read-and-write.py:290 `REPO_ROOT / "scripts" / "claude-code-session-transcript-lookup-and-text-search-common.py")`
+> - The list is incomplete, but no agent would act wrongly on it.
+State: open
+
+## E112 — possible problem: an assertion of the overview is contradicted
+
+Claim: Shared state `CLAUDE_CODE_TASK_LIST_ID` and `GIT_AUTHOR_NAME`: set by the launchers and by recovery for a ned-box supervisor. The first is required by the supervisor and names the list the writer prunes; the second names the seat in the snapshot module.
+Found by: the overview claim check of 2026-11-27 against commit 278538e9fde67e19ba038ef6e978855cb6d0787d; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/64cd4171b47d7147470bf4b2b95c625c871c08b1-2026-11-27T12-59-13-691974Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> The setters are borne out (launch-claude-mac:419-421; launch-claude-ubuntu:243-245; recover-crashed-seats.py:825-827). The readers are incomplete. The restore command also reads the first: uncommitted-work-snapshots.py:950 `task_list = Path.home() / ".claude" / "tasks" / environment[TASK_LIST_ENVIRONMENT_VARIABLE]`. The owner-file module reads the second: worktree-owner-file-read-and-write.py:47-48 `--agent-session names the nearest \`claude\` process ... and the agent-seat GIT_AUTHOR_NAME names`. So does the post-checkout hook: launch-claude-mac:268-270 `GIT_AUTHOR_NAME names the new agent-seat, so the post-checkout hook sees the agent-seat's own agent-home and writes it no owner file`.
+State: open
