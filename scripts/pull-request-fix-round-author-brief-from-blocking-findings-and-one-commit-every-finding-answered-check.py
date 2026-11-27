@@ -74,9 +74,10 @@ the frozen-head and that answers file has an entry for every finding: the refusa
 with --check, or, when the answers describe fixes, whose commit was reset away, to delete the answers file
 and run this again; this program cannot tell the two apart. Otherwise write the answers file with a line
 "<n>. (finding <comment ID>) " per finding, the finding's GitHub comment ID, followed by the answer that the
-file it replaces gave under that ID, if any; when that file held any other text, first copy it unchanged into
-this round's kept copies. Then print the brief:
-the frozen-head, ADVISOR_FIX_ROUND_INSTRUCTION when the round's number is ADVISOR_FIX_ROUND_NUMBER and on
+file it replaces gave under that ID, if any, unless that file gave more than one answer under the ID or a line
+it refuses ended the answer; when that file held any other text, first copy it unchanged into this round's kept
+copies. Then print the brief: the frozen-head, for each kept copy the findings whose answer it holds and was not
+put back, ADVISOR_FIX_ROUND_INSTRUCTION when the round's number is ADVISOR_FIX_ROUND_NUMBER and on
 no other, each blocking finding word for word, then each nit word for word, numbered on from the blocking
 findings, to fix in the same round, how to dispatch the fix-round subagent, a fork without Claude Code's
 worktree isolation, to work in the topic-worktree, what the author does when the subagent hands back new
@@ -857,11 +858,12 @@ def answer_start(number, finding_id):
 
 def answers_file_parse(text):
     """(the entries of an answers file's text, in order, each (finding comment ID, the answer's lines as written,
-    its first line without the "<n>. (finding <comment ID>)" start); the lines that open "<n>." but are not an
-    entry's start; whether any other non-blank line belongs to no answered entry). The brief, its rerun and the
-    check all read the file through this one parser. Only an entry whose numbered line holds answer text takes the
-    lines under it, so a note under an entry left empty answers nothing."""
-    entries, malformed, stray = [], [], False
+    its first line without the "<n>. (finding <comment ID>)" start); the lines ANSWER_NUMBERED_LINE_PATTERN
+    matches that ANSWER_START_PATTERN does not; the comment IDs of the answered entries such a line ended, which
+    may have gone on under it; whether any other non-blank line belongs to no answered entry). The brief, its rerun
+    and the check all read the file through this one parser. Only an entry whose numbered line holds answer text
+    takes the lines under it, so a note under an entry left empty answers nothing."""
+    entries, malformed, cut, stray = [], [], [], False
     current = None
     for line in text.splitlines():
         if ANSWER_NUMBERED_LINE_PATTERN.match(line):
@@ -871,12 +873,14 @@ def answers_file_parse(text):
                 entries.append(current[1:])
             else:
                 malformed.append(line)
+                if current is not None and answered(current[2]):
+                    cut.append(current[1])
                 current = None
         elif current is not None and answered(current[2]):
             current[2].append(line)
         elif line.strip():
             stray = True
-    return entries, malformed, stray
+    return entries, malformed, cut, stray
 
 
 def answered(lines):
@@ -885,12 +889,12 @@ def answered(lines):
 
 def answer_entries(text, finding_ids):
     """({finding number: the answer's non-blank lines, stripped}, numbers with more than one answer, tags naming
-    no finding of finding_ids, the lines that open "<n>." but are not an entry's start) of an answers file's text.
-    An entry is the answer to the finding its tag names, numbered as finding_ids orders them. An entry with no
-    answer, such as the line the brief writes, is left out."""
+    no finding of finding_ids, the lines ANSWER_NUMBERED_LINE_PATTERN matches that ANSWER_START_PATTERN does not)
+    of an answers file's text. An entry is the answer to the finding its tag names, numbered as finding_ids orders
+    them. An entry with no answer, such as the line the brief writes, is left out."""
     numbers = {finding_id: number for number, finding_id in enumerate(finding_ids, 1)}
     entries, repeated, unknown_tags = {}, [], []
-    parsed, malformed, _stray = answers_file_parse(text)
+    parsed, malformed, _cut, _stray = answers_file_parse(text)
     for finding_id, lines in parsed:
         if not answered(lines):
             continue
@@ -953,22 +957,27 @@ def answers_kept_copies_oldest_first(kept_copies_directory):
 
 
 def answers_kept_for_findings(data, finding_ids):
-    """({finding comment ID: the answer's lines} for each answered entry of data that names one of finding_ids,
-    whether data holds any other text), so that a rerun puts back what it can and copies the file otherwise."""
+    """({finding comment ID: the answer's lines} for each finding of finding_ids that data gives one answered entry
+    no refused line ended, whether data holds any other text, the comment IDs of finding_ids whose answer is left
+    out because data gives more than one or a refused line ended it), so that a rerun puts back only whole answers
+    and copies the file otherwise."""
     try:
         text = data.decode()
     except UnicodeDecodeError:
-        return {}, True
-    entries, malformed, stray = answers_file_parse(text)
-    kept, other = {}, stray or bool(malformed)
+        return {}, True, set()
+    entries, malformed, cut, stray = answers_file_parse(text)
+    kept, other, left_out = {}, stray or bool(malformed), set(cut) & finding_ids
     for finding_id, lines in entries:
         if not answered(lines):
             continue
-        if finding_id in finding_ids and finding_id not in kept:
+        if finding_id in finding_ids and finding_id in kept:
+            left_out.add(finding_id)
+        elif finding_id in finding_ids:
             kept[finding_id] = lines
-        else:
-            other = True
-    return kept, other
+        other = other or finding_id not in finding_ids
+    for finding_id in left_out:
+        kept.pop(finding_id, None)
+    return kept, other or bool(left_out), left_out
 
 
 def answers_file_text_kept_in_new_copy(path, kept_copies_directory, finding_ids=()):
@@ -979,7 +988,7 @@ def answers_file_text_kept_in_new_copy(path, kept_copies_directory, finding_ids=
         data = path.read_bytes()
     except FileNotFoundError:
         return None, {}
-    kept_answers, other = answers_kept_for_findings(data, set(finding_ids))
+    kept_answers, other, _left_out = answers_kept_for_findings(data, set(finding_ids))
     if not other:
         return None, kept_answers
     kept_copies_directory.mkdir(parents=True, exist_ok=True)
@@ -1159,8 +1168,21 @@ def print_brief(number, reviewer_login):
         f"The round's reviews: {review_link}",
     ]
     for kept_answers in kept_copies:
-        lines.append(f"The answers file held answers to other findings, so this program copied it unchanged to "
-                     f"{kept_answers}.")
+        try:
+            data = kept_answers.read_bytes()
+        except OSError as error:
+            raise StepFailed(f"could not read the kept copy {kept_answers} of the answers file: {error}") from None
+        left_out = answers_kept_for_findings(data, set(finding_ids))[2]
+        if left_out:
+            numbers = ", ".join(str(number) for number, finding_id in enumerate(finding_ids, 1)
+                                if finding_id in left_out)
+            lines.append(f"The answers file gave finding {numbers} more than one answer, or an answer that a line "
+                         f"{ANSWER_NUMBERED_LINE_WORDS} ended, so this program put none of them back and copied the "
+                         f"file unchanged to {kept_answers}. Read that copy, and write each such finding's whole "
+                         "answer after its line in the new file.")
+        else:
+            lines.append(f"The answers file held answers to other findings, so this program copied it unchanged to "
+                         f"{kept_answers}.")
     # A copies directory named by another review on this frozen-head: one an earlier version of this program
     # named by the round's latest changes-requested review, or one named by a first review since dismissed.
     for kept_answers in other_reviews_kept_copies:
@@ -1267,7 +1289,7 @@ def default_answers_path(number):
 
 def answer_starts_lines(finding_ids):
     # The answers file may hold no tags to copy from.
-    return "\n".join(f"  {answer_start(number, finding_id)}" for number, finding_id in enumerate(finding_ids, 1))
+    return "\n".join(answer_start(number, finding_id) for number, finding_id in enumerate(finding_ids, 1))
 
 
 def read_answers(path, finding_ids, blocking_count, nit_count):

@@ -2125,16 +2125,55 @@ def answers_put_back_cases(root, repository, _base, frozen_head):
           "answer",
           code == 0 and "1. hook.py:12: Fixed the lookup; the retry waits 3.5 s between attempts." in check_out,
           check_out + check_err)
+    for name, cut_answers in (
+            ("a numbered list inside an answer",
+             "1. (finding 1) Steps:\n1. first step\nthen more\n2. (finding 3) Added the timeout case.\n"),
+            ("a wrapped line that is just \"10.\"",
+             "1. (finding 1) The retry stops after\n10.\n2. (finding 3) Added the timeout case.\n"),
+            ("a second entry for the finding",
+             "1. (finding 1) Fixed the lookup.\n2. (finding 1) Fixed it again.\n2. (finding 3) Added the timeout "
+             "case.\n")):
+        answers.write_text(cut_answers)
+        code, out, err = run(root, repository, routes)
+        copies = sorted(kept_directory.iterdir(), key=lambda path: path.stat().st_mtime_ns)
+        check(f"answers put back: with {name}, the finding's answer is not put back, the file is copied unchanged, "
+              "and the brief names the finding and the copy",
+              code == 0 and answers.read_text() == "1. (finding 1) \n2. (finding 3) Added the timeout case.\n"
+              and copies[-1].read_text() == cut_answers
+              and "The answers file gave finding 1 more than one answer, or an answer that a line opening \"<n>.\" "
+                  "followed by whitespace, \"(\" or the line's end ended, so this program put none of them back and "
+                  f"copied the file unchanged to {copies[-1]}." in out
+              and f"held answers to other findings, so this program copied it unchanged to {copies[-1]}." not in out,
+              err + out)
+        code, check_out, check_err = run(root, repository, routes, "--check")
+        check(f"answers put back: with {name}, --check after the put-back refuses the finding left unanswered",
+              code == 1 and "no entry for finding 1;" in check_err and "Fix-round answered" not in check_out,
+              check_out + check_err)
+    unreadable = kept_directory / "unreadable.md"
+    unreadable.mkdir()
+    answers.write_text("1. (finding 1) Fixed the lookup.\n2. (finding 3) Added the timeout case.\n")
+    code, out, err = run(root, repository, routes)
+    unreadable.rmdir()
+    check("answers put back: a kept copy that cannot be read stops the brief with exit 2, naming the copy",
+          code == 2 and f"could not read the kept copy {unreadable} of the answers file" in err, err + out)
+    answers.write_text("1. Fixed the lookup.\n2. Added the timeout case.\n")
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    printed_starts = check_err.rstrip("\n").splitlines()[-2:]
+    answers.write_text(f"{printed_starts[0]}Fixed the lookup.\n{printed_starts[1]}Added the timeout case.\n")
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: the tagged starts a refusal prints, pasted as printed with an answer after each, pass "
+          "--check",
+          code == 0 and "1. hook.py:12: Fixed the lookup." in check_out, check_out + check_err)
     answers.write_text("1. Fixed the lookup.\n2. Added the timeout case.\n")
     code, check_out, check_err = run(root, repository, routes, "--check")
     check("answers put back: --check's refusal of an answers file with no tags, as an earlier brief wrote it, prints "
           "each finding's tagged start",
-          code == 1 and "\n  1. (finding 1) \n  2. (finding 3) " in check_err, check_out + check_err)
+          code == 1 and "\n1. (finding 1) \n2. (finding 3) " in check_err, check_out + check_err)
     answers.write_text("1. (finding 3) Added the timeout case.\n")
     code, check_out, check_err = run(root, repository, routes, "--check")
     check("answers put back: --check's refusal of an answers file missing an entry prints each finding's tagged start",
           code == 1 and "no entry for finding 1;" in check_err
-          and "\n  1. (finding 1) \n  2. (finding 3) " in check_err, check_out + check_err)
+          and "\n1. (finding 1) \n2. (finding 3) " in check_err, check_out + check_err)
     answers.write_text("1. (finding 99) An answer to a finding of another review.\n2. (finding 3) Added the timeout "
                        "case.\n")
     code, check_out, check_err = run(root, repository, routes, "--check")
