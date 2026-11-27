@@ -220,7 +220,9 @@ GUARDED_FILE_BACKUP_STORE_OPERATIONS_TOTAL_SECONDS_LIMIT_REACHED_INSTRUCTIONS = 
     "and did not finish. Run it yourself once in this checkout, as a Bash call with a 15-minute "
     "timeout: python3 .claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-"
     f"ask-hook.py {BACK_UP_AND_CHECK_EVERY_CHANGED_GUARDED_FILE_IN_ONE_LONG_RUN_OPTION}")
-BACK_UP_AND_CHECK_LONG_RUN_FOUND_NOTHING_TO_ASK_MESSAGE = "The guarded-file backup checked every changed guarded file; none needs the user."
+BACK_UP_AND_CHECK_LONG_RUN_FOUND_NOTHING_TO_ASK_MESSAGE = (
+    "The guarded-file backup copied and checked every changed guarded file of this checkout, and "
+    "none of them waits on the user's approval; carry on with your work.")
 FIRST_RUN_VERSION_LOST = (
     "[rule guarded-file-changed-without-approval-ask-user-afterward] "
     "The guarded-file backup could not approve version {blob} of {path}, the version this "
@@ -1909,8 +1911,15 @@ def main(arguments=None):
         return (EXIT_REFUSED if any(text.startswith(BACKUP_DID_NOT_RUN) for text in texts)
                 else EXIT_DONE)
     if arguments:
-        print(f"usage: python3 {HOOK_PATH} [--approve | --restore <path> <hash> ... | "
-              f"{BACK_UP_AND_CHECK_EVERY_CHANGED_GUARDED_FILE_IN_ONE_LONG_RUN_OPTION}]", file=sys.stderr)
+        print(f"{HOOK_PATH.name}: refused, nothing was done: it does not take the arguments "
+              f"{' '.join(arguments)!r}.\n"
+              f"usage: python3 {HOOK_PATH} --approve|--restore <path> <hash> "
+              "[<path> <hash> ...], with the pairs the hook's message gives\n"
+              f"   or: python3 {HOOK_PATH} "
+              f"{BACK_UP_AND_CHECK_EVERY_CHANGED_GUARDED_FILE_IN_ONE_LONG_RUN_OPTION}, "
+              "when the hook's message names that option\n"
+              "With no argument it runs as the hook, reading Claude Code's JSON on standard input.",
+              file=sys.stderr)
         return EXIT_BAD_INVOCATION
     try:
         payload = json.loads(sys.stdin.read() or "{}")
