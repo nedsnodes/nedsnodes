@@ -1812,13 +1812,13 @@ try:
     program = sorted(grid_module.CELL_PROGRAM_NAMES)[0]
     lifted_cases = (
         (grid_module.cell_common.STRAY_WRITE_PHRASE, "STRAY WRITE:",
-         grid_module.COLD_READ_CELL_STRAY_WRITE_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+         grid_module.cell_common.COLD_READ_CELL_STRAY_WRITE_STATUS_LINE_NEXT_STEP_INSTRUCTION),
         (grid_module.cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE, "WRITE CHECK DID NOT RUN:",
-         grid_module.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+         grid_module.cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_STATUS_LINE_NEXT_STEP_INSTRUCTION),
         (grid_module.cell_common.FELL_BACK_PHRASE, "FELL BACK:",
-         grid_module.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+         grid_module.cell_common.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION),
         (grid_module.cell_common.NEAR_MISS_RECOVERY_PHRASE, "RECOVERED:",
-         grid_module.COLD_READ_CELL_NEAR_MISS_REPORT_RECOVERED_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+         grid_module.cell_common.COLD_READ_CELL_NEAR_MISS_REPORT_RECOVERED_STATUS_LINE_NEXT_STEP_INSTRUCTION),
     )
     for phrase, marker, instruction in lifted_cases:
         printed = io.StringIO()
@@ -1844,9 +1844,9 @@ try:
           and "'/x/a\\u2028b\\u2029c\\x85d' To add an exception, run:" in printed_lines[0],
           repr(printed_lines))
     check("the FELL BACK instruction is the text item 24 of the approval-walk approved",
-          grid_module.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION
+          grid_module.cell_common.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION
           == "If this report drives a change, name the model that wrote it in cold-read-triage.md.",
-          grid_module.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION)
+          grid_module.cell_common.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION)
 
     real_working_tree_state = grid_module.cell_common.working_tree_state
     grid_module.cell_common.working_tree_state = failing_working_tree_state

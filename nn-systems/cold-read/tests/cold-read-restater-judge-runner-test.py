@@ -61,8 +61,10 @@ WHAT IS PINNED HERE.
 Run: python3 nn-systems/cold-read/tests/cold-read-restater-judge-runner-test.py
 """
 
+import contextlib
 import datetime
 import importlib.util
+import io
 import json
 import os
 import re
@@ -784,6 +786,47 @@ with tempfile.TemporaryDirectory() as scratch:
                   and str(repository / "test-cases") not in text for text in prompts),
           f"exit {result.returncode}; stderr={result.stderr[-400:]!r}; "
           f"prompts={[text[:200] for text in prompts]!r}")
+
+# --- Each lifted status line is followed by the line that says what to do ---
+_runner_spec = importlib.util.spec_from_file_location(
+    "cold_read_restater_judge_runner_under_test",
+    SYSTEM_DIRECTORY / "cold-read-restater-judge-runner.py")
+runner_module = importlib.util.module_from_spec(_runner_spec)
+_runner_spec.loader.exec_module(runner_module)
+
+
+class FinishedJudgeRun:
+    def poll(self):
+        return 0
+
+
+runner_common = runner_module.cell_common
+lifted_cases = (
+    (runner_common.FELL_BACK_PHRASE, "FELL BACK:",
+     runner_common.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+    (runner_common.STRAY_WRITE_PHRASE, "STRAY WRITE:",
+     runner_common.COLD_READ_CELL_STRAY_WRITE_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+    (runner_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE, "WRITE CHECK DID NOT RUN:",
+     runner_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+    (runner_common.NEAR_MISS_RECOVERY_PHRASE, "RECOVERED:",
+     runner_common.COLD_READ_CELL_NEAR_MISS_REPORT_RECOVERED_STATUS_LINE_NEXT_STEP_INSTRUCTION),
+)
+lift_scratch = Path(tempfile.mkdtemp(prefix="restater-runner-lift-"))
+try:
+    for phrase, marker, instruction in lifted_cases:
+        stderr_path = lift_scratch / "run-1.stderr"
+        stderr_path.write_text(
+            f"{runner_module.judge_cell.PROGRAM}: {phrase} something\n", encoding="utf-8")
+        captured = io.StringIO()
+        with contextlib.redirect_stderr(captured):
+            runner_module.wait_for_judge_runs(
+                {1: (FinishedJudgeRun(), lift_scratch / "run-1.md", stderr_path)})
+        printed_lines = captured.getvalue().splitlines()
+        check(f"the runner's lifted {marker} line is followed by its instruction line",
+              len(printed_lines) >= 2 and f"run 1 {marker} " in printed_lines[0]
+              and printed_lines[1] == instruction, repr(printed_lines))
+finally:
+    shutil.rmtree(lift_scratch, ignore_errors=True)
 
 print()
 if failures:

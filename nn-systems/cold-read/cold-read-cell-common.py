@@ -455,6 +455,26 @@ def stray_writes_since(baseline: set, own_report_path=None) -> list[str]:
 # The grid parses this phrase before deleting successful runs' logs.
 NEAR_MISS_RECOVERY_PHRASE = "recovered a near-miss report"
 
+
+COLD_READ_CELL_STRAY_WRITE_STATUS_LINE_NEXT_STEP_INSTRUCTION = (
+    "Inspect each file this line names and revert only what the reviewer wrote: you may have "
+    "been editing in the same checkout, and this is cleanup, not something to escalate.")
+COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_STATUS_LINE_NEXT_STEP_INSTRUCTION = (
+    "Look before you triage, because the check for writes outside the report did not run: read "
+    "what `git status` lists against the edits you know are your own, revert only what a "
+    "reviewer evidently wrote, and ask the user about any other change you did not make.")
+COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION = (
+    "If this report drives a change, name the model that wrote it in cold-read-triage.md.")
+COLD_READ_CELL_NEAR_MISS_REPORT_RECOVERED_STATUS_LINE_NEXT_STEP_INSTRUCTION = (
+    "The report is intact and now in place, so triage it as usual; nothing else needs doing.")
+
+
+def print_cold_read_cell_status_line_with_its_next_step_instruction(
+        status_line: str, next_step_instruction: str, file=None) -> None:
+    """Print a lifted cell status line, then the line that says what to do about it."""
+    print(status_line, file=file, flush=True)
+    print(next_step_instruction, file=file, flush=True)
+
 # Only launchers that can recognize a complete review in stdout may opt into recovery.
 STDOUT_RECOVERY_PHRASE = "recovered the report from the model's chat output"
 
