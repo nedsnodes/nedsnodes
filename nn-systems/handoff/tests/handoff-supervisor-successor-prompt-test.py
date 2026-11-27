@@ -3312,9 +3312,12 @@ def run_ready_tasks_listed_in_start_order_cases(workspace: Path):
     with contextlib.redirect_stderr(io.StringIO()) as console:
         failed = supervisor.ready_tasks_listed_in_start_order(unlistable_home, environment)
     check("ready tasks: a task list that cannot be listed gives the instruction naming the error",
-          failed.startswith("The handoff-supervisor could not list your ready tasks: NotADirectoryError")
-          and failed.endswith("first the task most other open tasks list in blockedBy, then the "
-                              "lowest task number.")
+          failed.startswith("The handoff-supervisor could not list your ready tasks, so none is "
+                            "listed here: NotADirectoryError")
+          and failed.endswith("Tell the user this error. The due-task Stop hook lists your ready "
+                              "tasks, in the order to start them, at the end of a turn when no "
+                              "approval-walk is open and none of "
+                              "your work is running.")
           and "the ready tasks could not be listed: NotADirectoryError" in console.getvalue(),
           (failed, console.getvalue()))
     heading = supervisor.NEXT_STEP_HEADING

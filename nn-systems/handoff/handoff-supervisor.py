@@ -182,6 +182,13 @@ _next_step_lines_spec = importlib.util.spec_from_file_location(
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
+_running_at_once_limit_spec = importlib.util.spec_from_file_location(
+    "agent_seat_subagents_and_workflows_running_at_once_limit_constant_common",
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
+    / "agent-seat-subagents-and-workflows-running-at-once-limit-constant-common.py")
+running_at_once_limit = importlib.util.module_from_spec(_running_at_once_limit_spec)
+_running_at_once_limit_spec.loader.exec_module(running_at_once_limit)
+
 _session_handoff_field_names_spec = importlib.util.spec_from_file_location(
     "session_handoff_field_names", Path(__file__).with_name("session-handoff-field-names-common.py"))
 session_handoff_field_names = importlib.util.module_from_spec(_session_handoff_field_names_spec)
@@ -586,15 +593,16 @@ ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION = (
     "/walk-me-through gives. When nothing needs him, open no approval-walk. "
     "2. While he answers, or at once when nothing needs him, take the next step, "
     "then start the ready tasks listed below, up to "
-    f"{agent_seat_worktrees_and_branches_list.due_task_raise_hook_module().SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT} "
+    f"{running_at_once_limit.SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT} "
     "subagents at once, in the order listed: a task another agent-seat owns "
     "goes to that agent-seat, any other to a background subagent or Codex."
 )
 
 READY_TASKS_NOT_LISTED_INSTRUCTION_TEMPLATE = (
-    "The handoff-supervisor could not list your ready tasks: {error}. Read your task list with "
-    "TaskList instead, and take its ready tasks in this order: first the task most other open "
-    "tasks list in blockedBy, then the lowest task number.")
+    "The handoff-supervisor could not list your ready tasks, so none is listed here: {error}. "
+    "Tell the user this error. The due-task Stop hook lists your ready tasks, in the order to "
+    "start them, at the end of a turn when no approval-walk is open and none of your work is "
+    "running.")
 
 
 def ready_tasks_listed_in_start_order(home: Optional[Path] = None, environment=None) -> str:

@@ -300,8 +300,12 @@ PREREQUISITE_FORMS = (
 
 RAISE_LINE_TEMPLATE = ('[rule due-task-raise-when-prerequisites-met] Act on task {task_id} "{subject}" '
                        "now: {reasons}.")
-# The user set this number and the wordings that name it; change them only with his approval.
-SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT = 3
+SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT = _load_module_by_path(
+    "agent_seat_subagents_and_workflows_running_at_once_limit_constant_common",
+    _HOOK_DIRECTORY.parent / "nn-systems" / "general-tools"
+    / "agent-seat-subagents-and-workflows-running-at-once-limit-constant-common.py",
+).SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT
+# The user set the wordings that name the limit; change them only with his approval.
 APPROVAL_RAISE_LINE_TEMPLATE = (
     '[rule due-task-approved-ready-task-forked-subagent-dispatch-reminder] Task {task_id} "{subject}" is ready and '
     "needs no decision from the user ({approval}).{running_sentence} Set it in_progress with TaskUpdate, "
