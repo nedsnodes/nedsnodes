@@ -977,6 +977,21 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
             input="not a commit\n", capture_output=True, text=True, env=GIT_ENVIRONMENT,
             check=True).stdout.strip()
 
+    def recorded_by_a_later_commit_and_earliest_failed_at_one_the_branch_holds(directory):
+        # Main's later commit recorded the test first, and a run of the commit the branch was cut
+        # from, finishing later, found it failing too.
+        failed_suites_record_written(directory)
+        record = failed_suites_record_of(directory)
+        cut_from = git_output(directory / "review-tools", "rev-parse", "HEAD")
+        later = subprocess.run(
+            ["git", *GIT_IDENTITY, "-C", str(directory / "review-tools"), "commit-tree",
+             "HEAD^{tree}", "-p", cut_from, "-m", "main's later commit"],
+            capture_output=True, text=True, env=GIT_ENVIRONMENT, check=True).stdout.strip()
+        for fields in record["scripts/broken-test.py"]["failed_tests"].values():
+            fields.update(commit=later, earliest_failed_commit=cut_from, last_failed_commit=later)
+        failed_suites_record_file(directory).write_text(json.dumps(record))
+        failed_suites_as_written.append(record)
+
     def one_recorded_and_one_new_case(directory):
         failed_suites_record_written(directory, tests=["case recorded"])
         failed_suites_as_written.append(failed_suites_record_of(directory))
@@ -985,6 +1000,11 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
 
     for name, runner_output, expected_exit, expected_lines, unexpected in (
             ("failed-into-another-branch-only-what-main-fails", RUNNER_FAILED, 0,
+             ["the test run of 'stacked-topic-branch' at ",
+              "failed only tests already on the failed suites record"],
+             ["STOP", "main may be broken"]),
+            ("failed-into-another-branch-recorded-later-but-earliest-failed-commit-held",
+             RUNNER_FAILED, 0,
              ["the test run of 'stacked-topic-branch' at ",
               "failed only tests already on the failed suites record"],
              ["STOP", "main may be broken"]),
@@ -999,11 +1019,11 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
              ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
               "failed tests that are not main's failures", TELL_AUTHOR_AND_USER,
               "is on the failed suites record, ",
-              ", which keeps the main commit whose test run recorded it first, ",
+              ", which keeps the earliest main commit known to fail it, ",
               ". 'stacked-topic-branch' does not hold that commit, so this program counts the "
               "failure as 'stacked-topic-branch''s own. It may still be main's: when two of "
-              "main's after-merge test runs overlap, the later commit's run can record the "
-              "test first, though the earlier commit fails it too.\n",
+              "main's after-merge test runs overlap, the run of an earlier commit that fails "
+              "it too may not have finished yet.\n",
               "If that test passes there, 'stacked-topic-branch' broke it: the author fixes it on "
               "'stacked-topic-branch'.\n",
               "If scripts/broken-test.py is not in that commit, main gained it after "
@@ -1020,11 +1040,11 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
              ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
               "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
              ["main may be broken", "nothing is needed",
-              "which keeps the main commit whose test run recorded it first"]),
+              "which keeps the earliest main commit known to fail it"]),
             ("failed-into-another-branch-first-failing-commit-unknown", RUNNER_FAILED, 3,
              ["STOP: pull request 10 merged into 'stacked-topic-branch', but git could not say "
-              "whether 'stacked-topic-branch' holds ffffffffffff, the main commit whose test run "
-              "first failed scripts/broken-test.py: case a, so this program counts the failure of every "
+              "whether 'stacked-topic-branch' holds ffffffffffff, the earliest main commit known "
+              "to fail scripts/broken-test.py: case a, so this program counts the failure of every "
               "test first failed there as 'stacked-topic-branch''s own, not main's; the STOP this "
               "program prints last lists those failures among the ones that are not main's. "
               "`git rev-list --first-parent --parents "
@@ -1041,6 +1061,8 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
                 recorded_at_commit(commit_the_branch_does_not_hold),
             "failed-into-another-branch-main-took-the-cut-from-commit-in-by-a-merge":
                 recorded_at_commit(commit_the_branch_holds_only_through_its_second_parent),
+            "failed-into-another-branch-recorded-later-but-earliest-failed-commit-held":
+                recorded_by_a_later_commit_and_earliest_failed_at_one_the_branch_holds,
             "failed-into-another-branch-recorded-suite-new-case": one_recorded_and_one_new_case,
             "failed-into-another-branch-first-failing-commit-unknown":
                 # Two tests first failed at one commit: one git fault, one STOP.
@@ -2004,7 +2026,7 @@ def failed_suites_kept_in_view_cases(scratch):
     runs = iter(range(1000))
 
     def kept_in_view_directly(last_failed_commit, tested_commit, junit,
-                              test="scripts/x-test.py"):
+                              test="scripts/x-test.py", first_recorded=None, earliest=None):
         run = next(runs)
         home = scratch / f"direct-home-{run}"
         log_dir = scratch / f"direct-logs-{run}"
@@ -2016,11 +2038,15 @@ def failed_suites_kept_in_view_cases(scratch):
             record = (home / ".local" / "state" / "nedsnodes"
                       / "failed-after-merge-test-suites-on-main.json")
             record.parent.mkdir(parents=True)
-            record.write_text(json.dumps({"scripts/x-test.py": {"failed_tests": {test: {
-                "commit": older if last_failed_commit != "0" * 40 else last_failed_commit,
+            fields = {
+                "commit": first_recorded or (
+                    older if last_failed_commit != "0" * 40 else last_failed_commit),
                 "last_failed_commit": last_failed_commit, "pull_request": "9", "log": None,
                 "failed_at": "2026-11-20T17:18:00Z", "repair_task_agent_seat": None,
-                "repair_task_id": None}}}}))
+                "repair_task_id": None}
+            if earliest is not None:
+                fields["earliest_failed_commit"] = earliest
+            record.write_text(json.dumps({"scripts/x-test.py": {"failed_tests": {test: fields}}}))
             printed = io.StringIO()
             with contextlib.redirect_stdout(printed):
                 kept = program.failed_suites_kept_in_view(
@@ -2063,6 +2089,31 @@ def failed_suites_kept_in_view_cases(scratch):
           and worked_after and "scripts/x-test.py" in left_after,
           f"{left}\n{left_after}\n{output}")
 
+    worked, left, output = kept_in_view_directly(newer, older, still_failing,
+                                                 first_recorded=newer, earliest=newer)
+    lowered = left["scripts/x-test.py"]["failed_tests"]["scripts/x-test.py"]
+    check("runs finishing out of order: a failure the newer commit's run recorded first, which "
+          "the older commit's run then fails too, keeps the older commit as the earliest main "
+          "commit failing it, and the newer as the commit that recorded it",
+          worked and lowered["earliest_failed_commit"] == older and lowered["commit"] == newer
+          and lowered["last_failed_commit"] == newer, f"{worked} {left}\n{output}")
+    worked, left, output = kept_in_view_directly(newer, newer, still_failing,
+                                                 first_recorded=newer, earliest=older)
+    check("a failure at a commit later than the earliest one known leaves the earliest as it was",
+          worked and left["scripts/x-test.py"]["failed_tests"]["scripts/x-test.py"][
+              "earliest_failed_commit"] == older, f"{worked} {left}\n{output}")
+    worked, left, output = kept_in_view_directly(newer, older, still_failing,
+                                                 first_recorded=newer, earliest="0" * 40)
+    check("an earliest commit git cannot judge is left as it was and is a STOP",
+          not worked and left["scripts/x-test.py"]["failed_tests"]["scripts/x-test.py"][
+              "earliest_failed_commit"] == "0" * 40
+          and "STOP: merged, but scripts/x-test.py stays" in output, f"{worked} {left}\n{output}")
+    worked, left, output = kept_in_view_directly(older, newer, still_failing)
+    check("a record written before earliest_failed_commit existed is read with it taken as the "
+          "test's commit, and written back with it",
+          worked and left["scripts/x-test.py"]["failed_tests"]["scripts/x-test.py"][
+              "earliest_failed_commit"] == older, f"{worked} {left}\n{output}")
+
     other_case = x_suite('<testcase name="case b"/>')
     worked, left, output = kept_in_view_directly(older, newer, other_case, test="case a")
     check("a recorded test its suite, run to the end at a later commit, no longer reports leaves "
@@ -2082,7 +2133,8 @@ def failed_suites_kept_in_view_cases(scratch):
     check("a recorded test stays unchanged when its suite, at a later commit, failed another "
           "case and stopped before this one with no traceback, as a shell suite under set -e does",
           worked and left.get("scripts/x-test.py", {}).get("failed_tests", {}).get("case a") == {
-              "commit": older, "last_failed_commit": older, "pull_request": "9", "log": None,
+              "commit": older, "earliest_failed_commit": older, "last_failed_commit": older,
+              "pull_request": "9", "log": None,
               "failed_at": "2026-11-20T17:18:00Z", "repair_task_agent_seat": None,
               "repair_task_id": None}
           and "left the failed suites record" not in output, f"{worked} {left}\n{output}")

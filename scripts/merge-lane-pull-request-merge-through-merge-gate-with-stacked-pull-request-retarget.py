@@ -104,7 +104,7 @@ repair task is already open; a new failed test in a recorded suite exits 3.
 A merge into a branch other than main leaves the record as it was, reruns no
 suite and opens no repair task, because the record and its repair tasks cover
 main alone. A failed test counts as main's when the record holds it and the
-merge commit descends from the main commit whose test run first failed it: the
+merge commit descends from the earliest main commit known to fail it: the
 branch then holds main's failure. Such failures alone, with every suite run to
 the end and every step done, print a notice and exit 0. Any other failed test,
 one the record does not hold or one the branch was cut before main began
@@ -814,6 +814,19 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
             undecided[test_named(suite, test)] = git_error(ancestor)
         return ancestor.returncode == 0
 
+    def earlier_than_earliest_failed(suite, test, fields):
+        # Runs can finish out of order, so a run of an older commit may find a failure that a
+        # newer commit's run recorded first.
+        earliest = fields["earliest_failed_commit"]
+        if earliest == merge_commit:
+            return False
+        ancestor = subprocess.run(
+            ["git", "-C", str(worktree), "merge-base", "--is-ancestor", merge_commit, earliest],
+            capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+        if ancestor.returncode not in (0, 1):
+            undecided[test_named(suite, test)] = git_error(ancestor)
+        return ancestor.returncode == 0
+
     def why_it_leaves(suite, test, fields):
         if suite in gone:
             return "git no longer lists its suite" if observed_at(suite, test, fields, False) else None
@@ -825,6 +838,8 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
         if test in verdict["failed"]:
             if observed_at(suite, test, fields, True):
                 fields["last_failed_commit"] = merge_commit
+            elif earlier_than_earliest_failed(suite, test, fields):
+                fields["earliest_failed_commit"] = merge_commit
             return None
         if test_skipped(test, verdict) or not verdict["ran_to_the_end"]:
             return None
@@ -882,7 +897,8 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
         for suite, tests in new_tests.items():
             on_record = suites.setdefault(suite, {"failed_tests": {}})["failed_tests"]
             for test, log in tests.items():
-                on_record[test] = {"commit": merge_commit, "last_failed_commit": merge_commit,
+                on_record[test] = {"commit": merge_commit, "earliest_failed_commit": merge_commit,
+                                   "last_failed_commit": merge_commit,
                                    "pull_request": arguments.pull_request, "log": log,
                                    "failed_at": now, "repair_task_agent_seat": None,
                                    "repair_task_id": None}
@@ -1032,7 +1048,7 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
 
     Return a dict of the form failed_suites_kept_in_view returns, with no repair task: the
     record and its repair tasks cover main alone. A failed test is main's when the record holds
-    it and merge_commit descends from the commit whose run first failed it on main; a branch cut
+    it and merge_commit descends from the earliest main commit known to fail it; a branch cut
     before that commit fails the test for a reason of its own. Each step that did not work
     prints its own STOP line."""
     runner = common.run_all_test_suites
@@ -1055,7 +1071,7 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
         if ancestor.returncode != 0:
             print(f"STOP: pull request {arguments.pull_request} merged into {base_branch!r}, but "
                   f"git could not say whether {base_branch!r} holds {first_failed[:12]}, the "
-                  f"main commit whose test run first failed {test_named(suite, test)}, so this "
+                  f"earliest main commit known to fail {test_named(suite, test)}, so this "
                   f"program counts the failure of every test first failed there as "
                   f"{base_branch!r}'s own, not main's; the STOP this program prints last lists "
                   f"those failures among the ones that are not main's. `git rev-list "
@@ -1087,7 +1103,7 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
           f"{arguments.pull_request} merged into {base_branch!r}, not main, and the failed "
           f"suites record holds main's failures alone. A failed test of this run is main's "
           f"failure when the failed suites record holds it and {base_branch!r} holds the main "
-          f"commit whose test run first failed it; the last line this program prints says whether any "
+          f"earliest main commit known to fail it; the last line this program prints says whether any "
           f"failed test needs action.")
     if not any(line.startswith(runner.FAILED_SUITE_LINE_PREFIX) for line in lines):
         return kept
@@ -1115,11 +1131,11 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
         on_record = recorded.get(suite, {}).get("failed_tests", {})
         for test, log in verdict["failed"].items():
             if test in on_record and branch_holds_mains_first_failing_commit(
-                    suite, test, on_record[test]["commit"]):
+                    suite, test, on_record[test]["earliest_failed_commit"]):
                 continue
             kept["new_tests"].setdefault(suite, {})[test] = log
-            if test in on_record and on_record[test]["commit"] in left_main_at:
-                first_failed = on_record[test]["commit"]
+            if test in on_record and on_record[test]["earliest_failed_commit"] in left_main_at:
+                first_failed = on_record[test]["earliest_failed_commit"]
                 kept["recorded_tests_first_failed_at_a_commit_the_branch_lacks"].append(
                     (suite, test, first_failed, left_main_at[first_failed]))
     kept["record_path"] = path
@@ -1140,17 +1156,16 @@ def after_merge_test_run_closing_message_printed_returning_whether_stop(argument
               f"are listed above, each with its log.\n"
               f"No repair task was opened: {kept['why_none']}. The pull request's author fixes "
               f"these tests on {tested} before it merges into main.")
-        # The record names the commit whose run recorded the test first; when two runs on main
-        # overlap, an older main commit can fail the test too, so the branch may hold main's
-        # failure after all.
+        # When two runs on main overlap, an older main commit's run that fails the test too may
+        # not have finished yet, so the branch may hold main's failure after all.
         for suite, test, commit, left_main in kept.get(
                 "recorded_tests_first_failed_at_a_commit_the_branch_lacks", []):
             print(f"{test_named(suite, test)} is on the failed suites record, "
-                  f"{kept.get('record_path')}, which keeps the main commit whose test run "
-                  f"recorded it first, {commit}. {tested} does not hold that commit, so this "
-                  f"program counts the failure as {tested}'s own. It may still be main's: when "
-                  f"two of main's after-merge test runs overlap, the later commit's run can "
-                  f"record the test first, though the earlier commit fails it too.\n"
+                  f"{kept.get('record_path')}, which keeps the earliest main commit known to "
+                  f"fail it, {commit}. {tested} does not hold that commit, so this program "
+                  f"counts the failure as {tested}'s own. It may still be main's: when two of "
+                  f"main's after-merge test runs overlap, the run of an earlier commit that "
+                  f"fails it too may not have finished yet.\n"
                   f"Before the author fixes it, run {suite} in a worktree at {left_main}, "
                   f"the commit where {tested} left main's history before {commit[:12]}.\n"
                   f"If {test_named(suite, test)} fails there too, the failure is main's: say "

@@ -11,10 +11,13 @@ the record.
 
 The record is the JSON object in ~/.local/state/nedsnodes/failed-after-merge-test-suites-on-main.json,
 one key per suite path, each holding failed_tests, an object with one key per failing test, as
-junit.xml names it. Each test holds commit, the merge commit whose after-merge test run first
-failed it; last_failed_commit, the newest commit at which a run has seen it fail since;
-pull_request, log, failed_at, repair_task_agent_seat and repair_task_id; the last two are null
-when no repair task was opened.
+junit.xml names it. Each test holds commit, the merge commit whose after-merge test run recorded
+it first, which its pull_request, log, failed_at and repair task belong to; earliest_failed_commit,
+the earliest main commit known to fail it, which a later-finishing run of an older commit moves
+back; last_failed_commit, the newest commit at which a run has seen it fail since; pull_request,
+log, failed_at, repair_task_agent_seat and repair_task_id; the last two are null when no repair
+task was opened. A record written before earliest_failed_commit existed is read with it taken as
+the test's commit.
 
 Exit codes: 0 the notice, if any, was printed; 1 the record could not be read, and stderr says why.
 """
@@ -30,7 +33,8 @@ from pathlib import Path
 # 3.14 about 30 ms to set up, and tempfile about 15 ms.
 
 NOTICE_HEADING = "FAILED TEST SUITES ON MAIN"
-TEST_FIELD_TYPES = {"commit": str, "last_failed_commit": str, "pull_request": str, "log": (str, type(None)),
+TEST_FIELD_TYPES = {"commit": str, "earliest_failed_commit": str, "last_failed_commit": str,
+                    "pull_request": str, "log": (str, type(None)),
                     "failed_at": str, "repair_task_agent_seat": (str, type(None)),
                     "repair_task_id": (int, str, type(None))}
 
@@ -54,6 +58,12 @@ def failed_after_merge_test_suites_on_main_record_read():
         return {}
     except (OSError, UnicodeDecodeError, ValueError) as error:
         raise FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable(f"could not read {path}: {error}") from error
+    if isinstance(suites, dict):
+        for suite in suites.values():
+            tests = suite.get("failed_tests") if isinstance(suite, dict) else None
+            for fields in (tests.values() if isinstance(tests, dict) else ()):
+                if isinstance(fields, dict) and "earliest_failed_commit" not in fields:
+                    fields["earliest_failed_commit"] = fields.get("commit")
     if not isinstance(suites, dict) or not all(
             isinstance(suite, dict) and isinstance(suite.get("failed_tests"), dict)
             and suite["failed_tests"] and all(
