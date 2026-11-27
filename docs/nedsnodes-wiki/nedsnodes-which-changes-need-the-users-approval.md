@@ -48,7 +48,7 @@ A specific change the user approved before an agent makes it, approved-by-walk o
 ### cosmetic-change
 
 A change to prose that alters only its formatting or its place, never what it says. Only these count:
-- formatting: whitespace, Markdown markup, or joining a paragraph, list item or table row broken across lines onto one line, as `CLAUDE.md` asks, with no word changed and no list or block structure changed;
+- formatting: whitespace, Markdown markup, or joining a paragraph, list item or table row broken across lines onto one line, with no word changed and no list or block structure changed;
 - moving prose or a Markdown file to another place, as the paragraph that begins "A change is the difference an agent's work makes" says.
 
 A spelling, grammar or punctuation fix is an obvious-error-fix, which the project glossary defines, not a cosmetic-change. A change to a part of a file that a program reads as data, such as a GHI-MD's first heading or a row of the word table in `docs/nedsnodes-wiki/nedsnodes-style-guide.md`, is never a cosmetic-change, however small.
