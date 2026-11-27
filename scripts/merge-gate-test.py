@@ -431,6 +431,9 @@ def gate_copy(text):
         shutil.copyfile(Path(__file__).resolve().parent.parent / common, top / common)
     # A link, not a copy: the check loads the posting program and its modules from its own resolved directory.
     (directory / VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH.name).symlink_to(VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH)
+    # The input recorder sees only the link's scratch path when the gate runs the check, so
+    # read the check by its checkout path here, or a change to it alone selects no run of this suite.
+    VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH.read_bytes()
     copy = directory / "merge-gate.sh"
     copy.write_text(text)
     return copy
@@ -2543,6 +2546,20 @@ def check_run_gate_fails_a_run_whose_stand_in_failed():
           f"failed checks recorded: {recorded!r}")
 
 
+def check_gate_copy_opens_the_marks_check_by_its_checkout_path():
+    """The gate runs the marks check through a link in the scratch directory, which the
+    suite input recorder does not trace to the checkout; gate_copy must open it there."""
+    opened, listening = [], [True]
+    # An audit hook cannot be removed, so this one stops recording once the copy is made.
+    sys.addaudithook(lambda event, arguments: listening[0] and event == "open"
+                     and opened.append(str(arguments[0])))
+    gate_copy("")
+    listening[0] = False
+    check("gate_copy opens the marks check by its checkout path",
+          str(VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH) in opened,
+          f"opened {opened!r}")
+
+
 def main():
     if BASH is None:
         raise SystemExit("merge-gate-test: bash is not on PATH")
@@ -2550,10 +2567,15 @@ def main():
     check_stand_in_fails_when_it_cannot_send_or_log()
     check_run_gate_fails_a_run_whose_stand_in_failed()
     check("the CLEAN spelling came from a capture", CLEAN == "CLEAN", f"read {CLEAN!r}")
+    check_gate_copy_opens_the_marks_check_by_its_checkout_path()
     open_before = open_file_descriptor_count()
     unmutated = run_cases(gate_copy(GATE.read_text()), "unmutated copy: ")
     run_mutations()
-    real_gate_name = f"real merge-gate.sh: {case_name_of(case_a1_pass_control)}"
+    # No ": " in the name: run-all-test-suites.py cuts a FAIL line's name at the first ": "
+    # no other case shares, so a failure would be recorded under a name its pass never clears.
+    real_gate_name = f"{case_name_of(case_a1_pass_control)}, on the real merge-gate.sh"
+    check("the real merge-gate.sh case's name holds no \": \"", ": " not in real_gate_name,
+          real_gate_name)
     real_gate_ok, real_gate_detail = case_a1_pass_control(GATE)
     check(real_gate_name, real_gate_ok, real_gate_detail)
     open_after = open_file_descriptor_count()
