@@ -54,6 +54,7 @@ class Fleet:
         self.clone = root / "clone"
         self.git(root, "clone", "--quiet", str(self.origin), str(self.clone))
         self.commit(self.clone, "base.txt", "First commit")
+        self.commit(self.clone, "main-changes.txt", "A file main changes")
         self.git(self.clone, "push", "--quiet", "origin", "HEAD:refs/heads/main")
         self.git(self.clone, "fetch", "--quiet", "origin")
         self.agents_root = root / "agents"
@@ -84,6 +85,7 @@ class Fleet:
         self.git(self.clone, "switch", "--quiet", "main")
         self.git(self.clone, "pull", "--quiet", "--ff-only", "origin", "main")
         self.commit(self.clone, "main-moves.txt", "Main moves on")
+        self.commit(self.clone, "main-changes.txt", "Main changes this file")
         self.git(self.clone, "push", "--quiet", "origin", "main")
 
     def seat_home(self, name: str, own_commits: int, recorded: bool) -> Path:
@@ -143,13 +145,17 @@ def main() -> int:
         fleet.git(kappa, "bisect", "start")
         # Already-detached agent-homes made before the launchers marked them, holding
         # uncommitted work: git keeps lambda's change across the move, and refuses mu's move
-        # because main adds a file mu holds untracked.
+        # because main adds a file mu holds untracked; git restores nu's deletion of a file main
+        # changes.
         lam = fleet.seat_home("lambda", own_commits=0, recorded=True)
         fleet.git(lam, "checkout", "--quiet", "--detach")
         (lam / "base.txt").write_text("changed, not committed\n")
         mu = fleet.seat_home("mu", own_commits=0, recorded=True)
         fleet.git(mu, "checkout", "--quiet", "--detach")
         (mu / "main-moves.txt").write_text("mu's own copy\n")
+        nu = fleet.seat_home("nu", own_commits=0, recorded=True)
+        fleet.git(nu, "checkout", "--quiet", "--detach")
+        (nu / "main-changes.txt").unlink()
         topic = fleet.agents_root / "alpha-topic-worktree"
         fleet.git(fleet.clone, "worktree", "add", "--quiet", "-b", "some-topic", str(topic),
                   "origin/main")
@@ -201,12 +207,19 @@ def main() -> int:
               and f"{lam}: now detached at origin/main and marked" in report, report)
         mu_marker = Path(fleet.git(mu, "rev-parse", "--absolute-git-dir")) / "agent-home-marker"
         check("a detached agent-home whose move git refuses is marked, not moved, its file kept, "
-              "and the line names git's error and the Stop hook that moves it later",
+              "and the line names git's error, not the Stop hook, which moves no checkout holding "
+              "a tracked change",
               mu_marker.is_file() and not fleet.is_moved_and_marked(mu)
               and (mu / "main-moves.txt").read_text() == "mu's own copy\n"
               and f"{mu}: marked as an agent-home but not moved: " in report
               and "main-moves.txt" in report
-              and "scripts/checkout-freshness-catch-up.py moves it at the end of a turn" in report,
+              and "checkout-freshness-catch-up.py" not in report, report)
+        check("a detached agent-home whose uncommitted deletion the move undoes is moved, named "
+              "as having lost that change, and counted as not cleanly moved",
+              fleet.is_moved_and_marked(nu)
+              and f"{nu}: now detached at origin/main and marked as an agent-home, but the move "
+              "lost the uncommitted change to main-changes.txt" in report
+              and f"{nu}: now detached at origin/main and marked as an agent-home;" not in report,
               report)
         check("a worktree under the agents root that is not an agent-home is not touched",
               fleet.git(topic, "symbolic-ref", "--short", "HEAD") == "some-topic"
@@ -231,7 +244,7 @@ def main() -> int:
               second.returncode == 0
               and all(fleet.is_moved_and_marked(home)
                       for home in (alpha, beta, gamma, delta, epsilon, theta, iota, kappa,
-                                   lam, mu)),
+                                   lam, mu, nu)),
               f"exit {second.returncode}: {second.stdout}{second.stderr}")
 
         empty_root = Path(temporary) / "no-agents"
@@ -296,6 +309,27 @@ def main() -> int:
             check(f"when git, asked whether a directory is a checkout, {failure_name}, the run "
                   "moves nothing and exits 2",
                   exit_status == 2 and not fleet.is_moved_and_marked(zeta), str(exit_status))
+
+        omicron = fleet.seat_home("omicron", own_commits=0, recorded=True)
+        fleet.git(omicron, "checkout", "--quiet", "--detach")
+        (omicron / "base.txt").write_text("changed, not committed\n")
+        real_working_copy = module.working_copy
+        reads = []
+
+        def working_copy_unreadable_after_the_move(home, path):
+            reads.append(path)
+            if len(reads) > 1:
+                raise PermissionError(13, "Permission denied", str(home / path))
+            return real_working_copy(home, path)
+        module.working_copy = working_copy_unreadable_after_the_move
+        try:
+            moved, line = module.move_agent_home(omicron, today)
+        finally:
+            module.working_copy = real_working_copy
+        check("a change that cannot be read after the move counts the agent-home as not cleanly "
+              "moved and says why",
+              not moved and "whether the move kept its uncommitted changes could not be read" in line
+              and "Permission denied" in line, line)
 
         real_git = module.git
 
