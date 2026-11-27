@@ -47,7 +47,10 @@ check refuses, writing nothing, every --not-asked, --already-decided and
 --now-over-later-already-decided, and the read step offers neither a no-answer
 row nor the now-over-later settling, since a settling then could record an item
 twice and reverse what that answer recorded; the user's own answer is still
-taken. When the
+taken. When that answer is to another item than the one `#next_to_present` names,
+as after a re-plan, the read step reads and presents nothing and says to run
+close first, since close would otherwise take the user's reply to the item shown
+for the newest answer. When the
 walk-minutes hold an `#item_page` line for the item, a link or a failed
 publish, the user was shown it, so --moved-on writes its answer line opening
 `shown to the user,` in place of `settled without asking the user,`, and CLOSE
@@ -1643,6 +1646,12 @@ ITEM_READ_LINES = (
     "Then present {item}{now_over_later_clause}",
 )
 ITEM_READ_NOT_RUN_NEXT = "Present {item}{now_over_later_clause}"
+ITEM_READ_EARLIER_ANSWER_NOT_CLOSED = (
+    "{item} was not read or presented: the walk-minutes {minutes} hold an answer to {earlier}, which check wrote and "
+    "close has not yet recorded. Until close records it, no item can be settled, and close would take the user's "
+    "reply to {item} as the newest answer, leaving the answer to {earlier} unrecorded.\n"
+    "Run `{close_command}` first and do what it prints, except reading and presenting the item it names next: in "
+    "place of that, run `{command}` again and do what it prints.")
 # The form scripts/agent-seat-due-task-raise-hook.py's parse_prerequisites reads.
 WAITING_ON_ITEM_PREREQUISITE_LINE = ("If a task waits on the user's decision on {item}, append this entry to the "
                                      "task's metadata.prerequisites list and give TaskUpdate the whole list, every "
@@ -3129,14 +3138,16 @@ def waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, par
         for unit in walk_finder.item_unit_spans(text, parser) if set(unit[0]) & set(numbers)]
 
 
-def latest_read(walk_finder, reads, numbers):
+def latest_read(walk_finder, reads, numbers, label=None):
     """Return (key, outcome) of the latest read of the item numbered numbers that wrote its report, or None; a read
-    ahead that no read step has used is no item's read. Matched by number, since a re-plan changes M in the label."""
+    ahead that no read step has used is no item's read. Matched by number, since a re-plan changes M in the label,
+    unless label is given: then only a read recorded under that whole label is the item's, for a walk-document where
+    another heading carries the same number with another M."""
     done = []
     for path in reads.glob("*-outcome.json") if reads.is_dir() else []:
         outcome = json.loads(path.read_text(encoding="utf-8"))
         if (walk_finder.parse_items(outcome["item"])[0] == numbers and outcome["status"] == READ_DONE
-                and not outcome.get(NUMBER_PREDICTED)):
+                and not outcome.get(NUMBER_PREDICTED) and label in (None, outcome["item"])):
             done.append((outcome["finished"], path.name[:-len("-outcome.json")], outcome))
     return max(done)[1:] if done else None
 
@@ -3953,6 +3964,12 @@ def waiting_item_read(arguments, sub_step_of=None):
                                                 WAITING_ITEM_READ_STEP, top)
     total = total or count
     item = items_named(numbers, total)
+    pending = unclosed_last_answer(walk_finder, minutes, parser)
+    if pending and walk_finder.parse_items(pending["item"])[0] != numbers:
+        print(ITEM_READ_EARLIER_ANSWER_NOT_CLOSED.format(item=item, minutes=minutes, earlier=pending["item"],
+                                                          close_command=step_command_with_cwd(top, "close"),
+                                                          command=rerun))
+        return 1
     command = read_step_command_with_cwd(top, AFTER_FIXES_FLAG, *rechecked_words)
     command_reading_again = read_step_command_with_cwd(top, *rechecked_words)
     document, text = item_text(walk_finder, minutes, value, numbers, total, parser,
@@ -4062,8 +4079,10 @@ def waiting_item_read(arguments, sub_step_of=None):
         if ahead:
             why = (ITEM_READ_RUN_AHEAD_FAILED.format(line=outcome["failed"]) if outcome
                    else ITEM_READ_RUN_AHEAD_ENDED.format(log=reads / f"{key}.log"))
-        latest = (latest_read(walk_finder, reads, numbers) if arguments.after_fixes_reread_only_when_facts_change
-                  else None)
+        shared = sum(1 for unit in walk_finder.item_unit_spans(document.read_text(encoding="utf-8"), parser)
+                     if set(unit[0]) & set(numbers)) > 1
+        latest = (latest_read(walk_finder, reads, numbers, item if shared else None)
+                  if arguments.after_fixes_reread_only_when_facts_change else None)
         if latest is not None:
             last_text = (reads / f"{latest[0]}.md").read_text(encoding="utf-8").rstrip("\n")
             facts = approval_walk_item_before_and_after_fixes_compare_for_changed_fact_words_needing_another_cold_read_fast_read(last_text, text, top)
