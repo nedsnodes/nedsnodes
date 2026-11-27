@@ -28,6 +28,8 @@ CUSTOM_TITLE_RECORD_TYPE = "custom-title"
 
 # Messages below follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 REMOTE_CONTROL_RENAME_LINE_TEMPLATE = "The agent-seat {old_name} is now {new_name} in Remote Control; send it messages under that name."
+# Not "in Remote Control": Remote Control still lists the agent-seat under the rename, its label.
+REMOTE_CONTROL_ADDRESS_GIVEN_BACK_LINE_TEMPLATE = "The agent-seat {old_name} is now {new_name} again; send it messages under that name."
 REMOTE_CONTROL_RENAMED_IN_CLAUDE_AI_REASON_TEMPLATE = (
     "The user renamed this agent-session in claude.ai from {old_names} to {new_name}. Until the "
     "handoff-supervisor next launches this agent-seat, at its session-handoff or after a crash, the "
@@ -135,7 +137,7 @@ def handoff_remote_control_name_save_when_transcript_custom_title_changed_and_re
     path = remote_control_name_file_path(agent_seat)
     path.parent.mkdir(parents=True, exist_ok=True)
     # The Stop hook and the handoff-supervisor can both store; a reader must never see half a name.
-    # Whoever stores it is told to announce it, so the others may know the agent-seat by it from now on.
+    # The others may know the agent-seat by it from now on: the Stop hook announces it, and the next launch replaces it.
     # Recorded before the store: a failed append then leaves the name unstored, and the next try redoes both.
     with open(handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build(agent_seat), "a", encoding="utf-8") as record:
         record.write(title + "\n")
@@ -145,20 +147,21 @@ def handoff_remote_control_name_save_when_transcript_custom_title_changed_and_re
     return RemoteControlRename(old_name, title)
 
 
-def _old_name_lines_send_instruction_build(reason_template: str, old_names: list, new_name: str) -> str:
+def _old_name_lines_send_instruction_build(reason_template: str, line_template: str, old_names: list, new_name: str) -> str:
     several = len(old_names) > 1
     reason = reason_template.format(
         old_names=", then ".join(old_names), new_name=new_name,
         the_old_name="an old name" if several else "the old name")
     return REMOTE_CONTROL_OLD_NAME_LINES_SEND_INSTRUCTION_TEMPLATE.format(
         reason=reason, this_line="these lines" if several else "this line",
-        lines="\n".join(REMOTE_CONTROL_RENAME_LINE_TEMPLATE.format(old_name=old_name, new_name=new_name)
+        lines="\n".join(line_template.format(old_name=old_name, new_name=new_name)
                         for old_name in old_names))
 
 
 def handoff_remote_control_rename_message_other_agent_seats_instruction_build(rename: RemoteControlRename) -> str:
     return _old_name_lines_send_instruction_build(
-        REMOTE_CONTROL_RENAMED_IN_CLAUDE_AI_REASON_TEMPLATE, [rename.old_name], rename.new_name)
+        REMOTE_CONTROL_RENAMED_IN_CLAUDE_AI_REASON_TEMPLATE, REMOTE_CONTROL_RENAME_LINE_TEMPLATE,
+        [rename.old_name], rename.new_name)
 
 
 def handoff_agent_seat_launch_old_addresses_to_announce_as_now_seat_name(agent_seat: str, announced_names: list) -> list:
@@ -174,4 +177,5 @@ def handoff_agent_seat_launch_old_addresses_to_announce_as_now_seat_name(agent_s
 def handoff_agent_seat_launch_tell_other_agent_seats_each_old_address_is_now_seat_name_instruction_build(old_names: list, agent_seat: str) -> str:
     """The instruction to send one line for each address the launch gave back, oldest first."""
     return _old_name_lines_send_instruction_build(
-        REMOTE_CONTROL_ADDRESS_GIVEN_BACK_AT_LAUNCH_REASON_TEMPLATE, old_names, agent_seat)
+        REMOTE_CONTROL_ADDRESS_GIVEN_BACK_AT_LAUNCH_REASON_TEMPLATE, REMOTE_CONTROL_ADDRESS_GIVEN_BACK_LINE_TEMPLATE,
+        old_names, agent_seat)

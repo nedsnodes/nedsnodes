@@ -1439,7 +1439,7 @@ with tempfile.TemporaryDirectory() as rename_directory:
         check("after a claude.ai rename, the successor tells the others the address is the agent-seat "
               "name again, and the rename stays the label",
               notice == ""
-              and "The agent-seat --renamed is now seat-a in Remote Control; send it messages under that name." in instruction
+              and "The agent-seat --renamed is now seat-a again; send it messages under that name." in instruction
               and "changes only the label" in instruction
               and name_file.read_text(encoding="utf-8").strip() == "--renamed", notice + " | " + instruction)
         launched()
@@ -1463,7 +1463,7 @@ with tempfile.TemporaryDirectory() as rename_directory:
         instruction = given_back()
         check("a rename announced, then undone by a rename back to the agent-seat name, still tells the "
               "others at the next launch that the announced address is gone",
-              "The agent-seat --renamed is now seat-a in Remote Control" in instruction
+              "The agent-seat --renamed is now seat-a again" in instruction
               and "The agent-seat seat-a is now seat-a" not in instruction, instruction)
         launched()
         name_file.unlink()

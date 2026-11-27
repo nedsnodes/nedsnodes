@@ -617,12 +617,12 @@ def run_claude_ai_rename_carried_to_successor_case(workspace: Path):
         successor_prompt = launched_prompts[1] if len(launched_prompts) > 1 else ""
         check("RENAME CARRIED: the successor tells the other agent-seats that the address the rename "
               "gave is the agent-seat name again",
-              f"The agent-seat renamed-in-claude-ai is now {agent} in Remote Control; "
+              f"The agent-seat renamed-in-claude-ai is now {agent} again; "
               "send it messages under that name." in successor_prompt,
               successor_prompt[-900:])
         third_prompt = launched_prompts[2] if len(launched_prompts) > 2 else "no third launch"
         check("RENAME CARRIED: the successor's own successor tells the others nothing",
-              "in Remote Control; send it messages under that name." not in third_prompt, third_prompt[-900:])
+              "send it messages under that name." not in third_prompt, third_prompt[-900:])
         check("RENAME CARRIED: each launch starts the record of announced names with the agent-seat name",
               recorded_names == [[agent], [agent], [agent]], str(recorded_names))
         check("RENAME CARRIED: the rename stays the stored label, and the title of a session that took "
@@ -696,12 +696,12 @@ def run_rename_before_a_crash_resume_announced_at_the_next_handoff_case(workspac
         resume_prompt = launches[1][1] if len(launches) > 1 else ""
         check("RENAME BEFORE A CRASH: the resume tells the others the address the rename gave is the "
               "agent-seat name again",
-              f"The agent-seat renamed-before-crash is now {agent} in Remote Control; "
+              f"The agent-seat renamed-before-crash is now {agent} again; "
               "send it messages under that name." in resume_prompt,
               resume_prompt[-900:])
         successor_prompt = launches[2][1] if len(launches) > 2 else "no third launch"
         check("RENAME BEFORE A CRASH: the next handoff tells the others nothing more",
-              "in Remote Control; send it messages under that name." not in successor_prompt,
+              "send it messages under that name." not in successor_prompt,
               successor_prompt[-900:])
     finally:
         name_file.unlink(missing_ok=True)
