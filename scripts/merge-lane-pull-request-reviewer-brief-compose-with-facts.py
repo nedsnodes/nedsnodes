@@ -91,7 +91,7 @@ GITHUB_ISSUE_OR_PULL_REQUEST_LINK = re.compile(
 # Far above the merged count, so gh lists them all.
 MERGED_PULL_REQUESTS_LIMIT = "100000"
 FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME = "pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py"
-FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER = re.compile(r"#follow_up_request pull request ([0-9]+)\b")
+FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER = re.compile(r"#follow_up_request#? pull request ([0-9]+)\b")
 _follow_up_request_program_spec = importlib.util.spec_from_file_location(
     "pull_request_follow_up_request_after_merge_finding_answers_and_next_step",
     Path(__file__).resolve().with_name(FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME))

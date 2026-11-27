@@ -2157,6 +2157,19 @@ def test_a_list_line_that_reads_as_a_reference_definition_only_alone_defines_not
           "parsed alone", counted(lines), f"lines {lines!r}")
 
 
+def test_shown_words_reads_the_whole_texts_references_and_adds_none_to_them():
+    hook = load_short_answer_hook_for_test()
+    parser = hook.load_walk_finder().markdown_parser()
+    env = {}
+    parser.parse("[r]: /docs\n", env)
+    before = dict(env["references"])
+    words = hook.shown_words("a [filter][r]", parser, env)
+    check("a reference link cut out of the text renders with the whole text's definition", words == "a filter", words)
+    hook.shown_words("[edits 4]: /docs", parser, env)
+    check("a line that is a definition only when parsed alone adds nothing to the whole text's references",
+          env["references"] == before, env["references"])
+
+
 def test_an_item_whose_heading_holds_a_reference_link_counts_when_shown_word_for_word():
     case = Case(next_to_present="item 4 of 9", document=REFERENCE_LINK_HEADING_DOCUMENT)
     lines = case.lines("a", case.transcript(REFERENCE_LINK_HEADING_DOCUMENT, ITEM_4_CLOSING_LINE))
@@ -2718,6 +2731,24 @@ def test_settled_line_a_transcript_record_whose_message_is_a_string_counts_as_a_
     check("a reply in his own words with that record names the failed transcript read and exits 0",
           result.returncode == 0 and len(lines) == 3 and "could not tell who wrote this prompt" in lines[1]
           and "AttributeError" in lines[1] and lines[2] == SETTLED_LINE,
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
+def test_settled_line_a_newest_turn_origin_record_with_no_message_is_no_match_not_a_failed_read():
+    case = Case(next_to_present="item 4 of 9")
+    document = (case.walk / f"{WALK_NAME}.md").read_text()
+    transcript = case.transcript(document)
+    with open(transcript, "a", encoding="utf-8") as records:
+        records.write(json.dumps({"type": "system", "subtype": "turn_duration", "turnOrigin": "peer"}) + "\n")
+    result = case.run("a", transcript_path=transcript)
+    check("an A whose newest turnOrigin record is a turn_duration record with no message is read by its opening "
+          "as the user's: exits 0 and shows the settled line",
+          result.returncode == 0 and SETTLED_LINE in context_lines(result),
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    result = case.run("take the other option", transcript_path=transcript)
+    check("a reply in his own words with that record gives no failed-transcript-read line and exits 0",
+          result.returncode == 0 and context_lines(result)
+          and not any("could not tell who wrote this prompt" in line for line in context_lines(result)),
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 

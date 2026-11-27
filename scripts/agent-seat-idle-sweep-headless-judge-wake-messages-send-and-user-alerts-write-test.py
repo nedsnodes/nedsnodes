@@ -147,6 +147,7 @@ def usage_limit(resets_at, when=LONG_AGO):
 DONE_TURN = [user("go"), assistant("Done."), turn_end()]
 OWNER_TASKS = "nedsnodes-reboot-test-tasks"
 DELIVERY_TASK_SUBJECT = "Idle sweep: a message it sent is missing from the agent-seat's transcript"
+HEADLESS_FAILED_TASK_SUBJECT = "Idle sweep: a headless agent-session failed"
 
 
 def socket_path(seat):
@@ -157,6 +158,11 @@ def socket_path(seat):
 def listed_ref(path):
     """The [ref] ListAgents gives the agent-session whose messaging socket is at path."""
     return hashlib.sha256(f"session:{path}".encode()).hexdigest()[:6]
+
+
+def full_digest(path):
+    """The digest whose start is the ref of the agent-session whose messaging socket is at path."""
+    return hashlib.sha256(f"session:{path}".encode()).hexdigest()
 
 
 def send_to(seat, message="@prompt-text", **extra):
@@ -231,6 +237,21 @@ def as_older_versions_logged(machine):
 DO_NOT_REPLY = "Do not reply to this message: the idle sweep sent it, and nothing acts on a reply."
 KEEP_IT = (f'The text ends with the sentence "{DO_NOT_REPLY}" That sentence is written to the '
            "agent-seat, not to you, and is part of the message: keep it.")
+
+
+def mark_irrelevant(message_id):
+    """The sentence every rule 2 and rule 5 message and every escalation carries, with its id."""
+    return ("If this reminder does not help, for example because the work is done, a task, GHI or "
+            "monitor already tracks it, or you will get a message when it ends, run `python3 "
+            "scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py "
+            f"{message_id}`; the idle sweep then stops this reminder.")
+
+
+def mark_irrelevant_call(message_id, when, tool_id="t-mark"):
+    """The Bash call by which the agent-seat marks a reminder irrelevant."""
+    return assistant(tool=("Bash", {"command": "python3 scripts/agent-seat-idle-sweep-received-"
+                                               f"wake-message-mark-irrelevant-by-message-id.py {message_id}"}),
+                     when=when, tool_id=tool_id)
 
 
 def ends_with_do_not_reply_once(text):
@@ -376,7 +397,7 @@ check("rule 3: the sender runs on Sonnet, allowed only SendMessage, ListAgents a
       and argv[argv.index("--allowedTools") + 1] == "SendMessage,ListAgents,ToolSearch", argv)
 check("rule 3: the sender is handed code's handoff text and the ref of the agent-seat's entry",
       calls and HANDOFF_TEXT_START in calls[0]["prompt"]
-      and f"whose ref is [{listed_ref(socket_path('alpha'))}]" in calls[0]["prompt"], calls)
+      and f"is the start of {full_digest(socket_path('alpha'))}" in calls[0]["prompt"], calls)
 sent = machine.events("message_sent")
 check("rule 3: the send is logged as the nudge, with the text code wrote",
       len(sent) == 1 and sent[0]["step"] == "nudge" and sent[0]["text"].startswith(HANDOFF_TEXT_START),
@@ -402,7 +423,9 @@ calls = machine.claude_calls()
 nudge_text = machine.events("wait_step")[0]["text"]
 expected = ("You've given this 26 minutes, please check; if not sure, hand off. At 2026-11-02 "
             "12:00Z the idle sweep wrote this, which you have not acted on:\n\n"
-            + "\n".join("> " + line for line in nudge_text.split("\n")) + "\n\n" + DO_NOT_REPLY)
+            + "\n".join("> " + line for line in nudge_text.split("\n")) + "\n\n"
+            + mark_irrelevant(machine.events("message_sent")[-1].get("message_id")) + "\n\n"
+            + DO_NOT_REPLY)
 check("idle again 15 minutes after the nudge: the escalation with the minutes since it went idle, "
       "quoting the nudge without its do-not-reply sentence",
       len(calls) == 1 and machine.events("message_sent")[-1]["text"] == expected
@@ -549,7 +572,9 @@ calls = machine.claude_calls()
 check("rule 5: asked again 15 minutes later; the message it wrote starts the wait with its text, "
       "and a sender sends it",
       len(calls) == 2 and "What's going on?" in calls[1]["prompt"]
-      and machine.events("message_sent")[-1]["text"] == "What's going on?\n\n" + DO_NOT_REPLY
+      and machine.events("message_sent")[-1]["text"]
+      == ("What's going on?\n\n" + mark_irrelevant(machine.events("message_sent")[-1]["message_id"])
+          + "\n\n" + DO_NOT_REPLY)
       and machine.events("wait_step")[-1]["step"] == "nudge"
       and machine.events("wait_step")[-1]["text"] == "What's going on?", machine.events())
 machine = Machine()
@@ -1533,11 +1558,9 @@ check("an escalated wait reaches the step after the escalation without another r
       and not machine.alerts(),
       (machine.claude_calls(), machine.events("wait_step"), machine.alerts()))
 
-for case, answer, subject in (
-        ("exits nonzero", {"exit": 2, "stderr": "the re-check judge failed"},
-         "Idle sweep: a headless agent-session failed: claude exited 2"),
-        ("answers for too few sentences", {"answer": {"sentences": []}},
-         "Idle sweep: a headless agent-session failed: the judge's answer could not be used")):
+for case, answer in (
+        ("exits nonzero", {"exit": 2, "stderr": "the re-check judge failed"}),
+        ("answers for too few sentences", {"answer": {"sentences": []}})):
     machine = editor_deferred_machine(f"Item 59.2 is approved as obvious. {EDITOR_SENTENCE}")
     machine.script(answer, sent_ok())
     code, _ = machine.run(16)
@@ -1546,7 +1569,7 @@ for case, answer, subject in (
           code == 1 and len(machine.claude_calls()) == 2
           and [event["purpose"] for event in machine.events("headless_failed")]
           == ["re-check whether the sentences its promise messages named are backed"]
-          and machine.owner_task_subjects() == [subject] and not machine.alerts()
+          and machine.owner_task_subjects() == [HEADLESS_FAILED_TASK_SUBJECT] and not machine.alerts()
           and not machine.events("wait_ended")
           and [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate"]
           and machine.events("message_sent")[-1]["step"] == "escalate",
@@ -1832,8 +1855,7 @@ code, output = machine.run(16)
 check("the re-check judge finds every sentence backed but gives no reason: a judge failure, and the "
       "escalation is sent",
       code == 1 and "Traceback" not in output and not machine.events("wait_ended")
-      and machine.owner_task_subjects()
-      == ["Idle sweep: a headless agent-session failed: the judge's answer could not be used"]
+      and machine.owner_task_subjects() == [HEADLESS_FAILED_TASK_SUBJECT]
       and machine.events("message_sent")[-1]["step"] == "escalate",
       (code, output[-300:], machine.events("wait_ended"), machine.owner_tasks()))
 
@@ -2006,7 +2028,7 @@ for case, answer in (("an index missing", {"sentences": []}),
     check(f"rule 2, the judge's answer with {case}: a task for reboot-test, no user-alert, exit 1, "
           "nothing sent",
           code == 1 and not machine.alerts() and machine.owner_task_subjects()
-          == ["Idle sweep: a headless agent-session failed: the judge's answer could not be used"]
+          == [HEADLESS_FAILED_TASK_SUBJECT]
           and not machine.events("message_sent"), (code, machine.alerts(), machine.owner_tasks()))
 
 # --- a prerequisite the GitHub budget left unasked ----------------------------------------------
@@ -2090,7 +2112,7 @@ code, _ = machine.run(2)
 calls = machine.claude_calls()
 check("an account change: one headless agent-session sends the notice to every agent-seat",
       code == 0 and len(calls) == 1
-      and f"alpha [{listed_ref(socket_path('alpha'))}], beta [{listed_ref(socket_path('beta'))}]"
+      and f"alpha [{full_digest(socket_path('alpha'))}], beta [{full_digest(socket_path('beta'))}]"
       in calls[0]["prompt"]
       and "The claude.ai account logged in on ned-box changed at" in calls[0]["prompt"]
       and sorted(event["agent_seat"] for event in machine.events("message_sent")) == ["alpha", "beta"],
@@ -2218,8 +2240,7 @@ failed = machine.events("headless_failed")
 check("a difference beside a send to another entry: each goes to a task of its own, no user-alert",
       code == 1 and len(machine.events("sent_text_differs_from_code_text")) == 1
       and machine.owner_task_subjects() == [
-          SENT_TEXT_TASK_SUBJECT, "Idle sweep: a headless agent-session failed: the sender's "
-          "SendMessage calls were not the sends code asked for"]
+          SENT_TEXT_TASK_SUBJECT, HEADLESS_FAILED_TASK_SUBJECT]
       and len(failed) == 1 and failed[0]["problem"]
       == f"sent to 'beta [{listed_ref(socket_path('beta'))}]', which is not alpha"
       and not machine.alerts(), (failed, machine.alerts(), machine.owner_tasks()))
@@ -2349,7 +2370,7 @@ machine = reached(f"alpha [{listed_ref(SUCCESSOR_SOCKET)}]", helper_and_successo
 check("after a session-handoff, a send to the successor counts",
       counted(machine), machine.events())
 check("the sender is told the successor's ref, not the helper's",
-      f"[{listed_ref(SUCCESSOR_SOCKET)}]" in machine.claude_calls()[0]["prompt"]
+      full_digest(SUCCESSOR_SOCKET) in machine.claude_calls()[0]["prompt"]
       and listed_ref(HELPER_SOCKET) not in machine.claude_calls()[0]["prompt"],
       machine.claude_calls())
 
@@ -2360,7 +2381,23 @@ machine = reached("Cpc [bc3857]", lambda machine: machine.session_record(
 check("a renamed agent-session counts by its ref, whatever its name", counted(machine),
       machine.events())
 
+machine = reached(f"alpha [{full_digest(socket_path('alpha'))[:8]}]")
+check("a ref Claude Code lengthened, because two refs share their first 6 digits, counts",
+      counted(machine), machine.events())
+
+for file_name in ("0-killed", "z-killed"):
+    machine = reached(send_to("alpha")["to"], lambda machine: (
+        machine.session_record("alpha", "s-1", socket_path("alpha"), startedAt=2_000),
+        machine.session_record(file_name, "s-1", "/run/user/1000/cc-socks/killed.sock",
+                               startedAt=1_000)))
+    check(f"a killed process's record of the same session, in {file_name}.json, is not the one "
+          "the ref is computed from", counted(machine)
+          and full_digest("/run/user/1000/cc-socks/killed.sock") not in
+          machine.claude_calls()[0]["prompt"], machine.events())
+
 for to, case in (("alpha [aaaaaa]", "a send to the agent-seat's name with another ref"),
+                 (f"alpha [{full_digest(socket_path('alpha'))[:5]}]",
+                  "a send whose ref has fewer than 6 digits"),
                  ("alpha", "a send to the agent-seat's name with no ref")):
     machine = reached(to)
     check(f"{case} does not count", not machine.events("message_sent") and any(
@@ -2425,6 +2462,46 @@ check("an account notice when no agent-seat has a running agent-session: no send
       code == 1 and not machine.claude_calls() and not machine.events("message_sent")
       and len(machine.events("agent_seat_entry_not_found")) == 1, (code, machine.events()))
 
+# A session-handoff lands after the sweep read the verdict and before the account check.
+HANDOFF_AFTER_FIRST_VERDICT = """
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("sweep", sys.argv[1])
+sweep = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sweep)
+read = sweep.verdicts_print.verdict_for_seat
+reads = []
+def read_then_hand_off(*arguments):
+    verdict = read(*arguments)
+    if not reads:
+        reads.append(1)
+        Path(state).write_text(json.dumps({"launched_session_id": "s-2"}))
+        moved = json.loads(Path(record).read_text())
+        moved["sessionId"] = "s-2"
+        Path(record).write_text(json.dumps(moved))
+    return verdict
+sweep.verdicts_print.verdict_for_seat = read_then_hand_off
+sys.exit(sweep.main(sys.argv[2:]))
+"""
+
+machine = Machine()
+first_transcript = machine.seat("alpha", DONE_TURN)
+machine.run(0)
+successor_transcript = first_transcript.with_name("s-2.jsonl")
+successor_transcript.write_text("".join(json.dumps(record) + "\n" for record in DONE_TURN))
+machine.account("account-2")
+machine.script(sent_ok())
+code, output = machine.run(1, runner_source=(
+    f"state = {str(machine.handoffs / 'alpha-supervisor-state.json')!r}\n"
+    f"record = {str(machine.home / '.claude' / 'sessions' / 'alpha.json')!r}\n"
+    + HANDOFF_AFTER_FIRST_VERDICT))
+sent = machine.events("message_sent")
+check("a session-handoff between the verdict and the account check: the notice goes to the "
+      "successor, and the delivery check reads the successor's transcript",
+      [event["session_id"] for event in sent] == ["s-2"]
+      and sent[0]["transcript_path"] == str(successor_transcript)
+      and not machine.events("agent_seat_entry_not_found"), (code, output, machine.events()))
+
 # --- headless agent-sessions that fail --------------------------------------------------------------
 FAILURES = (
     ("exits nonzero", {"exit": 1}, "claude exited 1"),
@@ -2477,7 +2554,7 @@ for case, answer, words in FAILURES + EXACT_FAILURES:
           code == 1 and len(failed) == 1
           and (failed[0]["problem"] == words if exact else words in failed[0]["problem"])
           and not machine.alerts() and len(tasks) == 1
-          and tasks[0]["subject"].startswith("Idle sweep: a headless agent-session failed: ")
+          and tasks[0]["subject"] == HEADLESS_FAILED_TASK_SUBJECT
           and failed[0]["problem"] in tasks[0]["description"]
           and not machine.events("message_sent"),
           (code, output, failed, machine.alerts(), tasks))
@@ -2532,16 +2609,16 @@ check("one usage limit with no transcript to read its reset time from, failing t
       "with different text from claude each time: both failures logged, one task, no pause",
       code == 1 and len(problems) == 2 and problems[0] != problems[1] and not machine.alerts()
       and machine.owner_task_subjects()
-      == ["Idle sweep: a headless agent-session failed: claude exited 1: usage_limit_reached"]
+      == [HEADLESS_FAILED_TASK_SUBJECT]
       and not machine.events("headless_usage_limit_pause"),
       (code, problems, machine.alerts(), machine.owner_tasks()))
 machine.script({"exit": 1, "stderr": "Invalid API key · Please run /login"})
 machine.run(32)
-check("another cause for the same agent-seat: a second task",
-      len(machine.events("headless_failed")) == 3 and len(machine.owner_tasks()) == 2
-      and not machine.alerts(), machine.owner_tasks())
-
-USAGE_LIMIT_TASK_SUBJECT = "Idle sweep: a headless agent-session failed: claude exited 1: usage_limit_reached"
+failed = machine.events("headless_failed")
+check("a second cause opens no second task, and the log names each cause",
+      len(failed) == 3 and len({event["kind"] for event in failed}) == 2
+      and machine.owner_task_subjects() == [HEADLESS_FAILED_TASK_SUBJECT]
+      and not machine.alerts(), (failed, machine.owner_tasks()))
 
 
 def machine_with_one_seat(records):
@@ -2566,8 +2643,9 @@ for path, machine, seat, start_minute in (
     machine.script(usage_limit_exit("34551553-ce2f-4bed-88d6-09449375602d", 394))
     code, _ = machine.run(start_minute)
     tasks = machine.owner_tasks()
-    check(f"{path} at a usage limit: the task's subject is the cause code names",
-          code == 1 and [task["subject"] for task in tasks] == [USAGE_LIMIT_TASK_SUBJECT]
+    check(f"{path} at a usage limit: the one task's description names the cause",
+          code == 1 and [task["subject"] for task in tasks] == [HEADLESS_FAILED_TASK_SUBJECT]
+          and "(claude exited 1: usage_limit_reached)" in tasks[0]["description"]
           and f"for the agent-seat {seat}," in tasks[0]["description"], (code, tasks))
 
 # --- a headless agent-session at a usage limit whose reset time its transcript carries -------------
@@ -2673,7 +2751,8 @@ code, _ = machine.run(16)
 check("an escalation sender at a usage limit with a reset time ahead: a pause, no task, and the "
       "promise message due in the same step is not sent",
       len(machine.events("headless_usage_limit_pause")) == 1
-      and USAGE_LIMIT_TASK_SUBJECT not in machine.owner_task_subjects()
+      and not any("send its escalate message" in task["description"]
+                  for task in machine.owner_tasks())
       and len(machine.claude_calls()) == 2
       and [event["step"] for event in machine.events("message_sent")] == ["nudge"],
       (code, machine.events("headless_usage_limit_pause"), machine.owner_tasks(),
@@ -2813,7 +2892,7 @@ for case, resets_at in (("carries no reset time", None),
     code, _ = machine.run(0)
     check(f"a judge at a usage limit whose transcript {case}: a task for reboot-test, no pause, the "
           "next agent-seat judged",
-          code == 1 and machine.owner_task_subjects() == [USAGE_LIMIT_TASK_SUBJECT]
+          code == 1 and machine.owner_task_subjects() == [HEADLESS_FAILED_TASK_SUBJECT]
           and not machine.events("headless_usage_limit_pause") and len(machine.claude_calls()) == 2,
           (code, machine.owner_tasks(), machine.claude_calls()))
 
@@ -3274,7 +3353,7 @@ nudge_text = machine.events("wait_step")[0]["text"]
 machine.script(rechecked(False, False), sent_ok())
 machine.run(16)
 escalation = machine.events("message_sent")[-1]["text"]
-quote = escalation.split("which you have not acted on:\n\n", 1)[-1].rsplit("\n\n", 1)[0]
+quote = escalation.split("which you have not acted on:\n\n", 1)[-1].rsplit("\n\n", 2)[0]
 check("an escalation after a nudge of two lines: each line of the nudge quoted with \"> \", the "
       "do-not-reply sentence once, after the quote and on no quoted line",
       len(nudge_text.split("\n")) == 2 and machine.events("message_sent")[-1]["step"] == "escalate"
@@ -4169,6 +4248,95 @@ machine.script({"sends": [send_to("alpha", is_error=True)], "answer": {"sent": F
 machine.run(0)
 check("rule 3: a message whose send failed logs no reminder", not machine.events("reminder_sent"),
       machine.events())
+
+# --- marking a reminder irrelevant, and the texts naming automatic tracking ----------------------
+RUNNING_WORK_TRACKED_AUTOMATICALLY = (
+    "A background command or subagent you started tells you itself when it ends. If you are "
+    "waiting for a pull request, stop any polling command and record a task with prerequisites "
+    '[{"pr_merged": <number>}], which raises the task when it merges.')
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+promise_sent = machine.events("message_sent")[-1]
+check("rule 2: the message names the pr_merged and issue_closed examples, then the command that "
+      "marks it irrelevant with its own message_id, then the do-not-reply sentence",
+      promise_sent["text"] == (
+          'You promised "I\'ll report when PR 927 merges.". Record it as a task whose prerequisites '
+          'name the event, such as [{"pr_merged": <number>}] or [{"issue_closed": <number>}], which '
+          "raises the task when it happens; or tell the user you take the promise back.\n\n"
+          + mark_irrelevant(promise_sent["message_id"]) + "\n\n" + DO_NOT_REPLY),
+      promise_sent)
+machine.append("alpha", cross_session(promise_sent["text"], at(0.5)),
+               mark_irrelevant_call(promise_sent["message_id"], at(1)),
+               assistant("Marked.", at(1.1)), turn_end(at(1.1)))
+machine.script()
+machine.run(7)
+machine.script(sent_ok())
+machine.run(16)
+check("rule 2: running the command with the message's id ends the wait, which a tool call alone "
+      "does not: no escalation",
+      [(event["why"], event.get("message_ids")) for event in machine.events("wait_ended")]
+      == [("it marked a reminder sent on the wait irrelevant", [promise_sent["message_id"]])]
+      and [event["step"] for event in machine.events("message_sent")] == ["nudge"]
+      and not machine.alerts() and not machine.claude_calls(),
+      (machine.events("wait_ended"), machine.events("message_sent"), machine.alerts()))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", mark_irrelevant_call("0" * 32, at(1)), assistant("Marked.", at(1.1)),
+               turn_end(at(1.1)))
+machine.script()
+machine.run(7)
+machine.script(rechecked(False), sent_ok())
+machine.run(16)
+check("rule 2: marking an id no message on the open wait has ends nothing, and the escalation is sent",
+      waited_on_to_escalation(machine),
+      (machine.events("wait_step"), machine.events("wait_ended")))
+escalation = machine.events("message_sent")[-1]
+check("the escalation names the command with its own message_id, not the nudge's",
+      escalation["step"] == "escalate"
+      and escalation["text"].endswith("\n\n" + mark_irrelevant(escalation["message_id"]) + "\n\n"
+                                       + DO_NOT_REPLY)
+      and escalation["message_id"] != machine.events("message_sent")[0]["message_id"], escalation)
+machine.append("alpha", mark_irrelevant_call(escalation["message_id"], at(17)),
+               assistant("Marked.", at(17.1)), turn_end(at(17.1)))
+machine.script()
+machine.run(32)
+check("marking the escalation's id ends the wait before the step that follows the escalation",
+      [event["why"] for event in machine.events("wait_ended")]
+      == ["it marked a reminder sent on the wait irrelevant"]
+      and "tell_user" not in [event["step"] for event in machine.events("wait_step")],
+      (machine.events("wait_ended"), machine.events("wait_step")))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), *background_bash_launch("b9s9", "python3 scripts/slow.py", at(-30),
+                                                            "tb9", "Run the slow check"),
+                       assistant("Waiting on the check."), turn_end()])
+machine.script(judged(True, 'Your background command "Run the slow check" (b9s9) started 30 '
+                            "minutes ago and has not finished. Is it taking longer than expected?"),
+               sent_ok())
+machine.run(0)
+running_sent = machine.events("message_sent")[-1]
+check("rule 5: a message naming running work gets the automatic-tracking text, then the command "
+      "with its own message_id; the wait opens with the message and the tracking text",
+      running_sent["text"] == (
+          'Your background command "Run the slow check" (b9s9) started 30 minutes ago and has not '
+          "finished. Is it taking longer than expected?\n\n" + RUNNING_WORK_TRACKED_AUTOMATICALLY
+          + "\n\n" + mark_irrelevant(running_sent["message_id"]) + "\n\n" + DO_NOT_REPLY)
+      and machine.events("wait_step")[-1]["text"].endswith(RUNNING_WORK_TRACKED_AUTOMATICALLY),
+      running_sent)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok())
+machine.run(0)
+check("rule 3: the handoff message, which is not a rule 2 or rule 5 message, names no command",
+      "mark-irrelevant" not in machine.events("message_sent")[-1]["text"],
+      machine.events("message_sent"))
 
 import importlib.util
 _spec = importlib.util.spec_from_file_location("idle_sweep_program", PROGRAM)
