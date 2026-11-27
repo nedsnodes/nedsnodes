@@ -412,7 +412,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
               in result.stderr.splitlines(), result.stderr)
     for label, marker_text in (
             ("naming an exception", "#pre_approved_change\ncosmetic-change\n"),
-            ("saying on neither list", "#pre_approved_change\non neither list\n")):
+            ("saying on neither list", "#pre_approved_change\non neither list\n"),
+            ("in the closed form, with the closing `#`", "#pre_approved_change#\ncosmetic-change\n")):
         marker.write_text(marker_text, encoding="utf-8")
         result = run_hook(decoy, workspace, str(workspace / "CLAUDE.md"))
         check(f"a #pre_approved_change marker {label} passes", result.returncode == 0,
@@ -429,6 +430,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           result.returncode == 0, result.stderr)
     for label, marker_text in (
             ("with no second line", "#pre_approved_change\n"),
+            ("in the closed form with no second line", "#pre_approved_change#\n"),
             ("with the exception on its first line", "#pre_approved_change cosmetic-change\n"),
             ("with the exception on its first line and on its second",
              "#pre_approved_change cosmetic-change\ncosmetic-change\n"),
