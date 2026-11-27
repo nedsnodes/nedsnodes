@@ -7,10 +7,8 @@ those it may carry, and the values a rule, decision, sentence kind and code read
 verdict_field_problems() below says which fields a verdict must and may have. The printing program's
 test checks every verdict it prints with verdict_field_problems(), and the program that judges and
 sends reads verdicts by the names here, so a field renamed in one place and not the other fails a
-test instead of being read as missing. That holds for the verdict's top-level fields and for the
-nested fields verdict_field_problems() names, those of a sentence, of the usage limit and of the
-fallback decision; other nested keys, such as each running subagent entry's "id" and "started",
-are written as literals and no test catches a rename of one.
+test instead of being read as missing. verdict_field_problems() checks the verdict's top-level
+fields and the nested fields of a sentence, of the usage limit and of the fallback decision.
 """
 
 AGENT_SEAT = "agent_seat"
