@@ -1008,8 +1008,9 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
         raise Refused(f"Pull request {number}'s topic-worktree {worktree} has a merge under way, such as the round's "
                       "merge of origin/main this program started, so the brief cannot start from it.\n"
                       "If a fix-round subagent is still resolving it, wait for it to finish.\n"
-                      "If the merge's conflicts are resolved, commit it with this command, then run this again:\n"
-                      f"git -C {quoted} commit --no-edit\n"
+                      "If the merge's conflicts are resolved, stage each resolved file and commit the merge with this "
+                      "command, then run this again:\n"
+                      f"git -C {quoted} add <each resolved file> && git -C {quoted} commit --no-edit\n"
                       "Otherwise abort it with this command, then run this again, which starts it afresh:\n"
                       f"git -C {quoted} merge --abort\n{rerun}")
     # Ignored files are left out: they never reach a commit. So is the answers file this program writes while it is

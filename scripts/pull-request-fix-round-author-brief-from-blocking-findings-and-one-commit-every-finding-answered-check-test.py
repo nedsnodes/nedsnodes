@@ -3494,7 +3494,8 @@ def hand_merge_cases(root, repository, _base, frozen_head):
 
     code, out, err = run(root, repository, routes, environment_extra=conflict)
     check("hand-merge: a rerun while the merge is under way refuses with exit 1, saying how to commit or abort it",
-          code == 1 and "has a merge under way" in err and f"git -C {repository} commit --no-edit" in err
+          code == 1 and "has a merge under way" in err
+          and f"git -C {repository} add <each resolved file> && git -C {repository} commit --no-edit" in err
           and f"git -C {repository} merge --abort" in err and out == "", err + out)
 
     (repository / "hook.py").write_text("one and main's own\n")
