@@ -1171,15 +1171,22 @@ def print_brief(number, reviewer_login):
         try:
             data = kept_answers.read_bytes()
         except OSError as error:
-            raise StepFailed(f"could not read the kept copy {kept_answers} of the answers file: {error}") from None
+            raise StepFailed(f"could not read the kept copy {kept_answers} of the answers file, a copy of an "
+                             "earlier answers file, to name the findings whose answers it holds: "
+                             f"{error}. The brief was not printed. The answers file {answers_path} was already "
+                             "rewritten, and the text it held that was not put back is in a copy in "
+                             f"{kept_copies_directory}. Fix the cause above, then run this program again") from None
         left_out = answers_kept_for_findings(data, set(finding_ids))[2]
         if left_out:
             numbers = ", ".join(str(number) for number, finding_id in enumerate(finding_ids, 1)
                                 if finding_id in left_out)
-            lines.append(f"The answers file gave finding {numbers} more than one answer, or an answer that a line "
-                         f"{ANSWER_NUMBERED_LINE_WORDS} ended, so this program put none of them back and copied the "
-                         f"file unchanged to {kept_answers}. Read that copy, and write each such finding's whole "
-                         "answer after its line in the new file.")
+            lines.append(f"The answers file gave finding {numbers} more than one answer, or an answer holding a line "
+                         f"{ANSWER_NUMBERED_LINE_WORDS}, which the check refuses unless it is an entry's start. So "
+                         "this program left those findings' answers out of the answers file it wrote, put back the "
+                         f"others, and copied the old file unchanged to {kept_answers}. Read that copy, and write "
+                         f"each such finding's answer in {answers_path} on its line, after its tag, as one answer "
+                         "that may go on under that line but holds no line "
+                         f"{ANSWER_NUMBERED_LINE_WORDS}: write a numbered list's \"1. \" as \"(1) \".")
         else:
             lines.append(f"The answers file held answers to other findings, so this program copied it unchanged to "
                          f"{kept_answers}.")

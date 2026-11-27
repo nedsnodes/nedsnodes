@@ -2140,9 +2140,11 @@ def answers_put_back_cases(root, repository, _base, frozen_head):
               "and the brief names the finding and the copy",
               code == 0 and answers.read_text() == "1. (finding 1) \n2. (finding 3) Added the timeout case.\n"
               and copies[-1].read_text() == cut_answers
-              and "The answers file gave finding 1 more than one answer, or an answer that a line opening \"<n>.\" "
-                  "followed by whitespace, \"(\" or the line's end ended, so this program put none of them back and "
-                  f"copied the file unchanged to {copies[-1]}." in out
+              and "The answers file gave finding 1 more than one answer, or an answer holding a line opening "
+                  "\"<n>.\" followed by whitespace, \"(\" or the line's end, which the check refuses unless it is an "
+                  "entry's start. So this program left those findings' answers out of the answers file it wrote, put "
+                  f"back the others, and copied the old file unchanged to {copies[-1]}. Read that copy, and write "
+                  f"each such finding's answer in {answers} on its line, after its tag," in out
               and f"held answers to other findings, so this program copied it unchanged to {copies[-1]}." not in out,
               err + out)
         code, check_out, check_err = run(root, repository, routes, "--check")
@@ -2155,7 +2157,8 @@ def answers_put_back_cases(root, repository, _base, frozen_head):
     code, out, err = run(root, repository, routes)
     unreadable.rmdir()
     check("answers put back: a kept copy that cannot be read stops the brief with exit 2, naming the copy",
-          code == 2 and f"could not read the kept copy {unreadable} of the answers file" in err, err + out)
+          code == 2 and f"could not read the kept copy {unreadable} of the answers file" in err
+          and "then run this program again" in err and "Blocking findings" not in out, err + out)
     answers.write_text("1. Fixed the lookup.\n2. Added the timeout case.\n")
     code, check_out, check_err = run(root, repository, routes, "--check")
     printed_starts = check_err.rstrip("\n").splitlines()[-2:]
