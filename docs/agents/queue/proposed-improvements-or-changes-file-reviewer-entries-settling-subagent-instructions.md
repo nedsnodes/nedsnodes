@@ -49,7 +49,7 @@ A second, independent agent must agree:
 
 ### Worth doing, and doable now
 
-Make the change now: a removal, an archiving, a simplification, an addition, or bringing the GHI-MD into line with the user-ruling. Removing or archiving is a change in its own right, not the side effect of a fix. Make a change to the GHI-MD through `scripts/ghi-issue-write.py edit`, as the /ghi-write skill, `.claude/skills/ghi-write/SKILL.md`, says. Once the edit's pull request is open, mark the entry with `settle --kind done`, naming the pull request in `--how`. The file in the log-store never goes into a pull request.
+Make the change now: a removal, an archiving, a simplification, an addition, or bringing the GHI-MD into line with a user-ruling that still applies, when the GHI-MD gives no reason for departing from it. Removing or archiving is a change in its own right, not the side effect of a fix. Make a change to the GHI-MD through `scripts/ghi-issue-write.py edit`, as the /ghi-write skill, `.claude/skills/ghi-write/SKILL.md`, says. Once the edit's pull request is open, mark the entry with `settle --kind done`, naming the pull request in `--how`. The file in the log-store never goes into a pull request.
 
 ### Worth doing, outside this GHI-MD
 
@@ -71,7 +71,7 @@ The attempt showed that the entry is one of the kinds in "4. What goes to the us
 Only these three kinds of entry, and nothing else:
 
 - an entry whose change would alter a document that step 2 of `.claude/skills/cold-read/SKILL.md` sends to a cold-read-full-run, in a way that its step 9 sends to the user: `--because cold-read-document`;
-- an entry that asks whether a user-ruling should change, because the sources show that the user-ruling still applies and the GHI-MD goes against it: `--because user-ruling-change`;
+- an entry where the GHI-MD goes against a user-ruling that still applies and gives a reason for its own design, whether or not it names the user-ruling, such as a draft that proposes another design, or where you cannot tell whether it gives a reason, so that the user decides whether the user-ruling changes: `--because user-ruling-change`;
 - an entry still open after its last attempt: `--because three-attempts`.
 
 In `--why`, say in one sentence what the user must decide; for `three-attempts`, what the attempts could not settle. Do not ask him yourself.
