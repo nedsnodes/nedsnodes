@@ -3639,13 +3639,15 @@ def approval_walk_item_first_numbered_sub_step_without_answer(walk_finder, minut
                 if level in sub_steps)
 
 
-def approval_walk_item_unnumbered_sub_step_headings_numbered(walk_finder, minutes, value, numbers, total, parser):
+def approval_walk_item_unnumbered_sub_step_headings_numbered(walk_finder, minutes, value, numbers, total, parser,
+                                                            write=True):
     """Write `Item K.n of M: ` into each unnumbered `###` sub-step heading of the one `##` item numbers names, K
     the item's number, n counting from 1 in walk-document order and M its heading's, and return whether any was
-    written. Only the headings inside the item's unit count, which item_unit_spans ends at the first Withdrawn
-    heading, so a Withdrawn version's sub-step headings stay as they are. An item that already has a numbered
-    sub-step, or names several items, is left as it is. Refuses, writing nothing, when an item with numbered
-    sub-steps also has an unnumbered one, and when a count it would write is already another heading's."""
+    written; with write False, only refuse or return False. The headings counted are the live `###` headings the
+    item owns: those from its heading to the end of its last numbered sub-step that start no unit, stand in no
+    Withdrawn section and in no other item's unit. An item that names several items is left as it is. Refuses,
+    writing nothing, when an owned heading has no title, when the item has numbered sub-steps and also an
+    unnumbered one, and when a count it would write is already another heading's."""
     if len(numbers) != 1:
         return False
     document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
@@ -3658,13 +3660,33 @@ def approval_walk_item_unnumbered_sub_step_headings_numbered(walk_finder, minute
     if heading is None or heading.markup != walk_finder.UNNUMBERED_ITEM_HEADING_MARKUP or len(unit[0]) != 1:
         return False
     lines = text.split("\n")
-    sub_step_headings = [token.map[0] for token in tokens
-                         if token.type == "heading_open" and token.level == 0 and token.map is not None
-                         and token.markup == APPROVAL_WALK_ITEM_SUB_STEP_HEADING_MARKUP]
     numbered = walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(all_units, unit)
-    sub_steps = [line for line in sub_step_headings if unit[3] < line < unit[4]]
+    end = max([unit[4]] + [each[4] for each in numbered])
+    headings = [(token.map[0], walk_finder.heading_level(token), tokens[index + 1].content, token.markup)
+                for index, token in enumerate(tokens)
+                if token.type == "heading_open" and token.level == 0 and token.map is not None]
+    withdrawn = [(line, min([later for later, later_level, _, _ in headings if later > line and later_level <= level]
+                            + [len(lines)]))
+                 for line, level, content, _ in headings if walk_finder.WITHDRAWN_HEADING.match(content)]
+    others = [each for each in all_units if each != unit and each not in numbered]
+    owned = [line for line, _, _, markup in headings
+             if unit[3] < line < end and markup == APPROVAL_WALK_ITEM_SUB_STEP_HEADING_MARKUP
+             and not any(each[3] == line for each in all_units)
+             and not any(first <= line < last for first, last in withdrawn)
+             and not any(each[3] <= line < each[4] for each in others)]
+    for line in owned:
+        if not SUB_STEP_HEADING_PARTS.match(lines[line]):
+            raise Failure(SUB_STEP_HEADING_WITHOUT_TITLE_REFUSED.format(line=line + 1, item=unit[0][0]))
+    if numbered and owned:
+        # An unnumbered heading among numbered sub-steps would be read, and decided, as part of the one above it.
+        raise Failure(UNNUMBERED_SUB_STEP_BESIDE_NUMBERED_ONES_REFUSED.format(
+            item=unit[0][0], headings="\n".join(
+                f"- line {line + 1}: {lines[line].strip()}"
+                for line in sorted(set(owned) | {each[3] for each in numbered}))))
+    if numbered or not owned:
+        return False
     written = []
-    for position, line in enumerate(sub_steps, start=1):
+    for position, line in enumerate(owned, start=1):
         marks, title = SUB_STEP_HEADING_PARTS.match(lines[line]).groups()
         number = f"{unit[0][0]}.{position}"
         held = [each[3] for each in all_units if number in each[0]]
@@ -3674,17 +3696,7 @@ def approval_walk_item_unnumbered_sub_step_headings_numbered(walk_finder, minute
                 other=lines[held[0]].strip(), other_line=held[0] + 1))
         written.append((line, NUMBERED_HEADING.format(marks=marks, number=number, total=unit[1] or total,
                                                       title=title)))
-    if numbered:
-        # An unnumbered heading among numbered sub-steps would be read, and decided, as part of the one above it.
-        starts = {each[3] for each in numbered}
-        end = max(each[4] for each in numbered)
-        mixed = [line for line in sub_step_headings if unit[3] < line < end and line not in starts]
-        if mixed:
-            raise Failure(UNNUMBERED_SUB_STEP_BESIDE_NUMBERED_ONES_REFUSED.format(
-                item=unit[0][0], headings="\n".join(
-                    f"- line {line + 1}: {lines[line].strip()}" for line in sorted(set(mixed) | starts))))
-        return False
-    if not written:
+    if not write:
         return False
     for line, numbered_heading in written:
         lines[line] = numbered_heading
@@ -3692,6 +3704,11 @@ def approval_walk_item_unnumbered_sub_step_headings_numbered(walk_finder, minute
     return True
 
 
+SUB_STEP_HEADING_WITHOUT_TITLE_REFUSED = (
+    "REFUSED: nothing written: line {line} of the walk-document is a `###` heading with no title inside waiting item "
+    "{item}, so the read step cannot number it as a sub-step.\n"
+    "Give it the sub-step's point as its title, as in `### <the sub-step's point>`, or delete it, then run the read "
+    "step again.")
 SUB_STEP_COUNT_ALREADY_HELD_REFUSED = (
     "REFUSED: nothing written: the read step would number the waiting item's sub-step at line {line}, \"{heading}\", "
     "as Item {number}, but the walk-document already has a heading with that count at line {other_line}, "
@@ -3705,7 +3722,9 @@ UNNUMBERED_SUB_STEP_BESIDE_NUMBERED_ONES_REFUSED = (
     "sub-step headings, numbered and not:\n{headings}\n"
     "Number each unnumbered heading as `### Item {item}.<n> of <M>: <point>`, <n> following the order of the "
     "headings above and <M> the walk's item count, renumbering the later sub-steps that are not yet answered, then "
-    "run the read step again.")
+    "run the read step again.\n"
+    "If a numbered heading listed belongs to an earlier version of the item, put `Withdrawn: ` just before `Item` in "
+    "it instead, as in `### Withdrawn: Item {item}.1 of <M>: <the point>`, so that no program counts it.")
 
 
 def rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named):
@@ -4028,6 +4047,13 @@ def waiting_item_read(arguments, sub_step_of=None):
         top, *([AFTER_FIXES_FLAG] if arguments.after_fixes_reread_only_when_facts_change else []), *rechecked_words)
     # Before walk_document_items, which can write: a missing copy refuses with nothing written.
     earlier = earlier_read_texts_of_item(walk_finder, minutes, value, numbers, total, parser, reads, rerun)
+    # Its refusals come before walk_document_items writes, so their "nothing written" is true. A walk-document that is
+    # gone, or names no such item, is left to walk_document_items, which refuses it with its own message.
+    try:
+        approval_walk_item_unnumbered_sub_step_headings_numbered(walk_finder, minutes, value, numbers, total, parser,
+                                                                write=False)
+    except (OSError, walk_finder.UnusableRange):
+        pass
     count, _, _, _, _ = walk_document_items(walk_finder, minutes, value, numbers, total, parser,
                                                 WAITING_ITEM_READ_STEP, top)
     total = total or count
