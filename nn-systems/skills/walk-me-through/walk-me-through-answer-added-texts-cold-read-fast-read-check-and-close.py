@@ -872,8 +872,10 @@ NO_ANSWER_CASES = (
                  NOT_ASKED_ANY_RATING, (TOUCHES,), (rating_and_needed_lines_problems, touched_files_exist_problems),
                  "touches; every touched file exists", None, NOT_ASKED_FLAG),
     NoAnswerCase(NOT_ASKED_ADDS_NOTHING, NOT_ASKED_ADDS_NOTHING_LABEL,
-                 "an item whose recommendation adds and changes nothing, such as leaving out a definition, a check or "
-                 "a step that its alternative would add, whatever its case against is rated",
+                 "an item whose recommendation adds and changes nothing, such as leaving out a definition or a step "
+                 "that its alternative would add, whatever its case against is rated; an item that drops a proposed "
+                 "check, test, guard, refusal or hook takes the row `proposed-check-dropped-search-found-no-case` "
+                 "instead, or is shown to you",
                  EVERY_RATING, (), (adds_nothing_problems,), "no `#new` text; any rating", None, NOT_ASKED_FLAG,
                  "whether the item's recommendation adds and changes nothing"),
     NoAnswerCase(NOT_ASKED_RATED_NONE, "case against none",
