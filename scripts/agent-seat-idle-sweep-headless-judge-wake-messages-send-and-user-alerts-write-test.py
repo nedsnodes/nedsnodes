@@ -68,6 +68,7 @@ for number, send in enumerate(answer.get("sends", [])):
     emit({{"type": "user", "message": {{"content": [
         {{"type": "tool_result", "tool_use_id": f"t{{number}}", "content": "sent",
          "is_error": send.get("is_error", False)}}]}}}})
+time.sleep(answer.get("sleep_after_sends", 0))
 sys.stderr.write(answer.get("stderr", ""))
 sys.stderr.flush()
 if answer.get("garbage"):
@@ -311,11 +312,11 @@ class Machine:
             for record in records:
                 stream.write(json.dumps(record) + "\n")
 
-    def task(self, seat, task_id):
+    def task(self, seat, task_id, subject=None):
         directory = self.tasks / f"nedsnodes-{seat}-tasks"
         directory.mkdir(exist_ok=True)
         (directory / f"{task_id}.json").write_text(json.dumps(
-            {"id": task_id, "subject": f"task {task_id}", "status": "pending", "blocks": [],
+            {"id": task_id, "subject": subject or f"task {task_id}", "status": "pending", "blocks": [],
              "blockedBy": []}))
 
     def handoff_put_off(self, session="s-1"):
@@ -4137,9 +4138,85 @@ machine.script(judged(True, "You have open tasks.", raised=["1", "2"]),
                                   f'"task 1".\n\n{DO_NOT_REPLY}')],
                 "answer": {"sent": True, "reason": "sent"}})
 machine.run(0)
-check("rule 5: a task one of two successful sends listed is recorded as reminded",
+check("rule 5: of two successful sends, only the tasks the last text lists, the one the delivery "
+      "check looks for, are recorded as reminded",
+      [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 1"]],
+      machine.events("reminder_sent"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "2", subject='Ship it; #1 "old output"')
+machine.script(judged(True, "You have open tasks.", raised=["1", "2"]),
+               {"sends": [send_to("alpha", 'You have open tasks. Open tasks nothing holds: #2 '
+                                  f'"Ship it; #1 \'old output\'".\n\n{DO_NOT_REPLY}')],
+                "answer": {"sent": True, "reason": "sent"}})
+machine.run(0)
+check("rule 5: a dropped task is not credited from an id inside a listed task's subject, whose "
+      "double quotes the listing makes single",
+      """#2 "Ship it; #1 'old output'".""" in machine.events("wait_step")[0]["text"]
+      and [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 2"]],
+      (machine.events("wait_step"), machine.events("reminder_sent")))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "2")
+machine.script(judged(True, "You have open tasks.", raised=["1", "2"]),
+               {"sends": [send_to("alpha", 'You have open tasks. Open tasks\nnothing holds: #1 '
+                                  f'"task 1";\n#2 "task 2".\n\n{DO_NOT_REPLY}')],
+                "answer": {"sent": True, "reason": "sent"}})
+machine.run(0)
+check("rule 5: a listing whose lines the sender wrapped still credits every task it lists",
       [event["subjects"] for event in machine.events("reminder_sent")]
       == [["open task: 1", "open task: 2"]], machine.events("reminder_sent"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]),
+               dict(sent_ok(), sleep_after_sends=10))
+machine.run(0, "--headless-timeout-seconds", "3")
+check("rule 5: a sender stopped at its time limit after its SendMessage succeeded: the failure is "
+      "reported, and the send is logged for the delivery check and the reminder",
+      any("stopped after" in event["problem"] for event in machine.events("headless_failed"))
+      and len(machine.events("message_sent")) == 1
+      and [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 1"]],
+      (machine.events("headless_failed"), machine.events("message_sent"),
+       machine.events("reminder_sent")))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]),
+               {"sends": [send_to("alpha", is_error=True)], "answer": {"sent": False, "reason": "r"}})
+machine.run(0)
+machine.script(sent_ok())
+machine.run(16)
+escalation = machine.events("message_sent")
+answered_with_a_tool_call_and_idle_again(machine, 17)
+calls, _ = judge_asked_at(machine, 30)
+check("rule 5: after the nudge's only send fails, a delivered escalation reminds of the tasks it "
+      "lists, and the next idle stretch does not offer them again without the user typing",
+      [step["step"] for step in machine.events("wait_step")][:2] == ["nudge", "escalate"]
+      and len(escalation) == 1
+      and [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 1"]]
+      and not calls, (machine.events("wait_step"), machine.events("reminder_sent"), calls))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant("Waiting.", when=at(0.6)), turn_end(at(0.7)))
+machine.script(sent_ok())
+machine.run(16)
+check("rule 3: an escalation that lists no open task logs no reminder",
+      [step["step"] for step in machine.events("wait_step")][:2] == ["nudge", "escalate"]
+      and len(machine.events("reminder_sent")) == 1
+      and all(event["subjects"] for event in machine.events("reminder_sent")),
+      (machine.events("wait_step"), machine.events("reminder_sent")))
 
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
