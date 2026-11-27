@@ -682,8 +682,9 @@ class MergeQueuePullRequestMergeBatchRunner:
         if exit_code == 1 and not on_github:
             self.in_progress_file.unlink(missing_ok=True)
             if "mergeStateStatus is DIRTY" in text:
-                why = ("conflicts with main (mergeStateStatus DIRTY): its author merges main "
-                       "in, then the new nn-head-commit needs a new review")
+                why = ("conflicts with main (mergeStateStatus DIRTY): its author asks merge-lane-2 "
+                       "for a review that requests changes for the conflict, whose fix-round merges "
+                       "main in; the new nn-head-commit then needs a new review")
             else:
                 first = next((line for line in text.splitlines()
                               if line.startswith(("GATE REFUSED", "STOP"))), "no reason printed")

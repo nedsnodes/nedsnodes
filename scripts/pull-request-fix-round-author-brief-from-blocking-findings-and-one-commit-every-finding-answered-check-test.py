@@ -6,7 +6,9 @@ answers from a routes file the case writes, keyed by its arguments joined with s
 prefix of them when the key ends with "*"; it exits 1 on an unarranged call, and appends each
 call's arguments to the calls file. A fake `git` beside it answers `git ls-remote` with FAKE_GIT_LS_REMOTE_STDOUT,
 FAKE_GIT_LS_REMOTE_STDERR and FAKE_GIT_LS_REMOTE_EXIT, by default origin's branch at the head and branch the case's gh pr view route
-names; FAKE_GIT_MERGE_TREE_EXIT makes `git merge-tree` fail with that exit code; it hands every other git command to the real git.
+names; FAKE_GIT_MERGE_TREE_EXIT makes `git merge-tree` fail with that exit code, and FAKE_GIT_MERGE_EXIT makes `git merge`
+exit with that code without merging, FAKE_GIT_MERGE_RESET_TO makes it reset FAKE_GIT_MERGE_RESET_IN's branch
+to that commit instead; it hands every other git command to the real git.
 
 Run: python3 scripts/pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-answered-check-test.py
 """
@@ -85,6 +87,14 @@ for argument in "$@"; do
         printf 'fatal: the fake merge-tree failed\n' >&2
         exit "$FAKE_GIT_MERGE_TREE_EXIT"
     fi
+    if [ "$argument" = merge ] && [ -n "$FAKE_GIT_MERGE_RESET_TO" ]; then
+        REAL_GIT -C "$FAKE_GIT_MERGE_RESET_IN" reset -q --hard "$FAKE_GIT_MERGE_RESET_TO"
+        exit 0
+    fi
+    if [ "$argument" = merge ] && [ -n "$FAKE_GIT_MERGE_EXIT" ]; then
+        printf 'fatal: the fake merge failed\n' >&2
+        exit "$FAKE_GIT_MERGE_EXIT"
+    fi
     if [ "$argument" = ls-remote ]; then
         printf '%s\n' "$*" >> "$FAKE_GIT_LS_REMOTE_CALLS"
         printf '%s' "$FAKE_GIT_LS_REMOTE_STDOUT"
@@ -149,7 +159,7 @@ sys.exit(1 if failing else 2 if not_run else 0)
 '''
 
 # Stands in for scripts/branch-conflict-check.py in every scratch repository's base commit. FAKE_CONFLICT_CHECK
-# picks its report: unset or "clean" for no conflict, "replace" or "rebase" for a conflict with that answer,
+# picks its report: unset or "clean" for no conflict, "merge-main-at-next-fix-round", "none" or "rebase" for a conflict with that answer,
 # "fail" for a run that could not answer, "crash" for an uncaught exception, which Python ends with exit 1 and no
 # verdict, "killed" for a run a signal ended before it printed anything, and "replace-then-exit-2" and
 # "replace-then-killed" for a run that printed a replace answer and then failed. FAKE_CONFLICT_CHECK_CALLS records its arguments.
@@ -446,23 +456,25 @@ def brief_cases(root, repository, base, frozen_head):
     check("brief: rule 2 says a fix that carries out a user ruling in a guarded-file is a user-approved-change",
           "\n   " + paragraph + "\n3. Change nothing else" in out
           and out.index("2. Check each finding") < out.index(paragraph), out)
-    check("brief: a replace answer found during the round stops the subagent, which hands it back to the author",
-          "If it reports VERDICT: CONFLICT with ANSWER: replace, stop and tell the agent that dispatched you what "
-          f"it printed: that agent runs python3 {PROGRAM.resolve()} {NUMBER} again" in out
-          and out.index("ANSWER: replace") < out.index("2. Check each finding")
-          and "take none of steps 2 to 8" not in out, out)
-    check("brief: a conflict defers to the conflict check's report",
-          "If it reports VERDICT: CONFLICT with any other answer, do what its report says." in out
-          and "merge origin/main as its report says" not in out and "--after-conflict-merge" not in out, out)
+    check("brief: a conflict found during the round stops the subagent, whose dispatching agent's rerun starts the "
+          "round's merge",
+          "If it reports VERDICT: CONFLICT, stop and tell the agent that dispatched you what it printed: that agent "
+          f"runs python3 {PROGRAM.resolve()} {NUMBER} again, which starts the round's merge of origin/main." in out
+          and out.index("If it reports VERDICT: CONFLICT") < out.index("2. Check each finding")
+          and "ANSWER: replace" not in out and "do what its report says" not in out, out)
+    check("brief: with no conflict, the brief names no hand-merge and prints no conflict report",
+          "started the round's hand-merge" not in out and "The conflict check's report:" not in out
+          and "aborted the merge" not in out, out)
     check("brief: step 1 says when to merge origin/main, with the command, and that a conflict stops the "
-          "round for the replace route, after the conflict check and before any change",
+          "round for a rerun that starts the merge, after the conflict check and before any change",
           "Then, if a finding can be fixed or tested only with what origin/main has and the branch lacks" in out
           and f"before changing anything: {in_worktree}git fetch origin && git merge --no-edit origin/main\n" in out
           and "Resolve nothing by hand and change nothing in the merge's commit" in out
           and f"If git stops on a conflict, run {in_worktree}git merge --abort, then stop" in out
-          and f"runs python3 {PROGRAM.resolve()} {NUMBER} again, which prints the replace route." in out
+          and f"runs python3 {PROGRAM.resolve()} {NUMBER} again, which starts that merge for the round, its "
+              "conflicts for you to resolve." in out
           and "Merge nothing but origin/main." in out
-          and out.index("If it reports VERDICT: CONFLICT with any other answer") < out.index("git merge --no-edit")
+          and out.index("If it reports VERDICT: CONFLICT") < out.index("git merge --no-edit")
           < out.index("2. Check each finding"), out)
     check("brief: step 4 puts the one commit after the merge, and lets the merge alone be the fix",
           "4. Put every change in one commit on top of the branch as step 1 left it, after the merge when step 1 "
@@ -1577,9 +1589,8 @@ def merge_of_origin_main_cases(root, repository, base, frozen_head):
     commit_file(repository, "hook.py", "five\n", "a third commit")
     code, out, err = run(root, repository, routes_for(frozen_head, reviews), "--check", "--answers", answers)
     check("merge check: a merge and two commits refuse", code == 1 and "has 3 commits" in err
-          and "a merge of origin/main that git makes without a conflict, alone or followed by one non-merge "
-          "commit; either may be followed by one non-merge commit that changes only nn-architecture-overview "
-          "pages." in err, err)
+          and "a merge of origin/main, alone or followed by one non-merge commit; either may be followed by one "
+          "non-merge commit that changes only nn-architecture-overview pages." in err, err)
 
     git(repository, "reset", "-q", "--hard", frozen_head)
     commit_file(repository, "hook.py", "early\n", "fix before the merge")
@@ -1617,9 +1628,8 @@ def merge_of_origin_main_cases(root, repository, base, frozen_head):
     git(repository, "add", "hook.py")
     git(repository, "commit", "-q", "--no-edit")
     code, out, err = run(root, repository, routes_for(frozen_head, reviews), "--check", "--answers", answers)
-    check("merge check: a merge of origin/main whose conflict was resolved by hand refuses, sending the pull "
-          "request to the replace route", code == 1 and "has conflicts in hook.py, resolved by hand" in err
-          and f"runs python3 {PROGRAM.resolve()} {NUMBER} again, which prints the replace route" in err, err)
+    check("merge check: a merge of origin/main whose conflict was resolved by hand passes as the round's "
+          "hand-merge", code == 0 and "Not pushed yet" in out, out + err)
 
 
 def commissioned_reviewer_cases(root, repository, base, frozen_head):
@@ -3040,7 +3050,7 @@ def fix_commit_range_two_commit_round_cases(_root, repository, _base, _frozen_he
         original_directory = os.getcwd()
         os.chdir(repository)
         try:
-            return program.fix_commit_range(NUMBER, program.MERGE_LANE_2_REVIEWER_LOGIN, frozen_head,
+            return program.fix_commit_range(frozen_head,
                                             program.commits_since(frozen_head, head), "merge-lane-2")
         except program.Refused as refusal:
             return refusal
@@ -3385,21 +3395,20 @@ def conflict_check_cases(root, repository, _base, frozen_head):
           err + out)
     check("conflict check: no conflict prints the brief", "1. Before changing anything" in out, out)
 
-    code, out, err = run(root, repository, routes, environment_extra={"FAKE_CONFLICT_CHECK": "replace"})
-    check("conflict check: a replace answer prints the check's report and the replace steps, and exits 0",
-          code == 0 and "ANSWER: replace -- the fake's answer." in out
-          and "Cut a new nn-topic-branch from current origin/main." in out
-          and f"No fix-round runs: pull request {NUMBER} conflicts with main" in out
-          and "tell merge-lane-2 with SendMessage that this round stopped on a conflict with main" in out
-          and f"Frozen-head: {frozen_head}" in out, err + out)
-    check("conflict check: a replace answer prints none of the round's rules, dispatch or check command",
-          "For the subagent" not in out and "For the author" not in out and "0. Make a local branch" not in out
-          and "2. Check each finding" not in out and "--check" not in out
-          and "hook.py swallows" not in out, out)
+    code, out, err = run(root, repository, routes, environment_extra={"FAKE_CONFLICT_CHECK": "none"})
+    check("conflict check: a conflict the check cannot say how to clear fails with exit 2, its report quoted, "
+          "and starts no merge",
+          code == 2 and err.startswith("FAILED: ") and "could not say how it is cleared" in err
+          and "ANSWER: none -- the fake's answer." in err and out == ""
+          and git(repository, "rev-parse", "HEAD") == frozen_head, err + out)
 
-    code, out, err = run(root, repository, routes, environment_extra={"FAKE_CONFLICT_CHECK": "rebase"})
-    check("conflict check: a conflict with another answer still prints the brief, whose step 1 handles it",
-          code == 0 and "1. Before changing anything" in out and "No fix-round runs" not in out, err + out)
+    code, out, err = run(root, repository, routes, environment_extra={"FAKE_CONFLICT_CHECK": "merge-main-at-next-fix-round"})
+    check("conflict check: a conflict whose merge git makes by itself is the round's first commit, and step 1 "
+          "says so", code == 0 and "1. The round's merge of origin/main is already its first commit" in out
+          and git(repository, "rev-parse", "HEAD^1") == frozen_head
+          and git(repository, "rev-parse", "HEAD^2") == git(repository, "rev-parse", "origin/main")
+          and "The conflict check's report:\nVERDICT: CONFLICT -- abc conflicts with origin/main." in out, err + out)
+    git(repository, "reset", "-q", "--hard", frozen_head)
 
     code, out, err = run(root, repository, routes, environment_extra={"FAKE_CONFLICT_CHECK": "fail"})
     check("conflict check: a check that cannot answer fails with exit 2, its output quoted, and prints no brief",
@@ -3435,6 +3444,127 @@ def conflict_check_cases(root, repository, _base, frozen_head):
     check("conflict check: a checkout without the conflict check fails with exit 2 and prints no brief",
           code == 2 and err.startswith("FAILED: ") and out == "", err + out)
     git(repository, "checkout", "-q", "--", "scripts/branch-conflict-check.py")
+
+
+def hand_merge_cases(root, repository, _base, frozen_head):
+    """A pull request that conflicts with main gets its hand-merge started by the brief: main changes the
+    frozen-head's hook.py too."""
+    git(repository, "checkout", "-q", "main-line")
+    main_tip = commit_file(repository, "hook.py", "main's own\n", "main changes hook.py")
+    git(repository, "update-ref", "refs/remotes/origin/main", main_tip)
+    git(repository, "checkout", "-q", BRANCH)
+    routes = routes_for(frozen_head, [review(commit_id=frozen_head)])
+    conflict = {"FAKE_CONFLICT_CHECK": "merge-main-at-next-fix-round"}
+    in_worktree = f"cd {repository} && "
+
+    for exit_code, said in (("128", "the fake merge failed"), ("1", "left neither a merge nor a conflict")):
+        code, out, err = run(root, repository, routes, environment_extra={**conflict, "FAKE_GIT_MERGE_EXIT": exit_code})
+        check(f"hand-merge: git merge exiting {exit_code} without merging fails with exit 2, saying why, and prints "
+              "no brief", code == 2 and err.startswith("FAILED: ") and said in err and out == "", err + out)
+
+    code, out, err = run(root, repository, routes, environment_extra={
+        **conflict, "FAKE_GIT_MERGE_RESET_TO": main_tip, "FAKE_GIT_MERGE_RESET_IN": str(repository)})
+    check("hand-merge: a merge that moves the branch to a commit that is no merge puts the topic-worktree back at "
+          "the frozen-head and says to run the command again",
+          code == 2 and git(repository, "rev-parse", "HEAD") == frozen_head
+          and f"put {repository} back at the frozen-head {frozen_head}" in err
+          and "Run this same command again, which runs the conflict check afresh" in err, err + out)
+
+    code, out, err = run(root, repository, routes, environment_extra=conflict)
+    check("hand-merge: the brief starts the merge of origin/main in the topic-worktree and leaves its conflict",
+          code == 0 and subprocess.run(["git", "-C", str(repository), "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                                       capture_output=True).returncode == 0
+          and git(repository, "diff", "--name-only", "--diff-filter=U") == "hook.py", err + out)
+    check("hand-merge: the brief prints the conflict check's report before the findings",
+          "The conflict check's report:\nVERDICT: CONFLICT -- abc conflicts with origin/main.\n"
+          "ANSWER: merge-main-at-next-fix-round -- the fake's answer." in out
+          and out.index("The conflict check's report:") < out.index("Blocking findings"), out)
+    check("hand-merge: step 1 has the subagent resolve and commit the merge first, or abort it and hand back for "
+          "the replacement",
+          "1. This program started the round's hand-merge, its first commit: it ran git merge --no-edit origin/main "
+          f"in {repository}, which stopped on conflicts in hook.py." in out
+          and f"{in_worktree}git add <each resolved file> && git commit --no-edit" in out
+          and f"If you cannot make both changes work, run {in_worktree}git merge --abort" in out
+          and "that agent replaces the pull request." in out
+          and "branch-conflict-check.py --pull-request" not in out.split("1. This program")[1].split("2. Check")[0],
+          out)
+    check("hand-merge: the author is told to replace the pull request when the subagent gives the merge up",
+          "For the author, when the subagent reports that it aborted the merge because it could not make both "
+          f"changes work: replace pull request {NUMBER} yourself" in out, out)
+
+    code, out, err = run(root, repository, routes, environment_extra=conflict)
+    check("hand-merge: a rerun while the merge is under way refuses with exit 1, saying how to commit or abort it",
+          code == 1 and "has a merge under way" in err and f"git -C {repository} commit --no-edit" in err
+          and f"git -C {repository} merge --abort" in err and out == "", err + out)
+
+    (repository / "hook.py").write_text("one and main's own\n")
+    git(repository, "add", "hook.py")
+    git(repository, "commit", "-q", "--no-edit")
+    merge = git(repository, "rev-parse", "HEAD")
+    code, out, err = run(root, repository, routes, environment_extra=conflict)
+    check("hand-merge: a rerun after the merge is committed briefs the round on top of it, starting no second merge",
+          code == 0 and "1. The round's merge of origin/main is already its first commit" in out
+          and git(repository, "rev-parse", "HEAD") == merge, err + out)
+
+    answers = answers_file(root, GOOD_ANSWERS)
+    code, out, err = run(root, repository, routes, "--check", "--answers", answers)
+    check("hand-merge: --check passes the merge whose conflict was resolved by hand, not pushed",
+          code == 0 and "Not pushed yet" in out, out + err)
+    fix = commit_file(repository, "hook.py", "one and main's own, fixed\n", "the round's fix")
+    code, out, err = run(root, repository, routes, "--check", "--answers", answers)
+    check("hand-merge: --check passes the hand-merge followed by one fix commit, not pushed",
+          code == 0 and "Not pushed yet" in out, out + err)
+    code, out, err = run(root, repository, routes_for(fix, [review(commit_id=frozen_head)]), "--check",
+                         "--answers", answers)
+    check("hand-merge: once pushed, the message tells the merge-lane the merge's conflicts were resolved by hand",
+          code == 0 and f"a merge {merge} of origin/main's {main_tip} whose conflicts with main were resolved by "
+          f"hand, so its resolution is for review, then one fix commit {fix}." in out, out + err)
+
+    (repository / ANSWERS_NAME).write_text(GOOD_ANSWERS)
+    submitted = routes_for(frozen_head, [dict(review(commit_id=frozen_head), submitted_at="2020-01-01T00:00:00Z")])
+    code, out, err = run(root, repository, submitted, environment_extra=conflict)
+    check("hand-merge: a rerun at a fix commit on the merge, every finding answered, says to finish with --check",
+          code == 1 and "answers every finding of this round" in err and f"{NUMBER} --check" in err, err + out)
+
+
+def conflict_alone_round_cases(root, repository, _base, frozen_head):
+    """A review stating **Blocking: 0**, as the posting program writes for a ready pull request that conflicts
+    with main, is a round with no finding whose one change is the hand-merge."""
+    git(repository, "checkout", "-q", "main-line")
+    commit_file(repository, "hook.py", "main's own\n", "main changes hook.py")
+    git(repository, "update-ref", "refs/remotes/origin/main", git(repository, "rev-parse", "HEAD"))
+    git(repository, "checkout", "-q", BRANCH)
+    conflict_review = review(commit_id=frozen_head, body="REQUEST_CHANGES\n\n**Blocking: 0**\n\n"
+                                                       "**Merge-lane: merge-lane-2**\n\nConflicts with main.")
+    routes = routes_for(frozen_head, [conflict_review], comments=[])
+    code, out, err = run(root, repository, routes, environment_extra={"FAKE_CONFLICT_CHECK": "merge-main-at-next-fix-round"})
+    check("conflict alone: the brief says the round has no finding and is the merge alone, and starts the merge",
+          code == 0 and "This round has no finding: merge-lane-2's review requests changes only because the pull "
+          "request conflicts with main, so the round is step 1's merge alone." in out
+          and "Blocking findings (0)" in out and "This program started the round's hand-merge" in out, err + out)
+    git(repository, "merge", "--abort")
+    answers = answers_file(root, "")
+    code, out, err = run(root, repository, routes, "--check", "--answers", answers)
+    check("conflict alone: --check with no commit refuses, saying to run the brief, which starts the merge",
+          code == 1 and "has no finding" in err and "Run the brief again" in err, err + out)
+    with_nit = routes_for(frozen_head, [conflict_review], comments=[comment("hook.py", "**fix-in-maintenance, nit** "
+                                                                             "A typo.", comment_id=4)])
+    (root / "nit-answers.md").write_text("1. Fixed.\n")
+    code, out, err = run(root, repository, with_nit, "--check", "--answers", str(root / "nit-answers.md"))
+    check("conflict alone: --check with a nit but no commit still refuses, since only the merge clears the "
+          "conflict", code == 1 and "has no finding" in err, err + out)
+    subprocess.run(["git", "-C", str(repository), "merge", "-q", "--no-edit", "origin/main"], capture_output=True)
+    (repository / "hook.py").write_text("both\n")
+    git(repository, "add", "hook.py")
+    git(repository, "commit", "-q", "--no-edit")
+    code, out, err = run(root, repository, routes, "--check", "--answers", answers)
+    check("conflict alone: --check passes the round's hand-merge alone", code == 0 and "Not pushed yet" in out,
+          out + err)
+    commented = review(commit_id=frozen_head, body="REQUEST_CHANGES\n\nNo count here.")
+    code, out, err = run(root, repository, routes_for(frozen_head, [commented], comments=[]),
+                         environment_extra={"FAKE_CONFLICT_CHECK": "merge-main-at-next-fix-round"})
+    check("conflict alone: a review with no finding and no Blocking: 0 is still refused",
+          code == 1 and "none of its 0 inline comments starts with" in err, err + out)
 
 
 def merge_lane_name_line_cases(root, repository, _base, frozen_head):
@@ -3498,6 +3628,8 @@ case("move pre-push hook output", move_pre_push_hook_output_cases)
 case("brief", brief_cases)
 case("topic-worktree", topic_worktree_cases)
 case("conflict check", conflict_check_cases)
+case("hand-merge", hand_merge_cases)
+case("conflict alone round", conflict_alone_round_cases)
 case("check", check_cases)
 case("merge of origin/main", merge_of_origin_main_cases)
 case("pushed head read from origin", pushed_head_read_from_origin_cases)

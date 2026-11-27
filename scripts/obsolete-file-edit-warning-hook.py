@@ -136,7 +136,7 @@ NEVER_PUSHED_ADVICE = (
 )
 # No commit on top can clear a conflict with main, so a pushed branch that
 # conflicts is sent to scripts/branch-conflict-check.py, whose report says
-# whether it is rebased or its pull request replaced.
+# how the conflict is cleared.
 PUSHED_ADVICE = (
     "This branch is pushed, so its review may be running: do not rebase or amend "
     "it. A fix for this topic is a new commit on top. To learn whether the branch "

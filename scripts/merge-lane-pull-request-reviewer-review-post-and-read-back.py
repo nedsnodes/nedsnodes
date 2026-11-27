@@ -57,7 +57,8 @@ reads non-blocking findings by:
 - when N comments are must-fix-now, N at least 1, the body carries
   "**Blocking: N**" alone on its line, after the verdict line and a blank
   line, the only place the fix-round program's BLOCKING_COUNT_PATTERN reads
-  it, and only on merge-lane-2's reviews. No count is written when N is 0;
+  it, and only on merge-lane-2's reviews. No count is written when N is 0, apart from
+  the conflict review below;
 - after the count, a blank line and the fix-round program's REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_FORMAT
   naming the merge-lane that posts the review, the agent-seat GIT_AUTHOR_NAME names, which
   the fix-round program sends the round's messages to. Every merge-lane posts as
@@ -65,7 +66,15 @@ reads non-blocking findings by:
   changes is refused when GIT_AUTHOR_NAME is not a merge-lane's name, such as merge-lane-1;
 - the posted verdict is REQUEST_CHANGES when any comment is must-fix-now and
   APPROVE otherwise. A file whose verdict is REQUEST_CHANGES with no
-  must-fix-now comment is refused rather than posted as an approval.
+  must-fix-now comment is refused rather than posted as an approval;
+- an APPROVE on a pull request GitHub does not mark as a draft is posted
+  instead as REQUEST_CHANGES with "**Blocking: 0**" and the merge-lane line,
+  then MAIN_CONFLICT_ONLY_CHANGES_REQUESTED_REVIEW_BODY_PARAGRAPH, when
+  --branch-conflict-check-program, by default this checkout's
+  branch-conflict-check.py, run with --pull-request, exits 1 with a
+  VERDICT: CONFLICT line, since a pull request marked ready gets main merged
+  in only in a fix-round; any other exit but 0, or no answer within
+  BRANCH_CONFLICT_CHECK_TIMEOUT_SECONDS, posts nothing.
 
 merge-lane-2's verdict review answers for every Codex finding on the reviewed
 commit. The program reads each codex-review-run-record.json under
@@ -201,6 +210,12 @@ CODEX_FINDING_GRADES_KEY = "merge_lane_codex_review_finding_grades"
 NO_REVIEWER_TIER = "no-reviewer-tier"
 REVIEW_TIERS_THAT_RUN_CODEX = ("codex-review-and-head-tests-tier", "claude-and-codex-review-and-head-tests-tier")
 REVIEW_PLAN_PROGRAM = Path(__file__).resolve().with_name("pull-request-review-plan.py")
+BRANCH_CONFLICT_CHECK_PROGRAM = Path(__file__).resolve().with_name("branch-conflict-check.py")
+# The check fetches origin and reads GitHub up to 6 times, 10 seconds apart.
+BRANCH_CONFLICT_CHECK_TIMEOUT_SECONDS = 300
+MAIN_CONFLICT_ONLY_CHANGES_REQUESTED_REVIEW_BODY_PARAGRAPH = (
+    "This review requests changes only because the pull request conflicts with main. Its fix-round merges "
+    "origin/main in as the round's first commit; the fix-round program starts that merge.")
 # The plan prints its JSON and exits 3 when a message in it has no fast-read command; its tier still holds.
 REVIEW_PLAN_EXIT_CODES_WITH_A_PLAN = (0, 3)
 # The plan makes several GitHub reads and a diff of the pull request.
@@ -869,6 +884,27 @@ def posted_verdict_review_missing_review_posting_program_marks_reason_or_none(re
     return None
 
 
+def pull_request_conflicts_with_main(program, number):
+    """(True or False, None) for whether the conflict check finds the pull request in conflict with main, or
+    (None, why) when it gives no answer."""
+    command = [sys.executable, str(program), "--pull-request", str(number)]
+    try:
+        # The check asks git in its working directory, which must be a checkout of this clone wherever the
+        # merge-lane runs this program from.
+        completed = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                   cwd=Path(__file__).resolve().parents[1],
+                                   timeout=BRANCH_CONFLICT_CHECK_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return None, f"{shlex.join(command)} did not finish in {BRANCH_CONFLICT_CHECK_TIMEOUT_SECONDS} seconds"
+    if completed.returncode == 0:
+        return False, None
+    if completed.returncode == 1 and any(line.startswith(fix_round.CONFLICT_CHECK_CONFLICT_VERDICT_PREFIX)
+                                         for line in completed.stdout.splitlines()):
+        return True, None
+    return None, (f"{shlex.join(command)} exited {completed.returncode}, so whether the pull request conflicts "
+                  f"with main is not known; it printed: {(completed.stdout + completed.stderr).strip()}")
+
+
 def commentable_lines(files):
     """Map each path to the new-side line numbers its diff shows, from GitHub's pull request files."""
     lines = {}
@@ -967,6 +1003,10 @@ def parse_arguments(argv):
                         help="the program that matches each Codex finding on main's code against the findings "
                              "record (default: this checkout's "
                              "findings-record-codex-finding-match-and-row-add-or-decide.py)")
+    parser.add_argument("--branch-conflict-check-program", type=Path, default=BRANCH_CONFLICT_CHECK_PROGRAM,
+                        help="the program that says whether the pull request conflicts with main, asked before "
+                             "merge-lane-2's approval of a pull request marked ready (default: this checkout's "
+                             "branch-conflict-check.py)")
     parser.add_argument("review_file", type=Path,
                         help="the review: a JSON object with verdict, body and comments")
     return parser.parse_args(argv)
@@ -1021,7 +1061,9 @@ def main(argv=None):
         print(NOT_POSTED.format(reason=error), file=sys.stderr)
         return EXIT_NOT_POSTED
     try:
-        author = gh_json(token, [f"repos/{REPOSITORY}/pulls/{number}"])["user"]["login"]
+        facts = gh_json(token, [f"repos/{REPOSITORY}/pulls/{number}"])
+        author = facts["user"]["login"]
+        is_draft = facts.get("draft") is True
     except (GhFailed, KeyError, TypeError) as error:
         print(NOT_POSTED.format(reason=f"reading the pull request's author failed: {reason_of(error)}"),
               file=sys.stderr)
@@ -1048,6 +1090,16 @@ def main(argv=None):
     elif account == MERGE_LANE_ACCOUNT:  # pragma: no mutate, --github-account allows only mac-claude and ned-review-merge, and mac-claude sorts before ned-review-merge, so >= gives what == gives
         merge_lane = os.environ.get("GIT_AUTHOR_NAME", "")
         verdict, body, comments = with_finding_category_marks(body, comments, merge_lane)
+        if verdict == "APPROVE" and not is_draft:
+            conflicts, why = pull_request_conflicts_with_main(arguments.branch_conflict_check_program, number)
+            if conflicts is None:
+                print(NOT_POSTED.format(reason=why), file=sys.stderr)
+                return EXIT_NOT_POSTED
+            if conflicts:
+                verdict = "REQUEST_CHANGES"
+                body = (BLOCKING_COUNT_FORMAT.format(count=0) + "\n\n"
+                        + fix_round.REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_FORMAT.format(merge_lane=merge_lane)
+                        + "\n\n" + MAIN_CONFLICT_ONLY_CHANGES_REQUESTED_REVIEW_BODY_PARAGRAPH + "\n\n" + body)
         if verdict == "REQUEST_CHANGES" and not fix_round.REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_PATTERN.match(f"{verdict}\n\n{body}"):
             print(NOT_A_MERGE_LANE.format(name=merge_lane), file=sys.stderr)
             return EXIT_NOT_POSTED

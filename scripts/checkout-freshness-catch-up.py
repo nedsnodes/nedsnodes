@@ -154,13 +154,6 @@ _stop_hooks_stay_silent_rule_specification = importlib.util.spec_from_file_locat
 stop_hooks_stay_silent_rule = importlib.util.module_from_spec(_stop_hooks_stay_silent_rule_specification)
 _stop_hooks_stay_silent_rule_specification.loader.exec_module(stop_hooks_stay_silent_rule)
 
-_rebase_or_replace_spec = importlib.util.spec_from_file_location(
-    "pull_request_conflict_with_main_rebase_or_replace_answer_common",
-    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
-rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
-_rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
-
 _branch_lock_spec = importlib.util.spec_from_file_location(
     "branch_rebase_and_push_per_checkout_mutual_exclusion_lock_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
@@ -222,7 +215,7 @@ GIT_IN_PROGRESS_MARKERS = tuple(GIT_IN_PROGRESS_OPERATION_BY_MARKER)
 # moved by anyone but its author, and then only forward.
 # No commit on top can clear a conflict with main, so a pushed branch that
 # conflicts is sent to scripts/branch-conflict-check.py, whose report says
-# whether it is rebased or its pull request replaced.
+# how the conflict is cleared.
 # The runner selects the suites a change can affect, so no agent picks them by hand.
 SELECTIVE_TEST_RUN_COMMAND = (
     "python3 scripts/run-all-test-suites.py "
@@ -1234,8 +1227,8 @@ def merges_from_main(checkout: Path):
     WHY A CLEAN RE-MERGE IS THE TEST. A merge that resolved a real conflict
     with main has the same shape as the banned catch-up — a merge commit whose
     second parent is on main — but this detector reports catch-ups only; a
-    conflict with main is answered by the rebase or the replacement pull
-    request scripts/branch-conflict-check.py reports, never by this detector.
+    conflict with main is answered as scripts/branch-conflict-check.py
+    reports, never by this detector.
     Re-merging the parents tells the two apart: parents that CONFLICT mean the
     merge resolved a conflict, so it is skipped; parents that merge cleanly
     mean the merge was unnecessary, which is the banned catch-up, and it is
@@ -1571,10 +1564,7 @@ def catch_up_session_checkout_branch_under_lock(checkout: Path, git_dir: Path, s
     # files just changed under the agent, and that is never deduplicated. A
     # skip or a conflict is told once per key, but ATTEMPTED every turn end,
     # so the moment the tree is clean it goes.
-    # A never-pushed branch has no pull request on origin.
-    if state_key == "unpushed" and (
-            rebase_or_replace.pull_request_conflict_with_main_rebase_or_replace_answer(False)
-            == rebase_or_replace.REBASE_ONTO_MAIN):
+    if state_key == "unpushed":
         outcome, detail = rebase_never_pushed_branch(checkout, git_dir)
         if outcome == "rebased":
             stamp["behind"], stamp["ahead"] = 0, stamp.get("own")
