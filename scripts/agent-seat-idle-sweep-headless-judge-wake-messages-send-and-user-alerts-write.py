@@ -330,7 +330,6 @@ SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
                       "properties": {"sent": {"type": "boolean"}, "reason": {"type": "string"}}}
 OPEN_TASK_IDS_RAISED = "open_task_ids_raised"
 OPEN_TASK_IDS_OFFERED_NOT_RAISED = "open_task_ids_offered_not_raised"
-EARLIER_TEXTS_SENT = "earlier_texts_sent"
 IDLE_JUDGE_ANSWER_SCHEMA = {
     "type": "object", "required": ["send", "message", "reason", OPEN_TASK_IDS_RAISED],
     "properties": {"send": {"type": "boolean"}, "message": {"type": "string"},
@@ -595,6 +594,8 @@ class SweepLog:
                     wait = {"session_id": event["session_id"],
                             "first_idle_at": event["first_idle_at"], NUDGE: event["at"],
                             "nudge_text": event["text"],
+                            # A wait opened before nudges logged their raised ids escalates
+                            # recording no task as reminded: at most one extra reminder each.
                             OPEN_TASK_IDS_RAISED: event.get(OPEN_TASK_IDS_RAISED, []),
                             PULL_REQUEST_EVENTS_TASK_ID: event.get(PULL_REQUEST_EVENTS_TASK_ID),
                             PROMISE_MESSAGES: [],
@@ -1165,9 +1166,12 @@ class Sweep:
         if outcome.error:
             self.headless_failed(seat, f"send its {step} message", outcome.error,
                                  outcome.error_kind, outcome)
-            return False
+            # A sender stopped after its SendMessage succeeded has still sent the message.
+            if not any(send["succeeded"] and entry_seat(send["to"], refs) == seat
+                       for send in outcome.sends):
+                return False
         self.sent_texts_differ(outcome, refs, text, step)
-        problems = send_problems(outcome, refs)
+        problems = [] if outcome.error else send_problems(outcome, refs)
         if problems:
             self.headless_failed(seat, f"send its {step} message", "; ".join(problems), SENDS_WRONG)
             return False
@@ -1184,7 +1188,6 @@ class Sweep:
         # for minutes after its SendMessage, and the record is written when it ends.
         return self.record({"event": "message_sent", "agent_seat": seat, "step": step,
                             "text": texts[-1],
-                            **({EARLIER_TEXTS_SENT: texts[:-1]} if texts[1:] else {}),
                             "send_started_at": iso(started_at), "message_id": message_id,
                             "session_id": verdict.get(fields.SESSION_ID),
                             "transcript_path": verdict.get(fields.TRANSCRIPT_PATH), **details})
@@ -1700,7 +1703,7 @@ class Sweep:
                                                  open_tasks_listed_in(sent, task_ids)] if sent else [])
 
     def reminder_sent(self, seat, verdict, sent, subjects):
-        if sent:
+        if sent and subjects:
             self.record({"event": REMINDER_SENT, "agent_seat": seat,
                          "session_id": verdict[fields.SESSION_ID], "subjects": subjects,
                          "message_id": sent["message_id"],
@@ -1940,16 +1943,30 @@ def open_tasks_raised_listing(tasks):
     """The sentence code adds to a rule 5 message naming every open task the judge raised, or ""."""
     if not tasks:
         return ""
-    return " Open tasks nothing holds: " + "; ".join(
-        f'#{task["id"]} "{task.get("subject") or ""}"' for task in tasks) + "."
+    # A subject's own double quote becomes a single one, so that a quote ends only an entry.
+    return f" {OPEN_TASKS_LISTING_HEADING} " + "; ".join(
+        f'#{task["id"]} "{(task.get("subject") or "").replace(chr(34), chr(39))}"'
+        for task in tasks) + "."
+
+
+OPEN_TASKS_LISTING_HEADING = "Open tasks nothing holds:"
 
 
 def open_tasks_listed_in(sent, task_ids):
-    """The ids among task_ids that an entry of open_tasks_raised_listing names in any text of the
-    message_sent event sent; an id inside another entry's quoted subject is no entry."""
-    texts = [sent["text"], *sent.get(EARLIER_TEXTS_SENT, [])]
-    return [task_id for task_id in task_ids if any(re.search(
-        rf'(?:Open tasks nothing holds:|;)\s+#{re.escape(task_id)}\s+"', text) for text in texts)]
+    """The ids among task_ids that an entry of open_tasks_raised_listing names in the last text of
+    the message_sent event sent: the delivery check looks for that text alone, so only its entries
+    are known to have arrived. The entries are read in order from the listing's heading, with runs
+    of whitespace made one space, as the delivery check compares."""
+    text = " ".join(sent["text"].split())
+    start = text.find(OPEN_TASKS_LISTING_HEADING)
+    if start < 0:
+        return []
+    listed, position = set(), start + len(OPEN_TASKS_LISTING_HEADING)
+    entry = re.compile(r' ?#(\S+) "([^"]*)"(?:;|\.)')
+    while match := entry.match(text, position):
+        listed.add(match.group(1))
+        position = match.end()
+    return [task_id for task_id in task_ids if task_id in listed]
 
 
 def idle_judge_answer_problem(answer, open_task_ids):
