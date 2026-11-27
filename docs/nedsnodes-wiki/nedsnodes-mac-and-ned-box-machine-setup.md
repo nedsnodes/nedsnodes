@@ -39,6 +39,8 @@ Verified 2026-09-14, every row checked on the box itself.
 
 The legacy checkout's absence is expected and safe: the main-gatekeeper's `--import` machinery refuses `import-invalid` ("not a readable git repository") until one exists, which is a named refusal rather than a failure. Clone it only when an import is actually needed.
 
+ned-box swaps to a 32G swap file, `/swapfile`, in the top-level subvolume of its btrfs root filesystem `/`; `swapon --show` lists it. It was made with `btrfs filesystem mkswapfile --size 32g /swapfile`, because btrfs cannot swap to a file that `fallocate` made. The line `/swapfile none swap defaults 0 0` in `/etc/fstab` turns it on at every boot.
+
 ## Mac — user `el`
 
 Verified 2026-09-14. The checkout path is also pinned by the repository's own tests (`scripts/handoff-extract-conversation-test.py`).
