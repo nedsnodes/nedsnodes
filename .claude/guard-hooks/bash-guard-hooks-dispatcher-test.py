@@ -219,11 +219,17 @@ def clock_reaching_deadline_as_guard_refuses_and_exits():
     return 100.0
 
 
-(result,) = dispatcher.bash_guard_hook_results_from_one_forked_child_each(
-    [(str(refuses_on_go), 30)], b"{}", str(REPOSITORY_ROOT), clock=clock_reaching_deadline_as_guard_refuses_and_exits)
-check("a guard that refuses and exits after the dispatcher's last look before its deadline has its refusal "
-      "returned, not a timeout", not result["timed_out"] and result["exit_status"] == 0
-      and "REFUSED JUST BEFORE DEADLINE" in result["stdout"], result)
+JUST_BEFORE_DEADLINE_CASE = ("a guard that refuses and exits after the dispatcher's last look before its deadline "
+                             "has its refusal returned, not a timeout")
+if hasattr(os, "waitid"):
+    (result,) = dispatcher.bash_guard_hook_results_from_one_forked_child_each(
+        [(str(refuses_on_go), 30)], b"{}", str(REPOSITORY_ROOT),
+        clock=clock_reaching_deadline_as_guard_refuses_and_exits)
+    check(JUST_BEFORE_DEADLINE_CASE, not result["timed_out"] and result["exit_status"] == 0
+          and "REFUSED JUST BEFORE DEADLINE" in result["stdout"], result)
+else:
+    print(f"SKIP  [this machine cannot run it] {JUST_BEFORE_DEADLINE_CASE}: this Python has no os.waitid, which "
+          f"waiting for the guard's exit without reaping it needs; run it with Python 3.13 or later")
 failure_notice_check("a guard that prints text that is not JSON", guard("prints-text", "print('hello')\n"),
                      "it printed output that is not PreToolUse hook JSON this dispatcher combines")
 failure_notice_check("a guard that prints JSON with a key the dispatcher does not combine",
