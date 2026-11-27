@@ -148,6 +148,9 @@ def test_removed_checkouts_pruned_and_others_kept():
         check("--dry-run deletes nothing", removed.exists() and nested.exists(), dry.stdout)
         check("--dry-run names the removed checkout", f"removed checkout {agents}/removed: would delete" in dry.stdout,
               dry.stdout)
+        check("--dry-run names each copy it would delete, and no copy as deleting",
+              f"would delete {removed}\n" in dry.stdout and f"would delete {nested}\n" in dry.stdout
+              and "deleting " not in dry.stdout, dry.stdout)
         check("--dry-run names no checkout that exists or keeps its copies",
               all(f"removed checkout {name}" not in dry.stdout for name in
                   (f"{agents}/live", f"{agents}/declined", f"{repository}:", f"{repository}/docs")),
@@ -167,7 +170,8 @@ def test_removed_checkouts_pruned_and_others_kept():
               f"deleting {removed}\n" in result.stdout and f"deleting {nested}\n" in result.stdout
               and "deleting " + str(live) not in result.stdout, result.stdout)
         check("the summary counts two checkouts, one copy not approved and one approved copy kept",
-              "whose every version was approved, in 2 removed checkouts" in result.stdout
+              "2 approved copies, of files whose every version was approved, in 2 removed checkouts"
+              in result.stdout
               and "1 copies of versions not approved and 1 approved copies of the same files" in result.stdout,
               result.stdout)
 
@@ -459,10 +463,12 @@ def test_git_failure_fails():
               and "injected failure" in result.stderr, result.stderr)
         check("and keeps that checkout's copy", copy.exists())
         check("and goes on to the end", "1 failures" in result.stdout, result.stdout)
-        check("and the summary points to the failures after this run's start line",
-              f"1 failures, each named on stderr; in a log that holds both stdout and stderr, "
-              f"they come after the line '{result.stdout.splitlines()[0]}'" in result.stdout,
-              result.stdout)
+        check("and the summary points to the failures just before it",
+              "1 failures, each named on stderr; in a log that holds both stdout and stderr, "
+              "they are printed just before this line" in result.stdout, result.stdout)
+        check("and says what to do once the cause is fixed",
+              result.stderr.rstrip().endswith(f"or run python3 {PROGRAM} to prune it now."),
+              result.stderr)
         check("the other checkout is still pruned, and named", not other.exists()
               and f"deleting {other}\n" in result.stdout,
               result.stdout)
@@ -627,6 +633,9 @@ def test_mac_deadline_names_what_was_deleted():
         check("and says the run stopped, not that nothing was pruned",
               "stopped: the store did not answer within 2.0 seconds" in result.stderr
               and "not pruned" not in result.stderr, result.stderr)
+        check("and says how to run it again, on a line of its own",
+              f"\nWhen the cause is fixed, run python3 {PROGRAM} again" in result.stderr,
+              result.stderr)
 
 
 def run_appending_to_log(store, log, **variables):
@@ -684,7 +693,34 @@ def test_stop_message_points_past_earlier_runs_in_the_log():
               lines)
 
 
+def test_failures_are_just_before_the_summary_in_the_log():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        store = root / "store"
+        store.mkdir()
+        broken = root / "a-broken"
+        broken.mkdir()
+        git("init", "-q", str(broken))
+        (broken / ".gitignore").write_text("worktree/\n")
+        add_version(store, f"{broken}/worktree/CLAUDE.md", "one\n", approved=True)
+        other = add_version(store, f"{root}/agents/removed/CLAUDE.md", "two\n", approved=True)
+        log = root / "prune.log"
+        exit_status = run_appending_to_log(store, log, PATH=path_failing_git(root, "check-ignore"))
+        lines = log.read_text().splitlines()
+        summary = [index for index, line in enumerate(lines) if line.startswith(f"store {store}: ")]
+        check("a run with a failure, appending to one log, exits 1 and prints one summary",
+              exit_status == 1 and len(summary) == 1, lines)
+        failure = summary[0] - 1 if summary else 0
+        check("the failure is the line just before the summary, after the run's stdout lines",
+              "check-ignore" in lines[failure] and f"deleting {other}" in lines[failure - 2]
+              and lines[failure - 1].startswith("removed checkout "), lines)
+        check("and what to do is the line after it",
+              lines[failure + 2:] and lines[failure + 2].startswith("Each path a failure names"),
+              lines)
+
+
 if __name__ == "__main__":
+    test_failures_are_just_before_the_summary_in_the_log()
     test_default_mount_parents_keep_copies_under_a_missing_volume()
     test_stop_message_points_past_earlier_runs_in_the_log()
     test_removed_checkouts_pruned_and_others_kept()
