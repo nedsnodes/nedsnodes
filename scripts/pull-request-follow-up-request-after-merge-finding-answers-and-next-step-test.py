@@ -594,6 +594,9 @@ def test_build_pull_request_description_ending_with_follow_up_request_line():
     closed = "Answers it.\n\n#follow_up_request# pull request 1964\n#no_defect_fixed#\n"
     check("a description already holding the follow-up request line with the hashtag's closing # is kept as written",
           program.build_pull_request_description_ending_with_follow_up_request_line(closed, 1964) == closed)
+    pasted = "Answers it.\n\n#follow_up_request pull request 1964 \n#no_defect_fixed\n"
+    check("a description whose follow-up request line ends in a no-break space is kept as written",
+          program.build_pull_request_description_ending_with_follow_up_request_line(pasted, 1964) == pasted)
     naming_inline = "From merge-lane-2's `#follow_up_request pull request 1964`.\n\n#no_defect_fixed"
     check("a description naming the request only inside a sentence gets the line at its end",
           program.build_pull_request_description_ending_with_follow_up_request_line(naming_inline, 1964)
