@@ -47,3 +47,9 @@ The owner is the agent-seat agent-instructions-editor, which wrote the hook's re
 
 1. Make `rendered_blocks`, `lead_ins` and `shown_units` read the copy from the whole message's parse, for example by selecting the tokens of the item's line range, so that a line that is not a definition in the message cannot become one in the copy. Check the hook's other parses of cut text too: `parser.parse(copy, {})` at line 1566, the `shown_words` calls on slices at lines 1183 and 1199, and the parses of `body` at line 1569.
 2. Add both cases above to the hook's test file, each with its control. With the stand-in model answering `changed`, case 1 and its control must both count the answer with 0 model calls, and case 2 and its control must both make 1 model call and refuse the answer.
+
+## Outcome
+
+This issue is moot, and the steps under "What to do next" no longer apply. [Walk short-answer hook: stop comparing a revised item and stop calling a model](https://github.com/nedsnodes/nedsnodes/pull/4491), merged on 2026-11-25, removed the comparison of an item's decision-bearing lines with the message's copy of them, and the model call that comparison made. Neither case above can occur on main: at 212a498f4 the hook defines no `message_copy_of_item`, `rendered_blocks`, `lead_ins` or `shown_units`, and makes no model call.
+
+What remains on main is the hook's check that some message showed the item at all. `item_shown_in_transcript` and `unseen_item_lines` call `shown_words` on one line at a time, a message line or the item's heading line, with the whole text's reference definitions, to match the item's heading. That check compares no decision-bearing text, so a line read as a definition there cannot pass an answer for text the user saw differently.
