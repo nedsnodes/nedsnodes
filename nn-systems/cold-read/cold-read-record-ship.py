@@ -636,6 +636,22 @@ def utc_text_of_epoch_seconds(seconds: int) -> str:
         "%Y-%m-%d %H:%M:%SZ")
 
 
+def triage_compare_command(host, local_triage_path, stored_triage_path) -> str:
+    """The `diff` of a checkout's triage file with the log-store's, for the rule 4 refusal.
+
+    From the Mac the log-store's copy is fetched into a temporary file first,
+    and `diff` runs only when the fetch exits 0: piped straight into `diff`, a
+    failed fetch reads as an empty log-store copy, every line of the
+    checkout's copy opens `<`, and the refusal's "no line opens `>`" then says
+    to replace the log-store's rulings with it.
+    """
+    if not host:
+        return shlex.join(["diff", str(local_triage_path), str(stored_triage_path)])
+    return (f"stored=$(mktemp) && ssh {shlex.quote(host)} cat "
+            f"{shlex.quote(str(stored_triage_path))} > \"$stored\" && "
+            f"diff {shlex.quote(str(local_triage_path))} \"$stored\"")
+
+
 def local_first_line(path: pathlib.Path) -> str:
     try:
         with path.open(encoding="utf-8", errors="replace") as handle:
@@ -1505,37 +1521,6 @@ def ship_one(host, records_path: pathlib.PurePosixPath, record_dir: pathlib.Path
     if outcome["differing"]:
         return refuse(outcome["differing"])
     added, stored = outcome["added"], outcome["stored"]
-    if outcome.get("triage_newer_in_store"):
-        store_seconds, local_seconds = outcome["triage_newer_in_store"]
-        stored_triage_path = store_dir / triage_name
-        local_triage_path = record_dir / triage_name
-        compare = (f"ssh {shlex.quote(host)} cat {shlex.quote(str(stored_triage_path))} | "
-                   f"diff {shlex.quote(str(local_triage_path))} -" if host
-                   else shlex.join(["diff", str(local_triage_path), str(stored_triage_path)]))
-        fetch = shlex.join((["scp", f"{host}:{stored_triage_path}"] if host
-                            else ["cp", str(stored_triage_path)]) + [str(local_triage_path)])
-        ship_again = shlex.join([sys.argv[0], str(record_dir)])
-        print(f"REFUSED: {name} — the log-store's {triage_name} in {citation} was modified "
-              f"at {utc_text_of_epoch_seconds(store_seconds)}, after this checkout's "
-              f"{local_triage_path} at {utc_text_of_epoch_seconds(local_seconds)}, and "
-              f"holds other content, so the log-store's copy was kept and not replaced by "
-              f"this older one"
-              f"{'; the other new files were added, and a later shipment finds them already there' if added else ''}. "
-              f"Compare the two with `{compare}`: of its output, lines opening `>` hold "
-              f"text only the log-store's copy has, and lines opening `<` text only this "
-              f"checkout's copy has; its other lines are position headers. If no line opens "
-              f"`<`, replace this checkout's copy with the log-store's with `{fetch}`; "
-              f"nothing else is needed, and shipping again says nothing new. If "
-              f"lines open both `<` and `>`, edit this checkout's copy so it keeps the "
-              f"log-store's `>` text that is still wanted, then ship again with "
-              f"`{ship_again}`: the edited copy is newer, so it replaces the log-store's. "
-              f"If no line opens `>`, or this checkout's copy should replace the "
-              f"log-store's as it is, run `touch {shlex.quote(str(local_triage_path))}` to "
-              f"make it the newer, then ship again. From now on, edit "
-              f"a record's {triage_name} in a checkout and ship it, never in the "
-              f"log-store directly: an edit made only in the log-store leaves every "
-              f"checkout's copy older, and the next shipment from one meets this refusal.")
-        return EXIT_REFUSED
     displaced_triage_digest = outcome["displaced"]
     if displaced_triage_digest is not None and triage_name in added:
         added.remove(triage_name)
@@ -1575,6 +1560,38 @@ def ship_one(host, records_path: pathlib.PurePosixPath, record_dir: pathlib.Path
               f"{', '.join(missing)}. {rerun}")
         sys.stderr.write(placed.stderr)
         return EXIT_FAILED
+    if outcome.get("triage_newer_in_store"):
+        store_seconds, local_seconds = outcome["triage_newer_in_store"]
+        stored_triage_path = store_dir / triage_name
+        local_triage_path = record_dir / triage_name
+        compare = triage_compare_command(host, local_triage_path, stored_triage_path)
+        fetch = shlex.join((["scp", f"{host}:{stored_triage_path}"] if host
+                            else ["cp", str(stored_triage_path)]) + [str(local_triage_path)])
+        ship_again = shlex.join([sys.argv[0], str(record_dir)])
+        print(f"REFUSED: {name} — the log-store's {triage_name} in {citation} was modified "
+              f"at {utc_text_of_epoch_seconds(store_seconds)}, after this checkout's "
+              f"{local_triage_path} at {utc_text_of_epoch_seconds(local_seconds)}, and "
+              f"holds other content, so the log-store's copy was kept and not replaced by "
+              f"this older one"
+              f"{'; the other new files were added, and a later shipment finds them already there' if added else ''}. "
+              f"Compare the two with `{compare}`: of its output, lines opening `>` hold "
+              f"text only the log-store's copy has, and lines opening `<` text only this "
+              f"checkout's copy has; its other lines are position headers. An exit other "
+              f"than 0 (the same) or 1 (they differ) means the comparison did not run, "
+              f"whatever it printed: fix the error it names and compare again before "
+              f"doing anything below. If no line opens "
+              f"`<`, replace this checkout's copy with the log-store's with `{fetch}`; "
+              f"nothing else is needed, and shipping again says nothing new. If "
+              f"lines open both `<` and `>`, edit this checkout's copy so it keeps the "
+              f"log-store's `>` text that is still wanted, then ship again with "
+              f"`{ship_again}`: the edited copy is newer, so it replaces the log-store's. "
+              f"If no line opens `>`, or this checkout's copy should replace the "
+              f"log-store's as it is, run `touch {shlex.quote(str(local_triage_path))}` to "
+              f"make it the newer, then ship again. From now on, edit "
+              f"a record's {triage_name} in a checkout and ship it, never in the "
+              f"log-store directly: an edit made only in the log-store leaves every "
+              f"checkout's copy older, and the next shipment from one meets this refusal.")
+        return EXIT_REFUSED
     if not added and displaced_triage_digest is None:
         return nothing_new()
     summary = []
