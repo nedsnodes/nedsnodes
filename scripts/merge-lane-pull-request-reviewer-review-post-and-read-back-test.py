@@ -18,7 +18,9 @@ writes its pid to gh-hanging and sleeps, for a case that signals the program the
 The reads scripts/merge-gate.sh makes when the program asks it to count new activity
 are answered with FAKE_GH_GATE_REVIEWS, FAKE_GH_GATE_INLINE and FAKE_GH_GATE_ISSUE, each
 an empty page unless given, and are named gate-reviews, gate-inline and gate-issue for
-FAKE_GH_FAILS.
+FAKE_GH_FAILS. The read of the pull request's reviews for earlier Codex grades,
+named earlier-reviews, is answered with FAKE_GH_EARLIER_REVIEWS, one empty page
+unless given.
 
 The round-trip cases load the fix-round program, which reads blocking findings,
 and hand its blocking_findings the posted body and comments in place of what
@@ -64,7 +66,8 @@ with open(state / "calls.jsonl", "a") as log:
     log.write(json.dumps({"arguments": arguments, "token": os.environ.get("GH_TOKEN"),
                           "stdin": stdin}) + "\\n")
 path = next(argument for argument in arguments if argument.startswith("repos/"))
-call = ("post" if "POST" in arguments else "read-back" if "/reviews/" in path
+call = ("post" if "POST" in arguments else "earlier-reviews" if "/reviews?" in path
+        else "read-back" if "/reviews/" in path
         else "files" if "/files" in path else "gate-reviews" if path.endswith("/reviews")
         else "gate-issue" if path.endswith("/comments") and "/issues/" in path
         else "gate-inline" if path.endswith("/comments") else "author")
@@ -74,7 +77,9 @@ if os.environ.get("FAKE_GH_HANGS") == call:
 if os.environ.get("FAKE_GH_FAILS") == call:
     print("gh: HTTP 502: Bad Gateway", file=sys.stderr)
     sys.exit(1)
-if call.startswith("gate-"):
+if call == "earlier-reviews":
+    print(os.environ.get("FAKE_GH_EARLIER_REVIEWS", "[[]]"))
+elif call.startswith("gate-"):
     print(os.environ.get("FAKE_GH_" + call.upper().replace("-", "_"), "[]"))
 elif call == "author":
     print(json.dumps({"user": {"login": os.environ.get("FAKE_GH_AUTHOR", "an author")}}))
@@ -525,6 +530,111 @@ def findings_record_cases(scratch):
               in result.stderr, result.detail)
 
 
+def reads_only_earlier_reviews(result):
+    """Whether the run's only GitHub call read the pull request's reviews for earlier Codex grades, and nothing
+    was posted."""
+    return result.posted is None and [call["arguments"][-1] for call in result.calls] == [
+        "repos/nedsnodes/nedsnodes/pulls/7/reviews?per_page=100"]
+
+
+def earlier_review(review_id, body, commit=HEAD, login="ned-review-merge"):
+    return {"id": review_id, "commit_id": commit, "user": {"login": login}, "body": body}
+
+
+def earlier_review_grade_cases(scratch):
+    """PR 5314's case: round 1 graded a must-fix-now Codex finding on head H; a description edit settled it, so
+    round 2 is on the same head, with the same Codex run, and its APPROVE file grades nothing."""
+    text = "Keep the error \u2014 scripts/thing.py:2-2"
+    finding_id = codex_finding_id("P1", text)
+    runs = ((HEAD, 0, f"<!-- provenance -->\nSummary.\n\n- [P1] {text}\n"),)
+    round_one_body = (f"REQUEST_CHANGES\n\nPosted by merge-lane-3.\n\n**Codex findings graded:**\n"
+                      f"- {finding_id} (P1): must-fix-now: {text}")
+    approve = json.dumps({"verdict": "APPROVE", "body": "The description edit settles it.", "comments": []})
+
+    def posting(reviews, **environment):
+        return run_program(scratch, approve, arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs,
+                           FAKE_GH_EARLIER_REVIEWS=json.dumps([reviews]), **environment)
+    round_one = [earlier_review(6090833372, round_one_body)]
+    result = posting(round_one)
+    check("a round-2 APPROVE on the same head that answers neither settled nor still-open for round 1's "
+          "must-fix-now Codex finding is refused, naming the finding and its earlier review",
+          result.code == 2 and result.posted is None and "have no answer" in result.stderr
+          and f"- {finding_id}: graded in review 6090833372" in result.stderr, result.detail)
+
+    def answered(answer, verdict="APPROVE", comments=()):
+        return json.dumps({"verdict": verdict, "body": "Round 2.", "comments": list(comments),
+                           "merge_lane_codex_review_earlier_must_fix_now_finding_answers":
+                               [{"finding": finding_id, "answer": answer}]})
+    result = run_program(scratch, answered("settled"), arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs,
+                         FAKE_GH_EARLIER_REVIEWS=json.dumps([round_one]))
+    body = (result.posted or {}).get("body", "")
+    check("PR 5314's case: a round-2 APPROVE on the same head, grading nothing and answering settled for round "
+          "1's must-fix-now Codex finding, posts as APPROVE with no comment, and its body lists the finding with "
+          "its earlier grade, review and answer",
+          result.code == 0 and result.posted is not None and result.posted["event"] == "APPROVE"
+          and f"**Codex findings graded:**\n- {finding_id} (P1): must-fix-now, graded in review 6090833372, "
+              f"settled in this round: {text}" in body and not result.posted["comments"], result.detail)
+    result = run_program(scratch, answered("still-open"), arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs,
+                         FAKE_GH_EARLIER_REVIEWS=json.dumps([round_one]))
+    check("an APPROVE file that answers still-open for an earlier must-fix-now finding is refused",
+          result.code == 2 and result.posted is None and "has the verdict APPROVE but answers" in result.stderr,
+          result.detail)
+    result = run_program(scratch, answered("still-open", "REQUEST_CHANGES"), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=runs, FAKE_GH_EARLIER_REVIEWS=json.dumps([round_one]))
+    check("a REQUEST_CHANGES file that answers still-open with no must-fix-now comment naming the finding is "
+          "refused", result.code == 2 and result.posted is None, result.detail)
+    blocking = finding(2, "must-fix-now", f"Still missing (Codex finding {finding_id}).")
+    result = run_program(scratch, answered("still-open", "REQUEST_CHANGES", [blocking]),
+                         arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs,
+                         FAKE_GH_EARLIER_REVIEWS=json.dumps([round_one]))
+    check("a REQUEST_CHANGES file that answers still-open with a must-fix-now comment naming the finding posts "
+          "as REQUEST_CHANGES",
+          result.code == 0 and (result.posted or {}).get("event") == "REQUEST_CHANGES", result.detail)
+    result = run_program(scratch, answered("settled"), arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs,
+                         FAKE_GH_EARLIER_REVIEWS=json.dumps([[]]))
+    check("an answer for a finding no earlier review graded must-fix-now is refused",
+          result.code == 2 and result.posted is None and "Remove each such answer" in result.stderr, result.detail)
+    main_lines = FACT_LINES.replace("`#defect_already_on_main` `no`", "`#defect_already_on_main` `yes`")
+    on_main_runs = ((HEAD, 0, f"<!-- provenance -->\nSummary.\n\n- [P1] {text}\n"
+                     + "\n".join("  " + line for line in main_lines.splitlines()) + "\n"),)
+    result = run_program(scratch, answered("settled"), arguments=MERGE_LANE_ARGUMENTS, codex_runs=on_main_runs,
+                         FAKE_GH_EARLIER_REVIEWS=json.dumps([round_one]),
+                         findings_record_match={"match": (0, json.dumps(
+                             {finding_id: {"answer": "NEW", "record_id": 17}}), "")})
+    check("a settled finding the findings record matches as NEW, since round 1 added its row at this head, "
+          "posts without asking the findings record to add it again",
+          result.code == 0 and [call[0][0] for call in result.match_calls] == ["match"], result.detail)
+    fix_next_body = round_one_body.replace("REQUEST_CHANGES", "APPROVE").replace("must-fix-now", "fix-next")
+    result = posting([earlier_review(5, fix_next_body)])
+    check("a finding an earlier review graded fix-next needs no new grade and no answer, and the body lists its "
+          "earlier grade",
+          result.code == 0 and f"- {finding_id} (P1): fix-next, graded in review 5: {text}"
+          in (result.posted or {}).get("body", ""), result.detail)
+    regraded = json.dumps({"verdict": "APPROVE", "body": "Round 2.", "comments": [],
+                           "merge_lane_codex_review_finding_grades":
+                               [{"finding": finding_id, "grade": "does-not-hold", "reason": "Unreachable."}]})
+    result = run_program(scratch, regraded, arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs,
+                         FAKE_GH_EARLIER_REVIEWS=json.dumps([round_one]))
+    check("a file that grades an earlier-graded finding again needs no answer and reads no earlier review",
+          result.code == 0 and "does-not-hold, Unreachable." in (result.posted or {}).get("body", "")
+          and not any(call["arguments"][-1].endswith("reviews?per_page=100") for call in result.calls),
+          result.detail)
+    for name, reviews in (
+            ("no earlier review", []),
+            ("an earlier review on another commit", [earlier_review(1, round_one_body, commit="f" * 40)]),
+            ("an earlier review by another account", [earlier_review(1, round_one_body, login="mac-claude")]),
+            ("an earlier review grading another finding",
+             [earlier_review(1, round_one_body.replace(finding_id, "0" * 12))])):
+        result = posting(reviews)
+        check(f"the ungraded finding is still refused with {name}",
+              result.code == 2 and result.posted is None and "1 Codex finding(s)" in result.stderr
+              and finding_id in result.stderr, result.detail)
+    result = posting([], FAKE_GH_FAILS="earlier-reviews")
+    check("a failed read of the earlier reviews is refused, naming the read, and posts nothing",
+          result.code == 2 and result.posted is None and "reviews, to find the Codex findings" in result.stderr
+          and "502" in result.stderr, result.detail)
+
+
 def codex_finding_grade_cases(scratch):
     first, second = "Keep the error \u2014 scripts/thing.py:2-2", "Old format \u2014 scripts/thing.py:3-3"
     report = (f"<!-- provenance -->\nSummary.\n\n- [Codex priority P2 (P0 highest)] Keep the error \u2014 "
@@ -540,7 +650,7 @@ def codex_finding_grade_cases(scratch):
     result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
     check("a verdict review with ungraded Codex findings of both report formats is refused before GitHub, "
           "listing each finding's id, priority and text",
-          result.code == 2 and not result.calls and "2 Codex finding(s)" in result.stderr
+          result.code == 2 and reads_only_earlier_reviews(result) and "2 Codex finding(s)" in result.stderr
           and f"- {first_id}: P2 {first}" in result.stderr and f"- {second_id}: P3 {second}" in result.stderr,
           result.detail)
     result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=all_grades[:1]),
@@ -728,7 +838,7 @@ def codex_finding_grade_cases(scratch):
                              codex_runs=((HEAD, 0, "<!-- provenance: runtime=codex-exec-review -->\n" + report_text),))
         check(f"a successful run whose report is Codex's review object, {form}, is read through the cell's "
               "conversion, so its finding needs a grade under the id it has in prose",
-              result.code == 2 and not result.calls and "1 Codex finding(s)" in result.stderr
+              result.code == 2 and reads_only_earlier_reviews(result) and "1 Codex finding(s)" in result.stderr
               and f"- {first_id}: P2 {first}" in result.stderr, result.detail)
     unconvertible = "<!-- provenance: runtime=codex-exec-review -->\n" + json.dumps({"findings": ["x"],
                                                                                     "overall_explanation": "E"})
@@ -1307,6 +1417,7 @@ def main():
     try:
         merge_lane_cases(scratch)
         codex_finding_grade_cases(scratch)
+        earlier_review_grade_cases(scratch)
         findings_record_cases(scratch)
         finding_fact_line_count_cases(scratch)
         merge_account_comment_review_cases(scratch)
