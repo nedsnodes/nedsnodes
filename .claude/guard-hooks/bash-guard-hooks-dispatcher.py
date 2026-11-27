@@ -212,7 +212,9 @@ def bash_guard_hook_results_from_one_forked_child_each(guards, payload, reposito
 
     Each result is {"path", "timeout_seconds", "stdout", "stderr", "exit_status", "signal", "timed_out"}, in
     the order of guards. A guard is done when its output and error output are closed and it has exited, as
-    Claude Code waits for a hook's; one still not done at its timeout is killed and is timed_out.
+    Claude Code waits for a hook's; one still not done at its timeout is killed and is timed_out. Not handled:
+    a guard whose output has closed at its timeout but which the kernel cannot yet reap, because it is still
+    exiting, is timed_out too.
     """
     sys.stdout.flush()
     sys.stderr.flush()
@@ -246,8 +248,8 @@ def bash_guard_hook_results_from_one_forked_child_each(guards, payload, reposito
                 if _done(child):
                     pending.remove(child)
                 elif clock() >= child.deadline:
-                    # Output that came, and an exit, since the last look still count: only a guard still
-                    # running is timed out.
+                    # Output that came, and an exit, since the last look still count: a guard is timed out
+                    # unless it has both exited and closed its output.
                     _ready_output_read(selector, child)
                     if not _done(child):
                         _kill_and_reap(selector, child)
@@ -285,6 +287,7 @@ def _read_or_close(selector, descriptor, child):
 
 
 def _ready_output_read(selector, child):
+    """Read each open descriptor of child until a read finds it empty; a writer that never stops lengthens this."""
     for descriptor in child.descriptors.keys() - child.closed:
         while _read_or_close(selector, descriptor, child):
             pass
