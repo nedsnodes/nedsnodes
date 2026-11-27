@@ -2112,8 +2112,8 @@ def main():
           f"writes were {recording.writes!r}")
 
     # Case 40: a cause only the user can clear is not relaunched. A logged-out
-    # CLI, a missing one and a usage limit fail a second launch the way they
-    # failed the first, so the cell is launched once, and the lines under its
+    # CLI and a missing one fail a second launch the way they failed the
+    # first, so the cell is launched once, and the lines under its
     # FAILED line tell the agent to tell the user and give the command that
     # runs this one cell again: this run's target, each context document and
     # the request, and the cell's adversarial prompt and agent-binary as the only --adversarial-prompt and
