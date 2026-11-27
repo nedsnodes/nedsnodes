@@ -196,6 +196,9 @@ def inverse_document_frequency(standing_entry_count_in_store, entries_found_by_t
 
 def age_in_days(said_at_utc, now):
     said_at = datetime.datetime.fromisoformat(said_at_utc.replace("Z", "+00:00"))
+    # The index program stores a walk-minutes user-ruling whose line gives only a date as "YYYY-MM-DD", with no zone.
+    if said_at.tzinfo is None:
+        said_at = said_at.replace(tzinfo=datetime.timezone.utc)
     return (now - said_at).total_seconds() / 86400
 
 

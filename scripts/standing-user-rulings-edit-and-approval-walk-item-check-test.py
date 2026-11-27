@@ -279,6 +279,20 @@ with tempfile.TemporaryDirectory() as directory:
 
     store.connection.close()
 
+# The index program writes four forms of said_at_utc; a walk-minutes line that gives only a date is stored as
+# "YYYY-MM-DD", with no zone, and the lookup must still weigh it.
+with tempfile.TemporaryDirectory() as directory:
+    log_store = Path(directory) / "logs"
+    store = Store(log_store)
+    forms = {"2026-11-18": 7, "2026-11-18T00:00Z": 7, "2026-11-18T00:00:00Z": 7, "2026-11-18T00:00:00.000Z": 7}
+    ids_by_form = {form: store.add(f"Stored as {form}.", form, tags=("GHI 9",)) for form in forms}
+    exit_code, header, entries, stderr = run(log_store, {"tags": ["GHI 9"]})
+    weights = {entry["said_at_utc"]: entry["recency_weight"] for entry in entries}
+    check("every form of said_at_utc the index program writes, a date alone included, is weighed as UTC",
+          exit_code == 0 and set(weights) == set(forms) and all(close(weight, 1) for weight in weights.values()),
+          (exit_code, weights, stderr))
+    store.connection.close()
+
 # Two entries the same tag finds have the same relevance, so the newer one, weighing more, comes first.
 with tempfile.TemporaryDirectory() as directory:
     log_store = Path(directory) / "logs"
