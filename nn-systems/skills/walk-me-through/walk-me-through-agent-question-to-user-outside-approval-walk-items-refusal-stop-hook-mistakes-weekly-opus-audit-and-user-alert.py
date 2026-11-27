@@ -76,11 +76,11 @@ COUNTS_DIRECTORY_NAME = "walk-me-through-agent-question-to-user-outside-approval
 ENTRY_FIELDS = ("line", "turn_started_by", "message_that_started_the_turn", "agent_message_holding_the_line",
                 "waiting_walk_item_text")
 
-ALERT_TITLE = "The question-check hook's weekly relabelling found {found}"
+ALERT_TITLE = "The question-check hook's relabelling found {found}"
 ALERT_TEXT_OPENING = (
-    "Each week {model} labels a sample of the lines the question-check Stop hook "
+    "{model} labelled a sample of the lines the question-check Stop hook "
     "(walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py) sent to its model, "
-    "{hook_model}, using the answer key's labelling prompt. This week, from {start} to {end}: {refused} refused lines "
+    "{hook_model}, using the answer key's labelling prompt. From {start} to {end}: {refused} refused lines "
     "labelled, {wrong} of them wrong stops; {passed} passed lines labelled, {missed} of them missed asks. An item is "
     "raised when any passed line is a missed ask, or when more than 1 in {one_in} of at least {minimum} refused lines "
     "are wrong stops. The labeller can be wrong too; each line below is given with its reason. The whole sample, with "
@@ -93,9 +93,9 @@ RERUN_COMMAND = "cd /home/nedlern/Projects/nedsnodes && python3 " + THIS_PROGRAM
 RERUN_INSTRUCTION = (
     "Fix each cause named, then run `" + RERUN_COMMAND + "` on ned-box, which samples the same week this run did. "
     "When you cannot fix a cause yourself, or the rerun fails again, tell the user, in one plain sentence, what "
-    "failed and why, saying that the weekly relabelling of the lines the question-check Stop hook, "
-    "walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py, sent its model does "
-    "not run until it is fixed; a subagent tells the agent that dispatched it instead, with the rerun command.")
+    "failed and why, saying that the relabelling of the lines the question-check Stop hook, "
+    "walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py, sent its model cannot "
+    "run until the cause is fixed; a subagent tells the agent that dispatched it instead, with the rerun command.")
 PROMPT_UNREADABLE_REASON = (
     "the answer key's labelling prompt {path} could not be read ({error}); it is the prompt the answer key's models "
     "were scored with, and the labeller is given nothing else")
@@ -105,7 +105,7 @@ LABELLING_FAILED_LINE = "Labelling failed for the line {line}: {failure}."
 EVERY_LABELLING_CALL_LOGGED_OUT_MESSAGE = (
     "Every labelling call failed because `claude` on ned-box is not logged in, so no line was labelled and no "
     "user-alert was written.\n"
-    "Tell the user this sentence, with no approval-walk item: \"`claude` on ned-box is logged out, so this week's "
+    "Tell the user this sentence, with no approval-walk item: \"`claude` on ned-box is logged out, so the "
     "relabelling of the question-check hook's lines could not run; you can log in from a Terminal on your Mac with "
     "`ssh nedlern@ned-box 'claude auth login'`.\" A subagent tells the agent that dispatched it instead, with the "
     "rerun command below, and stops.\n"
@@ -114,7 +114,7 @@ EVERY_LABELLING_CALL_FAILED_MESSAGE = (
     "Every labelling call failed, as the line or lines above say, so no line was labelled and no user-alert was "
     "written. " + RERUN_INSTRUCTION)
 SOME_LABELLING_CALLS_FAILED_MESSAGE = (
-    "{failed} of {total} labelling calls failed, as the line or lines above say; those lines are left out of the counts, and "
+    "{failed} of {total} labelling calls failed, as the line or lines above say; the lines they were labelling are left out of the counts, and "
     "the {labelled} lines labelled decided whether a user-alert was written. Nothing needs doing.")
 
 
@@ -143,7 +143,7 @@ def window_lines(log_text, start, end):
     """(the newest row of each line judged between start and end with a label, one per agent-session and line; the
     number of malformed rows)."""
     newest, malformed = {}, 0
-    for text in log_text.splitlines():
+    for text in log_text.split("\n"):
         if not text.strip():
             continue
         try:
@@ -249,7 +249,7 @@ def labelling_failures_report(labelled, now):
 
 
 def run(environment, now, rng, program):
-    """Do one week's relabelling; return the exit status."""
+    """Relabel a sample of the week before now; return the exit status."""
     log_file, problem = hook.reply_line_model_ask_or_not_label_log_path(environment)
     if log_file is None:
         raise JobFailed(LOG_STORE_UNREACHABLE_REASON.format(problem=problem))
@@ -273,7 +273,17 @@ def run(environment, now, rng, program):
     for line in failure_lines:
         print(line, file=sys.stderr)
     record_path = log_store / COUNTS_DIRECTORY_NAME / f"{now.strftime('%Y-%m-%dT%H%M%SZ')}.json"
-    alert_id = None
+    record = {"window_start": start.isoformat(timespec="seconds"), "window_end": now.isoformat(timespec="seconds"),
+              "labeller_model": LABELLER_MODEL, "hook_model": hook.MODEL, "counts": numbers, "lines": labelled}
+    # Written before the user-alert that names it, so no alert names a record that is not there.
+    try:
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        record_path.write_text(json.dumps(record, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    except OSError as error:
+        print(f"The record of this run could not be written to {record_path}: {error!r}, so no user-alert was "
+              f"written either. {RERUN_INSTRUCTION.format(now=now.isoformat(timespec='seconds'))}", file=sys.stderr)
+        return 1
+    print(f"Record written to {record_path}.")
     if threshold_crossed(numbers):
         title, text = alert_text(numbers, labelled, start, now, record_path)
         try:
@@ -281,28 +291,16 @@ def run(environment, now, rng, program):
         except OSError as error:
             print(f"A threshold was crossed, but the user-alert could not be written, so none reached pending/: "
                   f"{error!r}. {RERUN_INSTRUCTION.format(now=now.isoformat(timespec='seconds'))}", file=sys.stderr)
-            status = 1
-        else:
-            print(f"A threshold was crossed: user-alert {alert_id} written into the user-alerts pending/ folder.")
-    record = {"window_start": start.isoformat(timespec="seconds"), "window_end": now.isoformat(timespec="seconds"),
-              "labeller_model": LABELLER_MODEL, "hook_model": hook.MODEL, "counts": numbers,
-              "user_alert_id": alert_id, "lines": labelled}
-    try:
-        record_path.parent.mkdir(parents=True, exist_ok=True)
-        record_path.write_text(json.dumps(record, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    except OSError as error:
-        print(f"The record of this run could not be written to {record_path}: {error!r}. Any user-alert this run "
-              f"wrote stands and names that path. {RERUN_INSTRUCTION.format(now=now.isoformat(timespec='seconds'))}",
-              file=sys.stderr)
-        return 1
-    print(f"Record written to {record_path}.")
+            return 1
+        print(f"A threshold was crossed: user-alert {alert_id} written into the user-alerts pending/ folder.")
     return status
 
 
 def time_with_time_zone(text):
     time = datetime.datetime.fromisoformat(text)
     if time.tzinfo is None:
-        raise argparse.ArgumentTypeError(f"{text!r} has no time zone; give one, as in {text}+00:00")
+        raise argparse.ArgumentTypeError(f"{text!r} has no time zone; give a time with one, as in "
+                                         "2026-11-30T06:15:00+00:00")
     return time
 
 
