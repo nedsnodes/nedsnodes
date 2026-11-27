@@ -8,7 +8,7 @@ An entry's State line says which of three states it is in: `State: open`, `State
 
 ## Change the file only through its program
 
-Change the file only with `scripts/proposed-improvements-or-changes-file-entry-state-try-and-second-agent-verdict-lines-write.py`; never edit it by hand. The program changes only an entry's State line, its Try lines, its "Second agent:" lines and its User-ruling lines, stamps each line with the time, counts the tries, and refuses what rules 4 and 5 forbid. Its docstring lists its subcommands.
+Change the file only with `scripts/proposed-improvements-or-changes-file-entry-state-attempt-and-second-agent-verdict-lines-write.py`; never edit it by hand. The program changes only an entry's State line, its Attempt lines, its "Second agent:" lines and its User-ruling lines, stamps each line with the time, counts the attempts, and refuses what rules 4 and 5 forbid. Its docstring lists its subcommands.
 
 - Name the file as the agent that dispatched you named it, such as `nedlern@ned-box:/home/nedlern/nedsnodes-logs/ghi-guide-agent-proposed-improvements-or-changes/<name>.md`.
 - When you are not on ned-box, the program refuses and prints an `ssh nedlern@ned-box` command with your arguments already quoted; run that command as printed.
@@ -24,17 +24,17 @@ Work through every open entry in them before you report, even when one of them g
 
 ## 2. Order the open entries
 
-- **Dependent entries**, where settling one may settle or change another: handle the one furthest upstream first, then run `show` and read the others again, since a change upstream may settle them. Settle an entry the upstream change settled in its own try, citing that change.
-- **Related entries**, sharing one cause: make one change for all of them, and record it as one try under each, by naming them all in one `try` command for each file they are in.
+- **Dependent entries**, where settling one may settle or change another: handle the one furthest upstream first, then run `show` and read the others again, since a change upstream may settle them. Settle an entry the upstream change settled in its own attempt, citing that change.
+- **Related entries**, sharing one cause: make one change for all of them, and record it as one attempt under each, by naming them all in one `attempt` command for each file they are in.
 - **Independent entries**: handle each on its own.
 
-## 3. Work on an entry: at most 3 tries
+## 3. Work on an entry: at most 3 attempts
 
-A try is one attempt to settle an entry: reading its sources, finding out whether it is real and worth doing, and, when it is, making the change. Record each try with the `try` subcommand once you have done the work, saying in `--found` what you tried, what you read and what you found, with the words of each source you rely on, on one line, and naming each source you read with one `--source`: a path in this repository, a log-store path, `PR <number>` or `GHI <number>`. After a try brings an entry to 3 tries, the program says so. When that try found the entry not worth doing, run `second-agent-verdict` as "Not worth doing" says: if the second agent disagrees, the program marks the entry as needing the user. When that try neither settles the entry nor found it not worth doing, run `needs-the-user` on the entry with `--because three-tries`.
+An attempt is one effort to settle an entry: reading its sources, finding out whether it is real and worth doing, and, when it is, making the change. Record each attempt with the `attempt` subcommand once you have done the work, saying in `--found` what you did, what you read and what you found, with the words of each source you rely on, on one line, and naming each source you read with one `--source`: a path in this repository, a log-store path, `PR <number>` or `GHI <number>`. After an attempt brings an entry to 3 attempts, the program says so. When that attempt found the entry not worth doing, run `second-agent-verdict` as "Not worth doing" says: if the second agent disagrees, the program marks the entry as needing the user. When that attempt neither settles the entry nor found it not worth doing, run `needs-the-user` on the entry with `--because three-attempts`.
 
-An entry of the first kind in "4. What goes to the user", whose change would alter a design, such as a GHI-MD that is a design, may go to the user at once, without a try: run `needs-the-user` on it with `--because cold-read-document`.
+An entry of the first kind in "4. What goes to the user", whose change would alter a design, such as a GHI-MD that is a design, may go to the user at once, without an attempt: run `needs-the-user` on it with `--because cold-read-document`.
 
-Each try ends in one of these five ways.
+Each attempt ends in one of these five ways.
 
 ### Not worth doing
 
@@ -42,9 +42,9 @@ An entry is not worth doing when the problem is not real, or the improvement doe
 
 A second, independent agent must agree:
 
-1. Record your try with `try`, ending `--found` with your conclusion.
-2. Run `second-agent-verdict` on the entry. Run it in the background, with the Bash tool's `run_in_background`, and wait for it to finish, because the agent it runs can take longer than a foreground command may. The program runs the second agent, gives it the entry and your try's sources but not your conclusion, writes its verdict under the entry, and prints its reply.
-3. If it agrees, mark the entry with `settle --kind not-worth-doing`, giving in `--how` the reason in one sentence. If it disagrees, the try is spent: read the reasons in its reply, and start another try if the program allows one. A disagreement on the third try marks the entry as needing the user, and the program says so.
+1. Record your attempt with `attempt`, ending `--found` with your conclusion.
+2. Run `second-agent-verdict` on the entry. Run it in the background, with the Bash tool's `run_in_background`, and wait for it to finish, because the agent it runs can take longer than a foreground command may. The program runs the second agent, gives it the entry and your attempt's sources but not your conclusion, writes its verdict under the entry, and prints its reply.
+3. If it agrees, mark the entry with `settle --kind not-worth-doing`, giving in `--how` the reason in one sentence. If it disagrees, the attempt is spent: read the reasons in its reply, and start another attempt if the program allows one. A disagreement on the third attempt marks the entry as needing the user, and the program says so.
 4. If `second-agent-verdict` prints `FAILED:`, no verdict was written and the entry stays open: go on with the other entries, and put what it printed in your report.
 
 ### Worth doing, and doable now
@@ -60,11 +60,11 @@ When the change does not belong in this GHI-MD, ask ghi-guide-agent whether a GH
 
 ### Worth doing, but not doable now
 
-Leave the entry open, with its try recorded: the open entry is the reminder, and no task is needed. A maintenance-job of GHI [Regular maintenance: the list of maintenance jobs, how often each runs, and how each reaches the user](https://github.com/nedsnodes/nedsnodes/issues/1058) is to list every entry open more than 7 days. When a program the change needs fails, such as `scripts/ghi-issue-write.py`, the change is not doable now: say in the try what the program printed.
+Leave the entry open, with its attempt recorded: the open entry is the reminder, and no task is needed. A maintenance-job of GHI [Regular maintenance: the list of maintenance jobs, how often each runs, and how each reaches the user](https://github.com/nedsnodes/nedsnodes/issues/1058) is to list every entry open more than 7 days. When a program the change needs fails, such as `scripts/ghi-issue-write.py`, the change is not doable now: say in the attempt what the program printed.
 
 ### Goes to the user
 
-The try showed that the entry is one of the kinds in "4. What goes to the user": mark it with `needs-the-user` and the `--because` value given there.
+The attempt showed that the entry is one of the kinds in "4. What goes to the user": mark it with `needs-the-user` and the `--because` value given there.
 
 ## 4. What goes to the user
 
@@ -72,9 +72,9 @@ Only these three kinds of entry, and nothing else:
 
 - an entry whose change would alter a document that step 2 of `.claude/skills/cold-read/SKILL.md` sends to a cold-read-full-run, in a way that its step 9 sends to the user: `--because cold-read-document`;
 - an entry that asks whether a user-ruling should change, because the sources show that the user-ruling still applies and the GHI-MD goes against it: `--because user-ruling-change`;
-- an entry still open after 3 tries: `--because three-tries`.
+- an entry still open after 3 attempts: `--because three-attempts`.
 
-In `--why`, say in one sentence what the user must decide; for three tries, what the tries could not settle. Do not ask him yourself.
+In `--why`, say in one sentence what the user must decide; for three attempts, what the attempts could not settle. Do not ask him yourself.
 
 ## 5. Your report
 
