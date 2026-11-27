@@ -51,7 +51,6 @@ def refused(command, cwd, tool_name="Bash"):
             and output.get("permissionDecisionReason") == hook.GH_API_GRAPHQL_PAGINATE_WITHOUT_END_CURSOR_REFUSAL)
 
 
-# The command of 2026-11-24 that refetched page 1 for 35 minutes, shortened.
 QUERY_WITH_C = ("query($c:String){repository(owner:\"nedsnodes\",name:\"nedsnodes\"){pullRequests(states:OPEN,"
                 "first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{number}}}}")
 QUERY_WITH_END_CURSOR = QUERY_WITH_C.replace("$c", "$endCursor")
@@ -62,14 +61,14 @@ with tempfile.TemporaryDirectory() as directory:
     Path(directory, "not-utf-8.graphql").write_bytes(b"\xff\xfe query")
 
     REFUSED = [
-        ("the $c query of 2026-11-24, as -f query='...'", f"gh api graphql --paginate -f query='{QUERY_WITH_C}'"),
+        ("a query whose cursor variable is $c, as -f query='...'", f"gh api graphql --paginate -f query='{QUERY_WITH_C}'"),
         ("--paginate after the query", f"gh api graphql -f query='{QUERY_WITH_C}' --paginate"),
         ("--raw-field query=...", f"gh api graphql --paginate --raw-field query='{QUERY_WITH_C}'"),
         ("--raw-field=query=...", f"gh api graphql --paginate --raw-field='query={QUERY_WITH_C}'"),
         ("-fquery=... attached", f"gh api graphql --paginate -fquery='{QUERY_WITH_C}'"),
         ("-F query=@file whose query has $c", "gh api graphql --paginate -F query=@c.graphql"),
         ("--field query=@file by absolute path", f"gh api graphql --paginate --field query=@{directory}/c.graphql"),
-        ("piped into head, as on 2026-11-24", f"gh api graphql --paginate -f query='{QUERY_WITH_C}' | head -300"),
+        ("piped into head", f"gh api graphql --paginate -f query='{QUERY_WITH_C}' | head -300"),
         ("behind timeout", f"timeout 60 gh api graphql --paginate -f query='{QUERY_WITH_C}'"),
         ("inside bash -c", f"bash -c \"gh api graphql --paginate -f query='{QUERY_WITH_C}'\""),
         ("inside an ssh remote command", f"ssh nedlern@ned-box \"gh api graphql --paginate -f query='{QUERY_WITH_C}'\""),
