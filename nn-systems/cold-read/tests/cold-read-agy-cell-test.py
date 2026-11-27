@@ -5,9 +5,8 @@ called.
 
 WHAT IS PINNED HERE.
 
-  - The fast tier's pin (user-ruled 2026-09-07): --tier fast runs
-    gemini-3.8-flash-medium at effort medium (the 2026-09-07 ruling after
-    measurements, superseding low), and the stamp says so, with
+  - The fast tier's pin (user-ruled 2026-11-25): --tier fast runs
+    gemini-4-neon-low at effort low, and the stamp says so, with
     runtime=agy. The other tiers are refused by this launcher before agy
     runs: it pins no model for them, and a Gemini review under a `deep`- or
     `second-strongest-model`-tier stamp would be a tier the roster never measured it on.
@@ -137,7 +136,7 @@ STDOUT_RECOVERY_PHRASE = cell_common.STDOUT_RECOVERY_PHRASE
 REAL_AGY_STREAM_JSON_OUTPUT = (
     SYSTEM_DIRECTORY / "tests"
     / "cold-read-agy-cell-test-real-agy-stream-json-output-of-one-read.jsonl")
-# The cell's deadline in these cases is agy's 30 minutes; a read ended by the
+# The cell's deadline in these cases is agy's 15 minutes; a read ended by the
 # result line ends long before this.
 RESULT_LINE_ENDS_READ_WITHIN_SECONDS = 20
 KILLED_AFTER_RESULT_LINE_WORDS = cell_common.AGENT_BINARY_KILLED_AFTER_FINAL_RESULT_LINE_PHRASE
@@ -413,7 +412,7 @@ def agy_cell_copy_killing_agy_after_seconds(repository, timeout_seconds, margin_
     copied_cell = repository / "nn-systems" / "cold-read" / "cold-read-agy-cell.py"
     cell_text = copied_cell.read_text(encoding="utf-8")
     for constant_line, value in (
-            ("COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n", timeout_seconds),
+            ("COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 15 * 60\n", timeout_seconds),
             ("COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS = 60\n", margin_seconds)):
         if cell_text.count(constant_line) != 1:
             raise AssertionError(f"the agy cell no longer holds {constant_line!r} once")
@@ -577,9 +576,9 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a fast-tier cell whose agy writes the report exits 0",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     stamp = provenance_stamp_of(report)
-    check("the fast tier is pinned to gemini-3.8-flash-medium at medium, stamped runtime=agy",
-          stamp.startswith("<!-- provenance: runtime=agy model=gemini-3.8-flash-medium "
-                           "effort=medium cell=fast-clarify tier=fast "),
+    check("the fast tier is pinned to gemini-4-neon-low at low, stamped runtime=agy",
+          stamp.startswith("<!-- provenance: runtime=agy model=gemini-4-neon-low "
+                           "effort=low cell=fast-clarify tier=fast "),
           repr(stamp))
     check("the stamp carries duration_s and no tokens field",
           re.search(r"\bduration_s=\d+\b", stamp) is not None and "tokens=" not in stamp,
@@ -593,9 +592,9 @@ with tempfile.TemporaryDirectory() as scratch:
     check("agy is told to skip permission prompts",
           "--dangerously-skip-permissions" in argv, repr(argv))
     check("the model, effort, print timeout and stream-json output are on the command line",
-          argv[argv.index("--model") + 1] == "gemini-3.8-flash-medium"
-          and argv[argv.index("--effort") + 1] == "medium"
-          and argv[argv.index("--print-timeout") + 1] == "30m"
+          argv[argv.index("--model") + 1] == "gemini-4-neon-low"
+          and argv[argv.index("--effort") + 1] == "low"
+          and argv[argv.index("--print-timeout") + 1] == "15m"
           and argv[argv.index("--output-format") + 1] == "stream-json",
           repr(argv))
     received_prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else ""
@@ -613,7 +612,7 @@ with tempfile.TemporaryDirectory() as scratch:
     repository = build_scratch_repository(scratch)
     copied_cell = repository / "nn-systems" / "cold-read" / "cold-read-agy-cell.py"
     cell_text = copied_cell.read_text(encoding="utf-8")
-    constant_line = "COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n"
+    constant_line = "COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 15 * 60\n"
     check("the agy cell sets its per-model time limit on one line this suite can change",
           cell_text.count(constant_line) == 1, repr(constant_line))
     copied_cell.write_text(cell_text.replace(
@@ -629,6 +628,22 @@ with tempfile.TemporaryDirectory() as scratch:
     check("agy's --print-timeout follows the cell's per-model time limit",
           result.returncode == 0 and "--print-timeout" in argv
           and argv[argv.index("--print-timeout") + 1] == "45m",
+          f"exit {result.returncode}; argv={argv!r}; stderr={result.stderr!r}")
+
+    # The cold-read-grid gives its Gemini defect-hunt cell a longer limit than
+    # the fast read's, through --per-model-run-timeout-seconds.
+    repository = build_scratch_repository(scratch)
+    report = report_path_for(repository, "print-timeout-follows-option")
+    argv_dump = scratch / "print-timeout-follows-option-argv.json"
+    result = run_agy_cell(
+        repository, stubs,
+        {"*": {"report": "STUB AGY REVIEW\n", "dump_argv": str(argv_dump)}}, report,
+        "--per-model-run-timeout-seconds", "2400",
+    )
+    argv = json.loads(argv_dump.read_text(encoding="utf-8")) if argv_dump.is_file() else []
+    check("agy's --print-timeout follows --per-model-run-timeout-seconds",
+          result.returncode == 0 and "--print-timeout" in argv
+          and argv[argv.index("--print-timeout") + 1] == "40m",
           f"exit {result.returncode}; argv={argv!r}; stderr={result.stderr!r}")
 
     # --- The other tiers are refused before agy runs ----------------------
@@ -656,7 +671,7 @@ with tempfile.TemporaryDirectory() as scratch:
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     report_text = report.read_text(encoding="utf-8") if report.is_file() else ""
     check("its stdout is the report, under a stamp",
-          report_text.startswith("<!-- provenance: runtime=agy model=gemini-3.8-flash-medium ")
+          report_text.startswith("<!-- provenance: runtime=agy model=gemini-4-neon-low ")
           and LONG_CHAT_REVIEW.strip() in report_text,
           repr(report_text[:200]))
     check("the recovery is announced on stderr under the pinned phrase",
@@ -810,13 +825,32 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the cell reports the attempt as timed out, on the cause line callers read",
           "cold-read-agy-cell: cause: timed-out — no result within 2 seconds"
           in result.stderr.splitlines()
-          and "gemini-3.8-flash-medium(timed-out)" in result.stderr,
+          and "gemini-4-neon-low(timed-out)" in result.stderr,
           repr(result.stderr))
     check("what agy printed before it was killed is on the cell's stderr",
           "stub agy: words before the hang" in result.stderr, repr(result.stderr))
     check("the process agy started is killed with agy",
           len(child_pids) == 1 and all(process_gone_within(pid, 10) for pid in child_pids),
           repr(child_pids))
+    kill_left_over_processes(child_pids)
+
+    # --- --per-model-run-timeout-seconds moves the kill with agy's deadline ---
+    repository = build_scratch_repository(scratch)
+    agy_cell_copy_killing_agy_after_seconds(repository, 15 * 60, 1)
+    report = report_path_for(repository, "agy-past-the-deadline-the-option-gives")
+    pid_file = scratch / "agy-past-the-deadline-the-option-gives-child-pids"
+    started = time.monotonic()
+    result = run_agy_cell(repository, stubs,
+                          {"*": {"hang_writing_child_pid_to": str(pid_file)}}, report,
+                          "--per-model-run-timeout-seconds", "1")
+    elapsed = time.monotonic() - started
+    child_pids = pids_written_to(pid_file)
+    check("with --per-model-run-timeout-seconds 1, the cell kills agy 1 second plus the "
+          "kill margin after it started, not at the default limit",
+          result.returncode == 1 and not report.exists() and elapsed < 60
+          and "cold-read-agy-cell: cause: timed-out — no result within 2 seconds"
+          in result.stderr.splitlines(),
+          f"exit {result.returncode}; {elapsed:.0f} s; stderr={result.stderr!r}")
     kill_left_over_processes(child_pids)
 
     # --- agy's result line ends the run, though agy hangs after it --------
@@ -840,7 +874,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and "written before the result line" in report_text,
           f"exit {result.returncode}; {elapsed:.0f} s; stderr={result.stderr!r}")
     check("the cell says it killed agy after its result line, and reports no time-out",
-          f"gemini-3.8-flash-medium {KILLED_AFTER_RESULT_LINE_WORDS}" in result.stderr
+          f"gemini-4-neon-low {KILLED_AFTER_RESULT_LINE_WORDS}" in result.stderr
           and "timed-out" not in result.stderr, repr(result.stderr))
     check("the process agy started is killed with agy, though both ignore SIGTERM",
           len(child_pids) == 1 and all(process_gone_within(pid, 10) for pid in child_pids),
@@ -949,7 +983,7 @@ with tempfile.TemporaryDirectory() as scratch:
     check("an ERROR result followed by a hang fails the cell with exit 1 within seconds",
           result.returncode == 1 and not report.exists()
           and elapsed < RESULT_LINE_ENDS_READ_WITHIN_SECONDS
-          and "gemini-3.8-flash-medium(exit1)" in result.stderr,
+          and "gemini-4-neon-low(exit1)" in result.stderr,
           f"exit {result.returncode}; {elapsed:.0f} s; stderr={result.stderr!r}")
     check("agy's AGY_ERROR line reaches the cell's stderr whole, for the fast read to parse",
           agy_error_line in result.stderr.splitlines(), repr(result.stderr))
@@ -962,7 +996,7 @@ with tempfile.TemporaryDirectory() as scratch:
                           {"*": {"stdout": agy_result_line("SUCCESS", SHORT_CHAT_REMARK),
                                  "exit": 3}}, report)
     check("an agy that prints a SUCCESS result and then exits 3 by itself fails with exit 3",
-          result.returncode == 1 and "gemini-3.8-flash-medium(exit3)" in result.stderr
+          result.returncode == 1 and "gemini-4-neon-low(exit3)" in result.stderr
           and KILLED_AFTER_RESULT_LINE_WORDS not in result.stderr,
           f"exit {result.returncode}; stderr={result.stderr!r}")
 

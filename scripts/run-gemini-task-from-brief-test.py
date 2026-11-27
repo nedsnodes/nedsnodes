@@ -25,6 +25,11 @@ spec = importlib.util.spec_from_file_location("gemini_task", PROGRAM)
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
+LISTED_MODEL = "gemini-4-neon-high"
+OTHER_LISTED_MODEL = "gemini-3.8-flash-medium"
+# A strict prefix of a listed id, so a launcher that accepted prefixes would take it.
+PARTIAL_MODEL = LISTED_MODEL.rsplit("-", 1)[0]
+
 FAKE_AGY = r'''#!PYTHON
 import json, os, pathlib, signal, sys, time
 args = sys.argv[1:]
@@ -39,7 +44,7 @@ if args == ["models"]:
     if mode == "models-fail":
         sys.exit(4)
     if mode != "models-sleep":
-        print("Available models:\n  gemini-4-neon-high\n  gemini-3.8-flash-medium", flush=True)
+        print("Available models:\n  @LISTED@\n  @OTHER@", flush=True)
         sys.exit(0)
 if mode in ("sleep", "models-sleep"):
     child = os.fork()
@@ -84,7 +89,8 @@ class GeminiTaskTests(unittest.TestCase):
         for name, content in (("agy", FAKE_AGY), ("bwrap", FAKE_SANDBOX),
                               ("sandbox-exec", FAKE_SANDBOX)):
             script = self.bin / name
-            script.write_text(content.replace("#!PYTHON", "#!" + sys.executable))
+            script.write_text(content.replace("#!PYTHON", "#!" + sys.executable)
+                              .replace("@LISTED@", LISTED_MODEL).replace("@OTHER@", OTHER_LISTED_MODEL))
             script.chmod(0o755)
         self.brief = self.base / "brief.md"
         self.brief.write_text("---\nRead README.md.\nWrite three lines.\n")
@@ -166,11 +172,12 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertNotIn("test-key-from-caller", self.log.read_text())
 
     def test_unknown_model_stops_before_task(self):
-        result = self.run_cli(extra=("-m", "gemini-4-neon"))
+        self.assertTrue(LISTED_MODEL.startswith(PARTIAL_MODEL) and PARTIAL_MODEL != LISTED_MODEL)
+        result = self.run_cli(extra=("-m", PARTIAL_MODEL))
         self.assertEqual(result.returncode, 1)
         self.assertIn("unknown model", result.stderr)
-        self.assertIn("gemini-4-neon-high", result.stderr)
-        self.assertIn("gemini-3.8-flash-medium", result.stderr)
+        self.assertIn(LISTED_MODEL, result.stderr)
+        self.assertIn(OTHER_LISTED_MODEL, result.stderr)
         self.assertEqual(len(self.calls.read_text().splitlines()), 1)
 
     def test_nonzero_exits(self):
