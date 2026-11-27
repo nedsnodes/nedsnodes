@@ -2475,8 +2475,7 @@ def test_a_fast_read_whose_record_was_not_shipped_is_reported():
           and result.stdout.split("\n")[0].endswith(f"The fast read also said: {note}")
           and "The minutes record the answer, but the fast read of `#new` text 1 did not ship its record: "
               f"{note}" in result.stdout
-          and Path(shlex.split(printed_command_with(result, "cold-read-record-ship.py"))[1]).name
-          == "cold-read-record-ship.py"
+          and printed_command_with(result, "cold-read-record-ship.py") != "false"
           and case.minutes.read_text().count(f"The fast read also said: {note}") == 2, described(result))
 
 
@@ -8124,8 +8123,16 @@ def run_printed_command(case, command):
                     AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE: str(case.agent_homes)}))
 
 
-def printed_command_with(result, words):
-    return next((command for command in printed_program_commands(result) if words in command), "false")
+def printed_command_with(result, word):
+    """The first printed command whose script is named `word` or that takes `word` as an argument, else "false".
+
+    Matched on the parsed words, not the text, because the checkout path may hold the word too."""
+    word = word.strip()
+    for command in printed_program_commands(result):
+        words = shlex.split(command)
+        if len(words) > 1 and (Path(words[1]).name == word or word in words[2:]):
+            return command
+    return "false"
 
 
 def check_every_printed_command_from_a_path_holding_a_space():
@@ -8194,11 +8201,14 @@ def check_every_printed_command_from_a_path_holding_a_space():
     silent = silent_case.run("check", mode="silent-exit")
     failed = re.search(r"FAILED: (.*) exited 3 without naming a report", silent.stdout)
     ran = shlex.split(failed.group(1)) if failed else []
-    # The target was in the scratch directory the failed read removed, so only its parse can be checked.
+    given = fast_reads_run(silent_case)
+    given_target = given[-1][0][given[-1][0].index("--target") + 1] if given else None
+    # The target was in the scratch directory the failed read removed, so it is compared with the path the stand-in
+    # was given rather than checked on disk.
     check("from a path holding a space, the FAILED message of a fast read that names no report holds a command that "
-          "parses to the fast-read program, --target and one target path",
+          "parses to the fast-read program, --target, the target path it was given, and --without-question-4",
           silent.returncode == 1 and len(ran) == 4 and Path(ran[0]).is_file() and ran[1] == "--target"
-          and ran[3] == "--without-question-4", described(silent))
+          and ran[2] == given_target and ran[3] == "--without-question-4", described(silent))
 
 
 def check_read_step_retry_after_failed_scratch_removal_drops_only_the_after_fixes_flag():
