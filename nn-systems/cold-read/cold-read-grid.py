@@ -195,13 +195,11 @@ CELL_LAUNCHERS = {
     "agy": pathlib.Path(__file__).with_name("cold-read-agy-cell.py"),
 }
 RECORD_SHIPPER = pathlib.Path(__file__).with_name("cold-read-record-ship.py")
-# The shipper's one line opens with this only when the record reached the
-# log-store; REFUSED and FAILED both leave it on disk alone.
-RECORD_SHIPPED_LINE_PREFIX = "shipped:"
 _record_shipper_spec = importlib.util.spec_from_file_location(
     "cold_read_record_ship", RECORD_SHIPPER)
 record_shipper = importlib.util.module_from_spec(_record_shipper_spec)
 _record_shipper_spec.loader.exec_module(record_shipper)
+RECORD_SHIPPED_LINE_PREFIX = record_shipper.RECORD_SHIPPED_LINE_PREFIX
 # Import shared status phrases so launcher output and grid parsing cannot drift.
 _common_spec = importlib.util.spec_from_file_location(
     "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py")
@@ -836,7 +834,7 @@ def mark_every_report(record_dir: pathlib.Path, marker: str) -> None:
     """Insert a marker after provenance and existing markers in every Markdown report."""
     for report_path in sorted(record_dir.glob("*.md")):
         lines = report_path.read_text(encoding="utf-8").split("\n")
-        insert_at = 1 if lines and lines[0].startswith("<!-- provenance:") else 0
+        insert_at = 1 if lines and lines[0].startswith(cell_common.PROVENANCE_COMMENT_PREFIX) else 0
         while insert_at < len(lines) and lines[insert_at].startswith(GRID_MARKER_PREFIXES):
             insert_at += 1
         lines.insert(insert_at, marker)
@@ -989,7 +987,7 @@ def what_should_be_code_question_closing_line(record_dir: pathlib.Path,
     if name in outcome.stopped:
         return ""
     lines = report_path.read_text(encoding="utf-8").split("\n")
-    insert_at = 1 if lines and lines[0].startswith("<!-- provenance:") else 0
+    insert_at = 1 if lines and lines[0].startswith(cell_common.PROVENANCE_COMMENT_PREFIX) else 0
     lines[insert_at:insert_at] = [
         fast_read.WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING, ""]
     report_path.write_text("\n".join(lines), encoding="utf-8")

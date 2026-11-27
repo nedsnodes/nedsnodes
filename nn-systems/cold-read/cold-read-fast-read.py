@@ -319,9 +319,6 @@ CLAUDE_CELL_LAUNCHER = pathlib.Path(__file__).with_name("cold-read-claude-cell.p
 # and nothing else; when it is not `shipped:`, the report is still printed and
 # then the read exits 1.
 RECORD_SHIPPER = pathlib.Path(__file__).with_name("cold-read-record-ship.py")
-# The shipper's one line opens with this only when the record reached the
-# log-store; REFUSED and FAILED both leave it on disk alone.
-RECORD_SHIPPED_LINE_PREFIX = "shipped:"
 # What a cold-read-record is called and where it lives, defined once in a
 # module so no program keeps its own copy. importlib, because the filename
 # has hyphens.
@@ -335,6 +332,7 @@ _record_shipper_spec = importlib.util.spec_from_file_location(
     "cold_read_record_ship", RECORD_SHIPPER)
 record_shipper = importlib.util.module_from_spec(_record_shipper_spec)
 _record_shipper_spec.loader.exec_module(record_shipper)
+RECORD_SHIPPED_LINE_PREFIX = record_shipper.RECORD_SHIPPED_LINE_PREFIX
 # Finds a report's findings and checks and records the agent's outcome for each.
 _finding_outcomes_spec = importlib.util.spec_from_file_location(
     "cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common",
@@ -1377,7 +1375,7 @@ def with_line_after_provenance(report_text: str, line: str) -> str:
     """The report with `<!-- line -->` at its top, after the provenance stamp when there is one."""
     marker = f"<!-- {line} -->\n"
     first, newline, rest = report_text.partition("\n")
-    if first.startswith("<!-- provenance:"):
+    if first.startswith(cell_common.PROVENANCE_COMMENT_PREFIX):
         return first + newline + marker + rest
     return marker + report_text
 

@@ -433,6 +433,8 @@ pre_push_conflict_check = _load_sibling_script(
 
 DEFAULT_REPO = "nedsnodes/nedsnodes"
 GHI_MD_DIRECTORY = "docs/issues"
+# Opens the title and commit message of every GHI-MD edit pull request; the merge-lane program imports it.
+GHI_MD_EDIT_PULL_REQUEST_TITLE_OPENING = "GHI-MD edit for issue"
 SYSTEM_DIRECTORY = "nn-systems"
 # Where a design moves once its code lands: the `docs/` directory of the
 # directory its code is in, under a name ending `.design.md` that carries no
@@ -2600,7 +2602,7 @@ def create_pull_request_for_edit_branch(repo: str, branch: str, number: int,
     created = runner(
         ["gh", "pr", "create", "--repo", repo, "--base", "main",
          "--head", branch, "--title",
-         f"GHI-MD edit for issue {number}: {title}", "--body", body],
+         f"{GHI_MD_EDIT_PULL_REQUEST_TITLE_OPENING} {number}: {title}", "--body", body],
         cwd=str(cwd))
     report((created.stdout or "").strip())
 
@@ -2803,7 +2805,7 @@ def land_edit(repo: str, number: int, title: str, relative: str, staged: str,
         if moved_from:
             runner(["git", "rm", "--quiet", moved_from], cwd=str(worktree))
             report(f"removing {moved_from}: its content moves to {relative}")
-        message = (f"GHI-MD edit for issue {number}: {title}\n\n"
+        message = (f"{GHI_MD_EDIT_PULL_REQUEST_TITLE_OPENING} {number}: {title}\n\n"
                    f"Edited by scripts/ghi-issue-write.py from {relative}. "
                    "The issue's title and body are derived from main's copy "
                    "of this file, so they follow when this lands. The "
