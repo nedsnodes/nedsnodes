@@ -1340,6 +1340,13 @@ def run_launch_time_git_sync_git_failure_cases(root: Path, remote: Path, seed: P
           "fast-forwarded to main (its new commit could not be read" in report
           and "fatal: stub failure" in report
           and launch_time_git_sync_next_steps(f"git -C {home} rev-parse --short HEAD") in report, report)
+    check("a fast-forward whose new commit cannot be read still marks the checkout as at "
+          "main's commit, so the supervisor restarts onto main's code, and not as holding main "
+          "after a fetch, so the successor is shown git's error",
+          getattr(report, "checkout_is_at_main_commit", None) is True
+          and getattr(report, "checkout_has_main_after_a_fetch", None) is False,
+          (type(report).__name__, getattr(report, "checkout_is_at_main_commit", None),
+           getattr(report, "checkout_has_main_after_a_fetch", None)))
 
     (home / "agent-note.txt").write_text("own work\n", encoding="utf-8")
     git_in(["add", "-A"], home)
