@@ -54,7 +54,9 @@ The launcher removes the agent-seat's GitHub tokens, which can push and
 merge, from agy's environment, and sets GH_TOKEN to the read-only token in
 ~/.config/nedsnodes-sandboxed-models/, so that `gh` inside the sandbox
 reads public GitHub. When that token cannot be read, agy runs without one,
-and the run log says why after the model listing. This launcher does not provision
+and the run log says why after the model listing. How gh behaves inside the
+macOS sandbox is said beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py. This launcher does not provision
 logins, recover reports from chat, retry models, or verify report content.
 
 agy runs on its own Google login, never on a Gemini API key: the launcher

@@ -112,6 +112,6 @@ def read_state(folder):
     except (OSError, UnicodeDecodeError) as error:
         return Unreadable(newest, str(error))
     final = last_line(text)
-    if final.startswith(LIFT_LINE_PREFIX):
+    if final.startswith((LIFT_LINE_PREFIX, LIFT_LINE_PREFIX.rstrip() + "# ")):
         return Lifted(newest, final)
     return InForce(newest, text)

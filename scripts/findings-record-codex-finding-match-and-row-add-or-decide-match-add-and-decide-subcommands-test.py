@@ -158,6 +158,11 @@ hashtag_answers = program.fact_line_answers(
 check("a finding's hashtag lines fill the same fields as the older labelled lines", hashtag_answers == {
           "main_has_it": "yes", "this_pull_request_makes_it_happen": "no", "reports_success_on_failure": "no",
           "shown_by": "judged from the code only"}, hashtag_answers)
+closed_hashtag_answers = program.fact_line_answers(
+    "A finding.\n  - `#defect_already_on_main#` `yes`\n  #pull_request_triggers_the_defect# no\n"
+    "  - **#false_report_of_success_on_failure#** no\n  #defect_evidence# judged from the code only")
+check("a finding's hashtag lines with the closing # fill the same fields, the # not read as part of the answer",
+      closed_hashtag_answers == hashtag_answers, closed_hashtag_answers)
 code, again, err = add([graded])
 check("running the same add again adds no second row or sighting",
       code == 0 and again == added and count("findings_record_row") == 1

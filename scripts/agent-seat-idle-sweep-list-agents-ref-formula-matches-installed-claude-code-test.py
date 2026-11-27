@@ -6,7 +6,8 @@ The idle sweep, scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-
 computes an agent-session's ListAgents ref from its session record in ~/.claude/sessions with a
 formula read out of the Claude Code binary, which Claude Code does not document. Should a Claude
 Code update change the formula or the session record, every wake message would fail to send; this
-suite fails first.
+suite reports the change at the next full test run, since a selective run does not see a Claude
+Code update.
 
 Each agent-session with a session record that has called ListAgents since it started has the result in its
 transcript, ~/.claude/projects/<project>/<sessionId>.jsonl, opening "This session is <name>
@@ -14,6 +15,10 @@ transcript, ~/.claude/projects/<project>/<sessionId>.jsonl, opening "This sessio
 agent-session with the idle sweep's own function and compares the two. It reads the real HOME and
 writes nothing. Where no agent-session has such a result, as on a machine with no
 agent-sessions, it prints a SKIP line.
+
+What it does not handle: a Claude Code update that renames `sessionId` or `startedAt` leaves no
+agent-session to compare, so the suite prints SKIP and passes; and while running agent-sessions
+still run an older version than the installed binary, it checks only that older version's refs.
 """
 
 import importlib.util
@@ -107,7 +112,7 @@ def main():
         computed = idle_sweep.list_agents_tool_entry_ref_of_running_agent_session_id(session_id)
         check(f"the idle sweep computes the ref Claude Code {record.get('version')} advertises for "
               f"agent-session {session_id}",
-              computed is not None and advertised.startswith(computed),
+              computed is not None and computed.startswith(advertised),
               f"advertised [{advertised}], computed {computed!r}, from the record of pid "
               f"{record.get('pid')} with messagingSocketPath {record.get('messagingSocketPath')!r}")
     if compared == 0:

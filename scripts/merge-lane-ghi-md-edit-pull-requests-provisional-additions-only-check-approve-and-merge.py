@@ -260,12 +260,12 @@ def gh_bytes(environment, *arguments):
 
 
 def merge_output_last_lines(output):
-    """The merge program's last lines, from its STOP line on when it printed one."""
+    """The merge program's last lines, from its first STOP line on when it printed one."""
     lines = output.splitlines()
     start = len(lines) - MERGE_OUTPUT_LINES_IN_MESSAGE
     stops = [index for index, line in enumerate(lines) if line.startswith("STOP:")]
     if stops:
-        start = min(start, stops[-1])
+        start = min(start, stops[0])
     return "\n".join(lines[max(start, 0):])
 
 

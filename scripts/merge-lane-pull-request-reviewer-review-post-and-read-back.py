@@ -222,12 +222,12 @@ FINDING_FACT_LINE_OLDER_LABELS = {"Main has it": "#defect_already_on_main",
                                   "This pull request makes it happen": "#pull_request_triggers_the_defect",
                                   "Reports success on failure": "#false_report_of_success_on_failure",
                                   "Shown by": "#defect_evidence"}
-# A hashtag or a label may open a list item of any kind and sit inside code or bold marks, and a label's colon
+# A hashtag, with or without its closing `#`, or a label may open a list item of any kind and sit inside code or bold marks, and a label's colon
 # may sit inside or outside them.
 FINDING_FACT_LINE = re.compile(
     r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(?:("
     + "|".join(re.escape(hashtag) for hashtag in FINDING_FACT_LINE_HASHTAGS)
-    + r")(?!\w)|("
+    + r")#?(?!\w)|("
     + "|".join(re.escape(label) for label in FINDING_FACT_LINE_OLDER_LABELS)
     + r")[`*_]*:)(.*)$", re.MULTILINE)
 FINDING_FACT_LINE_MARKS_AND_SPACE = re.compile(r"[`*_\s]")

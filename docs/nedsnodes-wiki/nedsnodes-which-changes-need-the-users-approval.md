@@ -36,6 +36,7 @@ A change is the difference an agent's work makes, from before it starts to after
 - Rewording a sentence of prose to remove an ambiguity or a contradiction, when the rest of the same document or the latest user-ruling on the subject settles which meaning is intended.
 - Carrying out a decision the user already made: merging a clean pull request, deleting what he retired, closing a finished task or GHI, or recording the decision in a GHI's outcome section.
 - A change an approval-walk item makes when the /walk-me-through skill's rule for items that need no answer from the user settled the item without asking the user, and the walk-minutes record it as not asked.
+- Updating a page in `docs/nedsnodes-wiki/` so that what it says about the code, the machines or the project matches how they are on main and on the machines, or as the pull request that carries the update will make them, when the update neither adds nor changes anything that the page directs, decides or plans. When the code or a machine differs from what the page says was decided, tell the user instead of updating the page. This exception covers prose only, and not the project glossary, `docs/nedsnodes-wiki/nedsnodes-sdlc-terms.md`, `docs/nedsnodes-wiki/nedsnodes-ordinary-hyphenated-words-list.md` or the word table in `docs/nedsnodes-wiki/nedsnodes-style-guide.md`.
 
 ## Terms
 

@@ -382,6 +382,10 @@ def main():
         program_spec = importlib.util.spec_from_file_location("brief_compose", PROGRAM)
         program = importlib.util.module_from_spec(program_spec)
         program_spec.loader.exec_module(program)
+        found = program.FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER.findall(
+            "#follow_up_request pull request 31\n#follow_up_request# pull request 32\n")
+        check("a follow-up request line is read in its open form and in its closed form, with the closing `#`",
+              found == ["31", "32"], repr(found))
         log_store = Path("/home/nedlern/nedsnodes-logs")
         default_parent = program.DEFAULT_MERGE_LANE_PULL_REQUEST_REVIEWER_SCRATCH_DIRECTORIES_PARENT_DIRECTORY
         check("the default reviewer scratch parent is outside the log-store, which the "
