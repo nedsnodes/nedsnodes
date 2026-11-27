@@ -243,14 +243,14 @@ def bash_guard_hook_results_from_one_forked_child_each(guards, payload, reposito
             for key, _ in (selector.select(max(0.0, wait)) if selector.get_map() else _sleep(max(0.0, wait))):
                 _read_or_close(selector, key.fileobj, key.data)
             for child in list(pending):
-                if not child.descriptors.keys() - child.closed:
-                    reaped, wait_status = os.waitpid(child.pid, os.WNOHANG)
-                    if reaped:
-                        child.wait_status = wait_status
-                        pending.remove(child)
-                        continue
-                if clock() >= child.deadline:
-                    _kill_and_reap(selector, child)
+                if _done(child):
+                    pending.remove(child)
+                elif clock() >= child.deadline:
+                    # Output that came, and an exit, since the last look still count: only a guard still
+                    # running is timed out.
+                    _ready_output_read(selector, child)
+                    if not _done(child):
+                        _kill_and_reap(selector, child)
                     pending.remove(child)
     finally:
         for child in pending:
@@ -259,17 +259,35 @@ def bash_guard_hook_results_from_one_forked_child_each(guards, payload, reposito
     return [child.result() for child in children]
 
 
+def _done(child):
+    """Return whether child's output and error output are closed and it has exited, reaping it if so."""
+    if child.descriptors.keys() - child.closed:
+        return False
+    reaped, wait_status = os.waitpid(child.pid, os.WNOHANG)
+    if reaped:
+        child.wait_status = wait_status
+    return bool(reaped)
+
+
 def _read_or_close(selector, descriptor, child):
+    """Read what descriptor has waiting, or close it at its end; return whether anything was read."""
     try:
         data = os.read(descriptor, READ_CHUNK_BYTES)
     except BlockingIOError:
-        return
+        return False
     if data:
         child.descriptors[descriptor] += data
-        return
+        return True
     selector.unregister(descriptor)
     os.close(descriptor)
     child.closed.add(descriptor)
+    return False
+
+
+def _ready_output_read(selector, child):
+    for descriptor in child.descriptors.keys() - child.closed:
+        while _read_or_close(selector, descriptor, child):
+            pass
 
 
 def _kill_and_reap(selector, child):
