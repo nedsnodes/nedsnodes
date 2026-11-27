@@ -35,8 +35,8 @@ WHAT IS PINNED HERE.
     FAILED (exit N): with the second attempt's cause, keeps both logs, and
     the report is absent. One failure is neither retried nor absent: Gemini
     refusing the Gemini cell on its quota, on agy's own error line, skips the
-    cell, leaves the run complete with no INCOMPLETE SET marker, and closes
-    with a sentence saying so; another agy error, and the same line in a
+    cell, on its first attempt or its retry, leaves the run complete with no
+    INCOMPLETE SET marker, and closes with a sentence saying so; another agy error, and the same line in a
     Codex cell, are retried and absent as any failure is. Two first failures
     are not retried: a cause the
     user can clear, whose FAILED line tells the user at once while the other
@@ -260,12 +260,14 @@ def reviews_saved_lines(result):
 # whether it is a cell's first attempt or its retry: the grid launches the
 # same command twice and the stub keeps no other state.
 # COLD_READ_GRID_TEST_STUB_FAILURE_PLAN, when set, is a JSON list of entries
-# {"fragment", "attempts", "stdout", "stdout_by_attempt", "stderr", "edit"}: a cell
+# {"fragment", "attempts", "stdout", "stdout_by_attempt", "stderr",
+# "stderr_by_attempt", "edit"}: a cell
 # whose report name contains "fragment" (the first matching entry wins)
 # writes nothing and exits 1 on its first "attempts" launches, printing
 # "stdout" on stdout first -- the real texts of the cases below -- or the
 # attempt's own text from "stdout_by_attempt" ({"2": ...}), and "stderr" on
-# stderr, where agy prints its error line, and appending to the file
+# stderr, where agy prints its error line, or the attempt's own from
+# "stderr_by_attempt", and appending to the file
 # "edit" before failing, for a stray write by a failed first attempt.
 # COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS, when set, is how long the stub waits
 # before writing its report -- a reviewer still reading -- except in a cell
@@ -339,8 +341,9 @@ for entry in json.loads(os.environ.get("COLD_READ_GRID_TEST_STUB_FAILURE_PLAN") 
         text = entry.get("stdout_by_attempt", {}).get(str(attempt), entry.get("stdout", ""))
         if text:
             sys.stdout.write(text + "\n")
-        if entry.get("stderr"):
-            sys.stderr.write(entry["stderr"] + "\n")
+        error_text = entry.get("stderr_by_attempt", {}).get(str(attempt), entry.get("stderr", ""))
+        if error_text:
+            sys.stderr.write(error_text + "\n")
         if entry.get("edit"):
             with open(entry["edit"], "a", encoding="utf-8") as handle:
                 handle.write("The reviewer's own edit on a failed attempt.\n")
@@ -1546,7 +1549,7 @@ try:
         'spend cap.","error_code":429,"retryable":true}')
     gemini_quota_skipped_sentence_opening = (
         "The Gemini cell agy-hunt-gemini-4-neon-high was skipped because Gemini's quota "
-        "was used up: it was not retried, and its report is not counted as absent (log: ")
+        "was used up: its quota error was not retried, and its report is not counted as absent (log: ")
     repository = build_scratch_repository(scratch, "checkout-agy-cell-gemini-quota")
     attempt_counts = scratch / "gemini-quota-attempt-counts"
     result = run_grid(repository, stubs, {
@@ -1562,7 +1565,7 @@ try:
           repr(result.stdout))
     check("a Gemini quota refusal leaves the run complete: six saved, exit 0, no absent list",
           result.returncode == 0 and len(reviews_saved_lines(result)) == 6
-          and "All 6 reports of the cells that ran landed in" in result.stdout
+          and "All 6 reports of the other cells landed in" in result.stdout
           and "the set is complete without the Gemini cell's report." in result.stdout
           and "All seven reports landed" not in result.stdout
           and "- agy-hunt-gemini-4-neon-high:" not in result.stdout,
@@ -1576,6 +1579,30 @@ try:
           record_directory is not None
           and markers_in(record_directory, "<!-- INCOMPLETE SET:") == [],
           markers_in(record_directory, "<!-- INCOMPLETE SET:") if record_directory else "no record")
+
+    # --- Gemini's quota refusal on the retry skips the Gemini cell too ------
+    repository = build_scratch_repository(scratch, "checkout-agy-cell-gemini-quota-on-retry")
+    attempt_counts = scratch / "gemini-quota-on-retry-attempt-counts"
+    result = run_grid(repository, stubs, {
+        "COLD_READ_GRID_TEST_STUB_ATTEMPT_COUNTER_DIRECTORY": str(attempt_counts),
+        "COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
+            [{"fragment": "agy-hunt-gemini-4-neon-high.md", "attempts": 2,
+              "stderr_by_attempt": {"2": gemini_quota_agy_error_line}}])})
+    record_directory = record_directory_of(repository)
+    agy_attempts = attempt_counts / "agy-hunt-gemini-4-neon-high.md"
+    check("a Gemini quota refusal on the retry: two launches, one RETRYING, no FAILED, "
+          "the skip sentence with the retry's log, exit 0, no marker",
+          agy_attempts.is_file() and len(agy_attempts.read_text().splitlines()) == 2
+          and len(lines_opening(result, "RETRYING:")) == 1
+          and lines_opening(result, "FAILED") == []
+          and result.returncode == 0
+          and "All 6 reports of the other cells landed in" in result.stdout
+          and any(line.startswith(gemini_quota_skipped_sentence_opening)
+                  and line.endswith("agy-hunt-gemini-4-neon-high.md.attempt-2.stderr.log).")
+                  for line in result.stdout.splitlines())
+          and record_directory is not None
+          and markers_in(record_directory, "<!-- INCOMPLETE SET:") == [],
+          f"exit {result.returncode}; stdout={result.stdout!r}")
 
     # --- A skipped Gemini cell beside an absent one: counts stay of seven -----
     repository = build_scratch_repository(scratch, "checkout-agy-cell-gemini-quota-and-one-absent")

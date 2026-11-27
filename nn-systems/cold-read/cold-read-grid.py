@@ -87,7 +87,7 @@ cause the user can clear (cell_common.USER_CLEARABLE_CAUSE_CLASSES), which a
 retry would only meet again, and an attempt stopped at the time limit.
 One failure is neither retried nor absent: when Gemini refuses the Gemini
 Neon defect-hunt cell because its quota is used up, which a retry would only
-meet again, the cell is skipped, its log is kept, the run counts as complete
+meet again, on its first attempt or its retry, the cell is skipped, its log is kept, the run counts as complete
 without its report, and the closing text says the cell was skipped because
 Gemini's quota was used up. The grid knows that refusal by agy's own error
 line, which cell_common.gemini_ultra_quota_error_line finds in
@@ -381,11 +381,11 @@ SOME_LANDED_OPENING = (
     "and incomplete: triage the reports that landed.")
 NONE_LANDED_OPENING = "No report landed in {record_dir}, so there is nothing to triage."
 GEMINI_QUOTA_SKIPPED_ALL_OTHERS_LANDED_OPENING = (
-    "All {landed} reports of the cells that ran landed in {record_dir}, one file per "
+    "All {landed} reports of the other cells landed in {record_dir}, one file per "
     "reviewer; the set is complete without the Gemini cell's report.")
 GEMINI_QUOTA_SKIPPED_SENTENCE = (
-    "The Gemini cell {cell} was skipped because Gemini's quota was used up: it was not "
-    "retried, and its report is not counted as absent (log: {log_path}).")
+    "The Gemini cell {cell} was skipped because Gemini's quota was used up: its quota error "
+    "was not retried, and its report is not counted as absent (log: {log_path}).")
 WHAT_SHOULD_BE_CODE_QUESTION_ANSWERED_LINE = (
     "Question 4, What should be code, is answered in {report_path}, by one more "
     "reviewer of the same frozen-copy. Triage its numbered items as you triage the "
