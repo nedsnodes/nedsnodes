@@ -182,6 +182,23 @@ with tempfile.TemporaryDirectory() as temporary:
     check("a closed issue moves into issues-closed.md with its reason",
           "#9 — Ninth — closed 2026-08-20 (not_planned)" in closed_text2, closed_text2)
 
+    # --- a closed issue's Superseded-by: marker reaches its one line -------
+    mirror_dir_superseded = root / "m-superseded"
+    calls = []
+    fake_gh(calls, [([issue_node(31, "Thirty-one", state="CLOSED", state_reason="NOT_PLANNED",
+                             closed_at="2026-08-08T00:00:00Z",
+                             body="Covered elsewhere now.\n\nSuperseded-by: #46\n"),
+                      issue_node(32, "Thirty-two", state="CLOSED", state_reason="COMPLETED",
+                             closed_at="2026-08-09T00:00:00Z", body="Done.")], None)])
+    mirror.main(["--mirror-dir", str(mirror_dir_superseded), "--repo", "x/y"])
+    closed_superseded = (mirror_dir_superseded / mirror.CLOSED_FILE_NAME).read_text(encoding="utf-8")
+    check("a closed issue's Superseded-by: marker is written into its issues-closed.md line",
+          "#31 — Thirty-one — closed 2026-08-08 (not_planned) — Superseded-by: #46\n"
+          in closed_superseded, closed_superseded)
+    check("a closed issue with no marker keeps its line unchanged",
+          "#32 — Thirty-two — closed 2026-08-09 (completed)\n" in closed_superseded,
+          closed_superseded)
+
     # --- --full forces a full fetch even with a cache present --------------
     calls = []
     fake_gh(calls, [([issue_node(9, "Ninth", state="CLOSED", state_reason="NOT_PLANNED",
