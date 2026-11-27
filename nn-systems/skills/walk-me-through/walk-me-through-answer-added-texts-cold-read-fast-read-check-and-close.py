@@ -4233,8 +4233,10 @@ def heading_title(walk_finder, line):
     heading = walk_finder.approval_walk_item_heading_with_deferred_note_removed(line).replace("`", "")
     parts = UNNUMBERED_HEADING_PARTS.match(heading)
     title = parts[2] if parts else heading.lstrip("#")
+    # At most one separator, and a dash only when a space or emphasis follows it, so a title such as `--help` keeps
+    # its own leading hyphens, as the waits-on line naming it does.
     title = re.sub(r"^[*_\s]*items?\s+[\d.]+(?:\s*(?:,|&|\band\b|\bto\b|-|–)\s*[\d.]+)*\s+of\s+\d+\b"
-                   r"[*_\s:.\-–—]*", "", title, flags=re.I)
+                   r"[*_\s]*(?:[:.]|[-–—](?=[\s*_]))?[*_\s]*", "", title, flags=re.I)
     return squeezed(title.strip(" *_")).lower()
 
 

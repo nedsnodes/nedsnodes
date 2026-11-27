@@ -7296,6 +7296,24 @@ def test_an_item_can_wait_on_an_item_whose_title_ends_in_inline_code():
           shown == ["run `close`", "the waiting one", "Summary"], f"{shown}\n{walk_document(case)}")
 
 
+def test_an_item_can_wait_on_a_numbered_item_whose_title_starts_with_hyphens():
+    case = Case(next_to_present="item 1 of 9", document=ordered_walk(
+        numbered_item(2, "--help in one format"),
+        unshown_item("the waiting one", f"{CATEGORY_TAG}must_fix_now",
+                     "#approval_walk_item_waits_on --help in one format")))
+    shown = titles_shown_in_turn(case)
+    check("a waits-on line naming a numbered item whose title starts with `--` finds that item, and the item waiting "
+          "comes after it", shown == ["--help in one format", "the waiting one", "Summary"],
+          f"{shown}\n{walk_document(case)}")
+    program = load_program()
+    finder = program.load_walk_finder()
+    for heading in ("## Item 2 of 9: --help", "## Item 2 of 9 - --help", "## Item 2 of 9 \u2014 --help",
+                    "## **Item 2 of 9**: --help", "## **Item 2 of 9:** --help"):
+        title = program.heading_title(finder, heading)
+        check(f"`{heading}` has the title `--help`, the separator after its count taken out and the title's own "
+              "hyphens kept", title == "--help", repr(title))
+
+
 def test_a_category_tag_in_underscore_emphasis_is_read_without_the_closing_underscores():
     for tag in (f"_{CATEGORY_TAG}must_fix_now_", f"__{CATEGORY_TAG}must_fix_now__"):
         case = Case(next_to_present="item 1 of 9", document=ordered_walk(
