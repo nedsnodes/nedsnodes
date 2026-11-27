@@ -96,7 +96,7 @@ class StepFailed(Exception):
 
 GITHUB_ISSUE_OR_PULL_REQUEST_LINK = re.compile(
     r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/(?:issues|pull)/([0-9]+)")
-# GitHub's gateway errors, which pass: gh met them six times from 2026-10-26 to 2026-11-13 in this program.
+# GitHub's gateway errors, which pass after a moment.
 # `gh pr view` prints "HTTP 502: 502 Bad Gateway (...)", and `gh api` prints "gh: Bad Gateway (HTTP 502)".
 GH_GATEWAY_ERROR_PATTERN = re.compile(r"\bHTTP 50[24]\b")
 FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME = "pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py"

@@ -202,7 +202,8 @@ def merged_cross_reference(merged):
 
 # Issue 50's timeline in two pages, holding besides the merged pull requests that link to it: an open pull
 # request, an issue, another repository's merged pull request, all with a matching not-fixed line, and an event
-# that is no cross-reference. Pull request 7's timeline holds #102, which links it by the old name, and #101 again.
+# that is no cross-reference. Pull request 7's timeline holds the second merged pull request, which links it by
+# the old name, and the first one again.
 FOLLOW_UP_TIMELINES = {
     timeline_path(50): {"stdout": json.dumps([
         [merged_cross_reference(MERGED_PULL_REQUESTS[0]), {"event": "labeled"},
