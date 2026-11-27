@@ -55,10 +55,11 @@ def walk_in(root, minutes, document=WALK_DOCUMENT, name=WALK):
 def approved_line(walk, count_and_point, link, count):
     """The line the user approved for a waiting item with a page link, filled in."""
     return (f"Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
-            f"{link}. Before your first message, open that page with the Artifact tool. If it is gone, publish "
-            f"the item again from docs/walk/{walk}.md and append the line \"#item_page item {count} <new link>\" "
-            f"to docs/walk/{walk}-minutes.md. Show the item in full, and end your first message with its closing "
-            f"line, holding the link that opens.")
+            f"{link}. Before your first message, check, with the Artifact tool's read action, that the link "
+            f"still works. If the read fails, publish the item again from docs/walk/{walk}.md and append the line "
+            f"\"#item_page item {count} <new link>\" to docs/walk/{walk}-minutes.md. Show the item in full, and "
+            f"end your first message with the item's closing line, holding the link that works: this one, or "
+            f"the new link when you published again.")
 
 
 def without_link_line(walk, count_and_point, count):
@@ -118,6 +119,14 @@ def run_walk_minutes_cases(workspace):
     walk_in(root, "#next_to_present item 2 of 3\n#item_page item 1 of 3 https://claude.ai/artifact/ItemOne\n")
     check("no `#item_page` line for the waiting item: the line says so and says to publish it",
           lines_for(root) == (without_link_line(WALK, f"2 of 3, {POINT},", "2 of 3"),), repr(lines_for(root)))
+
+    root = workspace / "file-item-page"
+    file_link = "file:///Volumes/nedhome/agents/fixture/docs/walk/item-2.html"
+    walk_in(root, OPEN_MINUTES + f"#item_page item 2 of 3 {file_link}\n")
+    check("a newest `#item_page` line holding a `file:` link: the line keeps it and asks for no Artifact read",
+          lines_for(root) == (supervisor.WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE.format(
+              walk=WALK, count_and_point=f"2 of 3, {POINT},", count="2 of 3", link=file_link),)
+          and "Artifact tool's read action" not in lines_for(root)[0], repr(lines_for(root)))
 
     root = workspace / "publish-failed"
     walk_in(root, OPEN_MINUTES + "#item_page item 2 of 3 publish failed: the Artifact tool timed out\n")
@@ -277,7 +286,7 @@ def run_walk_minutes_cases(workspace):
     with contextlib.redirect_stdout(io.StringIO()):
         no_total = lines_for(root)
     check("several waiting items, no total, a later-named one with no heading: the `#item_page` line still has `of M`",
-          len(no_total) == 1 and no_total[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          len(no_total) == 1 and no_total[0].startswith(without_link_line(WALK, "1 of 3", "1 of 3"))
           and "`Item 2`" in no_total[0], repr(no_total))
 
     root = workspace / "several-items-no-total-first-named-one-without-heading"
@@ -287,7 +296,7 @@ def run_walk_minutes_cases(workspace):
     with contextlib.redirect_stdout(io.StringIO()):
         first_missing = lines_for(root)
     check("several waiting items, no total, the first-named one with no heading: the `#item_page` line still has `of M`",
-          len(first_missing) == 1 and first_missing[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          len(first_missing) == 1 and first_missing[0].startswith(without_link_line(WALK, "1 of 3", "1 of 3"))
           and "`Item 1`" in first_missing[0], repr(first_missing))
 
     root = workspace / "several-items-no-total-first-named-one-repeated"

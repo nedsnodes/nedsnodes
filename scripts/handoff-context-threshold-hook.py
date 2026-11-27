@@ -14,6 +14,14 @@ The open-pull-request watcher counts as a one-shot run, not a watcher, only when
 handled, and the one-shot run is counted as the watcher. Written with "=", it is no one-shot run:
 argparse refuses a value for the flag, and the command exits at once.
 
+Once before that, at the first turn end at which the count is at or above
+--get-ready-used-percentage and below the threshold, it tells the agent to start no new subagent
+and no 10-plus-minute background work, and that it may hand off whenever it is ready,
+and records that in <session>-handoff-get-ready-notice-sent; a count that passes both shares in
+one turn gets no such notice. The record is kept apart from <session>-handoff-deferred, because
+this hook, the cold-read-full-run guard hook and the writer script read that file's existence as
+the threshold having been passed.
+
 The post-compaction hook deletes only <session>-handoff-asked, so while <session>-handoff-deferred
 exists the hook still fires below the threshold once the awaited work has finished; it then
 moves that file to <session>-handoff-deferred-fired, where the writer script reads when the
@@ -77,6 +85,13 @@ def handoff_asked_marker_path(session_id: str) -> Path:
     return HANDOFF_DIRECTORY / f"{session_id}{HANDOFF_ASKED_MARKER_SUFFIX}"
 
 
+HANDOFF_GET_READY_NOTICE_SENT_MARKER_SUFFIX = "-handoff-get-ready-notice-sent"
+
+
+def handoff_get_ready_notice_sent_marker_path(session_id: str) -> Path:
+    return HANDOFF_DIRECTORY / f"{session_id}{HANDOFF_GET_READY_NOTICE_SENT_MARKER_SUFFIX}"
+
+
 def deferred_marker_path(session_id: str) -> Path:
     return handoff_deferred_marker_and_refused_commands_files_common.handoff_deferred_marker_path(
         HANDOFF_DIRECTORY, session_id)
@@ -99,6 +114,8 @@ DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000
 # scripts/agent-seat-due-task-raise-hook.py reads this to tell a handoff is due at the same Stop.
 DEFAULT_THRESHOLD_USED_PERCENTAGE = 33.0
 
+DEFAULT_GET_READY_USED_PERCENTAGE = 30.0
+
 FIRST_TAIL_READ_BYTES = 256 * 1024
 
 # Messages below follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
@@ -112,6 +129,28 @@ SHARE_WITH_COMPACTION_DROPPED = (
 HANDOFF_INSTRUCTION = (
     "[rule handoff-context-threshold-reached-run-handoff] This session has used {share} of its context window, which has "
     "reached the reincarnation threshold. Run the /handoff skill now."
+)
+
+HANDOFF_GET_READY_NOTICE = (
+    "[rule handoff-context-threshold-get-ready-no-new-subagents-or-10-plus-minute-work] Context at {share}: at "
+    "{threshold:g}% this agent-session is asked to hand off, and a subagent or background Bash "
+    "task still running then can delay the handoff by an hour or more; a detached program that "
+    "writes its result to a file does not. Start no new subagents, and no runs of the Workflow "
+    "tool, from now until the session-handoff: do the work yourself, or add it to your task list "
+    "for your successor. This overrides any instruction to dispatch a subagent. Start no "
+    "background Bash task that usually runs 10 minutes or longer, such as a cold-read-full-run: "
+    "add that work to your task list for your successor. From now on, at {get_ready:g}% context "
+    "or more, you may run the /handoff skill whenever nothing of yours is still running and you "
+    "reach a good stopping point, such as a finished pull request or an answered walk item; when "
+    "the only work left is on your task list for your successor, run it."
+)
+
+# Without the record, every later turn's end below the threshold repeats the notice.
+HANDOFF_GET_READY_NOTICE_NOT_RECORDED_LINE = (
+    "The threshold-hook could not write {path} ({problem}), so it repeats this notice and "
+    "this line at each turn's end until the context reaches {threshold:g}%. The second time you "
+    "see this line, tell the user once: \"On {host}, the threshold-hook cannot write {path}: "
+    "{problem}.\""
 )
 
 MODEL_ID_NOT_IN_CONTEXT_WINDOW_TABLE_LINE = (
@@ -131,9 +170,12 @@ CLAUDE_VERSION_TIMEOUT_SECONDS = 10
 
 # The approved ban on new work; the wait no longer counts work started after the deferral began.
 NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION = (
-    "Carry on, open approval-walks included. Short work, which usually ends "
+    "Carry on, open approval-walks included. Start no new subagents, and no "
+    "runs of the Workflow tool, from now until the session-handoff: do the work "
+    "yourself, or add it to your task list for your successor. This overrides "
+    "any instruction to dispatch a subagent. Short work, which usually ends "
     "within 10 minutes, such as a cold-read-fast-read, may start. Work you leave "
-    "running when your turn ends must run as a subagent, a background Bash task, "
+    "running when your turn ends must run as a background Bash task "
     "or a detached process, such as one started with setsid or systemd-run --user, "
     "that writes its result to a file; name that file in your next-step file, "
     "since the handoff writer script cannot name that process. A command or an "
@@ -146,8 +188,8 @@ NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION = (
     "whether to start it again. Write work the "
     "writer could not list into a new next-step file that holds your next step "
     "and names that work, and run the writer again with --next-step-file. Do not "
-    "start long work, such as a cold-read-full-run or a pull-request review: add "
-    "it to your task list for your successor."
+    "start 10-plus-minute work, such as a cold-read-full-run or a pull-request "
+    "review: add it to your task list for your successor."
 )
 
 HANDOFF_DEFERRED_MARKER_NOT_DELETED = (
@@ -1033,6 +1075,21 @@ def defer(session_id, used, share, flight, arguments, unreadable_marker_problem=
     return 2  # exit 2 surfaces stderr to the agent as a system message
 
 
+def send_handoff_get_ready_notice(session_id, used, share, arguments) -> int:
+    lines = [HANDOFF_GET_READY_NOTICE.format(share=share, threshold=arguments.threshold_used_percentage,
+                                             get_ready=arguments.get_ready_used_percentage)]
+    record = handoff_get_ready_notice_sent_marker_path(session_id)
+    try:
+        HANDOFF_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        record.write_text(f"{used:.1f}\n", encoding="utf-8")
+    except OSError as problem:
+        lines.append(HANDOFF_GET_READY_NOTICE_NOT_RECORDED_LINE.format(
+            path=record, problem=problem, threshold=arguments.threshold_used_percentage,
+            host=socket.gethostname()))
+    print("\n".join(lines), file=sys.stderr)
+    return 2
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Fire the handoff skill when context runs low.",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -1045,6 +1102,13 @@ def main(argv=None) -> int:
         "--ceiling-used-percentage", type=float, default=65.0,
         help="the share of the context window, in percent, at or above which the context used "
              "plus the tokens compactions dropped fires the handoff even with work in flight",
+    )
+    parser.add_argument(
+        "--get-ready-used-percentage", type=float, default=DEFAULT_GET_READY_USED_PERCENTAGE,
+        help="the share of the context window, in percent, at or above which, and below the "
+             "reincarnation threshold, the context used plus the tokens compactions dropped "
+             "makes the hook tell the agent once to start no new subagent and no 10-plus-minute "
+             "background work, and that it may hand off whenever it is ready",
     )
     arguments = parser.parse_args(argv)
 
@@ -1070,6 +1134,11 @@ def main(argv=None) -> int:
     share = (SHARE_WITH_COMPACTION_DROPPED.format(
                  used_percentage=100.0 * used_tokens / window, used_plus_dropped_percentage=used)
              if dropped_tokens else f"{used:.0f}%")
+    if (arguments.get_ready_used_percentage <= used < arguments.threshold_used_percentage
+            and not deferred_marker_path(session_id).exists()
+            and not handoff_asked_marker_path(session_id).exists()
+            and not handoff_get_ready_notice_sent_marker_path(session_id).exists()):
+        return send_handoff_get_ready_notice(session_id, used, share, arguments)
     # The count can fall below the threshold after a deferral, as when the session moves to a model
     # with a larger window; a compaction does not lower it. The deferred marker records that the
     # threshold was passed, so the handoff its notice promised still comes.

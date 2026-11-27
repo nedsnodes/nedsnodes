@@ -350,6 +350,10 @@ def run_release_cases(root):
           alerts.user_alerts_claimed_delete_if_recorded_in_approval_walk_minutes_else_release_to_pending_after_30_minutes(now=NOW) is None)
 
 
+check("a `#user_alert` line is read in its open form and in its closed form, with the closing `#`",
+      alerts.USER_ALERT_LINE.findall("  #user_alert open-id\n  #user_alert# closed-id\n") == ["open-id", "closed-id"],
+      repr(alerts.USER_ALERT_LINE.findall("  #user_alert open-id\n  #user_alert# closed-id\n")))
+
 with tempfile.TemporaryDirectory() as temporary_directory:
     scratch = Path(temporary_directory)
     run_write_cases(scratch)

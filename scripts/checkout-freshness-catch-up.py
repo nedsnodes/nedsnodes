@@ -154,12 +154,16 @@ _stop_hooks_stay_silent_rule_specification = importlib.util.spec_from_file_locat
 stop_hooks_stay_silent_rule = importlib.util.module_from_spec(_stop_hooks_stay_silent_rule_specification)
 _stop_hooks_stay_silent_rule_specification.loader.exec_module(stop_hooks_stay_silent_rule)
 
-_rebase_or_replace_spec = importlib.util.spec_from_file_location(
-    "pull_request_conflict_with_main_rebase_or_replace_answer_common",
+_branch_lock_spec = importlib.util.spec_from_file_location(
+    "branch_rebase_and_push_per_checkout_mutual_exclusion_lock_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
-rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
-_rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
+    / "branch-rebase-and-push-per-checkout-mutual-exclusion-lock-common.py")
+branch_lock = importlib.util.module_from_spec(_branch_lock_spec)
+_branch_lock_spec.loader.exec_module(branch_lock)
+
+# Well under the Stop hook's 60-second default, which the fetch before it also spends. A turn end
+# that cannot take the lock leaves the checkout as it is; the next turn end catches it up.
+CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = 20
 
 _reusable_prompt_rule_spec = importlib.util.spec_from_file_location(
     "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common",
@@ -1470,6 +1474,16 @@ def catch_up_session_checkout(checkout: Path, interval_seconds: int) -> None:
     branch = current_branch(checkout)
     if branch is None:
         return
+    # Held from deciding the branch was never pushed until any rebase ends, so the turn-end push
+    # hook, running in parallel, pushes the branch either before that decision or after the rebase.
+    with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(
+            git_dir, CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS) as held:
+        if held:
+            catch_up_session_checkout_branch_under_lock(checkout, git_dir, stamp_path, stamp, branch)
+
+
+def catch_up_session_checkout_branch_under_lock(checkout: Path, git_dir: Path, stamp_path: Path,
+                                                stamp: dict, branch: str) -> None:
     state_key, state_text = head_state(checkout, branch)
 
     # 1. Misbehaviour, to the agent, once per distinct finding of each
@@ -1550,10 +1564,7 @@ def catch_up_session_checkout(checkout: Path, interval_seconds: int) -> None:
     # files just changed under the agent, and that is never deduplicated. A
     # skip or a conflict is told once per key, but ATTEMPTED every turn end,
     # so the moment the tree is clean it goes.
-    # A never-pushed branch has no pull request on origin.
-    if state_key == "unpushed" and (
-            rebase_or_replace.pull_request_conflict_with_main_rebase_or_replace_answer(False)
-            == rebase_or_replace.REBASE_ONTO_MAIN):
+    if state_key == "unpushed":
         outcome, detail = rebase_never_pushed_branch(checkout, git_dir)
         if outcome == "rebased":
             stamp["behind"], stamp["ahead"] = 0, stamp.get("own")

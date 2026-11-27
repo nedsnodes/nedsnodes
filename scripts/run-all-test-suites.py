@@ -248,8 +248,12 @@ SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI, names the suites
 from the scripts/run-all-test-suites.py of the checkout whose suites the run
 tests, parsed and never run. A list that file lacks, or assigns the set it
 was before it became a dict, as an older checkout does, is taken from this
-file instead; the report names each file that supplied a list. A run refuses, exit 2, when that file binds one of the four any other
-way, such as to a dict not written out literally.
+file instead; the report names each file that supplied a list. A run refuses, exit 2, when the last
+top-level assignment to one of the four gives it a value not written out literally, such as a dict
+built by a call, or when the file binds it only by another statement, such as a `for` loop, an
+augmented assignment or an assignment inside an `if` block. Such a statement after a literal
+assignment is not seen, so the literal value is read. A `def`, `class` or `import ... as` of
+the name is not seen either, so the list is taken from this file as if the checkout lacked it.
 A suite bwrap reports as exiting 128+N is reported as killed by signal N;
 sandbox-exec replaces itself with the suite, so a suite's exit passes through.
 
@@ -2698,16 +2702,18 @@ def copy_lines_of_suite_output(stream, log, started, cases):
                       "unix_time": time.time()})
 
 
-def test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(cases):
+def test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(
+        cases, skipped_texts=()):
     """Give each FAIL case the name its suite's other case lines show it has.
 
     A FAIL line prints a case's name, then ": " and a detail, and a name may itself hold ": ",
     as in "--failures-only: prints X", so the line alone cannot say where the name ends. The
     name is the shortest prefix of the line's text, ending just before a ": ", that no PASS case
     of the suite has as its name or as the start of its name followed by ": ", and that no other
-    FAIL line of the suite starts with followed by ": "; when there is none, the whole text."""
+    FAIL line, nor any of skipped_texts, the suite's SKIP lines' case texts, starts with
+    followed by ": "; when there is none, the whole text."""
     passed = [case["name"] for case in cases if case["verdict"] == "PASS"]
-    failing = [case["text"] for case in cases if case["verdict"] == "FAIL"]
+    failing = [case["text"] for case in cases if case["verdict"] == "FAIL"] + list(skipped_texts)
     for case in cases:
         if case["verdict"] != "FAIL":
             continue
@@ -2782,7 +2788,7 @@ def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):
         failed_after_last_case = int(bool(cases) and result["exit"] != 0 and not failed)
         suite_element = xml.etree.ElementTree.SubElement(
             root, "testsuite", name=result["suite"],
-            tests=str(len(cases) + failed_after_last_case if cases else 1),
+            tests=str((len(cases) + failed_after_last_case if cases else 1) + len(result["skips"])),
             failures=str(failed + failed_after_last_case if cases else int(result["exit"] != 0)),
             skipped=str(len(result["skips"])), time=f"{result['seconds']:.3f}",
             ran_to_the_end=str(test_suite_ran_to_the_end(result)).lower(),
@@ -3679,14 +3685,16 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
         counters)
     if killed_at_memory_ceiling and exit_code == 0:
         exit_code = -signal.SIGKILL
+    skips = skipped_case_lines(log_file)
     result = {
         "suite": suite,
         "exit": exit_code,
         "seconds": seconds,
         "log": log_file,
-        "skips": skipped_case_lines(log_file),
+        "skips": skips,
         "cases": test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(
-            list(cases)),
+            list(cases), [skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker(line)
+                          for line in skips]),
         "output_note": output_note,
         "cpu_seconds": None,
         "peak_memory_bytes": None,

@@ -67,6 +67,24 @@ def read_merge_account_token():
     return token
 
 
+def fix_round_reviewed_whole_because(git, checkout, head_reviewed_before, head):
+    """Return why a fix-round is reviewed whole, from the merge base with main, or None.
+
+    `git(checkout, *arguments)` runs git and returns its stripped output. The same
+    two checks as pull-request-review-plan.py's for reviewing a fix-round whole: a
+    diff from the earlier head across a merge of main holds main's changes, and one
+    from a commit the head does not descend from holds the rewrite.
+    """
+    merges = git(checkout, "rev-list", "--merges", "--first-parent",
+                 f"{head_reviewed_before}..{head}").split()
+    if merges:
+        return (f"the commits since the nn-head-commit reviewed before hold merge commit(s) "
+                f"{', '.join(merge[:12] for merge in merges)}")
+    if int(git(checkout, "rev-list", "--count", f"{head}..{head_reviewed_before}")):
+        return "the head does not descend from the nn-head-commit reviewed before"
+    return None
+
+
 def add_directory_options(parser, holds):
     """Add the three directory options; holds names what the outputs directory holds."""
     parser.add_argument("--merge-lane-worktrees-and-outputs-directory", type=Path,

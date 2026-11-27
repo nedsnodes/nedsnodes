@@ -115,9 +115,12 @@ task saying how to repair it, and never becomes a new baseline, which would
 drop the events since the last run; --poll-once-write-baseline makes the first
 state file. Each successful poll also assigns reviews as above; its
 REVIEW-ASSIGNED lines, and a WATCH line saying assignment stopped, go to the
-event file, the WATCH line once per case as the state file records. A run that
-cannot append them puts the assignment file back as it was, so the next run
-that can append deals those pull requests again. A failed
+event file, the WATCH line once per case as the state file records. A run whose
+append fails keeps the deal of each pull request whose REVIEW-ASSIGNED line the
+event file holds, or of every one when the file cannot be read back, names those
+pull requests in its failure task, since a failed append may not survive a crash,
+and puts the rest back out of the assignment file, so the next run that can
+append deals them again. A failed
 poll keeps the state, assigns nothing, and only
 WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK failed polls in a row open a task.
 Not detected: a run killed between writing the assignment file and appending
@@ -128,6 +131,14 @@ writing the task fails at that failed poll, the rest of the same outage, which
 opens no task; and a task list directory that does not exist, so that each
 failure reaches only the cron log. With another --repo, --poll-once needs its own
 --poll-once-directory, so that the default state is never another repository's.
+With the default --repo, each --poll-once run then starts the merge queue's merges:
+when the merge queue file holds a waiting line, it runs the merge queue program's
+merge-batch-start --quiet, which starts nothing while a merge batch runs or the stop
+file exists. It starts one only when the queue file's size or an open pull request's
+nn-head-commit, or the set of open pull requests, has changed since the last start, so a
+stacked line the last batch passed over waits for its parent's merge. A run with no waiting line, or whose merge-batch-start prints nothing,
+writes no task and sends no message; an unreadable queue file, or a merge-batch-start
+that fails or hangs, opens one task.
 A cron run, the loop watcher and the seed each hold a lock file
 beside the assignment file from reading it to replacing it.
 
@@ -224,6 +235,10 @@ MAC_CLAUDE_ACCOUNT = "mac-claude"
 
 # A short redaction pattern would corrupt ordinary output; reject invalid credentials at startup.
 MINIMUM_PLAUSIBLE_TOKEN_CHARS = 8
+
+MERGE_QUEUE_PROGRAM = Path(__file__).resolve().with_name(
+    "merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py")
+MERGE_BATCH_START_TIMEOUT_SECONDS = 60
 
 OPEN_PULL_REQUESTS_QUERY = """
 query($owner: String!, $name: String!, $cursor: String) {
@@ -714,10 +729,13 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
     """Deal the pull requests with no assignment, write them to the assignment file, and return
     a REVIEW-ASSIGNED event line for each one the file holds afterwards. A failure passes a WATCH
     line to report_stop each time its case differs from the last poll's, as state records.
-    record_assigned_lines, when given, is called with those lines while the lock is held; when it
-    raises OSError, the assignment file is put back as it was and the error raised again, so the
-    next poll deals those pull requests again. When putting it back fails too, the raised OSError
-    names the pull requests the file keeps with no REVIEW-ASSIGNED line recorded."""
+    record_assigned_lines, when given, is called with those lines while the lock is held. When it
+    raises OSError, the assignment file keeps the deal of each pull request whose line the error
+    names as in the event file (EventLinesAppendFailed.written_lines), or every deal when the
+    event file could not be read back, and loses the others, so the next poll deals those again;
+    the OSError raised then names the kept pull requests, whose lines a failed append may not keep
+    through a crash. When putting the file back fails too, it names the pull requests the file
+    keeps with no REVIEW-ASSIGNED line recorded."""
 
     def stop(case, message):
         if state.get("stopped") != case:
@@ -772,16 +790,38 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
             try:
                 record_assigned_lines(assigned_lines)
             except OSError as error:
-                try:
-                    merge_lane_pull_request_review_assignments_file_write(path, text)
-                except OSError as put_back_error:
-                    raise OSError(
-                        f"{error}; and the assignment file {path} could not be put back as it was "
-                        f"({put_back_error}), so it assigns these pull requests although no "
-                        f"REVIEW-ASSIGNED line for them was recorded: "
-                        + "; ".join(assigned_lines)
-                        + ". Send each to its merge-lane agent-seat yourself") from error
-                raise
+                written = getattr(error, "written_lines", [])
+                read_back = getattr(error, "read_back", True)
+                # A deal whose line reached, or may have reached, the event file stands: dealing it
+                # again could send the pull request to a second agent-seat.
+                kept = [(deal, line) for deal, line in zip(dealt, assigned_lines)
+                        if line in written or not read_back]
+                put_back = [line for line in assigned_lines if read_back and line not in written]
+                message = str(error)
+                if kept:
+                    message += (
+                        f". The assignment file {path} keeps these pull requests, whose "
+                        f"REVIEW-ASSIGNED lines the event file "
+                        + ("held" if read_back else "may hold")
+                        + " after the failed append: " + "; ".join(line for _, line in kept)
+                        + ". Those lines may not survive a crash, because the append failed. For "
+                        "each one the event file does not hold, forward the line to its merge-lane "
+                        "agent-seat as you forward REVIEW-ASSIGNED lines")
+                if put_back:
+                    try:
+                        merge_lane_pull_request_review_assignments_file_write(
+                            path, text + separator + "".join(
+                                f"{pull_request['number']} {lane}\n" for (pull_request, lane), _ in kept))
+                    except OSError as put_back_error:
+                        raise OSError(
+                            f"{message}; and the assignment file {path} could not be put back "
+                            f"({put_back_error}), so it assigns these pull requests although no "
+                            f"REVIEW-ASSIGNED line for them was recorded: "
+                            + "; ".join(put_back)
+                            + ". Send each to its merge-lane agent-seat yourself") from error
+                if isinstance(error, EventFileCutBackFailed):
+                    raise
+                raise OSError(message) from error
         return assigned_lines
 
 
@@ -876,7 +916,17 @@ def merge_lane_pull_request_review_assignments_list(path, lane, repo, token, opt
     """Print the lane's open pull requests that are not drafts, and whether each waits for its
     verdict. Return the exit status."""
     try:
-        assignments = merge_lane_pull_request_review_assignments_file_read(path)
+        # The lock keeps the read from seeing a deal that a failed append is about to put back.
+        lock = merge_lane_pull_request_review_assignments_file_lock(path)
+    except OSError as error:
+        warn(f"merge-lane-open-prs-watch-and-reviewer-assign: cannot list {lane}'s pull requests, because "
+             f"the lock file beside the assignment file {path} cannot be opened or locked ({error}).\n"
+             f"  Tell merge-lane-2, which runs the watcher, quoting this message.\n"
+             f"  If you are a subagent, report this message to the agent that dispatched you instead of acting on it.")
+        return 1
+    try:
+        with lock:
+            assignments = merge_lane_pull_request_review_assignments_file_read(path)
     except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
         warn(f"merge-lane-open-prs-watch-and-reviewer-assign: cannot list {lane}'s pull requests, because "
              f"{error}. merge-lane-2's open-pull-request watcher meets the same failure, and "
@@ -978,14 +1028,102 @@ def event_file_line_count(path):
         return 0
 
 
+class EventLinesAppendFailed(OSError):
+    """An append to the event file failed after it opened the file. written_lines holds the lines
+    of the append the file holds whole at the append's offset, in order, which may not survive a
+    crash; read_back is False when the file could not be read back, so any line may be there."""
+
+    def __init__(self, message, written_lines, read_back):
+        super().__init__(message)
+        self.written_lines = written_lines
+        self.read_back = read_back
+
+
+class EventFileCutBackFailed(OSError):
+    """The event file ends inside a line, and the bytes after its last newline could not be cut."""
+
+
+def event_file_cut_back_to_last_whole_line(path):
+    """Cut the bytes after the event file's last newline, which an append that stopped inside a
+    line leaves, so that the next line does not glue onto them. Raises EventFileCutBackFailed when
+    they cannot be cut."""
+    try:
+        with path.open("rb") as events:
+            end = events.seek(0, os.SEEK_END)
+            if end == 0:
+                return
+            events.seek(end - 1)
+            if events.read(1) == b"\n":
+                return
+            while end > 0:
+                start = max(0, end - 65536)
+                events.seek(start)
+                chunk = events.read(end - start)
+                newline = chunk.rfind(b"\n")
+                if newline >= 0:
+                    end = start + newline + 1
+                    break
+                end = start
+    except FileNotFoundError:
+        return
+    try:
+        os.truncate(path, end)
+    except OSError as error:
+        raise EventFileCutBackFailed(
+            f"the event file {path} ends inside a line, which a failed append left, and the poll "
+            f"could not cut that line back ({error}), so this poll recorded nothing. Each later "
+            f"poll cuts the line back itself before it records, so polls record again once the "
+            f"cut works. Fix what the error names; do not edit the event file by hand. When a "
+            f"later poll has recorded events, mark this task completed") from error
+
+
 def event_lines_append(path, lines, now):
+    """Append the lines, each after the UTC time. Raises EventLinesAppendFailed when the append
+    fails after the file is opened, and OSError when it cannot be opened or ends inside a line
+    that cannot be cut back."""
     if not lines:
         return
+    # The caller's lock keeps other writers out, so bytes after the last newline are a failed
+    # append's.
+    event_file_cut_back_to_last_whole_line(path)
     stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    with path.open("a", encoding="utf-8", errors="replace") as events:
-        events.write("".join(f"{stamp} {redact_secrets(line)}\n" for line in lines))
-        events.flush()
-        os.fsync(events.fileno())
+    encoded = [f"{stamp} {redact_secrets(line)}\n".encode("utf-8", errors="replace") for line in lines]
+    start = None
+    try:
+        with path.open("ab") as events:
+            start = events.tell()
+            events.write(b"".join(encoded))
+            events.flush()
+            os.fsync(events.fileno())
+    except OSError as error:
+        if start is None:
+            raise
+        held = event_file_count_of_appended_lines_found_whole_from_append_offset(path, start, encoded)
+        if held is None:
+            raise EventLinesAppendFailed(
+                f"{error}; the event file {path} could not be read back, so it may hold any of "
+                f"this append's {len(lines)} lines", [], read_back=False) from error
+        raise EventLinesAppendFailed(
+            f"{error}; the event file {path} holds {held} of this append's {len(lines)} lines",
+            lines[:held], read_back=True) from error
+
+
+def event_file_count_of_appended_lines_found_whole_from_append_offset(path, offset, encoded_lines):
+    """Return how many of the encoded lines the file holds whole, in order, from the offset, or
+    None when it cannot be read."""
+    try:
+        with path.open("rb") as events:
+            events.seek(offset)
+            found = events.read(sum(len(line) for line in encoded_lines))
+    except OSError:
+        return None
+    held = 0
+    for line in encoded_lines:
+        if not found.startswith(line):
+            break
+        found = found[len(line):]
+        held += 1
+    return held
 
 
 def open_task_with_subject_exists(task_list_directory, subject):
@@ -1069,6 +1207,79 @@ def poll_once_write_baseline(arguments, token, state_path, events_path):
     return 0
 
 
+def merge_queue_program_module():
+    spec = importlib.util.spec_from_file_location("merge_lane_merge_queue_program", MERGE_QUEUE_PROGRAM)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def merge_batch_start_inputs(arguments, state):
+    """What a merge batch acts on: the merge queue file's size and each open pull request's
+    nn-head-commit. A batch passes a stacked pull request over without appending a line, so
+    its line keeps waiting; a batch started again with these unchanged would only pass it over
+    again."""
+    return [os.path.getsize(arguments.merge_queue_file),
+            sorted([int(number), seen["head_sha"]] for number, seen in state["pull_requests"].items())]
+
+
+def merge_batch_started_when_lines_wait(arguments, task_list_directory, state, state_path):
+    """Run the merge queue program's merge-batch-start --quiet when the merge queue file holds
+    a waiting line and something the batch acts on has changed since the last start, and
+    return the exit status. Nothing waiting, nothing changed, a merge batch already running
+    and a stop file all print nothing and write no task, so merge-lane-2 hears only of a
+    failure."""
+    queue = merge_queue_program_module()
+    runner = queue.MergeQueuePullRequestMergeBatchRunner(queue.parse_arguments(
+        ["--merge-queue-file", str(arguments.merge_queue_file), "merge-batch-list-waiting"]))
+    try:
+        waiting = runner.waiting(runner.queue_lines())
+    except (queue.Stop, OSError) as error:
+        return failure_reported(task_list_directory, "the merge queue file cannot be read",
+                                f"{arguments.merge_queue_file}: {error}. No merge batch starts "
+                                f"until it can be read; repair it, and the next run starts one.")
+    if not waiting:
+        return 0
+    try:
+        inputs = merge_batch_start_inputs(arguments, state)
+    except OSError as error:
+        return failure_reported(task_list_directory, "the merge queue file cannot be read",
+                                f"{arguments.merge_queue_file}: {error}. No merge batch starts "
+                                f"until it can be read; repair it, and the next run starts one.")
+    if state.get("merge_batch_started_for") == inputs:
+        return 0
+    command = [sys.executable, str(arguments.merge_queue_program),
+               "--merge-queue-file", str(arguments.merge_queue_file),
+               *(["--merge-batches-directory", str(arguments.merge_batches_directory)]
+                 if arguments.merge_batches_directory is not None else []),
+               *(["--merge-program-outputs-directory", str(arguments.merge_program_outputs_directory)]
+                 if arguments.merge_program_outputs_directory is not None else []),
+               "merge-batch-start", "--quiet"]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                   timeout=MERGE_BATCH_START_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return failure_reported(task_list_directory, "merge-batch-start did not finish",
+                                f"{shlex.join(command)} ran over {MERGE_BATCH_START_TIMEOUT_SECONDS} "
+                                f"seconds and was killed; it only checks files and starts a "
+                                f"process, so run it by hand to see where it hangs.")
+    output = (completed.stdout + completed.stderr).strip()
+    if output:
+        emit(f"merge-batch-start: {output}")
+    if completed.returncode != 0:
+        return failure_reported(task_list_directory, "merge-batch-start failed",
+                                f"{shlex.join(command)} exited {completed.returncode}: "
+                                f"{one_line_snippet(output or 'no output', FAILURE_REASON_SNIPPET_CHARS)}")
+    state["merge_batch_started_for"] = inputs
+    try:
+        poll_state_write(state_path, state)
+    except OSError as error:
+        return failure_reported(task_list_directory, "it could not record the merge batch start",
+                                f"{state_path}: {error}. Until it can, every run starts a merge "
+                                f"batch while a line waits, even when nothing has changed.")
+    return 0
+
+
 def poll_once(arguments, assignments_file, options_in_use):
     """One cron run: see the module docstring. assignments_file is None when no review is
     assigned. Return the exit status."""
@@ -1130,14 +1341,20 @@ def poll_once(arguments, assignments_file, options_in_use):
             events_task_opened_when_due(state, state_path, events_path, task_list_directory, now)
         except PollStateUnusable as error:
             return failure_reported(task_list_directory, "its state cannot be used", str(error))
+        except EventFileCutBackFailed as error:
+            # Its own subject, so an open append-failure task does not swallow it.
+            return failure_reported(task_list_directory, "its polls record nothing until the event "
+                                    "file's last line is cut back", str(error))
         except OSError as error:
             return failure_reported(task_list_directory, "it could not record or deliver events",
                                     f"{error}. The state file still holds the last run that "
                                     f"recorded its events, so the first run after this is repaired "
                                     f"finds this run's events again; lines already in "
                                     f"{events_path} reach a later events task.")
+        merge_batch_status = (merge_batch_started_when_lines_wait(arguments, task_list_directory, state, state_path)
+                              if arguments.merge_queue_file is not None else 0)
         if reason is None:
-            return 0
+            return merge_batch_status
         snippet = one_line_snippet(reason, FAILURE_REASON_SNIPPET_CHARS)
         if state["failed_polls"] == WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK:
             return failure_reported(
@@ -1210,6 +1427,17 @@ def parse_arguments(argv):
                              f"{MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE} with the "
                              "default --repo; with another --repo, none, and no review is "
                              "assigned)")
+    parser.add_argument("--merge-queue-file", type=Path,
+                        help="the merge queue file whose waiting lines make --poll-once start a "
+                             "merge batch (default: the merge queue program's own with the default "
+                             "--repo; with another --repo, none, and no merge batch is started)")
+    parser.add_argument("--merge-queue-program", type=Path, default=MERGE_QUEUE_PROGRAM,
+                        help="the merge queue program --poll-once runs merge-batch-start --quiet of "
+                             "(default: %(default)s)")
+    parser.add_argument("--merge-batches-directory", type=Path,
+                        help="passed to the merge queue program when given")
+    parser.add_argument("--merge-program-outputs-directory", type=Path,
+                        help="passed to the merge queue program when given")
     # Each of these exits instead of watching, so it shares the group of the ways to watch.
     when_to_exit.add_argument(
         "--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit",
@@ -1249,6 +1477,8 @@ def main(argv=None):
     # The default file holds the default repository's pull request numbers only.
     if assignments_file is None and repo_is_default:
         assignments_file = MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
+    if arguments.merge_queue_file is None and repo_is_default and arguments.poll_once:
+        arguments.merge_queue_file = merge_queue_program_module().DEFAULT_MERGE_QUEUE_FILE
     options_in_use = [*(["--repo", arguments.repo] if not repo_is_default else []),
                       *(["--token-file", arguments.token_file]
                         if arguments.token_file != DEFAULT_TOKEN_FILE else [])]

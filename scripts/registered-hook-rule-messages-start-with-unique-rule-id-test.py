@@ -62,10 +62,6 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     (".claude/guard-hooks/bash-guard-hooks-dispatcher.py", "GUARD_LIST_FIX_LINE"): LATER_PART,
     # fork A
     (".claude/guard-hooks/claude-code-tmux-kill-server-and-kill-session-missing-server-selection-refusal-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
-    (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
-    (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "UNCHECKED_NOTE_FIRST_LINE"): HOOK_FAILED,
-    (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "UNCHECKED_NOTE_NO_RETRY_TEMPLATE"): HOOK_FAILED,
-    (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "UNCHECKED_NOTE_RETRY_TEMPLATE"): HOOK_FAILED,
     (".claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py", "CLOSE_LINES"): LATER_PART,
     (".claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py", "LABELS_ONLY_LINE"): LATER_PART,
     (".claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
@@ -125,6 +121,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "DECIDED_BY_MODEL_NOTICE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "MODEL_CHECK_FAILED_NOTICE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "NOT_LOGGED_NOTICE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "REPLY_LINE_MODEL_ASK_OR_NOT_LABELS_NOT_LOGGED_NOTICE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "NO_PAGE_TEMPLATE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "NO_WALK_REFUSAL_INSTRUCTIONS"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "REFUSAL_INSTRUCTIONS"): LATER_PART,
@@ -165,14 +162,16 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "RECOMMENDATION_UNKNOWN_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "REPEAT_PAGE_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "REPEAT_UNPUBLISHED_LINES"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "MORE_RESPONSES_SEVERAL_ITEMS_LINE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "MORE_RESPONSES_CLOSING_LINE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "MORE_RESPONSES_UNPUBLISHED_LINES"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_FIX_APPROVAL_WALK_ITEM_TEXT_UNREADABLE_FROM_WALK_DOCUMENT_BEFORE_PUBLISHING_ITEM_PAGE_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "RIDER_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "WALK_ME_THROUGH_USER_SHORT_ANSWER_WITH_USER_ADDED_WORDS_WHEN_NO_APPROVAL_WALK_IS_OPEN_AGENT_INSTRUCTION_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "TRANSCRIPT_UNREADABLE_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "USER_REPLY_LINE"): LATER_PART,
     ("scripts/agent-seat-due-task-prerequisites-recording-reminder-after-task-create-hook.py", "FAULT_LINE_TEMPLATE"): HOOK_FAILED,
     ("scripts/agent-seat-due-task-prerequisites-recording-reminder-after-task-create-hook.py", "TASK_ID_CLAUSE_TEMPLATE"): LATER_PART,
-    ("scripts/agent-seat-due-task-raise-hook.py", "BUDGET_SKIPPED_INSTRUCTIONS"): LATER_PART,
-    ("scripts/agent-seat-due-task-raise-hook.py", "BUDGET_SKIPPED_TASK_LINE_TEMPLATE"): HOOK_FAILED,
     ("scripts/agent-seat-due-task-raise-hook.py", "CLOSED_WITHOUT_MERGING_INSTRUCTIONS"): LATER_PART,
     ("scripts/agent-seat-due-task-raise-hook.py", "DEFER_INSTRUCTION"): LATER_PART,
     ("scripts/agent-seat-due-task-raise-hook.py", "NEXT_ACTION_HELD_TASKS_LINE"): LATER_PART,
@@ -225,6 +224,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/cold-read-fast-read-due-for-linked-document-reminder-hook.py", "UNCHECKED_INSTRUCTION"): LATER_PART,
     ("scripts/cold-read-fast-read-due-for-linked-document-reminder-hook.py", "UNCHECKED_STDERR_LINE"): HOOK_FAILED,
     ("scripts/file-name-collision-warning-hook.py", "GIT_FAILURE_TEMPLATE"): HOOK_FAILED,
+    ("scripts/handoff-context-threshold-hook.py", "HANDOFF_GET_READY_NOTICE_NOT_RECORDED_LINE"): LATER_PART,
     ("scripts/handoff-context-threshold-hook.py", "MARKER_NOT_WRITTEN_LINE"): LATER_PART,
     ("scripts/handoff-context-threshold-hook.py", "MODEL_ID_NOT_IN_CONTEXT_WINDOW_TABLE_LINE"): LATER_PART,
     ("scripts/handoff-context-threshold-hook.py", "NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION"): LATER_PART,
@@ -267,6 +267,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/obsolete-file-edit-warning-hook.py", "PUSHED_NO_OVERLAP_LINE"): LATER_PART,
     ("scripts/obsolete-file-edit-warning-hook.py", "PUSHED_OVERLAP_LINE"): LATER_PART,
     ("scripts/obsolete-file-edit-warning-hook.py", "RECORD_WRITE_FAILED_LINE"): LATER_PART,
+    ("scripts/obsolete-file-edit-warning-hook.py", "UNDO_ONLY_THIS_EDIT_LINES"): LATER_PART,
     ("scripts/post-compaction-session-continues-hook.py", "FAULT_LINE"): LATER_PART,
     ("scripts/post-compaction-session-continues-hook.py", "MARKER_PATH_NOT_CLEARED_INSTRUCTION"): LATER_PART,
     ("scripts/post-compaction-session-continues-hook.py", "MARKER_PATH_UNKNOWN_INSTRUCTION"): LATER_PART,
@@ -274,7 +275,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/style-guide-word-checker-markdown-edit-hook-hack.py", "HIT_LINE"): LATER_PART,
     ("scripts/style-guide-word-checker-markdown-edit-hook-hack.py", "MORE_HITS_LINE"): LATER_PART,
     ("scripts/uncommitted-work-snapshot-hook.py", "NOT_PROTECTED_MESSAGE"): HOOK_FAILED,
-    ("scripts/uncommitted-work-snapshot-hook.py", "OWNER_FILE_NOT_WRITTEN_MESSAGE"): HOOK_FAILED,
+    ("nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py", "BRANCHES_NOT_FULLY_ON_GITHUB_NEXT_STEP_MESSAGE"): LATER_PART,
 }
 
 # Hook path: why the hook prints no message for a rule.
@@ -283,14 +284,13 @@ HOOKS_THAT_PRINT_NO_RULE_MESSAGE = {
     "nn-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py": "prints only the worktree path Claude Code reads, or its own failure",
     "nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py": "it only puts the conversation-tail's last lines, written by the handoff-supervisor, above the successor's first message on the user's screen, which the agent does not see",
     "nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py": "it shows the user a systemMessage, which the agent does not see, and otherwise reports only its own failure",
-    "scripts/uncommitted-work-snapshot-hook.py": "it speaks only when it could not keep a work-snapshot or write a worktree's owner file, which reports its own failure",
+    "scripts/uncommitted-work-snapshot-hook.py": "it speaks only when it could not keep a work-snapshot, which reports its own failure",
 }
 
 # (hook path, rule ID): every message constant of that hook the ID opens, when it opens
 # more than one; each is a variant of the one rule's message.
 MESSAGE_VARIANTS_OF_ONE_RULE = {
     (".claude/guard-hooks/claude-code-tmux-kill-server-and-kill-session-missing-server-selection-refusal-hook.py", "bash-guard-tmux-kill-without-socket-option"): {"REFUSAL_WITHOUT_COMMAND_MESSAGE", "REFUSAL_WITH_COMMAND_TEMPLATE"},
-    (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "bash-guard-git-push-force"): {"DENY_REASON_TEMPLATE", "UNRESOLVED_REASON_TEMPLATE"},
     (".claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py", "bash-guard-gh-issue-body-or-title-set-by-hand"): {"EDIT_BODY_REFUSAL", "EDIT_TITLE_REFUSAL"},
     (".claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py", "bash-guard-gh-issue-comment"): {"CLOSE_WITH_COMMENT_REFUSAL", "COMMENT_REFUSAL", "NO_COMMENTS_LINE", "REOPEN_WITH_COMMENT_REFUSAL"},
     (".claude/guard-hooks/git-worktree-remove-cold-read-record-and-sanity-check-record-ship-to-log-store-first-guard-hook.py", "bash-guard-git-worktree-remove-record-being-written"): {"RECORD_BEING_WRITTEN_IN_REMOVED_WORKTREE_REFUSAL_TEMPLATE", "REMOVED_WORKTREE_UNRESOLVED_REFUSAL_TEMPLATE"},
@@ -366,10 +366,10 @@ check("a listed group whose ID now opens one constant fails",
       == [("r", ["A_MESSAGE"], ["A_MESSAGE", "B_MESSAGE"])])
 
 # The pattern, on texts whose answer is known.
-for text, expected in (("[rule bash-guard-git-push-force] Refused on purpose", "bash-guard-git-push-force"),
+for text, expected in (("[rule bash-guard-tmux-kill-without-socket-option] Refused on purpose", "bash-guard-tmux-kill-without-socket-option"),
                        ("[rule a1-b2] x", "a1-b2"),
                        ("[rule stop] x", "stop"),
-                       ("Refused [rule bash-guard-git-push-force] x", None),
+                       ("Refused [rule bash-guard-tmux-kill-without-socket-option] x", None),
                        ("[rule Bash-guard] x", None),
                        ("[rule bash_guard] x", None),
                        ("[rule bash-guard]x", None),

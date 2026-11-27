@@ -33,7 +33,10 @@ starts with coreutils `timeout <duration>` and runs nothing after the timed comm
 pipe, the time that timeout stops it (a subagent that reported and
 stopped while background commands it launched still run gets the time of its report under
 `stopped_at` and a list of those commands under `own_running_background_commands`), the matched sentences with the code's reading of each, the agent-seat's last message, the tool calls a judge of the sentences
-looks through, each marked failed when its result carried is_error, and the assistant texts it reads, the rule that applies and its decision.
+looks through, each marked failed when its result carried is_error, and the assistant texts it reads,
+the id of each idle-sweep reminder the agent-seat marked irrelevant by running
+scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py, the rule that
+applies and its decision.
 
 What it does not handle: it keeps no record of earlier runs, so it cannot tell which turn-ending
 messages it has already checked; by default it checks only the last one, and
@@ -113,6 +116,13 @@ TASK_TOOL_NAMES = ("TaskCreate", "TaskUpdate")
 # and "Updated task #<n> <fields>".
 TASK_TOOL_SUCCESS_RESULT_PATTERN = re.compile(
     r"Task #(?P<created>\d+) created successfully\b|Updated task #(?P<updated>\d+)\b")
+# The program an agent-seat runs, with a reminder's message_id, to mark that idle-sweep reminder
+# irrelevant; the sweep's reminders name it, and this program reads its Bash calls.
+AGENT_SEAT_IDLE_SWEEP_RECEIVED_WAKE_MESSAGE_MARK_IRRELEVANT_PROGRAM_PATH = (
+    "scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py")
+MARK_IRRELEVANT_CALL_PATTERN = re.compile(
+    re.escape(Path(AGENT_SEAT_IDLE_SWEEP_RECEIVED_WAKE_MESSAGE_MARK_IRRELEVANT_PROGRAM_PATH).name)
+    + r"['\"]?\s+['\"]?(?P<message_id>[0-9a-f]{32})\b")
 # Coreutils `timeout`: its options, then the duration, a number with an optional unit.
 TIMEOUT_COMMAND_LINE_START_PATTERN = re.compile(
     r"\s*timeout(?:\s+(?:-[fpv]+|--(?:foreground|preserve-status|verbose)"
@@ -932,6 +942,10 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
             {"time": iso(moment), "name": name, "task": task_id}
             for moment, name, tool_input, task_id in facts.task_tool_calls
             if moment and sets_prerequisites_or_blocked_by(tool_input)]
+        verdict[fields.IDLE_SWEEP_VERDICT_FIELD_LISTING_REMINDER_MESSAGE_IDS_THE_AGENT_SEAT_MARKED_IRRELEVANT] = [
+            match["message_id"] for _, name, tool_input, _ in facts.tool_calls
+            if name == "Bash" and isinstance(tool_input.get("command"), str)
+            for match in MARK_IRRELEVANT_CALL_PATTERN.finditer(tool_input["command"])]
         verdict[fields.IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS] = [
             {"time": iso(moment), "blocked_tasks": [str(task) for task in tool_input["addBlocks"]]}
             for moment, _, tool_input, _ in facts.task_tool_calls

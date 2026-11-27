@@ -9,7 +9,11 @@ Usage:
 
 The file holds a JSON list. Each entry has tag, number, title, author, head,
 main, tests and hazards, and may have overlaps. A fix-round entry also has
-reviewed_before, previous_reviews, new_commits and answer.
+reviewed_before, previous_reviews, new_commits and answer. A fix-round's
+files-touched fact lists the files changed since reviewed_before; but when the
+first-parent commits since it hold a merge commit, as when the author merged
+main, or the head does not descend from it, the fact lists the whole pull
+request's files from the merge base, so it names none of main's changes.
 
 Each brief is three parts: the standing text, composed by --review-tools-worktree-at-main's
 scripts/compose-pull-request-reviewer-brief.py with the reviewing
@@ -24,7 +28,12 @@ makes useless a point fix or workaround they kept. For each pull request a
 in it, the facts give merge-lane-2's follow-up request block for that pull
 request as --review-tools-worktree-at-main's FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME
 prints it, so the reviewer can check the answers against the findings' own
-text, or, when that program refuses to print it, its refusal. The facts end with the pull request's description, which the brief
+text, or, when that program refuses to print it, its refusal and the block
+merge-lane-2 wrote by hand instead, as the author's follow-up request hook saved
+it in the git common directory of --review-tools-worktree-at-main, where that
+program keeps its saved blocks; an author on the Mac saves it on the Mac, so the
+brief then says no block is saved. A saved block that cannot be read is a
+failed step. The facts end with the pull request's description, which the brief
 quotes as the author's claims. The reviewer runs with no GitHub login, so the
 brief is where it reads the description and the follow-up request blocks. The brief is written to
 briefs/brief-<tag>-mac-claude.md under the worktrees and outputs directory, and
@@ -86,7 +95,12 @@ GITHUB_ISSUE_OR_PULL_REQUEST_LINK = re.compile(
 # Far above the merged count, so gh lists them all.
 MERGED_PULL_REQUESTS_LIMIT = "100000"
 FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME = "pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py"
-FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER = re.compile(r"#follow_up_request pull request ([0-9]+)\b")
+FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER = re.compile(r"#follow_up_request#? pull request ([0-9]+)\b")
+_follow_up_request_program_spec = importlib.util.spec_from_file_location(
+    "pull_request_follow_up_request_after_merge_finding_answers_and_next_step",
+    Path(__file__).resolve().with_name(FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME))
+follow_up_request_program = importlib.util.module_from_spec(_follow_up_request_program_spec)
+_follow_up_request_program_spec.loader.exec_module(follow_up_request_program)
 
 
 def parse_arguments(argv):
@@ -203,6 +217,24 @@ def follow_up_pull_requests_text(number, closing_issues, merged_pull_requests):
             "closes, or to this pull request: " + ("; ".join(found) or "none") + ".")
 
 
+def hand_written_follow_up_request_block_text(review_tools_worktree, followed_up):
+    """The brief's sentence giving the block merge-lane-2 wrote by hand for pull request `followed_up`, as the
+    author's follow-up request hook saved it, or saying none is saved."""
+    try:
+        saved = follow_up_request_program.state_file(
+            follow_up_request_program.state_directory(
+                review_tools_worktree, run_all_test_suites.environment_without_git_redirecting_variables()),
+            follow_up_request_program.SAVED_FINDINGS_FILE_NAME_FORMAT, followed_up)
+        block = follow_up_request_program.read_text_if_present(saved)
+    except follow_up_request_program.StepFailed as failure:
+        raise StepFailed(f"the saved follow-up request block for pull request {followed_up}: {failure}") from None
+    if block is None or not block.strip():
+        return (f"No block merge-lane-2 wrote by hand is saved at `{saved}`, where the author's follow-up request "
+                "hook saves the block merge-lane-2 sends it; an author on the Mac saves it on the Mac.\n")
+    return (f"The block merge-lane-2 wrote by hand and sent the author instead, as the author's follow-up request "
+            f"hook saved it at `{saved}`:\n\n" + quoted(block.strip()) + "\n")
+
+
 def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
     """The brief's facts giving merge-lane-2's follow-up request block for each pull request the description names
     in a "#follow_up_request pull request <number>", lowest number first."""
@@ -217,9 +249,10 @@ def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
                         refusal_allowed=True).strip()
         except Refused as refusal:
             # A refused block is one merge-lane-2 writes by hand, so the brief is still composed, with the refusal
-            # in the block's place.
+            # and the hand-written block in the printed block's place.
             texts.append(f"{fact}: {program} refused to print it from merge-lane-2's reviews, saying:\n\n"
-                         + quoted(str(refusal)) + "\n")
+                         + quoted(str(refusal)) + "\n\n"
+                         + hand_written_follow_up_request_block_text(review_tools_worktree, followed_up))
             continue
         texts.append(f"{fact}, as {program} prints it from merge-lane-2's reviews"
                      + (":\n\n" + quoted(block) + "\n" if block else
@@ -252,9 +285,16 @@ def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pu
         facts.append(f"- This nn-head-commit is a fix-round. nn-head-commit reviewed before: "
                      f"`{spec['reviewed_before']}` ({spec['previous_reviews']}). "
                      f"{spec['new_commits']}")
-        facts.append("- Files the new commit touches: "
-                     + files_touched_text(review_tools_worktree, spec["reviewed_before"], head)
-                     + ".")
+        reviewed_whole_because = common.fix_round_reviewed_whole_because(
+            git, review_tools_worktree, spec["reviewed_before"], head)
+        if reviewed_whole_because:
+            facts.append(f"- Files the whole pull request touches, from the merge base, because "
+                         f"{reviewed_whole_because}: "
+                         + files_touched_text(review_tools_worktree, merge_base, head) + ".")
+        else:
+            facts.append("- Files the new commit touches: "
+                         + files_touched_text(review_tools_worktree, spec["reviewed_before"], head)
+                         + ".")
         facts.append(f"- The author's answer to each finding: {spec['answer']}")
         facts.append("- Test files the whole pull request touches: "
                      + ", ".join(f"`{t}`" for t in spec["tests"]) + ".")

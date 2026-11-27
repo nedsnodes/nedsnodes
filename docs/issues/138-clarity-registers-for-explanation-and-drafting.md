@@ -1,5 +1,5 @@
 ---
-issue: "[Clarity registers: explanations and drafted instruction text land without the user's repeated corrections](https://github.com/nedschorus/nedschorus/issues/138)"
+issue: "[Clarity registers: explanations and drafted instruction text land without the user's repeated corrections](https://github.com/nedsnodes/nedsnodes/issues/138)"
 ---
 
 # Clarity registers for explanation and drafting — GHI-MD for issue [Clarity registers: explanations and drafted instruction text land without the user's repeated corrections](https://github.com/nedschorus/nedschorus/issues/138)

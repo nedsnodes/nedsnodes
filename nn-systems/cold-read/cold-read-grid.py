@@ -86,11 +86,11 @@ none, one the cold-read-grid names itself: `RETRYING:` at the first failure,
 first failures are not retried and go straight to `FAILED` and absence: a
 cause the user can clear (cell_common.USER_CLEARABLE_CAUSE_CLASSES), which a
 retry would only meet again, and an attempt stopped at the time limit. The
-time limit is 4 hours per attempt, counted on time.monotonic(), which leaves
+time limit is 2 hours per attempt, counted on time.monotonic(), which leaves
 out time the machine was asleep on both Linux (CLOCK_MONOTONIC) and macOS
 (mach_absolute_time), so a Mac that sleeps overnight does not trip it; the
 attempt is stopped with its children, its cause is `timed-out — timed out
-after 4 hours`, and a report it had written is deleted as unfinished, so it
+after 2 hours`, and a report it had written is deleted as unfinished, so it
 neither ships nor counts as a review. The `FAILED` line of an attempt whose cause the user can
 clear ends with "Tell the user: ...", once per agent-binary and cause, so
 the user hears of it while the other cold-read-cells run. When
@@ -249,18 +249,24 @@ GRID_CELL_ROSTER = (
 
 
 class GridCell(typing.NamedTuple):
-    """One cold-read-cell of the run; model and effort None keep the launcher's tier pin."""
+    """One cold-read-cell of the run; model, effort and per-model-run timeout None keep the launcher's own."""
 
     runtime: str
     cell_pass: str
     tier: str
     model: typing.Optional[str]
     effort: typing.Optional[str]
+    per_model_run_timeout_seconds: typing.Optional[int] = None
 
 
-# agy serves only the fast tier, so Neon runs on it with the model and effort given here.
+# Its model chain is the one model given, so one model run, plus the agy cell's
+# kill margin, must fit within CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS.
+GEMINI_NEON_DEFECT_HUNT_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 40 * 60
+# agy serves only the fast tier, so Neon runs on it with the model, effort and
+# time limit given here, not the fast read's.
 GEMINI_NEON_DEFECT_HUNT_CELL = GridCell(
-    "agy", "defect-hunt", "fast", "gemini-4-neon-high", "high")
+    "agy", "defect-hunt", "fast", "gemini-4-neon-high", "high",
+    GEMINI_NEON_DEFECT_HUNT_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS)
 GRID_CELLS = tuple(
     GridCell(runtime, cell_pass, tier, None, effort)
     for runtime in ("claude", "codex")
@@ -282,16 +288,19 @@ AGENT_BINARY_DOWN_PREFIX = "AGENT-BINARY DOWN:"
 # Both undo messages share this, so that neither can drop the `--` before a path.
 STRAY_WRITE_RESTORE_ARGUMENTS = "restore --staged --worktree --"
 STOPPED_CELL_WRITE_CHECK_LINE = (
-    "The {cell} cell was stopped before it could check for files it wrote outside its "
-    "report, and the grid could not check for it, because {reason}; that is "
+    "The {cell} cell was stopped, so any check it made for files it wrote outside its "
+    "report is not used, and the grid could not check for it, because {reason}; that is "
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
     + ".\nBefore "
     "you do anything else, read `git status` against the edits you know are your own. "
-    "Undo a change git status lists, by running `rm -r -- <path>` if it is untracked or "
+    "For a path git status lists whose every uncommitted change shows a reviewer wrote it, such as "
+    "notes about the document under review, undo it: run `rm -r -- <path>` if it is untracked or "
     f"`git --literal-pathspecs {STRAY_WRITE_RESTORE_ARGUMENTS} <path>` if it is tracked, with <path> "
-    "replaced by the path as one shell-quoted argument, only when its content shows a reviewer wrote "
-    "it, such as notes about the document under review. Ask the user about any other "
-    "change you did not make, and whenever you are unsure.")
+    "replaced by the path as one shell-quoted argument. "
+    "For a file that holds a reviewer's writing beside other uncommitted changes, delete only the "
+    "reviewer's writing, by editing the file: either command above throws away every uncommitted "
+    "change to the file. "
+    "Ask the user about any other change you did not make, and whenever you are unsure.")
 
 # A stopped cell never reaches its own stray-write check, so the grid runs one for it
 # against the snapshot it took before launching the cells. What to do goes on the next
@@ -328,6 +337,10 @@ STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ = (
     "both `git -C {repository} diff --ours -- {path}` and `git -C {repository} diff --theirs -- {path}`, "
     "the file against each side of its unresolved merge conflict, and {absolute_path}, the copy on "
     "disk, because those diffs show nothing against a side the conflict does not have,")
+STRAY_WRITE_ALREADY_CHANGED_UNMERGED_GONE_READ = (
+    "both `git -C {repository} diff --ours -- {path}` and `git -C {repository} diff --theirs -- {path}`, "
+    "the file against each side of its unresolved merge conflict, knowing that the file is now gone "
+    "from disk and those diffs may show nothing of what it held,")
 GIT_STATUS_UNMERGED_CODES = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 # A cell can move an already-edited file without git pairing the move as a rename (a plain
 # `mv`, or a `git mv` of a much-edited file), can re-create the old name afterwards, and can
@@ -341,10 +354,14 @@ STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES = (
 STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED = (
     "No undo command is given for any path, because a file with uncommitted changes from before "
     "the cells launched has changed or gone since: {touched}, and a stopped cell may have moved "
-    "those changes. {path} is gone; `git -C {repository} diff HEAD -- {path}` shows what it held. "
+    "those changes. {path} is gone; {what_it_held} "
     "The index may still hold the moved changes under {path}, and an undo would discard them; "
     "`git -C {repository} diff --cached -- {path}` shows any copy the index holds. Ask the user before you "
     "restore {path}, and about any change you did not make.")
+GONE_PATH_AT_HEAD_WHAT_IT_HELD = "`git -C {repository} diff HEAD -- {path}` shows what it held."
+# A path staged as new, renamed or copied and then deleted is not at HEAD, so
+# `diff HEAD` prints nothing for it; only the index holds its text.
+GONE_PATH_NOT_AT_HEAD_WHAT_IT_HELD = "it was never committed, so only the index holds what it held."
 STOPPED_CELL_LINE = "{report}: stopped before it finished{deleted}."
 WORKING_TREE_SNAPSHOT_NOT_TAKEN_REASON = "its snapshot of the working tree before the cells launched failed ({error})"
 WORKING_TREE_CHECK_FAILED_REASON = "git status failed when it checked ({error})"
@@ -402,9 +419,9 @@ CELL_POLL_INTERVAL_OVERRIDE_VARIABLE = "COLD_READ_GRID_CELL_POLL_INTERVAL_SECOND
 CELL_POLL_INTERVAL_DEFAULT_SECONDS = 5.0
 # Tests shorten the limit so a timed-out attempt is seen in seconds.
 CELL_ATTEMPT_TIMEOUT_OVERRIDE_VARIABLE = "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS"
-CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS = 4 * 60 * 60
+CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS = 2 * 60 * 60
 TIMED_OUT_CAUSE_CLASS = "timed-out"
-TIMED_OUT_CAUSE_DETAIL = "timed out after 4 hours"
+TIMED_OUT_CAUSE_DETAIL = f"timed out after {CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS / 3600:g} hours"
 STOPPED_CELL_UNFINISHED_REPORT_DELETED_PHRASE = "; the unfinished report it had written is deleted"
 
 
@@ -926,6 +943,8 @@ def launch_cells(target: pathlib.Path, record_dir: pathlib.Path,
             command += ["--model", cell.model]
         if cell.effort:
             command += ["--effort", cell.effort]
+        if cell.per_model_run_timeout_seconds:
+            command += ["--per-model-run-timeout-seconds", str(cell.per_model_run_timeout_seconds)]
         # The reviewer writes its report; captured chat can omit findings written before tool calls.
         running[report_path] = start_attempt(command, report_path, 1, stderr_path)
     return running
@@ -1023,6 +1042,7 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
         for path in filter(None, (entry.path, entry.origin_path)):
             status_codes_by_path.setdefault(path, set()).add(entry.code)
     untracked = {path for path, codes in status_codes_by_path.items() if codes == {"??"}}
+    not_at_head = {entry.path for entry in entries if entry.code[0] in "ARC"}
     changed_before = {name for name, _ in baseline}
     # Read from the launch side: a pre-launch path that is now different, gone or out
     # of git status is in no current entry, and an undo could delete what it held.
@@ -1043,7 +1063,10 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 else STRAY_WRITE_UNDO_TRACKED)
         codes = status_codes_by_path.get(name, set())
         absolute_path = cell_common.shell_quoted_on_one_line(str(cell_common.REPO_ROOT / name))
-        what_to_read = (STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ if codes & GIT_STATUS_UNMERGED_CODES
+        unmerged_read = (STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ
+                         if os.path.lexists(cell_common.REPO_ROOT / name)
+                         else STRAY_WRITE_ALREADY_CHANGED_UNMERGED_GONE_READ)
+        what_to_read = (unmerged_read if codes & GIT_STATUS_UNMERGED_CODES
                         else STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
                         else STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ if "??" in codes
                         else STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ).format(
@@ -1051,6 +1074,9 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
         lines.append(STOPPED_CELLS_STRAY_WRITE_LINE.format(
             path=cell_common.path_shown_on_one_line(name), cells=cells, undo=undo.format(
                 path=cell_common.shell_quoted_on_one_line(name), repository=repository, what_to_read=what_to_read,
+                what_it_held=(GONE_PATH_NOT_AT_HEAD_WHAT_IT_HELD if name in not_at_head
+                              else GONE_PATH_AT_HEAD_WHAT_IT_HELD).format(
+                    path=cell_common.shell_quoted_on_one_line(name), repository=repository),
                 absolute_path=absolute_path,
                 touched=", ".join(cell_common.shell_quoted_on_one_line(name) for name in touched))))
     return lines
@@ -1069,14 +1095,16 @@ COLD_READ_CELL_NEAR_MISS_REPORT_RECOVERED_STATUS_LINE_NEXT_STEP_INSTRUCTION = (
     "The report is intact and now in place, so triage it as usual; nothing else needs doing.")
 
 
-def lift_cell_status_lines(report_path: pathlib.Path, log_lines: list) -> None:
+def lift_cell_status_lines(report_path: pathlib.Path, log_lines: list,
+                           stray_write_lines: bool = True) -> None:
     """Print cell status lines before successful-attempt logs are deleted,
-    each followed by the line that says what to do about it."""
+    each followed by the line that says what to do about it; without
+    stray_write_lines, leave out the STRAY WRITE and WRITE CHECK DID NOT RUN kinds."""
     for line in log_lines:
-        if cell_status_line(line, cell_common.STRAY_WRITE_PHRASE):
+        if stray_write_lines and cell_status_line(line, cell_common.STRAY_WRITE_PHRASE):
             print(f"STRAY WRITE: {line.strip()}", flush=True)
             print(COLD_READ_CELL_STRAY_WRITE_STATUS_LINE_NEXT_STEP_INSTRUCTION, flush=True)
-        if cell_status_line(line, cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE):
+        if stray_write_lines and cell_status_line(line, cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE):
             print(f"WRITE CHECK DID NOT RUN: {report_path.name} — "
                   f"{line.strip()}", flush=True)
             print(COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_STATUS_LINE_NEXT_STEP_INSTRUCTION, flush=True)
@@ -1117,7 +1145,7 @@ def announce_agent_binary_down(cells_by_runtime: dict, outcome: RunOutcome) -> N
         if any(cell not in outcome.absent and cell not in outcome.landed for cell in cells):
             continue
         classes = {report.cause_class for report in absences}
-        if len(classes) != 1 or not classes <= cell_common.AGENT_BINARY_WIDE_CAUSE_CLASSES:
+        if len(classes) != 1 or not classes <= cell_common.USER_CLEARABLE_CAUSE_CLASSES:
             continue
         last = absences[-1]
         outcome.down[runtime] = (last.cause_class, last.detail, len(absences))
@@ -1183,7 +1211,9 @@ def wait_for_cells(running: dict,
             name = cell_name_of(report_path)
             is_question_4 = report_path.name == COLD_READ_FULL_RUN_WHAT_SHOULD_BE_CODE_QUESTION_ANSWER_REPORT_FILE_NAME
             log_lines = attempt.stderr_path.read_text(encoding="utf-8").splitlines()
-            lift_cell_status_lines(report_path, log_lines)
+            # A stopped cell may have logged its own write check before the stop, and
+            # print_stopped_cells_write_check reports that cell's writes instead.
+            lift_cell_status_lines(report_path, log_lines, stray_write_lines=not timed_out)
             has_report = (
                 report_path.is_file()
                 and report_path.read_text(encoding="utf-8").strip() != ""
@@ -1238,7 +1268,8 @@ def wait_for_cells(running: dict,
                     outcome.stopped.append(cell_name_of(report_path))
                     log_lines = (attempt.stderr_path.read_text(encoding="utf-8").splitlines()
                                  if attempt.stderr_path.is_file() else [])
-                    lift_cell_status_lines(report_path, log_lines)
+                    # print_stopped_cells_write_check reports this cell's writes.
+                    lift_cell_status_lines(report_path, log_lines, stray_write_lines=False)
                     print(STOPPED_CELL_LINE.format(
                         report=report_path.name,
                         deleted=STOPPED_CELL_UNFINISHED_REPORT_DELETED_PHRASE if report_deleted else ""),

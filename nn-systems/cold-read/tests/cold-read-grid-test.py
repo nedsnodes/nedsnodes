@@ -146,7 +146,6 @@ import hashlib
 import importlib.util
 import inspect
 import io
-import itertools
 import json
 import re
 import os
@@ -259,19 +258,17 @@ def reviews_saved_lines(result):
 # {"fragment", "attempts", "stdout", "stdout_by_attempt", "edit"}: a cell
 # whose report name contains "fragment" (the first matching entry wins)
 # writes nothing and exits 1 on its first "attempts" launches, printing
-# "stdout" on stdout first -- the real limit texts of the cases below, with
-# `{family}` standing for the model's family name (Opus, Fable), as the
-# `claude` agent-binary's model-limit message names it -- or the attempt's own
-# text from "stdout_by_attempt" ({"2": ...}), and appending to the file
+# "stdout" on stdout first -- the real texts of the cases below -- or the
+# attempt's own text from "stdout_by_attempt" ({"2": ...}), and appending to the file
 # "edit" before failing, for a stray write by a failed first attempt.
 # COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS, when set, is how long the stub waits
 # before writing its report -- a reviewer still reading -- except in a cell
 # whose report name contains COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT,
 # which does not wait. One fast cell that edits the target while six slow
 # ones read is how a case moves the target mid-run.
-# COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY, when set, gets a file
-# named for the report once that wait ends. The grid deletes a stopped cell's report
-# but not this file, so the file shows the cell outlived its time limit.
+# COLD_READ_GRID_TEST_STUB_STARTED_READING_MARKER_DIRECTORY, when set, gets a nonempty
+# file named for the report once the stub has made its writes outside the report and
+# starts that wait.
 # COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE, when set, is a file outside
 # the scratch repository: the fast cell runs the real shipper on its record
 # before writing its report, as the pre-remove hook does when an agent-seat
@@ -329,18 +326,13 @@ if counter_directory:
     attempt = len(counter.read_text().splitlines()) + 1 if counter.is_file() else 1
     with open(counter, "a", encoding="utf-8") as handle:
         handle.write(f"attempt {attempt}\n")
-model = ""
-for flag in ("--model", "-m"):
-    if flag in sys.argv:
-        model = sys.argv[sys.argv.index(flag) + 1]
-family = model.split("-")[1].capitalize() if model.count("-") else model
 for entry in json.loads(os.environ.get("COLD_READ_GRID_TEST_STUB_FAILURE_PLAN") or "[]"):
     if entry["fragment"] not in given.name:
         continue
     if attempt <= entry.get("attempts", 1):
         text = entry.get("stdout_by_attempt", {}).get(str(attempt), entry.get("stdout", ""))
         if text:
-            sys.stdout.write(text.replace("{family}", family) + "\n")
+            sys.stdout.write(text + "\n")
         if entry.get("edit"):
             with open(entry["edit"], "a", encoding="utf-8") as handle:
                 handle.write("The reviewer's own edit on a failed attempt.\n")
@@ -361,14 +353,14 @@ for written_path in filter(None, os.environ.get(
         "COLD_READ_GRID_TEST_STUB_WRITE_PATHS_BEFORE_SLEEPING", "").split(",")):
     with open(written_path, "a", encoding="utf-8") as handle:
         handle.write("A reviewer's write outside its report, made before it was stopped.\n")
+started_marker_directory = os.environ.get("COLD_READ_GRID_TEST_STUB_STARTED_READING_MARKER_DIRECTORY")
+if started_marker_directory:
+    pathlib.Path(started_marker_directory).mkdir(parents=True, exist_ok=True)
+    (pathlib.Path(started_marker_directory) / given.name).write_text("reading\n", encoding="utf-8")
 sleep_seconds = float(os.environ.get("COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS") or 0)
 fast_fragment = os.environ.get("COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT")
 if sleep_seconds and not (fast_fragment and fast_fragment in given.name):
     time.sleep(sleep_seconds)
-finished_marker_directory = os.environ.get("COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY")
-if finished_marker_directory:
-    pathlib.Path(finished_marker_directory).mkdir(parents=True, exist_ok=True)
-    (pathlib.Path(finished_marker_directory) / given.name).touch()
 ship_line_file =os.environ.get("COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE")
 if ship_line_file and fast_fragment and fast_fragment in given.name:
     import subprocess
@@ -459,14 +451,14 @@ def write_target(repository, relative_path):
 
 # Runs the grid with its clock jumped past any attempt time limit once the record holds
 # this many nonempty reports, so a limit cannot expire before a slow cell has written.
-GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST = r'''import pathlib, runpy, sys, time
-grid, records, report_count, jump_seconds = sys.argv[1:5]
+GRID_WITH_CLOCK_JUMPED_ONCE_FILES_EXIST = r'''import glob, pathlib, runpy, sys, time
+grid, watched_glob, file_count, jump_seconds = sys.argv[1:5]
 real_monotonic = time.monotonic
 jumped = False
 def monotonic():
     global jumped
-    jumped = jumped or sum(path.stat().st_size > 0 for path in pathlib.Path(records).glob("*/*.md")
-                           if path.name != "cold-read-reference-check.md") >= int(report_count)
+    jumped = jumped or sum(pathlib.Path(path).stat().st_size > 0 for path in glob.glob(watched_glob)
+                           if pathlib.Path(path).name != "cold-read-reference-check.md") >= int(file_count)
     return real_monotonic() + (float(jump_seconds) if jumped else 0)
 time.monotonic = monotonic
 sys.argv = [grid, *sys.argv[5:]]
@@ -480,8 +472,8 @@ def run_grid(repository, stub_directory, environment_overrides=None,
              current_directory=None, launcher_arguments_before_grid=None, timeout_seconds=None):
     """The grid in `repository` as a subprocess, run from `current_directory`,
     by default `repository`. `launcher_arguments_before_grid`, when given, is
-    (launcher file, report count, jump seconds) for
-    GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST. Past `timeout_seconds` the grid is
+    (launcher file, glob of the watched files, their count, jump seconds) for
+    GRID_WITH_CLOCK_JUMPED_ONCE_FILES_EXIST. Past `timeout_seconds` the grid is
     killed and subprocess.TimeoutExpired raised; its cells keep running."""
     stub_directory.mkdir(parents=True, exist_ok=True)
     for runtime_name in ("claude", "codex", "agy"):
@@ -508,8 +500,7 @@ def run_grid(repository, stub_directory, environment_overrides=None,
         [sys.executable,
          *([str(launcher_arguments_before_grid[0]),
             str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py"),
-            str(repository / "cold-read-records"),
-            str(launcher_arguments_before_grid[1]), str(launcher_arguments_before_grid[2])]
+            *map(str, launcher_arguments_before_grid[1:])]
            if launcher_arguments_before_grid
            else [str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py")]),
          "--target", target_relative_path, *extra_arguments],
@@ -549,17 +540,41 @@ def processes_running_programs_under(*directories):
                              capture_output=True, text=True, check=True).stdout
     found = []
     for line in listing.splitlines():
-        words = line.split()[1:]
-        # A `#!/usr/bin/env python3` script is listed as `env python3 <script>` until env execs.
-        if words and Path(words[0]).name == "env":
-            words = list(itertools.dropwhile(lambda word: word.startswith("-") or "=" in word, words[1:]))
-        if not words:
-            continue
-        if "python" in Path(words[0]).name.lower():
-            words = [word for word in words[1:] if not word.startswith("-")] or words
-        if words[0].startswith(prefixes):
+        program = program_word_of_command(line.split()[1:])
+        if program is not None and program.startswith(prefixes):
             found.append(line.strip())
     return found
+
+
+ENV_OPTIONS_TAKING_AN_OPERAND = {"-u", "--unset", "-C", "--chdir"}
+PYTHON_OPTIONS_TAKING_AN_OPERAND = {"-W", "-X", "--check-hash-based-pycs"}
+
+
+def program_word_of_command(words):
+    """The program a `ps` command line runs, or the script file its Python runs; None when there is
+    neither, as for `python3 -c ...`, `python3 -m ...` or `python3 -` reading a program from stdin."""
+    # A `#!/usr/bin/env python3` script is listed as `env python3 <script>` until env execs.
+    if words and Path(words[0]).name == "env":
+        rest = iter(words[1:])
+        words = []
+        for word in rest:
+            if word in ENV_OPTIONS_TAKING_AN_OPERAND:
+                next(rest, None)
+            elif not (word.startswith("-") or "=" in word):
+                words = [word, *rest]
+    if not words:
+        return None
+    if "python" not in Path(words[0]).name.lower():
+        return words[0]
+    rest = iter(words[1:])
+    for word in rest:
+        if word == "-" or word.startswith(("-c", "-m")):
+            return None
+        if word in PYTHON_OPTIONS_TAKING_AN_OPERAND:
+            next(rest, None)
+        elif not word.startswith("-"):
+            return word
+    return words[0]
 
 
 def kill_processes_running_programs_under(*directories):
@@ -584,6 +599,23 @@ def run_grid_stopped_at_deadline(repository, stub_directory, environment_overrid
     return result, left_running
 
 
+def run_grid_with_every_stub_timed_out_once_all_are_reading(repository, stub_directory, environment_overrides):
+    """(the grid's result, the lines of its processes left running), after stopping them, for a grid
+    whose eight stubs each make their writes and then read until stopped, and whose clock passes
+    the attempt time limit only once all eight are reading. However loaded the machine, no stub
+    finishes before the grid stops it, and none is stopped before it has made its writes."""
+    started_reading_markers = repository.parent / f"{repository.name}-stubs-started-reading"
+    clock_launcher = repository.parent / f"{repository.name}-grid-with-clock-jumped-once-files-exist.py"
+    clock_launcher.write_text(GRID_WITH_CLOCK_JUMPED_ONCE_FILES_EXIST, encoding="utf-8")
+    attempt_limit_seconds = 3600
+    return run_grid_stopped_at_deadline(repository, stub_directory, {
+        "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": "86400",
+        "COLD_READ_GRID_TEST_STUB_STARTED_READING_MARKER_DIRECTORY": str(started_reading_markers),
+        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds),
+        **environment_overrides}, 240,
+        launcher_arguments_before_grid=(clock_launcher, started_reading_markers / "*", 8, attempt_limit_seconds))
+
+
 def wrote_then_hung_checks(result, left_running, repository, elapsed):
     """The (case name, condition, detail) checks of the wrote-then-hung run. A grid stopped at the
     deadline gets only the first: it may have made no record for the others to read."""
@@ -597,7 +629,7 @@ def wrote_then_hung_checks(result, left_running, repository, elapsed):
     checks.append(("a timed-out cell that had written its report: FAILED says the unfinished report is deleted",
                    lines_opening(result, "saved:") == []
                    and len(failed_lines) == 8
-                   and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
+                   and all(" — timed-out — timed out after 2 hours (stderr kept: " in line
                            and line.endswith(".stderr.log); the unfinished report it had written is deleted")
                            for line in failed_lines),
                    f"elapsed {elapsed:.1f}s; stdout={result.stdout!r}"))
@@ -934,12 +966,8 @@ try:
 
     # --- Every failure case below, in the design's terms ---------------------
     # nn-systems/cold-read/cold-read-grid-cell-failure-handling.tool.design.md, section
-    # 8. The real limit texts (section 4) are the fixtures: the lines of the
-    # kept logs it cites, and the 2026-09-18 logged-out capture on ned-box.
-    WEEKLY_LIMIT_LINE = "You've hit your weekly limit · resets Nov 7, 3am (America/Los_Angeles)"
-    MODEL_LIMIT_LINE = ("You've reached your {family} limit. Switch to another model, or "
-                        "manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, "
-                        "to continue.")
+    # 8. The logged-out line (section 4) is a fixture: the 2026-09-18 capture on ned-box.
+    LOGGED_OUT_LINE = "Not logged in · Please run /login"
 
     def lines_opening(result, prefix):
         return [line for line in result.stdout.splitlines() if line.startswith(prefix)]
@@ -1046,34 +1074,31 @@ try:
               "claude-terminology-deep.md.attempt-2.stderr.log"],
           sorted(path.name for path in record_directory.glob("*.stderr.log")))
 
-    # --- All three Claude cells fail both attempts with the account limit ----
+    # --- All three Claude cells fail both attempts logged out -----------------
     # The 2026-09-10 outage, eight records of three unrelated FAILED lines.
     repository = build_scratch_repository(scratch, "checkout-claude-down")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "claude-", "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
+        [{"fragment": "claude-", "attempts": 2, "stdout": LOGGED_OUT_LINE}])})
     down_lines = lines_opening(result, "AGENT-BINARY DOWN:")
-    check("one AGENT-BINARY DOWN line, naming claude, the class and the reset text",
-          down_lines == ["AGENT-BINARY DOWN: claude — account-limit — weekly limit · resets "
-                         "Nov 7, 3am (America/Los_Angeles); 3 reports absent"],
+    check("one AGENT-BINARY DOWN line, naming claude, the class and the logged-out line",
+          down_lines == ["AGENT-BINARY DOWN: claude — logged-out — Not logged in · Please run /login; 3 reports absent"],
           f"down lines were {down_lines!r}; stdout={result.stdout!r}")
     failed_lines = lines_opening(result, "FAILED")
-    check("an account limit is not retried: no RETRYING line, three FAILED lines naming it",
+    check("a logged-out cell is not retried: no RETRYING line, three FAILED lines naming it",
           lines_opening(result, "RETRYING:") == [] and len(failed_lines) == 3
-          and all("account-limit — weekly limit · resets Nov 7, 3am (America/Los_Angeles)" in line
-                  for line in failed_lines),
+          and all("logged-out — Not logged in · Please run /login" in line for line in failed_lines),
           repr(result.stdout))
     check("the first FAILED line alone tells the user, naming the attempt's log",
           [line for line in failed_lines if "Tell the user:" in line] == failed_lines[:1]
           and failed_lines[0].endswith(".md.stderr.log).")
-          and ". Tell the user: claude account-limit — weekly limit · resets Nov 7, 3am (America/Los_Angeles) (log: "
-          in failed_lines[0], repr(failed_lines))
+          and ". Tell the user: claude logged-out — Not logged in · Please run /login (log: " in failed_lines[0],
+          repr(failed_lines))
     check("the closing text restates the down line without the prefix, once",
-          result.stdout.count("- claude is down: account-limit — weekly limit · resets "
-                              "Nov 7, 3am (America/Los_Angeles); 3 reports absent") == 1
+          result.stdout.count("- claude is down: logged-out — Not logged in · Please run /login; 3 reports absent") == 1
           and result.stdout.count("AGENT-BINARY DOWN:") == 1, repr(result.stdout))
     check("the closing text ends by telling the user the cause, with the log to check",
           result.stdout.rstrip().splitlines()[-1].startswith(
-              "Tell the user: claude account-limit — weekly limit · resets Nov 7, 3am (America/Los_Angeles) (log: ")
+              "Tell the user: claude logged-out — Not logged in · Please run /login (log: ")
           and result.stdout.rstrip().endswith(".md.stderr.log)."),
           repr(result.stdout.rstrip().splitlines()[-1]))
     check("four land, the some-landed text, exit 1",
@@ -1081,70 +1106,37 @@ try:
           and "4 of 7 reports landed in" in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}")
 
-    # --- The account limit printed bare: the limit's own words are the detail
-    repository = build_scratch_repository(scratch, "checkout-claude-down-bare-limit")
-    result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "claude-", "attempts": 2, "stdout": "You've hit your weekly limit"}])})
-    down_lines = lines_opening(result, "AGENT-BINARY DOWN:")
-    check("a bare limit text is one AGENT-BINARY DOWN line naming account-limit and the limit",
-          down_lines == ["AGENT-BINARY DOWN: claude — account-limit — weekly limit; 3 reports absent"],
-          f"down lines were {down_lines!r}; stdout={result.stdout!r}")
-    check("the user is told the bare cause",
-          "Tell the user: claude account-limit — weekly limit (log: " in result.stdout,
-          repr(result.stdout))
-
-    # --- Two Claude cells hit the account limit after the third landed -------
+    # --- Two Claude cells log out after the third landed ----------------------
     # The rule as the user revised it at item 3 of the design's walk
     # (2026-09-16): the down line prints when a cell becomes absent with an
     # agent-binary-wide class and every other cell of its agent-binary has either
     # LANDED or is absent with the same class -- a report that landed before
-    # the limit hit does not stop the agent-binary from being reported down.
+    # the cause hit does not stop the agent-binary from being reported down.
     repository = build_scratch_repository(scratch, "checkout-claude-down-after-one-landed")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
         [{"fragment": "claude-hunt-second-strongest-model.md", "attempts": 0},
-         {"fragment": "claude-", "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
-    check("one landed Claude cell and two absent with the account limit is still claude down",
+         {"fragment": "claude-", "attempts": 2, "stdout": LOGGED_OUT_LINE}])})
+    check("one landed Claude cell and two absent logged out is still claude down",
           lines_opening(result, "AGENT-BINARY DOWN:")
-          == ["AGENT-BINARY DOWN: claude — account-limit — weekly limit · resets "
-              "Nov 7, 3am (America/Los_Angeles); 2 reports absent"]
-          and "- claude is down: account-limit — weekly limit · resets Nov 7, 3am (America/Los_Angeles); 2 reports absent"
-          in result.stdout
+          == ["AGENT-BINARY DOWN: claude — logged-out — Not logged in · Please run /login; 2 reports absent"]
+          and "- claude is down: logged-out — Not logged in · Please run /login; 2 reports absent" in result.stdout
           and result.returncode == 1 and len(reviews_saved_lines(result)) == 5,
           f"exit {result.returncode}; stdout={result.stdout!r}")
 
-    # --- All three Claude cells fail with a model limit: no agent-binary is down --
-    repository = build_scratch_repository(scratch, "checkout-model-limits")
-    result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "claude-", "attempts": 2, "stdout": MODEL_LIMIT_LINE}])})
-    check("a model limit on every Claude cell is three absences, not an agent-binary down",
-          "AGENT-BINARY DOWN:" not in result.stdout and "is down:" not in result.stdout
-          and len(lines_opening(result, "- claude-")) == 3, repr(result.stdout))
-    check("each absence names model-limit and the model's family",
-          any(line.startswith("- claude-hunt-deep: model-limit — Opus (log:")
-              for line in result.stdout.splitlines())
-          and any(line.startswith("- claude-hunt-second-strongest-model: model-limit — Fable (log:")
-                  for line in result.stdout.splitlines()), repr(result.stdout))
-    check("the user is told, one cause per agent-binary and class, on one FAILED line and at the end",
-          len([line for line in lines_opening(result, "FAILED")
-               if "Tell the user: claude model-limit — " in line]) == 1
-          and result.stdout.rstrip().splitlines()[-1].startswith("Tell the user: claude model-limit — ")
-          and result.stdout.count("Tell the user: claude model-limit — ") == 2,
-          repr(result.stdout))
-
-    # --- Two Claude cells hit the account limit; one fails otherwise twice ----
+    # --- Two Claude cells are logged out; one fails otherwise twice -----------
     repository = build_scratch_repository(scratch, "checkout-mixed-causes")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
         [{"fragment": "claude-hunt-second-strongest-model.md", "attempts": 2},
-         {"fragment": "claude-", "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
+         {"fragment": "claude-", "attempts": 2, "stdout": LOGGED_OUT_LINE}])})
     retrying_lines = lines_opening(result, "RETRYING:")
     check("only the exit-1 cell is retried",
           len(retrying_lines) == 1
           and retrying_lines[0].startswith("RETRYING: claude-hunt-second-strongest-model — exit-1 — "),
           repr(retrying_lines))
-    check("the retried cell is FAILED as exit-1, the others as account-limit",
+    check("the retried cell is FAILED as exit-1, the others as logged-out",
           any(line.startswith("FAILED (exit 1): claude-hunt-second-strongest-model — exit-1 — ")
               for line in lines_opening(result, "FAILED"))
-          and sum("account-limit" in line for line in lines_opening(result, "FAILED")) == 2,
+          and sum("logged-out" in line for line in lines_opening(result, "FAILED")) == 2,
           repr(lines_opening(result, "FAILED")))
     check("differing causes on one agent-binary are three facts, not one down line",
           "AGENT-BINARY DOWN:" not in result.stdout, repr(result.stdout))
@@ -1152,7 +1144,6 @@ try:
     # --- A logged-out cell is not retried, and the user is told at once -------
     # The other five read for a few seconds, so a Tell the user line printed
     # only when the run ends would come after their saved: lines.
-    LOGGED_OUT_LINE = "Not logged in · Please run /login"
     repository = build_scratch_repository(scratch, "checkout-logged-out-not-retried")
     result = run_grid(repository, stubs, {
         "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": "3",
@@ -1198,26 +1189,17 @@ try:
           repr(result.stdout))
 
     # --- An attempt that runs past the time limit is stopped, not retried -----
-    # The limit is shortened to seconds; every stub reads for longer than that.
-    stub_reading_seconds = 8
     repository = build_scratch_repository(scratch, "checkout-attempts-timed-out")
-    finished_reading_markers = scratch / "timed-out-stubs-finished-reading-markers"
     timed_out_stubs = scratch / "stub-bin-attempts-timed-out"
     started = time.monotonic()
-    result = run_grid(repository, timed_out_stubs, {
-        "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
-        "COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY": str(finished_reading_markers),
-        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
+    result, left_running = run_grid_with_every_stub_timed_out_once_all_are_reading(
+        repository, timed_out_stubs, {})
     elapsed = time.monotonic() - started
-    # Read before anything else: a stub the grid left running could still write its marker later.
-    left_running = processes_running_programs_under(timed_out_stubs, repository)
-    finished_before_the_grid_returned = sorted(path.name for path in finished_reading_markers.glob("*"))
-    kill_processes_running_programs_under(timed_out_stubs, repository)
     failed_lines = lines_opening(result, "FAILED")
     check("every attempt past the limit, the Question 4 cell's included, is FAILED as timed out, "
           "with no RETRYING line",
           lines_opening(result, "RETRYING:") == [] and len(failed_lines) == 8
-          and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
+          and all(" — timed-out — timed out after 2 hours (stderr kept: " in line
                   for line in failed_lines),
           repr(result.stdout))
     check("no timed-out cell's report is saved, none landed, exit 1",
@@ -1232,9 +1214,9 @@ try:
     check("the stopped stubs never wrote their reports",
           sorted(path.name for path in record_directory.glob("*.md")) == ["cold-read-reference-check.md"],
           sorted(path.name for path in record_directory.glob("*.md")))
-    check("the grid stopped every timed-out stub instead of waiting for it to finish",
-          finished_before_the_grid_returned == [], finished_before_the_grid_returned)
-    check("no timed-out stub or its launcher is left running", left_running == [], left_running)
+    check("the grid stopped every timed-out stub instead of waiting for it to finish, and none is left running",
+          result.returncode != -signal.SIGKILL and left_running == [],
+          f"exit {result.returncode}; still running: {left_running}")
 
     # --- Stopped cells that wrote outside their reports ------------------------
     # Every cell writes two files before it is stopped: a new file, and a committed one
@@ -1245,9 +1227,7 @@ try:
     new_file = "notes-a-reviewer-left.md"
     already_untracked = "already-untracked-before-the-run.md"
     (repository / already_untracked).write_text("The agent's own draft.\n", encoding="utf-8")
-    result = run_grid(repository, stubs, {
-        "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
-        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2",
+    result, _ = run_grid_with_every_stub_timed_out_once_all_are_reading(repository, stubs, {
         "COLD_READ_GRID_TEST_STUB_WRITE_PATHS_BEFORE_SLEEPING": ",".join(
             str(repository / name) for name in (new_file, TARGET_RELATIVE_PATH))})
     stray_lines = lines_opening_with_their_next_step(result, "STRAY WRITE:")
@@ -1273,15 +1253,12 @@ try:
               and f"`git -C {shlex.quote(str(resolved_repository))} --literal-pathspecs restore --staged --worktree -- "
                   f"{TARGET_RELATIVE_PATH}`" in line
               for line in stray_lines), repr(stray_lines))
-    time.sleep(stub_reading_seconds)
 
     # --- Stopped cells, and no snapshot to check them against -----------------
     # GIT_DIR points at nothing, so the grid's own snapshot fails as well as each cell's.
     repository = build_scratch_repository(scratch, "checkout-stopped-cells-no-snapshot")
-    result = run_grid(repository, stubs, {
-        "GIT_DIR": str(scratch / "no-such-git-directory"),
-        "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
-        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
+    result, _ = run_grid_with_every_stub_timed_out_once_all_are_reading(repository, stubs, {
+        "GIT_DIR": str(scratch / "no-such-git-directory")})
     unchecked_lines = lines_opening(result, "WRITE CHECK DID NOT RUN:")
     unchecked_lines_with_next_step = lines_opening_with_their_next_step(result, "WRITE CHECK DID NOT RUN:")
     check("a stopped cell's WRITE CHECK DID NOT RUN line has what to do on the next line",
@@ -1294,7 +1271,6 @@ try:
               and cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE in line
               for line in unchecked_lines),
           repr(unchecked_lines))
-    time.sleep(stub_reading_seconds)
 
     # --- A cell that writes its report and then hangs is stopped, report deleted
     # The clock jumps only once all eight have written, so no stub may exit before the last
@@ -1306,12 +1282,13 @@ try:
     hung_after_writing_stubs = scratch / "stub-bin-wrote-then-hung"
     attempt_limit_seconds = 3600
     clock_launcher = scratch / "grid-with-clock-jumped-once-reports-exist.py"
-    clock_launcher.write_text(GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST, encoding="utf-8")
+    clock_launcher.write_text(GRID_WITH_CLOCK_JUMPED_ONCE_FILES_EXIST, encoding="utf-8")
     started = time.monotonic()
     result, left_running = run_grid_stopped_at_deadline(repository, hung_after_writing_stubs, {
         "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)}, grid_deadline_seconds,
-        launcher_arguments_before_grid=(clock_launcher, 8, attempt_limit_seconds))
+        launcher_arguments_before_grid=(clock_launcher, repository / "cold-read-records" / "*" / "*.md", 8,
+                                        attempt_limit_seconds))
     for case_name, condition, detail in wrote_then_hung_checks(
             result, left_running, repository, time.monotonic() - started):
         check(case_name, condition, detail)
@@ -1327,7 +1304,7 @@ try:
     deadline_seconds = 2
     result, left_running = run_grid_stopped_at_deadline(
         repository, deadline_stubs, {}, deadline_seconds,
-        launcher_arguments_before_grid=(holding_launcher, 0, 0))
+        launcher_arguments_before_grid=(holding_launcher, "", 0, 0))
     deadline_checks = wrote_then_hung_checks(result, left_running, repository, deadline_seconds)
     check("a grid stopped at the deadline before making a record fails on the deadline alone",
           result.returncode == -signal.SIGKILL and record_directory_of(repository) is None
@@ -1342,11 +1319,18 @@ try:
     env_listing = subprocess.CompletedProcess(["ps"], 0, (
         f"  4242 /usr/bin/env python3 {env_listing_directory}/claude --print\n"
         f"  4243 /usr/bin/env -S PYTHONUNBUFFERED=1 python3 -u {env_listing_directory}/codex\n"
-        f"  4244 /usr/bin/env tail -F {env_listing_directory}/watched.log\n"), "")
+        f"  4244 /usr/bin/env tail -F {env_listing_directory}/watched.log\n"
+        f"  4245 /usr/bin/env -u PYTHONPATH python3 {env_listing_directory}/gemini\n"
+        f"  4246 /usr/bin/env -C {env_listing_directory}/checkout tail -F watched.log\n"
+        f"  4247 python3 - {env_listing_directory}/report.md\n"
+        f"  4248 python3 -c 'import sys' {env_listing_directory}/report.md\n"
+        f"  4249 python3 -m json.tool {env_listing_directory}/report.json\n"
+        f"  4250 python3 -W ignore {env_listing_directory}/claude\n"), "")
     with mock.patch.object(subprocess, "run", return_value=env_listing):
         listed_through_env = processes_running_programs_under(env_listing_directory)
-    check("a stub that env is still starting is found, and env running tail on a log there is not",
-          [int(line.split()[0]) for line in listed_through_env] == [4242, 4243], listed_through_env)
+    check("a stub that env is still starting is found, past env -u NAME, and env running tail on a log there,"
+          " env -C into it, or a Python reading a program from stdin, -c or -m is not",
+          [int(line.split()[0]) for line in listed_through_env] == [4242, 4243, 4245, 4250], listed_through_env)
 
     # --- Which processes a case reports and stops ------------------------------
     long_directory = scratch / ("directory-longer-than-a-terminal-line-" + "x" * 100)
@@ -1439,7 +1423,7 @@ try:
     result = run_grid(
         repository, stubs,
         {"COLD_READ_GRID_TEST_STUB_EDIT_GIVEN_TARGET": "1",
-         "COLD_READ_GRID_TEST_STUB_FAILING_MODEL": "claude-fable-5-1",
+         "COLD_READ_GRID_TEST_STUB_FAILING_MODEL": "claude-fable-5-2",
          **END_OF_RUN_COMPARISON_ONLY},
     )
     check("a run can lose a cell and its target at once: six saved, exit 3",
@@ -1461,20 +1445,20 @@ try:
           and marked[2].startswith("<!-- INCOMPLETE SET: 1 of 7 reports absent"),
           repr(marked[:3]))
 
-    # --- A Codex attempt's output holds the Claude limit text ----------------
+    # --- A Codex attempt's output holds the Claude logged-out text -----------
     # No Codex text is recognised, so the class is exit-1 whatever the line
     # says, and the run is otherwise the same as that failure without the
     # line: the cause changes what is reported, never what is decided.
     repository = build_scratch_repository(scratch, "checkout-codex-quotes-limit")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "codex-terminology-deep.md", "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
+        [{"fragment": "codex-terminology-deep.md", "attempts": 2, "stdout": LOGGED_OUT_LINE}])})
     repository_plain = build_scratch_repository(scratch, "checkout-codex-plain-failure")
     result_plain = run_grid(repository_plain, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
         [{"fragment": "codex-terminology-deep.md", "attempts": 2}])})
-    check("a Codex failure whose output starts with the Claude limit text is exit-1",
+    check("a Codex failure whose output starts with the Claude logged-out text is exit-1",
           any(line.startswith("FAILED (exit 1): codex-terminology-deep — exit-1 — ")
               for line in lines_opening(result, "FAILED"))
-          and "account-limit" not in result.stdout and "AGENT-BINARY DOWN:" not in result.stdout,
+          and "logged-out" not in result.stdout and "AGENT-BINARY DOWN:" not in result.stdout,
           repr(result.stdout))
     def decisions(text):
         return (text.count("RETRYING:"), text.count("FAILED (exit"), text.count("saved:"),
@@ -1686,24 +1670,24 @@ try:
 
     # A cause the user can clear is not retried, as for the reviews, but neither
     # its FAILED line nor the closing text tells the user: nothing waits on it.
-    repository = build_scratch_repository(scratch, "checkout-question-4-account-limit")
+    repository = build_scratch_repository(scratch, "checkout-question-4-logged-out")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": QUESTION_4_REPORT_NAME, "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
+        [{"fragment": QUESTION_4_REPORT_NAME, "attempts": 2, "stdout": LOGGED_OUT_LINE}])})
     record_directory = record_directory_of(repository)
     failed_lines = lines_opening(result, "FAILED")
-    check("a Question 4 cell at its account limit is FAILED at once, not retried",
+    check("a logged-out Question 4 cell is FAILED at once, not retried",
           lines_opening(result, "RETRYING:") == [] and len(failed_lines) == 1
           and failed_lines[0].startswith("FAILED (exit 1): question-4-what-should-be-code-answer — "
-                                         "account-limit — "),
+                                         "logged-out — "),
           repr(result.stdout))
-    check("a Question 4 cell at its account limit tells the user nothing and downs no agent-binary",
+    check("a logged-out Question 4 cell tells the user nothing and downs no agent-binary",
           "Tell the user:" not in result.stdout and "AGENT-BINARY DOWN:" not in result.stdout
           and result.returncode == 0 and "All seven reports landed" in result.stdout
           and markers_in(record_directory, "<!-- INCOMPLETE SET:") == [],
           f"exit {result.returncode}; stdout={result.stdout!r}")
-    check("the closing text gives the account limit as why Question 4 was not answered",
-          "Question 4, What should be code, was not answered: account-limit — weekly limit · resets "
-          "Nov 7, 3am (America/Los_Angeles) (log: " in result.stdout
+    check("the closing text gives the logged-out line as why Question 4 was not answered",
+          "Question 4, What should be code, was not answered: logged-out — Not logged in · Please run /login (log: "
+          in result.stdout
           and f"{QUESTION_4_REPORT_NAME}.stderr.log). The other reports do not depend on it: "
           "go on without its answer." in result.stdout, repr(result.stdout))
 
@@ -2115,7 +2099,9 @@ try:
         def run(*arguments):
             return subprocess.run(["git", "-C", str(repository), "-c", "user.name=grid test",
                                    "-c", "user.email=grid-test@example.invalid", *arguments],
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True,
+                                  # A developer's merge.default or merge.renames would change the conflicts built here.
+                                  env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull})
         run("init", "--quiet", "--initial-branch=main")
         (repository / "tracked.md").write_text("Committed.\n", encoding="utf-8")
         run("add", "tracked.md")
@@ -2209,17 +2195,21 @@ try:
     (glob_repository / "chapter1.md").write_text("The agent's own edit.\n", encoding="utf-8")
     with mock.patch.object(grid_module.cell_common, "REPO_ROOT", glob_repository):
         glob_baseline = grid_module.cell_common.working_tree_state()
-        glob_git("rm", "--cached", "--quiet", "chapter[1].md")
+        glob_sibling_index_entry = glob_git("--literal-pathspecs", "ls-files", "--stage", "--", "chapter1.md").stdout
+        glob_git("--literal-pathspecs", "rm", "--cached", "--quiet", "--", "chapter[1].md")
         (glob_repository / "chapter[1].md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
         glob_lines = grid_module.stopped_cells_write_check_lines(
             [scratch / "claude-hunt-deep.md"], glob_baseline, None, set())
     glob_commands = commands_in_line(glob_lines[0]) if glob_lines else []
     if len(glob_commands) == 1:
         subprocess.run(shlex.split(glob_commands[0]), capture_output=True, text=True)
-    check("the undo given for a path with a glob character restores that path and keeps another file's edits",
-          len(glob_commands) == 1
+    check("the undo given for a path with a glob character restores that path and keeps another file's edits "
+          "and index entry",
+          len(glob_commands) == 1 and glob_sibling_index_entry != ""
           and (glob_repository / "chapter[1].md").read_text(encoding="utf-8") == "Committed.\n"
-          and (glob_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n",
+          and (glob_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n"
+          and glob_git("--literal-pathspecs", "ls-files", "--stage", "--", "chapter1.md").stdout
+          == glob_sibling_index_entry,
           repr(glob_lines))
 
     # The fallback message's restore command, run as printed on a path with a glob character.
@@ -2264,6 +2254,33 @@ try:
           and all((quoted_repository / neighbor).read_text(encoding="utf-8") == "The agent's own edit.\n"
                   for neighbor in ("dont", "wont.md", "cant", "shant.md")),
           repr(fallback_commands))
+    # The restore command resets the whole file, so a file that also holds edits that are not a
+    # reviewer's is edited by hand; the Monitor tool shows only the line after the finding.
+    fallback_next_step = grid_module.STOPPED_CELL_WRITE_CHECK_LINE.split("\n")
+    check("the fallback message gives a whole-file undo command only for a path whose every change is "
+          "a reviewer's, says to edit out only the reviewer's writing otherwise, all on the one line "
+          "after the finding",
+          len(fallback_next_step) == 2
+          and "whose every uncommitted change shows a reviewer wrote it" in fallback_next_step[1]
+          and "delete only the reviewer's writing, by editing the file" in fallback_next_step[1]
+          and "throws away every uncommitted change to the file" in fallback_next_step[1],
+          grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
+
+    # A leading dash must reach both fallback commands as a path, not as an option.
+    dash_repository, dash_git = repository_with_committed_file("fallback-undo-of-a-dash-named-file")
+    (dash_repository / "-tracked.md").write_text("Committed.\n", encoding="utf-8")
+    dash_git("add", "--", "-tracked.md")
+    dash_git("commit", "--quiet", "-m", "dash-named file")
+    (dash_repository / "-tracked.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+    (dash_repository / "-dash.md").write_text("A reviewer's notes.\n", encoding="utf-8")
+    for command in fallback_commands:
+        dash_path = "-dash.md" if command.startswith("rm ") else "-tracked.md"
+        subprocess.run(["bash", "-c", command.replace("<path>", shlex.quote(dash_path))],
+                       cwd=dash_repository, capture_output=True, text=True)
+    check("the fallback message's undo commands act on a path that starts with a dash",
+          len(fallback_commands) == 2 and not (dash_repository / "-dash.md").exists()
+          and (dash_repository / "-tracked.md").read_text(encoding="utf-8") == "Committed.\n",
+          repr(fallback_commands))
 
     # A conflict with a missing side: both diffs can print only `* Unmerged path`.
     for missing_side_code, written in (("DD", "A reviewer's write.\n"), ("DU", "Incoming.\n")):
@@ -2295,6 +2312,15 @@ try:
               missing_status.startswith(missing_side_code)
               and f"{missing_repository / 'tracked.md'}, the copy on disk" in missing_line,
               repr((missing_status, missing_lines)))
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", missing_repository):
+            deleted_baseline = grid_module.cell_common.working_tree_state()
+            (missing_repository / "tracked.md").unlink()
+            deleted_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], deleted_baseline, None, set())
+        deleted_line = next((line for line in deleted_lines if line.startswith("STRAY WRITE: tracked.md ")), "")
+        check(f"a {missing_side_code} conflict path a cell deleted is reported as gone, with no copy on disk to read",
+              "the file is now gone from disk" in deleted_line and "the copy on disk" not in deleted_line,
+              repr(deleted_lines))
 
     # An already-conflicted file overwritten with either side: each side's diff shows the other's loss.
     conflict_repository, conflict_git = repository_with_committed_file("checkout-stopped-cell-overwrites-a-conflict")
@@ -2397,6 +2423,29 @@ try:
               and "an undo would discard them" in staged_gone_lines[0]
               and ("+The agent's own edit." in index_copy_shown) == (case == "staged copy of the edited file"),
               repr(staged_lines) + "\n" + shown + "\n" + index_copy_shown)
+    # A stopped cell that stages a new file and then deletes it leaves a path that is not at HEAD,
+    # where `diff HEAD` prints nothing; only the index copy shows what it held.
+    clean_move_git("reset", "--quiet", "--hard")
+    clean_move_git("clean", "--quiet", "-f")
+    (clean_move_repository / "agent-draft.md").write_text("The agent's own edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", clean_move_repository):
+        added_baseline = grid_module.cell_common.working_tree_state()
+        (clean_move_repository / "agent-draft.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        (clean_move_repository / "staged-new-by-a-reviewer.md").write_text("Staged new.\n", encoding="utf-8")
+        clean_move_git("add", "staged-new-by-a-reviewer.md")
+        (clean_move_repository / "staged-new-by-a-reviewer.md").unlink()
+        added_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], added_baseline, None, set())
+    added_gone_lines = [line for line in added_lines if line.startswith("STRAY WRITE: staged-new-by-a-reviewer.md ")]
+    added_diff_commands = re.findall(r"`(git -C [^`]* diff [^`]*)`", added_gone_lines[0]) if added_gone_lines else []
+    added_shown = [subprocess.run(shlex.split(command), check=True, capture_output=True, text=True).stdout
+                   for command in added_diff_commands]
+    check("a path a stopped cell staged as new and then deleted is named as never committed, and the one "
+          "diff the line gives shows what it held",
+          len(added_gone_lines) == 1 and "staged-new-by-a-reviewer.md is gone; it was never committed" in added_gone_lines[0]
+          and len(added_diff_commands) == 1 and " diff --cached -- " in added_diff_commands[0]
+          and "+Staged new." in added_shown[0],
+          repr(added_lines) + "\n" + "\n".join(added_shown))
     # A tracked file the agent had already changed: the diffs the line gives must together show a
     # cell's edit that is staged, and a cell's write of the HEAD text over a staged-and-edited file,
     # which leaves the working tree equal to HEAD.
@@ -2449,6 +2498,35 @@ try:
         if attempt.process is not None:
             grid_module.cell_common.stop_process_tree(attempt.process, grace_seconds=0.1)
     check("stopping a cell reaps its launcher", attempt.process.returncode is not None)
+
+    # The agy cell's default limit is the fast read's; only the grid's Gemini cell passes its own.
+    launched_commands = {}
+    with mock.patch.object(grid_module, "start_attempt",
+                           lambda command, report_path, *rest: launched_commands.setdefault(
+                               report_path.name, command)):
+        grid_module.launch_cells(scratch / "target.md", scratch, scratch / "origin.md")
+    agy_command = launched_commands.get("agy-hunt-gemini-4-neon-high.md", [])
+    timeout_flag = "--per-model-run-timeout-seconds"
+    check("the grid gives its Gemini defect-hunt cell 40 minutes per model run, "
+          "and no other cell a per-model-run time limit",
+          timeout_flag in agy_command
+          and agy_command[agy_command.index(timeout_flag) + 1] == str(40 * 60)
+          and not any(timeout_flag in command for name, command in launched_commands.items()
+                      if name != "agy-hunt-gemini-4-neon-high.md"),
+          repr(launched_commands))
+    agy_cell_spec = importlib.util.spec_from_file_location(
+        "cold_read_agy_cell_under_test", SYSTEM_DIRECTORY / "cold-read-agy-cell.py")
+    agy_cell_module = importlib.util.module_from_spec(agy_cell_spec)
+    agy_cell_spec.loader.exec_module(agy_cell_module)
+    check("the Gemini defect-hunt cell's one model run, with the agy cell's kill margin, "
+          "ends before the grid's cell-attempt time limit",
+          grid_module.GEMINI_NEON_DEFECT_HUNT_CELL.model is not None
+          and grid_module.GEMINI_NEON_DEFECT_HUNT_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS
+          + agy_cell_module.COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS
+          < grid_module.CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS)
+    check("the timed-out cause names the grid's cell-attempt time limit, 2 hours",
+          grid_module.TIMED_OUT_CAUSE_DETAIL == "timed out after 2 hours",
+          repr(grid_module.TIMED_OUT_CAUSE_DETAIL))
 
     # An interrupted grid exits while its cells keep writing the record: each cell holds the record's
     # being-written lock too, so the record is not shipped until the last cell has exited.
@@ -2560,6 +2638,49 @@ try:
         os.close(read_end)
     check("a timed-out cell's stray-write line reaches the grid's piped stdout while another cell still runs",
           running_process.line_seen_while_running, repr(running_process.read_so_far))
+
+    # --- A cell that ran its own write check before it was stopped is reported once ----
+    # Its log already holds the lines its own check printed when the grid finds it still
+    # running, past its time limit or once the target moved, so only the grid's line may
+    # report it.
+    own_check_directory = scratch / "stopped-cell-whose-own-write-check-already-ran"
+    own_check_directory.mkdir()
+    grid_stopped_without_snapshot_reason = "its snapshot of the working tree before the cells launched failed (test)"
+    own_skipped_check_line = io.StringIO()
+    with contextlib.redirect_stderr(own_skipped_check_line):
+        grid_module.cell_common.report_stray_writes(
+            "cold-read-claude-cell", grid_module.cell_common.WriteDetectorUnavailable("test"))
+    own_check_lines = (
+        own_skipped_check_line.getvalue()
+        + f"cold-read-claude-cell: {grid_module.cell_common.STRAY_WRITE_PHRASE} — notes.md.\n"
+        "cold-read-claude-cell: fell back to claude-opus-5-5 after claude-fable-5-2(exit1).\n")
+    for case_label, timeout_seconds, target_move in (
+            ("past its time limit", 60, lambda: None),
+            ("once the target moved", 3600, lambda: ("target moved",))):
+        own_check_report = own_check_directory / f"claude-hunt-deep-{timeout_seconds}.md"
+        own_check_stderr = own_check_directory / f"claude-hunt-deep-{timeout_seconds}.md.stderr.log"
+        own_check_stderr.write_text(own_check_lines, encoding="utf-8")
+        own_check_attempt = grid_module.CellAttempt(
+            own_check_report, ["unused"], 1, TimedOutCell(), own_check_stderr, "", time.monotonic() - 120)
+        printed = io.StringIO()
+        with mock.patch.object(grid_module.cell_common, "stop_process_tree", stop_timed_out_cell), \
+                contextlib.redirect_stdout(printed):
+            grid_module.wait_for_cells(
+                {own_check_report: own_check_attempt}, target_move, cell_poll_interval_seconds=0.01,
+                cell_attempt_timeout_seconds=timeout_seconds,
+                working_tree_baseline=None,
+                working_tree_baseline_failure_reason=grid_stopped_without_snapshot_reason)
+        printed_lines = printed.getvalue().splitlines()
+        unchecked_lines = [line for line in printed_lines if line.startswith("WRITE CHECK DID NOT RUN:")]
+        check(f"a cell stopped {case_label} after its own write check ran gets one WRITE CHECK DID NOT RUN "
+              "line, the grid's, and none of its own STRAY WRITE lines",
+              len(unchecked_lines) == 1 and grid_stopped_without_snapshot_reason in unchecked_lines[0]
+              and not any(line.startswith("STRAY WRITE:") for line in printed_lines),
+              repr(printed_lines))
+        check(f"a cell stopped {case_label} still has the FELL BACK line from its log printed",
+              any(line.startswith(f"FELL BACK: {own_check_report.name} — cold-read-claude-cell: "
+                                  f"{grid_module.cell_common.FELL_BACK_PHRASE}")
+                  for line in printed_lines), repr(printed_lines))
 
     # --- The reference pre-pass: a web link is not a path, a bare name is looked up --
     reference_directory = scratch / "reference-pre-pass"
@@ -3780,10 +3901,11 @@ try:
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
 
     left_running_at_end = processes_running_programs_under(scratch)
-    kill_processes_running_programs_under(scratch)
     check("no stub, launcher or grid the suite started is still running when it ends",
           left_running_at_end == [], left_running_at_end)
 finally:
+    # Also on SIGTERM: reviewers started in their own sessions outlive the suite unless stopped here.
+    kill_processes_running_programs_under(SCRATCH_ROOT)
     shutil.rmtree(SCRATCH_ROOT, ignore_errors=True)
 
 

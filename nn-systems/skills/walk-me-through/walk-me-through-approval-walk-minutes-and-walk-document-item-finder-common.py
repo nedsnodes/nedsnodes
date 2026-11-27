@@ -52,8 +52,8 @@ headings are parts or sections. A dotted count, as in a `### Item 1.1 of 3`
 sub-step, does not decide this. The answer program's close step numbers an
 unnumbered item when it is shown. M is display only: approval_walk_item_total_shown_and_waiting_counted_from_walk_document counts it from the
 walk-document, the whole numbers its item headings hold, a dotted number
-counting as the item before its first dot, plus its unnumbered items, so an
-item added changes no other heading. The close step writes it into the
+counting as the item before its first dot, or the highest of them when that is
+more, plus its unnumbered items, so an item added changes no other heading. The close step writes it into the
 `#next_to_present` line, and the hooks show the M that line gives; no M is
 compared, and an `of M` a heading or the minutes give is read only to choose
 between two headings that name the same item. A
@@ -157,11 +157,11 @@ RECOMMENDATION = re.compile(r"Recommendation:(.*)$", re.I | re.M)
 # text to repeat after `^\s*`.
 MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT = r"(?:(?:[-*+]|\d+[.)]|>)\s+)"
 # Recognises `#new` and `#new_if_d` mark lines, the walk-document lines holding a text an answer adds: after any list
-# or quotation marks, the mark `#new` or `#new_if_d`, spelled exactly, then the text. The walk check program and the
-# short-answer hook both read marks with this one pattern, so that a line one of them takes for a mark the other
-# cannot skip.
+# or quotation marks and a part's opening `Part N.`, the mark `#new` or `#new_if_d`, spelled exactly, then the text.
+# The walk check program and the short-answer hook both read marks with this one pattern, so that a line one of them
+# takes for a mark the other cannot skip.
 APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN = re.compile(
-    rf"^\s*{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*(#new(?:_if_d)?)\b[:\s]*(.*)$")
+    rf"^\s*(?:{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}|Part \d+\.\s+)*(#new(?:_if_d)?)\b#?[:\s]*(.*)$")
 
 REPOSITORY_TOP = Path(__file__).resolve().parents[3]
 SUITE_RUNNER_FILE = REPOSITORY_TOP / "scripts" / "run-all-test-suites.py"
@@ -172,11 +172,12 @@ MARKDOWN_PARSER_MODULE_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
 WALK_DIRECTORY = Path("docs") / "walk"
 MINUTES_SUFFIX = "-minutes.md"
-# Group 1 is set only for the hashtag; the old form is read so that open walks it marks are migrated.
+# Group 1 is set only for the hashtag, read with or without its closing `#`; the old form is read so that open walks
+# it marks are migrated.
 # The value runs to the line's end, the next marker or a pause hashtag, so two markers on a line are read as two
 # and a pause on the marker's line is not read as part of the value.
 NEXT_MARKER = re.compile(
-    r"(?:(#next_to_present)\b|Next to present:)[*_`\s:]*"
+    r"(?:(#next_to_present)\b#?|Next to present:)[*_`\s:]*"
     r"((?:(?!#next_to_present\b|Next to present:|#approval_walk_paused\b)[^\n])*)",
     re.I)
 PAUSE_MARKER = re.compile(r"#approval_walk_paused\b", re.I)
@@ -203,7 +204,12 @@ APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = 
 SUB_STEP_NO_DECISION_CLOSING_LINE = re.compile(
     rf"^\s*(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\((\S+)\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
 CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*)?", re.S)
-# Only right after the count, as in `(revised)` or `, revised:`, so a title that uses the word drops nothing.
+# The words item_title takes off a title as the `revised` label: `(revised)`, or the word followed by a separator or
+# the line's end, as in `, revised:`; so a title such as `: Revised estimates` keeps its first word. REVISED, which
+# decides whether a heading supersedes another, reads more forms; a title it reads as revised can keep the word.
+APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX = r"(?:\(revised\)|revised(?=\s*(?:[:,.;\-\u2013\u2014]|$)))"
+# Only right after the count, as in `(revised again)`, `, revised twice:` or `**Item 3 of 9 revised**:`; a word
+# character straight after it, as in `revised_estimates` or `revised__estimates`, makes it no label.
 REVISED = re.compile(r"^[*_\s(,:;.\-\u2013\u2014]*revised\b", re.I)
 WITHDRAWN_HEADING = re.compile(r"^[*_\s(]*withdrawn\b", re.I)
 APPROVAL_WALK_ITEM_TAG_LINE = re.compile(r"^\s*#approval_walk_item_", re.I)
@@ -226,7 +232,7 @@ NUMBER_OR_JOINER = re.compile(rf"{NUMBER}|\bto\b|-|\u2013", re.I)
 # `of M` is optional because only the item number is read, and the handoff-supervisor asks for a line without it
 # when no total is known.
 ITEM_PAGE_LINE_PATTERN = re.compile(
-    rf"^#item_page[ \t]+item[ \t]+({NUMBER})[ \t]+(?:of[ \t]+\d+[ \t]+)?"
+    rf"^#item_page#?[ \t]+item[ \t]+({NUMBER})[ \t]+(?:of[ \t]+\d+[ \t]+)?"
     rf"(?:(publish failed:[ \t]*\S.*?)|(?:version[ \t]+(\d+)[ \t]+)?(\S+)(?:[ \t]+\(([^\n]*)\))?)[ \t]*$",
     re.I | re.M)
 ITEM_PAGE_NOTE_VERSION = re.compile(r"\bversion[ \t]+(\d+)", re.I)
@@ -938,15 +944,17 @@ def approval_walk_document_new_item_insert_line_number_past_whole_item_sub_steps
 
 def approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units):
     """M, as a string: the whole numbers the numbered items of units hold, a dotted number such as 6.1 counting
-    as its item 6, plus the unnumbered items; so it counts the items shown and the items waiting."""
-    whole = {number.split(".")[0] for unit in units for number in unit[0]}
-    return str(len(whole) + sum(map(approval_walk_unit_is_unnumbered_item, units)))
+    as its item 6, or the highest of them when that is more, because a number can leave the walk-document; plus
+    the unnumbered items. So every item, numbered or still unnumbered, fits under M."""
+    whole = {int(number.split(".")[0]) for unit in units for number in unit[0]}
+    return str(max(len(whole), max(whole, default=0)) + sum(map(approval_walk_unit_is_unnumbered_item, units)))
 
 
 def approval_walk_next_unnumbered_item_number(units):
     """The number the close step gives the next unnumbered item it shows: one more than the highest whole number
     any item heading of units holds, so no number is used twice even where waiting items carry numbers."""
     return str(max((int(number.split(".")[0]) for unit in units for number in unit[0]), default=0) + 1)
+
 
 
 def waiting_item_units(document, value, numbers, total, parser, all_units=None):
@@ -1002,8 +1010,8 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
             f"the walk-document, put `Withdrawn: ` just before `Item` in each heading you do not mean, as in "
             f"`## Withdrawn: Item 4 of 9: <the point>`, or, only when the heading you mean comes after every other "
             f"heading for that item, write `revised` right after its `of M` instead of marking any heading `Withdrawn: `, "
-            f"with the colon after or before `revised`, as in `## Item 4 of 9 revised: <the point>` or "
-            f"`## Item 4 of 9: revised <the point>`")
+            f"with a colon after it or in parentheses, as in `## Item 4 of 9 revised: <the point>` or "
+            f"`## Item 4 of 9 (revised): <the point>`")
     if problems:
         raise UnusableRange("its walk-document has " + "; and it has ".join(problems) + ".")
     shown_total = total if total is not None else approval_walk_item_total_shown_and_waiting_counted_from_walk_document(all_units)

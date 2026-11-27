@@ -222,10 +222,17 @@ class Recorder:
         self.timeouts = []
         self.answers = {MAIN_COMMIT_CALL: Completed(MAIN_COMMIT + "\n"),
                         **(answers or {})}
+        self.last_shown = ""
 
     def __call__(self, arguments, timeout=None, cwd=None, check=True):
         self.calls.append(with_question_read(arguments))
         self.timeouts.append(timeout)
+        if ("--state" in arguments and "merged" in arguments
+                and not any("--state merged" in key for key in self.answers)):
+            # A resumed filing asks whether its filing pull request merged.
+            # A case that is not about that gets none, so a case's answer
+            # for open pull requests is not read as a merged one.
+            return Completed("[]")
         for prefix, answer in self.answers.items():
             if prefix in " ".join(arguments):
                 if isinstance(answer, Exception):
@@ -234,7 +241,17 @@ class Recorder:
                     raise tool.Refused(
                         f"{' '.join(arguments[:3])} failed: "
                         f"{(answer.stderr or answer.stdout).strip()}", 1)
+                if arguments[:2] == ["git", "show"]:
+                    self.last_shown = answer.stdout or ""
                 return answer
+        if arguments[:2] == ["git", "show"]:
+            self.last_shown = ""
+        if arguments[-2:] == ["--json", "title"]:
+            # The title read just after step 5 reads main's copy, answered
+            # as that copy's heading, so a case that is not about the title
+            # sees it left alone.
+            return Completed(json.dumps(
+                {"title": tool.first_heading(self.last_shown)}))
         return Completed()
 
     def commands(self):
@@ -454,6 +471,22 @@ def run_remote_ghi_guide_agent_log_store_cases(scratch: Path):
           and on_the_mac == ("nedlern@ned-box",
                              tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY),
           (on_ned_box, on_the_mac))
+    saved_override = os.environ.get(tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
+    os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE] = "relative/store"
+    try:
+        relative_store = tool.ghi_guide_agent_log_store()
+        relative_citation = tool.ghi_guide_agent_log_store_citation("a-file.md")
+    finally:
+        if saved_override is None:
+            del os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE]
+        else:
+            os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE] = saved_override
+    absolute_store = os.path.join(os.getcwd(), "relative/store")
+    check("a relative store override resolves to an absolute path, so a process "
+          "in another directory, such as ghi-guide-agent, reads the same store",
+          relative_store == (None, absolute_store)
+          and relative_citation == os.path.join(absolute_store, "a-file.md"),
+          (relative_store, relative_citation))
 
 
 def run_cases(scratch: Path):
@@ -1498,6 +1531,9 @@ def run_cases(scratch: Path):
     landed = written(scratch, "570-a-statusline-that-drops-its-branch-name.md",
                      STAGED)
     moved = Recorder({
+        "gh issue view 570 --repo nedsnodes/nedsnodes --json title":
+            Completed(json.dumps({"title": TITLE})),
+        f"git show origin/main:{LANDED}": Completed(STAGED),
         "gh issue view": Completed('{"body": "in progress ' + KEY + '"}'),
         "git ls-tree": Completed(LANDED + "\0"),
     })
@@ -2852,7 +2888,7 @@ def run_saved_question_on_resume_cases(scratch: Path):
     created_saved.write_text(ghi_guide_agent_file("may the filing go ahead?"))
     numbered = Recorder({
         "gh issue view 570": Completed(json.dumps(
-            {"body": tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)})),
+            {"title": "", "body": tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)})),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
     })
     lines = []
@@ -2887,6 +2923,251 @@ def run_saved_question_on_resume_cases(scratch: Path):
               and GHI_GUIDE_AGENT_HEAD in line
               and "dispatch a forked subagent" in line for line in lines),
           lines[-2:])
+    log_store_at(scratch / "default-log-store")
+
+
+def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
+    """The landing pull request changed the heading after the issue was
+    filed under the old one, so step 5 sets the title to main's heading in
+    the same call that links the body."""
+    log_store_at(scratch / "title-store").mkdir()
+    local = FILE_TEXT.replace(f"# {EDIT_TITLE}", "# Local unmerged heading")
+    source = filed_ghi_md(scratch, text=local)
+    placeholder = tool.placeholder_body(tool.pairing_key(local), REPO)
+    title_view = f"gh issue view 570 --repo {REPO} --json title"
+    main_copy = f"git show {MAIN_COMMIT}:{EDIT_RELATIVE}"
+
+    def numbered_run(title, landed=True, extra=None):
+        answers = {title_view: Completed(json.dumps({"title": title})),
+                   "gh issue view 570": issue_json(title, placeholder),
+                   main_copy: Completed(FILE_TEXT)}
+        if landed:
+            answers["git ls-tree"] = Completed(EDIT_RELATIVE + "\0")
+        answers.update(extra or {})
+        recorder = Recorder(answers)
+        lines = []
+        try:
+            outcome = tool.create(source, REPO, scratch, recorder, lines.append)
+        except (tool.Refused, KeyError) as raised:
+            outcome = raised
+        return recorder, lines, outcome
+
+    def one_edit_with_title(recorder, title):
+        return [call for call in recorder.calls
+                if call[:3] == ["gh", "issue", "edit"]
+                and "--body" in call
+                and (("--title" in call and title in call) if title
+                     else "--title" not in call)]
+
+    for name, title, landed, renamed in (
+            ("a title the heading changed from", "Handoff dialog: older words",
+             True, True),
+            ("a title that is main's heading already", EDIT_TITLE, True, False),
+            ("a file not yet on main", "Handoff dialog: older words", False,
+             False)):
+        recorder, lines, _ = numbered_run(title, landed)
+        check(f"a create resumed on its landed file with {name} "
+              + ("sets the title to main's heading in the body's edit"
+                 if renamed else "leaves the title alone"),
+              (len(one_edit_with_title(recorder,
+                                       EDIT_TITLE if renamed else None)) == 1
+               if landed else not recorder.ran("gh issue edit"))
+              and (f"title is now: {EDIT_TITLE}" in lines) == renamed,
+              (recorder.calls, lines))
+
+    recorder, lines, _ = numbered_run("Handoff dialog: older words")
+    check("the title comes from main's copy, not from a checkout whose "
+          "heading never merged",
+          not any("Local unmerged heading" in " ".join(call)
+                  for call in recorder.calls), (recorder.calls, lines))
+
+    failing, lines, outcome = numbered_run(
+        "Handoff dialog: older words",
+        extra={"gh issue edit": Completed("", returncode=1,
+                                          stderr="title write failed")})
+    rerun, rerun_lines, rerun_outcome = numbered_run(
+        "Handoff dialog: older words")
+    check("a failed title write leaves the body's pairing key, so a rerun "
+          "sets the title and links the body",
+          isinstance(outcome, tool.Refused)
+          and failing.count("gh issue edit") == 1
+          and rerun_outcome == (570, True)
+          and len(one_edit_with_title(rerun, EDIT_TITLE)) == 1,
+          (outcome, failing.calls, rerun_outcome, rerun.calls))
+
+    empty, lines, outcome = numbered_run(
+        "unused", extra={title_view: Completed("{}")})
+    check("a title read that answers no title raises, and nothing is edited",
+          isinstance(outcome, KeyError) and not empty.ran("gh issue edit"),
+          (outcome, empty.calls))
+
+    several, lines, _ = numbered_run(
+        "Handoff dialog: older words",
+        extra={"git ls-tree": Completed(
+            EDIT_RELATIVE + "\0docs/issues/570-another-file.md\0")})
+    check("an issue with several GHI-MDs on main keeps its title",
+          len(one_edit_with_title(several, None)) == 1
+          and not several.ran(title_view), (several.calls, lines))
+
+    original = written(scratch)
+    key = tool.pairing_key(FILE_TEXT)
+    from_original = Recorder({
+        "gh issue list": Completed(json.dumps([{
+            "number": 570, "title": "Handoff dialog: older words",
+            "body": tool.placeholder_body(key, REPO)}])),
+        title_view: Completed(json.dumps(
+            {"title": "Handoff dialog: older words"})),
+        main_copy: Completed(tool.with_issue_frontmatter(
+            FILE_TEXT, REPO, 570, EDIT_TITLE)),
+        "git show": Completed(tool.with_issue_frontmatter(
+            FILE_TEXT, REPO, 570, EDIT_TITLE)),
+        "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
+    })
+    lines = []
+    outcome = tool.create(original, REPO, scratch, from_original, lines.append)
+    check("a rerun on the original source whose filing merged sets the "
+          "title in the body's edit too",
+          outcome == (570, True)
+          and len(one_edit_with_title(from_original, EDIT_TITLE)) == 1,
+          (from_original.calls, lines))
+
+    moved, lines, outcome = numbered_run(
+        "Handoff dialog: older words",
+        extra={f"git show origin/main:{EDIT_RELATIVE}": Completed(
+            "", returncode=1, stderr="path not in origin/main")})
+    check("step 5 reads main's copy at the commit it listed the files from, "
+          "so a fetch that moves origin/main in between stops nothing",
+          outcome == (570, True)
+          and len(one_edit_with_title(moved, EDIT_TITLE)) == 1,
+          (outcome, moved.calls, lines))
+
+    class MainMovesAfterTheRead(Recorder):
+        """Another worktree's fetch moves origin/main, to a commit that
+        renamed the issue's file, once step 5 has read main's copy."""
+
+        def __call__(self, arguments, timeout=None, cwd=None, check=True):
+            if (" ".join(arguments) == MAIN_COMMIT_CALL
+                    and any(" ".join(call) == main_copy
+                            for call in self.calls)):
+                self.calls.append(list(arguments))
+                self.timeouts.append(timeout)
+                return Completed("9" * 40 + "\n")
+            return super().__call__(arguments, timeout, cwd, check)
+
+    moved_on = MainMovesAfterTheRead({
+        title_view: Completed(json.dumps(
+            {"title": "Handoff dialog: older words"})),
+        "gh issue view 570": issue_json("Handoff dialog: older words",
+                                        placeholder),
+        main_copy: Completed(FILE_TEXT),
+        "git ls-tree": Completed(EDIT_RELATIVE + "\0")})
+    lines = []
+    outcome = tool.create(source, REPO, scratch, moved_on, lines.append)
+    check("when origin/main moves after step 5 read main's copy, the body "
+          "keeps its placeholder and the run says step 5 was not done and why",
+          not moved_on.ran("gh issue edit")
+          and any(line.startswith("step 5 not done: origin/main moved from "
+                                  f"{MAIN_COMMIT}") for line in lines),
+          (outcome, moved_on.calls, lines))
+
+    dated_text = FILE_TEXT.replace(f"# {EDIT_TITLE}",
+                                   f"# {EDIT_TITLE} on 2026-11-26")
+    dated, lines, outcome = numbered_run(
+        "Handoff dialog: older words",
+        extra={main_copy: Completed(dated_text)})
+    check("a heading that gained a date in review is not made the title, "
+          "the body is linked, and the run says how to clear the date",
+          outcome == (570, True)
+          and len(one_edit_with_title(dated, None)) == 1
+          and any("title left as it is" in line and "2026-11-26" in line
+                  for line in lines)
+          and any(f"scripts/ghi-issue-write.py edit {EDIT_RELATIVE}" in line
+                  for line in lines),
+          (outcome, dated.calls, lines))
+
+    reviewed_heading = "Handoff dialog: words review chose"
+    reviewed = tool.with_issue_frontmatter(
+        FILE_TEXT.replace(f"# {EDIT_TITLE}", f"# {reviewed_heading}"),
+        REPO, 570, reviewed_heading)
+
+    def rerun_on_original_after_review_renamed(merged,
+                                               on_main=(EDIT_RELATIVE,)):
+        answers = {
+            "gh issue list": Completed(json.dumps([{
+                "number": 570, "title": EDIT_TITLE,
+                "body": tool.placeholder_body(key, REPO)}])),
+            title_view: Completed(json.dumps({"title": EDIT_TITLE})),
+            "git show": Completed(reviewed),
+            "git ls-tree": Completed("".join(f"{path}\0" for path in on_main)),
+            "git ls-remote": Completed(""),
+            "gh pr create": Completed("pr\n"),
+        }
+        if merged:
+            answers["--state merged"] = Completed(json.dumps([{"number": 5}]))
+        recorder = Recorder(answers)
+        lines = []
+        outcome = tool.create(original, REPO, scratch, recorder, lines.append)
+        return recorder, lines, outcome
+
+    renamed, lines, outcome = rerun_on_original_after_review_renamed(True)
+    check("a rerun on the original source whose filing pull request merged "
+          "with a heading review changed, its branch deleted, lands nothing "
+          "again and sets the title to main's heading",
+          outcome == (570, True)
+          and not renamed.ran("git worktree add")
+          and not renamed.ran("gh pr create")
+          and len(one_edit_with_title(renamed, reviewed_heading)) == 1,
+          (outcome, renamed.calls, lines))
+    second_file = "docs/issues/570-another-file.md"
+    two_files, lines, outcome = rerun_on_original_after_review_renamed(
+        True, on_main=(EDIT_RELATIVE, second_file))
+    edits = one_edit_with_title(two_files, None)
+    check("a rerun whose filing pull request merged, with two files on main "
+          "for the issue, lands nothing again and links both",
+          outcome == (570, True)
+          and not two_files.ran("git worktree add")
+          and not two_files.ran("gh pr create")
+          and len(edits) == 1
+          and edits[0][edits[0].index("--body") + 1]
+          == tool.links_body(REPO, [EDIT_RELATIVE, second_file]),
+          (outcome, two_files.calls, lines))
+    class MergedIntoStaging(Recorder):
+        """gh, asked for merged pull requests from the filing branch,
+        finds one merged into a staging branch, and none into main."""
+
+        def __call__(self, arguments, timeout=None, cwd=None, check=True):
+            joined = " ".join(arguments)
+            if "gh pr list" in joined and "--state merged" in joined:
+                self.calls.append(list(arguments))
+                self.timeouts.append(timeout)
+                if "--base main" in joined:
+                    return Completed("[]")
+                return Completed(json.dumps([{"number": 7}]))
+            return super().__call__(arguments, timeout, cwd, check)
+
+    staging = MergedIntoStaging({
+        "gh issue list": Completed(json.dumps([{
+            "number": 570, "title": EDIT_TITLE,
+            "body": tool.placeholder_body(key, REPO)}])),
+        title_view: Completed(json.dumps({"title": EDIT_TITLE})),
+        "git show": Completed(reviewed),
+        "git ls-tree": Completed(""),
+        "git ls-remote": Completed(""),
+        "gh pr create": Completed("pr\n")})
+    lines = []
+    try:
+        outcome = tool.create(original, REPO, scratch, staging, lines.append)
+    except tool.Refused as raised:
+        outcome = raised
+    check("a filing pull request merged into a base other than main is not "
+          "taken for the filing, so the rerun lands the file",
+          staging.ran("git worktree add")
+          and not isinstance(outcome, tool.Refused),
+          (outcome, staging.calls, lines))
+    unmerged, lines, outcome = rerun_on_original_after_review_renamed(False)
+    check("and with no merged filing pull request the rerun lands the file "
+          "as before",
+          unmerged.ran("git worktree add"), (outcome, unmerged.calls, lines))
     log_store_at(scratch / "default-log-store")
 
 
@@ -5556,6 +5837,8 @@ def run_resumed_create_after_older_name_merged_real_git_cases(scratch: Path):
                 return Completed("[]")
             if "pr create" in gh_calls[-1]:
                 return Completed("https://github.com/x/y/pull/11\n")
+            if "issue view" in gh_calls[-1]:
+                return Completed(json.dumps({"title": title}))
             return Completed("")
         return tool.run(arguments, timeout=timeout or tool.GH_TIMEOUT_SECONDS,
                         cwd=cwd, check=check)
@@ -5848,6 +6131,8 @@ def main():
                     run_group(run_old_ghi_guide_agent_files_on_main_cases, Path(name))
                 with tempfile.TemporaryDirectory(prefix="ghi-issue-resume-test-") as name:
                     run_group(run_saved_question_on_resume_cases, Path(name))
+                with tempfile.TemporaryDirectory(prefix="ghi-issue-resume-title-test-") as name:
+                    run_group(run_resumed_create_title_follows_landed_heading_cases, Path(name))
                 with tempfile.TemporaryDirectory(prefix="ghi-issue-remote-read-test-") as name:
                     run_group(run_remote_read_failure_cases, Path(name))
                 # A checkout of its own: the reconsidered marker lives at the root of

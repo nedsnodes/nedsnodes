@@ -11,8 +11,8 @@ unlocked, once claude has exited. A later Claude Code that locks or removes such
 fails it. It needs the real HOME, where claude is logged in, and an agent-seat of this machine
 for GIT_AUTHOR_NAME, so scripts/run-all-test-suites.py runs it outside any sandbox. It spends
 one short haiku agent-session, and removes the Claude Code project directory claude made for
-the scratch clone. When claude names a cause outside this repository, such as its usage limit
-or being logged out, the trial's cases are not judged: the suite prints the cause as its last
+the scratch clone. When claude names a cause outside this repository, such as being logged out
+or a model's limit, the trial's cases are not judged: the suite prints the cause as its last
 line and exits run-all-test-suites.py's NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES,
 unless another case failed.
 
@@ -35,7 +35,6 @@ HOOK = REPO_ROOT / "nn-systems" / "general-tools" / "agent-seat-worktree-create-
 CLAUDE_RUN_TIMEOUT_SECONDS = 600
 LOCK_POLL_SECONDS = 0.2
 SUBAGENT_WORKTREE_DIRECTORY_NAME = re.compile(r"worktree-agent-a[0-9a-f]{16}")
-CLAUDE_MODEL = "haiku"
 # `git worktree add` itself holds this lock while it checks the files out, and drops it when the add ends.
 GIT_WORKTREE_ADD_OWN_LOCK_LINE = "locked initializing"
 
@@ -102,33 +101,32 @@ def test_git_worktree_adds_own_lock_is_not_counted_as_a_lock():
 
 def claude_outside_cause_or_none(returncode, stdout, stderr):
     """"<cause class> — <claude's words>" when claude exited nonzero naming a cause outside this
-    repository, such as its usage limit or being logged out, else None."""
+    repository, such as being logged out, else None."""
     if returncode == 0:
         return None
     cause_class, detail = claude_cell.common.classify_failed_attempt(
         stdout=stdout, stderr=stderr, exit_code=returncode,
-        recognised_texts=claude_cell.recognised_failure_texts_for_model(CLAUDE_MODEL))
+        recognised_texts=claude_cell.RECOGNISED_FAILURE_TEXTS)
     return (f"{cause_class} — {detail}" if cause_class in claude_cell.common.USER_CLEARABLE_CAUSE_CLASSES
             else None)
 
 
 def test_claude_outside_cause_is_told_from_a_failure():
     weekly_limit = "You've hit your weekly limit · resets Nov 16, 8pm (America/Los_Angeles)\n"
-    check("claude's weekly limit, exit 1, is an outside cause naming the limit and its reset",
-          claude_outside_cause_or_none(1, weekly_limit, "")
-          == "account-limit — weekly limit · resets Nov 16, 8pm (America/Los_Angeles)",
+    check("claude's weekly limit, exit 1, is not an outside cause the classifier names",
+          claude_outside_cause_or_none(1, weekly_limit, "") is None,
           repr(claude_outside_cause_or_none(1, weekly_limit, "")))
-    check("claude's haiku model limit, as claude capitalises it, exit 1, is an outside cause",
-          (claude_outside_cause_or_none(1, "You've reached your Haiku limit · resets 3am\n", "") or "")
-          .startswith("model-limit — "),
-          repr(claude_outside_cause_or_none(1, "You've reached your Haiku limit · resets 3am\n", "")))
+    haiku_limit = "You've reached your Haiku limit · resets 3am\n"
+    check("claude's haiku model limit, exit 1, is not an outside cause the classifier names",
+          claude_outside_cause_or_none(1, haiku_limit, "") is None,
+          repr(claude_outside_cause_or_none(1, haiku_limit, "")))
     check("claude logged out, exit 1, is an outside cause",
           claude_outside_cause_or_none(1, "", "Not logged in · Please run /login\n")
           == "logged-out — Not logged in · Please run /login")
     check("claude's exit 1 with any other output is not an outside cause",
           claude_outside_cause_or_none(1, "Error: the hook failed\n", "") is None)
     check("claude's exit 0 is not an outside cause, whatever it printed",
-          claude_outside_cause_or_none(0, weekly_limit, "") is None)
+          claude_outside_cause_or_none(0, "", "Not logged in · Please run /login\n") is None)
 
 
 def agent_seat_of_this_machine():
@@ -237,13 +235,13 @@ def suite_last_line_and_exit_code(failed_cases, outside_causes):
 
 
 def test_a_failed_case_outranks_an_outside_cause():
-    weekly_limit = "account-limit — weekly limit · resets Nov 16, 8pm (America/Los_Angeles)"
-    check("a failed case and claude's weekly limit together exit 1, not NOT RUN",
-          suite_last_line_and_exit_code(["a pure case"], [weekly_limit]) == ("FAILED: 1 failed", 1),
-          repr(suite_last_line_and_exit_code(["a pure case"], [weekly_limit])))
-    check("claude's weekly limit alone exits NOT RUN's code, naming the cause",
-          suite_last_line_and_exit_code([], [weekly_limit])
-          == (f"NOT RUN: the trial against the installed Claude Code; claude stopped: {weekly_limit}",
+    logged_out = "logged-out — Not logged in · Please run /login"
+    check("a failed case and claude logged out together exit 1, not NOT RUN",
+          suite_last_line_and_exit_code(["a pure case"], [logged_out]) == ("FAILED: 1 failed", 1),
+          repr(suite_last_line_and_exit_code(["a pure case"], [logged_out])))
+    check("claude logged out alone exits NOT RUN's code, naming the cause",
+          suite_last_line_and_exit_code([], [logged_out])
+          == (f"NOT RUN: the trial against the installed Claude Code; claude stopped: {logged_out}",
               test_suite_runner.NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES))
     check("neither exits 0", suite_last_line_and_exit_code([], []) == ("PASSED: 0 failed", 0))
 

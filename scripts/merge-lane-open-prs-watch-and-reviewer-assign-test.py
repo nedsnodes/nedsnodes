@@ -29,10 +29,12 @@ would flake.
 """
 
 import contextlib
+import fcntl
 import importlib.util
 import io
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -1202,6 +1204,50 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and "--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit"
               in errors, errors)
 
+        real_lock = watcher_module.merge_lane_pull_request_review_assignments_file_lock
+        real_read = watcher_module.merge_lane_pull_request_review_assignments_file_read
+        held = []
+        read_while_held = []
+
+        class NotedLock:
+            def __init__(self, lock):
+                self.lock = lock
+
+            def __enter__(self):
+                held.append(True)
+                return self.lock.__enter__()
+
+            def __exit__(self, *exc):
+                held.pop()
+                return self.lock.__exit__(*exc)
+
+        def read_and_note(path):
+            read_while_held.append(bool(held))
+            return real_read(path)
+
+        watcher_module.merge_lane_pull_request_review_assignments_file_lock = (
+            lambda path: NotedLock(real_lock(path)))
+        watcher_module.merge_lane_pull_request_review_assignments_file_read = read_and_note
+        try:
+            exit_code, lines, errors = look_up("merge-lane-1", [open_at_lookup])
+        finally:
+            watcher_module.merge_lane_pull_request_review_assignments_file_lock = real_lock
+            watcher_module.merge_lane_pull_request_review_assignments_file_read = real_read
+        check("the lookup reads the assignment file while it holds the file's lock, so it never "
+              "sees a deal a failed append is about to put back",
+              exit_code == 0 and read_while_held == [True], f"{read_while_held} {errors}")
+
+        def lock_fails(path):
+            raise OSError("injected: the lock file cannot be opened")
+
+        watcher_module.merge_lane_pull_request_review_assignments_file_lock = lock_fails
+        try:
+            exit_code, lines, errors = look_up("merge-lane-1", [open_at_lookup])
+        finally:
+            watcher_module.merge_lane_pull_request_review_assignments_file_lock = real_lock
+        check("the lookup exits 1 when the assignment file's lock cannot be taken, naming it",
+              exit_code == 1 and "cannot be opened or locked" in errors and not lines, errors)
+
 
 class PollsRanOut(Exception):
     """Raised by the scripted fetch when the watcher polls past the script."""
@@ -1897,6 +1943,27 @@ class PollOnceMachine:
         self.assignments = scratch / "assignments.txt"
         self.assignments.write_text(EVERY_PULL_REQUEST_ASSIGNED_FILE.read_text(encoding="utf-8"),
                                     encoding="utf-8")
+        self.merge_queue_file = scratch / "merge-queue.txt"
+        self.merge_queue_file.write_text("", encoding="utf-8")
+        self.merge_batches = scratch / "merge-batches"
+        self.merge_outputs = scratch / "merge-outputs"
+        self.merge_queue_program = scratch / "fake-merge-queue-program.py"
+        self.merge_queue_program_calls = scratch / "fake-merge-queue-program-calls.txt"
+        self.merge_queue_program_exit = 0
+        self.merge_queue_program_output = ""
+        self.merge_queue_program_sleep = 0
+
+    def fake_merge_queue_program_write(self):
+        self.merge_queue_program.write_text(
+            "import sys, time\n"
+            f"open({str(self.merge_queue_program_calls)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            f"time.sleep({self.merge_queue_program_sleep})\n"
+            f"print({self.merge_queue_program_output!r}, end='')\n"
+            f"sys.exit({self.merge_queue_program_exit})\n", encoding="utf-8")
+
+    def merge_queue_program_call_lines(self):
+        return (self.merge_queue_program_calls.read_text(encoding="utf-8").splitlines()
+                if self.merge_queue_program_calls.exists() else [])
 
     def time(self):
         return self.now
@@ -1908,6 +1975,8 @@ class PollOnceMachine:
         watcher_module.fetch_open_pull_requests = lambda _repo, _token: (
             (None, self.poll) if isinstance(self.poll, str) else (self.poll, None))
         errors, output = io.StringIO(), io.StringIO()
+        if self.merge_queue_program.parent.is_dir() and self.merge_queue_program.name.startswith("fake-"):
+            self.fake_merge_queue_program_write()
         try:
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
                 code = watcher_module.main([
@@ -1915,6 +1984,10 @@ class PollOnceMachine:
                     "--poll-once-directory", str(self.directory),
                     "--task-list-directory", str(self.tasks),
                     "--needs-a-look-directory", str(self.notices),
+                    "--merge-queue-file", str(self.merge_queue_file),
+                    "--merge-queue-program", str(self.merge_queue_program),
+                    "--merge-batches-directory", str(self.merge_batches),
+                    "--merge-program-outputs-directory", str(self.merge_outputs),
                     *(["--merge-lane-pr-review-assignments-file", str(self.assignments)]
                       if assignment_options is None else assignment_options)])
         finally:
@@ -2107,6 +2180,205 @@ def run_poll_once_cases(scratch_root, token_file):
                machine.assignments.read_text(encoding="utf-8").splitlines()] == ["1", "2"],
           f"{(first, second, third)} {kept_while_failing!r} {assigned} {machine.errors}")
 
+    machine = machine_for("append-written-then-fsync-fails")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1)]
+    real_fsync = watcher_module.os.fsync
+    fsyncs = []
+
+    def fsync_fails_once(descriptor):
+        fsyncs.append(descriptor)
+        if len(fsyncs) == 1:
+            raise OSError("injected: fsync failed after the write")
+        real_fsync(descriptor)
+
+    watcher_module.os.fsync = fsync_fails_once
+    try:
+        first = machine.run()
+    finally:
+        watcher_module.os.fsync = real_fsync
+    kept = machine.assignments.read_text(encoding="utf-8")
+    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+    second = machine.run()
+    assigned = [line for line in machine.event_lines() if " REVIEW-ASSIGNED " in line]
+    check("when the append writes every line and then fsync fails, the run exits 1 but keeps the "
+          "deal, so the next run deals the pull request no second time",
+          (first, second) == (1, 0) and [line.split()[0] for line in kept.splitlines()] == ["1"]
+          and [line.split()[2] for line in assigned] == ["#1"],
+          f"{(first, second)} {kept!r} {assigned} {machine.errors}")
+    check("when the append writes every line and then fsync fails, the failure task names each "
+          "kept pull request and its lane, and says its line may not survive a crash",
+          "PR #1 REVIEW-ASSIGNED" in description and "may not survive a crash" in description
+          and "forward the line to its merge-lane agent-seat" in description,
+          description)
+
+    machine = machine_for("append-stops-after-the-first-review-assigned-line")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+    real_open = watcher_module.Path.open
+
+    class FirstLineOnly:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.handle.close()
+            return False
+
+        def tell(self):
+            return self.handle.tell()
+
+        def write(self, payload):
+            end = payload.index(b"\n", payload.index(b" REVIEW-ASSIGNED ")) + 1
+            self.handle.write(payload[:end])
+            self.handle.flush()
+            raise OSError("injected: no space left after the first REVIEW-ASSIGNED line")
+
+    def open_first_line_only(path, mode="r", *args, **kwargs):
+        handle = real_open(path, mode, *args, **kwargs)
+        if path == machine.events_path and mode == "ab":
+            return FirstLineOnly(handle)
+        return handle
+
+    watcher_module.Path.open = open_first_line_only
+    try:
+        first = machine.run()
+    finally:
+        watcher_module.Path.open = real_open
+    kept = machine.assignments.read_text(encoding="utf-8")
+    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+    machine.complete_tasks()
+    second = machine.run()
+    assigned = [line for line in machine.event_lines() if " REVIEW-ASSIGNED " in line]
+    check("when the append stops after one whole REVIEW-ASSIGNED line, the run keeps that deal, "
+          "names it in the failure task, and puts the other back, so the next run deals only the "
+          "other and no pull request gets a second REVIEW-ASSIGNED line",
+          (first, second) == (1, 0) and [line.split()[0] for line in kept.splitlines()] == ["1"]
+          and "PR #1 REVIEW-ASSIGNED" in description and "PR #2" not in description
+          and [line.split()[2] for line in assigned] == ["#1", "#2"],
+          f"{(first, second)} {kept!r} {description!r} {assigned} {machine.errors}")
+
+    def append_stopping_inside_second_line(name, truncate=None):
+        machine = machine_for(name)
+        machine.assignments.write_text("", encoding="utf-8")
+        machine.poll = []
+        machine.run("--poll-once-write-baseline")
+        machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+
+        class CutInsideSecondLine(FirstLineOnly):
+            def write(self, payload):
+                second_start = payload.index(b"\n", payload.index(b" REVIEW-ASSIGNED ")) + 1
+                self.handle.write(payload[:payload.index(b"PR #", second_start) + len(b"PR #")])
+                self.handle.flush()
+                raise OSError("injected: no space left inside the second REVIEW-ASSIGNED line")
+
+        def open_cut(path, mode="r", *args, **kwargs):
+            handle = real_open(path, mode, *args, **kwargs)
+            if path == machine.events_path and mode == "ab":
+                return CutInsideSecondLine(handle)
+            return handle
+
+        real_truncate = watcher_module.os.truncate
+        watcher_module.Path.open = open_cut
+        if truncate is not None:
+            watcher_module.os.truncate = truncate
+        try:
+            first = machine.run()
+        finally:
+            watcher_module.Path.open = real_open
+            watcher_module.os.truncate = real_truncate
+        description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+        return machine, first, description
+
+    machine, first, description = append_stopping_inside_second_line("append-stops-inside-the-second-line")
+    machine.complete_tasks()
+    second = machine.run()
+    lines = machine.event_lines()
+    check("when the append stops inside the second REVIEW-ASSIGNED line, the next run cuts the "
+          "event file back to its last whole line before it appends, so it writes a whole, readable "
+          "line for the put-back pull request",
+          (first, second) == (1, 0)
+          and [line.split()[2] for line in lines if " REVIEW-ASSIGNED " in line] == ["#1", "#2"]
+          and machine.events_path.read_bytes().endswith(b"\n")
+          and all(len(re.findall(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", line)) == 1 for line in lines),
+          f"{(first, second)} {lines} {machine.errors}")
+
+    def truncate_fails(path, length):
+        raise OSError("injected: the event file cannot be cut")
+
+    machine, first, description = append_stopping_inside_second_line(
+        "append-stops-inside-the-second-line-and-cannot-cut", truncate_fails)
+    # The first run's append-failure task stays open, as it does until merge-lane-2 reads it.
+    before = machine.events_path.read_bytes()
+    real_truncate = watcher_module.os.truncate
+    watcher_module.os.truncate = truncate_fails
+    try:
+        second = machine.run()
+    finally:
+        watcher_module.os.truncate = real_truncate
+    after = machine.events_path.read_bytes()
+    tasks = machine.tasks_read()
+    cut_tasks = [task for task in tasks if "cut back" in task["subject"]]
+    cut_description = cut_tasks[0]["description"] if cut_tasks else ""
+    whole_end = before.rfind(b"\n") + 1
+    check("when the next run cannot cut the cut line back, it appends nothing, exits 1, and opens "
+          "a task of its own beside the open append-failure task, saying polls record nothing "
+          "until the cut works",
+          first == 1 and second == 1 and after == before and len(tasks) == 2
+          and len(cut_tasks) == 1 and "recorded nothing" in cut_description,
+          f"{(first, second)} {before[-80:]!r} {after[-80:]!r} {tasks!r} {machine.errors}")
+    third = machine.run()
+    lines = machine.event_lines()
+    check("once the cut works again, the next run cuts the cut line back and records the put-back "
+          "pull request on a whole line",
+          third == 0 and [line.split()[2] for line in lines if " REVIEW-ASSIGNED " in line] == ["#1", "#2"]
+          and all(len(re.findall(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", line)) == 1 for line in lines),
+          f"{third} {lines} {machine.errors}")
+    check("the cut-failure task, still open after a later run recorded lines, names no byte offset "
+          "and no cut to make, so following it deletes none of those lines",
+          str(whole_end) not in cut_description and "bytes" not in cut_description
+          and "cut the file" not in cut_description and "by hand" in cut_description,
+          cut_description)
+
+    machine = machine_for("append-fails-and-cannot-be-read-back")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1)]
+    real_fsync = watcher_module.os.fsync
+    real_held = watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset
+
+    def fsync_fails(descriptor):
+        raise OSError("injected: fsync failed")
+
+    watcher_module.os.fsync = fsync_fails
+    watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset = lambda *arguments: None
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.os.fsync = real_fsync
+        watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset = real_held
+    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+    check("when the failed append's event file cannot be read back, the run keeps the deal, so "
+          "no later poll deals it again, and the failure task names it as a line the event file "
+          "may hold",
+          code == 1
+          and [line.split()[0] for line in
+               machine.assignments.read_text(encoding="utf-8").splitlines()] == ["1"]
+          and "could not be read back" in description and "may hold after the failed append" in description
+          and "PR #1 REVIEW-ASSIGNED" in description,
+          f"{code} {description!r} {machine.errors}")
+    check("an event file that cannot be read back gives no count of the lines it holds",
+          watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset(
+              machine.directory / "absent.log", 0, [b"x\n"]) is None)
+
     machine = machine_for("append-and-put-back-fail")
     machine.assignments.write_text("", encoding="utf-8")
     machine.poll = []
@@ -2285,6 +2557,153 @@ def run_poll_once_cases(scratch_root, token_file):
           code == 1 and "directory" in machine.tasks_read()[0]["subject"], machine.tasks_read())
 
 
+WAITING_MERGE_QUEUE_LINE = f"7 {'a' * 40} 2026-11-26T05:00:00Z nedlern (approved)"
+
+
+def run_poll_once_merge_batch_start_cases(scratch_root, token_file):
+    def machine_for(name, queue_text):
+        scratch = scratch_root / name
+        scratch.mkdir()
+        machine = PollOnceMachine(scratch, token_file)
+        machine.poll = [poll_once_pull_request(1)]
+        machine.run("--poll-once-write-baseline")
+        machine.merge_queue_file.write_text(queue_text, encoding="utf-8")
+        return machine
+
+    def silent(machine, code):
+        return (code == 0 and not machine.tasks_read() and not machine.event_lines()
+                and not machine.output and not machine.errors)
+
+    machine = machine_for("merge-batch-waiting", WAITING_MERGE_QUEUE_LINE + "\n")
+    code = machine.run()
+    calls = machine.merge_queue_program_call_lines()
+    check("--poll-once with a waiting merge queue line runs merge-batch-start --quiet on that queue "
+          "file once, and with no output writes no task and no event",
+          len(calls) == 1 and calls[0].endswith("merge-batch-start --quiet")
+          and f"--merge-queue-file {machine.merge_queue_file}" in calls[0] and silent(machine, code),
+          f"{code} {calls} {machine.tasks_read()} {machine.event_lines()} {machine.output!r} {machine.errors!r}")
+
+    machine = machine_for("merge-batch-nothing-waiting",
+                          f"MERGED 7 {'b' * 40}\n{'HOLD-why ' + WAITING_MERGE_QUEUE_LINE}\n# a comment\n")
+    code = machine.run()
+    check("--poll-once with no waiting line, only merged and held ones, starts nothing, writes no "
+          "task, no event and no output, so merge-lane-2 is not told anything",
+          not machine.merge_queue_program_call_lines() and silent(machine, code),
+          f"{code} {machine.merge_queue_program_call_lines()} {machine.tasks_read()} {machine.output!r}")
+
+    machine = machine_for("merge-batch-already-running", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program = watcher_module.MERGE_QUEUE_PROGRAM
+    machine.merge_batches.mkdir()
+    with open(machine.merge_batches / "merge-batch.lock", "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        code = machine.run()
+    check("--poll-once with a waiting line while a merge batch holds merge-batch.lock runs the real "
+          "merge queue program, which starts no second batch, and writes no task, no event and no output",
+          silent(machine, code) and not (machine.merge_batches / "merge-batch.log").exists(),
+          f"{code} {machine.tasks_read()} {machine.event_lines()} {machine.output!r} {machine.errors!r}")
+
+    machine = machine_for("merge-batch-stop-file", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program = watcher_module.MERGE_QUEUE_PROGRAM
+    machine.merge_outputs.mkdir()
+    (machine.merge_outputs / "merge-queue-stopped.txt").write_text("a test run failed\n", encoding="utf-8")
+    code = machine.run()
+    check("--poll-once with a waiting line and the stop file starts nothing and writes no task, no "
+          "event and no output, since merge-lane-2 already has the stopped notice",
+          silent(machine, code) and not (machine.merge_batches / "merge-batch.log").exists(),
+          f"{code} {machine.tasks_read()} {machine.output!r} {machine.errors!r}")
+
+    machine = machine_for("merge-batch-start-fails", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program_exit = 1
+    machine.merge_queue_program_output = "NOT STARTED: the merge batch could not be started: disk full\n"
+    code = machine.run()
+    tasks = machine.tasks_read()
+    check("a merge-batch-start that exits 1 makes --poll-once exit 1 and open one task quoting its output",
+          code == 1 and len(tasks) == 1 and "merge-batch-start failed" in tasks[0]["subject"]
+          and "disk full" in tasks[0]["description"], f"{code} {tasks}")
+    machine.run()
+    check("a second failing run opens no second task", len(machine.tasks_read()) == 1, machine.tasks_read())
+
+    machine = machine_for("merge-batch-start-hangs", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program_sleep = 5
+    saved_timeout = watcher_module.MERGE_BATCH_START_TIMEOUT_SECONDS
+    watcher_module.MERGE_BATCH_START_TIMEOUT_SECONDS = 1
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.MERGE_BATCH_START_TIMEOUT_SECONDS = saved_timeout
+    tasks = machine.tasks_read()
+    check("a merge-batch-start that runs over its timeout makes --poll-once exit 1 and open one task",
+          code == 1 and len(tasks) == 1 and "did not finish" in tasks[0]["subject"], f"{code} {tasks}")
+
+    machine = machine_for("merge-queue-unreadable", "this is no queue line\n")
+    code = machine.run()
+    tasks = machine.tasks_read()
+    check("a merge queue file holding a line of no known kind starts nothing, makes --poll-once exit "
+          "1 and opens one task naming the file",
+          code == 1 and not machine.merge_queue_program_call_lines() and len(tasks) == 1
+          and "cannot be read" in tasks[0]["subject"]
+          and str(machine.merge_queue_file) in tasks[0]["description"], f"{code} {tasks}")
+
+    machine = machine_for("merge-batch-stacked-line-waits", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.run()
+    code = machine.run()
+    check("a line still waiting on a second poll, with the queue file and the open pull requests "
+          "unchanged, as a stacked line the first batch passed over is, starts no second batch",
+          len(machine.merge_queue_program_call_lines()) == 1 and silent(machine, code),
+          f"{code} {machine.merge_queue_program_call_lines()} {machine.tasks_read()} {machine.output!r}")
+    machine.poll = []
+    code = machine.run()
+    check("once an open pull request leaves the open list, as the stacked line's parent does when it "
+          "merges, the next poll starts a batch again",
+          len(machine.merge_queue_program_call_lines()) == 2 and code == 0,
+          f"{code} {machine.merge_queue_program_call_lines()}")
+    with machine.merge_queue_file.open("a", encoding="utf-8") as queue:
+        queue.write(f"8 {'c' * 40} 2026-11-26T06:00:00Z nedlern (approved)\n")
+    code = machine.run()
+    check("a line appended to the queue file makes the next poll start a batch again",
+          len(machine.merge_queue_program_call_lines()) == 3 and code == 0,
+          f"{code} {machine.merge_queue_program_call_lines()}")
+
+    machine = machine_for("merge-batch-start-not-recorded", WAITING_MERGE_QUEUE_LINE + "\n")
+    saved_write = watcher_module.poll_state_write
+
+    def write_refused_once_it_records_a_start(path, state):
+        if "merge_batch_started_for" in state:
+            raise OSError("disk full")
+        saved_write(path, state)
+
+    watcher_module.poll_state_write = write_refused_once_it_records_a_start
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.poll_state_write = saved_write
+    tasks = machine.tasks_read()
+    check("a merge batch start that cannot be recorded in the state file makes --poll-once exit 1 "
+          "and open one task saying every run starts a batch until it can",
+          code == 1 and len(tasks) == 1 and "record the merge batch start" in tasks[0]["subject"]
+          and "disk full" in tasks[0]["description"], f"{code} {tasks}")
+
+    machine = machine_for("merge-queue-size-unreadable", WAITING_MERGE_QUEUE_LINE + "\n")
+    saved_getsize = watcher_module.os.path.getsize
+
+    def getsize_refused(path):
+        if Path(path) == machine.merge_queue_file:
+            raise OSError("input/output error")
+        return saved_getsize(path)
+
+    watcher_module.os.path.getsize = getsize_refused
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.os.path.getsize = saved_getsize
+    tasks = machine.tasks_read()
+    check("a merge queue file whose size cannot be read starts nothing, makes --poll-once exit 1 "
+          "and opens one task naming the file",
+          code == 1 and not machine.merge_queue_program_call_lines() and len(tasks) == 1
+          and "cannot be read" in tasks[0]["subject"]
+          and "input/output error" in tasks[0]["description"], f"{code} {tasks}")
+
+
 if __name__ == "__main__":
     run_unit_cases()
     run_merge_lane_pull_request_review_assignment_unit_cases()
@@ -2295,6 +2714,10 @@ if __name__ == "__main__":
         poll_once_token_file = Path(poll_once_scratch) / "token"
         poll_once_token_file.write_text(FIXTURE_TOKEN, encoding="utf-8")
         run_poll_once_cases(Path(poll_once_scratch), poll_once_token_file)
+    with tempfile.TemporaryDirectory() as merge_batch_scratch:
+        merge_batch_token_file = Path(merge_batch_scratch) / "token"
+        merge_batch_token_file.write_text(FIXTURE_TOKEN, encoding="utf-8")
+        run_poll_once_merge_batch_start_cases(Path(merge_batch_scratch), merge_batch_token_file)
     run_subprocess_cases()
     print()
     if failures:

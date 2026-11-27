@@ -45,7 +45,7 @@ the pull request's, with those commits and all three directory options:
   1. merge-lane-pull-request-head-and-merged-worktrees-rebuild.py <n> <head> <main>
   2. merge-lane-pull-request-reviewer-brief-compose-with-facts.py <the filled-in copy>
   3. merge-lane-code-review-codex-cell-run-on-pull-request-head.py <n> <base>
-     --expected-head-commit <head>
+     --expected-head-commit <head> --main-commit <main>
   4. merge-lane-pull-request-head-test-run-on-merged-worktree.py <n> --head-commit <head>
      --main-commit <main>
   5. merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py <n> <tag> <head>,
@@ -216,25 +216,6 @@ def review_tools_worktree_at_main_step_script_missing_refusal_message(step, chec
              f"If main's copy refuses the same way, tell the user this message."))
 
 
-def fix_round_reviewed_whole_because(checkout, head_reviewed_before, head):
-    """Return why a fix-round's Codex review must run from the merge base, or None.
-
-    The same two checks as pull-request-review-plan.py's for reviewing a fix-round
-    whole: a diff from the earlier head across a merge of main holds main's
-    changes, and one from a commit the head does not descend from holds the rewrite.
-    """
-    merges = git(checkout, "rev-list", "--merges", "--first-parent",
-                 f"{head_reviewed_before}..{head}").split()
-    if merges:
-        return (f"the commits since the nn-head-commit reviewed before hold merge commit(s) "
-                f"{', '.join(merge[:12] for merge in merges)}")
-    # merge-base exits 1 when the two commits share no history.
-    if git(checkout, "merge-base", head_reviewed_before, head,
-           accepted_exit_codes=(0, 1)) != head_reviewed_before:
-        return "the head does not descend from the nn-head-commit reviewed before"
-    return None
-
-
 def brief_specification_disagreement(checkout, specifications, number, head, main,
                                      head_reviewed_before):
     """Return (what is wrong with the brief specifications, what to do), or None."""
@@ -380,8 +361,8 @@ def main(argv=None):
                                 f"--head-commit-reviewed-before set to the nn-head-commit that "
                                 f"was reviewed before.")
             base, base_kind = head_reviewed_before, "nn-head-commit reviewed before"
-            reviewed_whole_because = fix_round_reviewed_whole_because(
-                checkout, head_reviewed_before, head_commit)
+            reviewed_whole_because = common.fix_round_reviewed_whole_because(
+                git, checkout, head_reviewed_before, head_commit)
             if reviewed_whole_because:
                 base = git(checkout, "merge-base", main_commit, head_commit)
                 base_kind = f"merge base, because {reviewed_whole_because}"
@@ -439,7 +420,8 @@ def main(argv=None):
           f"({base_kind})", flush=True)
     steps = ((WORKTREES_REBUILD_STEP, [str(number), head_commit, main_commit]),
              (REVIEWER_BRIEF_STEP, [str(filled_in_specifications_file)]),
-             (CODEX_REVIEW_STEP, [str(number), base, "--expected-head-commit", head_commit]),
+             (CODEX_REVIEW_STEP, [str(number), base, "--expected-head-commit", head_commit,
+                                 "--main-commit", main_commit]),
              (HEAD_TEST_RUN_STEP, [str(number), "--head-commit", head_commit,
                                   "--main-commit", main_commit]),
              (CLAUDE_REVIEWER_STEP, [str(number), str(specifications[0]["tag"]), head_commit]))

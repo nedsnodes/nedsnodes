@@ -717,6 +717,14 @@ def seen_lines(log, key):
             and fields[4] == key]
 
 
+def last_seen_key(log, excluded):
+    """The key of the last version the log records as seen, other than excluded, or None."""
+    for fields in reversed(log):
+        if fields[0] == "seen" and len(fields) >= 7 and fields[4] != excluded:
+            return fields[4]
+    return None
+
+
 def first_seen_time(log, key):
     lines = seen_lines(log, key)
     return int(lines[0][1]) if lines else None
@@ -806,9 +814,10 @@ def agent_seat_files():
                   if path.is_file())
 
 
-def outside_files():
+def outside_files(seat_files=None):
     claude = home_directory() / ".claude"
-    return [str(claude / "CLAUDE.md"), str(claude / "settings.json")] + agent_seat_files()
+    return ([str(claude / "CLAUDE.md"), str(claude / "settings.json")]
+            + (agent_seat_files() if seat_files is None else seat_files))
 
 
 def is_settings_file(path: str):
@@ -1059,8 +1068,14 @@ def store_phase(store, session, owner, checks, unsettled_unchanged, approvals, q
         log = store.log(check.path)
         approved = store.approved(check.path)
         reason = ""
-        if check.how == HOW_EDIT and check.previous not in (None, DELETED) \
-                and check.previous not in approved:
+        previous = check.previous
+        if check.how == HOW_EDIT and previous is None:
+            # A state that lost the file's entry, such as one an older hook's run rewrote, says
+            # nothing of the version the Edit was made on; the log's last one other than the
+            # Edit's result stands in for it.
+            previous = last_seen_key(log, check.key)
+        if check.how == HOW_EDIT and previous not in (None, DELETED) \
+                and previous not in approved:
             # The guard approved the Edit's change, not the unapproved text it was made on.
             check.how = ""
             reason = EDIT_ON_UNAPPROVED_VERSION
@@ -1254,7 +1269,8 @@ def run_hook(payload):
     outside_state = outside_state or {"files": {}}
     stock_agent_seat_files = not outside_state.get(AGENT_SEAT_FILES_STOCKED_KEY)
     outside_state[AGENT_SEAT_FILES_STOCKED_KEY] = True
-    outside = outside_files()
+    seat_files = agent_seat_files()
+    outside = outside_files(seat_files)
     groups.append(("outside", outside_path, outside_state, outside, None, outside_stocking))
 
     checkout = guard().enclosing_repository_root(cwd) if cwd.is_dir() else None
@@ -1376,14 +1392,6 @@ def run_hook(payload):
 
     def work(store):
         results = []
-        if stock_agent_seat_files:
-            for path in agent_seat_files():
-                if not store.approved(path):
-                    data = read_file(path)
-                    key = blob_hash(data)
-                    store.copy(path, key, data)
-                    store.approve(path, key)
-                    log_seen(store, path, session, owner(), key, key, HOW_STOCK)
         for plan in plans:
             (kind, state_path, state, files, changed, unsettled, approvals, quiet, _, stocking, _,
              held, main_blobs, repository, at_base, base_versions) = plan
@@ -1420,9 +1428,13 @@ def run_hook(payload):
                         continue
                     os.close(directory)
                 how = ""
+                # The agent-seat files' first check stocks the version this run's scan read, so a
+                # write after the scan is not approved in its place.
+                seat_stocking = (kind == "outside" and stock_agent_seat_files
+                                 and path in seat_files and not store.approved(path))
                 if main_blobs.get(path) == key:
                     how = HOW_ORIGIN_MAIN
-                elif stocking:
+                elif stocking or seat_stocking:
                     log = store.log(path)
                     if not (key not in store.approved(path) and seen_lines(log, key)):
                         how = HOW_STOCK
@@ -1559,7 +1571,10 @@ def current_version(path: str):
     if stat_data(path) is None:
         return DELETED, DELETED, b""
     data = read_file(path)
-    checkout = guard().enclosing_repository_root(Path(path).parent)
+    # A file the outside group checks is keyed by its bytes there, so it is here too: git's
+    # filters, such as core.autocrlf, would give a hash the hook never printed.
+    checkout = (None if path in outside_files()
+                else guard().enclosing_repository_root(Path(path).parent))
     copy_hash = (hashes_in_checkout(checkout, [path]).get(path) if checkout is not None
                  else None) or blob_hash(data)
     key = settings_approval_key(data) if is_settings_file(path) else copy_hash

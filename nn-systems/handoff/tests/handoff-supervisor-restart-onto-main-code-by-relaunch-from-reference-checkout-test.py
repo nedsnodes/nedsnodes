@@ -121,11 +121,10 @@ def check(case_name, condition, detail=""):
 
 
 def end_started_processes():
-    """SIGKILL every process the suite started, by process ID.
+    """SIGKILL every process ID in started_process_ids.
 
-    Not handled: a started process that has ended and been reaped, whose process ID another
-    process takes before this runs, is killed in its place; that needs ned-box's 4194304 process
-    IDs to wrap around within one run.
+    Not handled: when the operating system reassigns a recorded process ID before this runs, the
+    process that now holds it is killed.
     """
     for process_id in started_process_ids:
         with contextlib.suppress(OSError):
@@ -136,18 +135,18 @@ def end_started_processes():
 atexit.register(end_started_processes)
 
 
-def end_processes_earlier_cases_started():
-    """End every process the suite has started so far, and wait until none still runs.
+def end_processes_earlier_cases_started(wait_seconds=10):
+    """End every recorded process, wait until none still runs, and keep the IDs of any that do.
 
     Every case shares one agent-home, and step 5 stops at any process working there that step 2
     did not list, so a process an earlier case left running, as a failed case does, fails each
     later case that reaches step 5.
     """
     end_started_processes()
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + wait_seconds
     while any(running(process_id) for process_id in started_process_ids) and time.monotonic() < deadline:
         time.sleep(0.05)
-    started_process_ids.clear()
+    started_process_ids[:] = [process_id for process_id in started_process_ids if running(process_id)]
 
 
 def git(*arguments, cwd):
@@ -232,8 +231,12 @@ def start_fake_supervisor(under_shell=True, starts_claude=True, agent=SEAT, clau
 
 def running(process_id):
     # A fake ended while its parent lives stays a zombie, which ps still lists by its command line.
-    state = subprocess.run(["ps", "-o", "stat=", "-p", str(process_id)], capture_output=True,
-                           text=True).stdout.strip()
+    listed = subprocess.run(["ps", "-o", "stat=", "-p", str(process_id)], capture_output=True,
+                            text=True)
+    # ps exits 1 when no process has this ID.
+    if listed.returncode not in (0, 1):
+        raise RuntimeError(f"ps -p {process_id} exited {listed.returncode}: {listed.stderr.strip()}")
+    state = listed.stdout.strip()
     return bool(state) and not state.startswith("Z")
 
 
@@ -810,7 +813,7 @@ def step_4_and_leftover_cases():
     control("resupervise-exit-codes", "0")
     control("recover-exit-codes", "0")
     control("successor-reply", "replied")
-    supervisor_id, claude_id, leftover_id, state_path = state_with_leftover()
+    supervisor_id, claude_id, state_path = fresh_state()
     write_session_handoff()
     status, half, output = second_half(state_path)
     result = (state_path.parent / program.HANDOFF_SUPERVISOR_RESTART_RESULT_FILE_NAME).read_text()
@@ -1035,6 +1038,39 @@ def detached_start_cases():
           session != os.getsid(0) and "KeyError" in log, log)
 
 
+def clean_up_helper_cases():
+    global end_started_processes
+    survivor = subprocess.Popen(["sleep", "600"])
+    started_process_ids.append(survivor.pid)
+    real_end_started_processes = end_started_processes
+    end_started_processes = lambda: None
+    try:
+        end_processes_earlier_cases_started(wait_seconds=0.1)
+    finally:
+        end_started_processes = real_end_started_processes
+    check("clean-up: the ID of a process still running after the wait is kept",
+          survivor.pid in started_process_ids, str(started_process_ids))
+    end_processes_earlier_cases_started()
+    survivor.wait()
+    check("clean-up: the ID of a process that ended is dropped", survivor.pid not in started_process_ids,
+          str(started_process_ids))
+
+    failing_ps_directory = Path(tempfile.mkdtemp(dir=SCRATCH_HOME))
+    failing_ps = failing_ps_directory / "ps"
+    failing_ps.write_text("#!/bin/sh\necho 'ps cannot read the process table' >&2\nexit 2\n")
+    failing_ps.chmod(0o755)
+    real_path = os.environ["PATH"]
+    os.environ["PATH"] = f"{failing_ps_directory}{os.pathsep}{real_path}"
+    try:
+        running(os.getpid())
+        check("running: a ps that fails raises an error", False, "no error")
+    except RuntimeError as error:
+        check("running: a ps that fails raises an error", "ps cannot read the process table" in str(error),
+              str(error))
+    finally:
+        os.environ["PATH"] = real_path
+
+
 def main_cases():
     errors = io.StringIO()
     with contextlib.redirect_stderr(errors):
@@ -1059,6 +1095,7 @@ process_cases()
 notice_cases()
 mac_cases()
 detached_start_cases()
+clean_up_helper_cases()
 main_cases()
 end_started_processes()
 
