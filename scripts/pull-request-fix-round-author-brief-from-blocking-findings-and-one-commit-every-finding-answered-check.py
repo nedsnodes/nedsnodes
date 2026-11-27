@@ -96,10 +96,11 @@ that changes the code it describes names a commit earlier than the overview edit
 one git merge-tree --write-tree makes of its two parents with no conflict, since a conflict resolved by hand,
 or any other change made in the merge, would not show in a review of the fix commit; a conflict sends the
 pull request to the replace route. The answers file holds one entry per blocking finding
-and per nit, each starting "<n>. " on its own line, optionally followed by "(finding <comment ID>) ", with its answer
-starting on that line; a tagged entry answers the finding its tag names, whatever its number, and a tag
-naming no finding of the round is refused; an entry that starts with MOVED_TO_PULL_REQUEST_PREFIX_PATTERN,
-in any case, must go on with MOVED_TO_PULL_REQUEST_PATTERN naming a pull request gh pr view finds, or --check refuses it;
+and per nit, each starting "<n>. (finding <comment ID>) " on its own line, with its answer starting on that line;
+an entry answers the finding its tag names, whatever its number, and a tag naming no finding of the round is
+refused, as is any other line opening "<n>." then whitespace, the line's end or "(", such as an untagged
+entry; an entry that starts with MOVED_TO_PULL_REQUEST_PREFIX_PATTERN, in any case,
+must go on with MOVED_TO_PULL_REQUEST_PATTERN naming a pull request gh pr view finds, or --check refuses it;
 --check also refuses when, for any file of that pull request's gh pr diff, the file's whole patch reversed
 applies cleanly to the checked commit's tree, since the moved change is then still on this branch. A file
 whose moved part was undone but whose patch context the kept part changed is not caught. By default it is ANSWERS_FILE_NAME_FORMAT at the root of
@@ -233,9 +234,11 @@ ROUND_RECORD_FORMAT = ("Fix-round answered without a commit: frozen-head {frozen
                        "after this comment starts a new fix-round.")
 ROUND_RECORD_PATTERN = re.compile(r"Fix-round answered without a commit: frozen-head ([0-9a-f]+), "
                                   r"reviews (\d+(?: \d+)*)\.")
-# Every line opening "<n>." must be an entry, written "<n>. (finding <comment ID>) <answer text>": the brief writes the
-# start and the agent the answer after it. Any other line opening "<n>." is refused rather than guessed at.
-ANSWER_NUMBERED_LINE_PATTERN = re.compile(r"^\d+\.")
+# Every line opening "<n>." then whitespace, the line's end or "(" must be an entry, written
+# "<n>. (finding <comment ID>) <answer text>": the brief writes the start and the agent the answer after it. Any other
+# such line is refused rather than guessed at. A wrapped answer's line opening with a decimal, such as "3.12.4 (", is
+# no such line, so it stays part of the answer.
+ANSWER_NUMBERED_LINE_PATTERN = re.compile(r"^\d+\.(?=\s|$|\()")
 ANSWER_START_PATTERN = re.compile(r"^(\d+)\. \(finding ([^()\s]+)\)(?:\s+(.*))?$")
 ANSWER_FINDING_TAG_FORMAT = "(finding {finding_id})"
 MOVED_TO_PULL_REQUEST_PREFIX = "Moved to pull request "
@@ -847,6 +850,10 @@ def fix_round_brief_guarded_file_change_carrying_out_user_ruling_paragraph_compo
     return FIX_ROUND_BRIEF_GUARDED_FILE_CHANGE_CARRYING_OUT_USER_RULING_PARAGRAPH_TEMPLATE.format(marker=marker)
 
 
+def answer_start(number, finding_id):
+    return f"{number}. {ANSWER_FINDING_TAG_FORMAT.format(finding_id=finding_id)} "
+
+
 def answers_file_parse(text):
     """(the entries of an answers file's text, in order, each (finding comment ID, the answer's lines as written,
     its first line without the "<n>. (finding <comment ID>)" start); the lines that open "<n>." but are not an
@@ -1010,7 +1017,7 @@ def answers_file_with_one_line_per_finding_write(path, finding_ids, kept_copies_
         text = ""
         for index, finding_id in enumerate(finding_ids, 1):
             first, *rest = kept_answers.get(finding_id, [""])
-            text += f"{index}. {ANSWER_FINDING_TAG_FORMAT.format(finding_id=finding_id)} {first}\n"
+            text += f"{answer_start(index, finding_id)}{first}\n"
             text += "".join(f"{line}\n" for line in rest)
         # A unique name, because two brief runs can overlap; .md, so that the ignore line covers a file a killed
         # run leaves.
@@ -1256,6 +1263,11 @@ def default_answers_path(number):
     return str(Path(top_level) / ANSWERS_FILE_NAME_FORMAT.format(number=number))
 
 
+def answer_starts_lines(finding_ids):
+    # An answers file an earlier version of the brief wrote holds no tags to copy.
+    return "\n".join(f"  {answer_start(number, finding_id)}" for number, finding_id in enumerate(finding_ids, 1))
+
+
 def read_answers(path, finding_ids, blocking_count, nit_count):
     try:
         text = Path(path).read_text()
@@ -1267,7 +1279,8 @@ def read_answers(path, finding_ids, blocking_count, nit_count):
         raise Refused(f"The answers file {path} has {len(malformed)} line(s) opening \"<n>.\" that are not an "
                       f"entry's start, so the check cannot tell which finding each answers:\n{lines}\n"
                       f"Write each entry as \"<n>. {ANSWER_FINDING_TAG_FORMAT.format(finding_id='<comment ID>')} "
-                      "<answer text>\", keeping the start the brief wrote for it, and run the check again.")
+                      "<answer text>\", starting each with its finding's start below, and run the check again:\n"
+                      + answer_starts_lines(finding_ids))
     if repeated:
         raise Refused(f"The answers file {path} has two entries for finding {repeated[0]}.\n"
                       "Merge them into one entry.")
@@ -1284,7 +1297,7 @@ def read_answers(path, finding_ids, blocking_count, nit_count):
                       f"{blocking_count} blocking findings{nits}.\n"
                       "Give each finding exactly one entry, the line the brief wrote for it, "
                       f"\"<n>. {ANSWER_FINDING_TAG_FORMAT.format(finding_id='<comment ID>')} \", with the answer "
-                      "after it on the same line.")
+                      "after it on the same line. Each finding's start is:\n" + answer_starts_lines(finding_ids))
     return {number: " ".join(parts) for number, parts in sorted(answers.items())}
 
 
@@ -1993,7 +2006,7 @@ def main(argv=None):
     parser.add_argument("--check", action="store_true",
                         help="check the round in this checkout instead of printing the brief")
     parser.add_argument("--answers",
-                        help="with --check: the answers file, one \"<n>. \" entry per finding "
+                        help="with --check: the answers file, one \"<n>. (finding <comment ID>) \" entry per finding "
                              "(default: " + ANSWERS_FILE_NAME_FORMAT.format(number="<number>")
                              + " at the root of this worktree)")
     parser.add_argument("--commit", default="HEAD",

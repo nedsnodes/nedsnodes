@@ -2102,6 +2102,37 @@ def answers_put_back_cases(root, repository, _base, frozen_head):
     check("answers put back: --check gives each tagged answer to the finding its tag names, whatever its number",
           code == 0 and "1. hook.py:12: Fixed the lookup." in check_out
           and "2. test.py: Added the timeout case." in check_out, check_out + check_err)
+    decimal = ("1. (finding 1) Only the following version needs the fix:\n3.12.4 (3.12.5 already rejects the input)\n"
+               "2. (finding 3) Added the timeout case.\n")
+    answers.write_text(decimal)
+    copies_before = sorted(kept_directory.iterdir()) if kept_directory.exists() else []
+    code, out, err = run(root, repository, routes)
+    copies_after = sorted(kept_directory.iterdir()) if kept_directory.exists() else []
+    check("answers put back: a wrapped answer's line opening with a decimal and \"(\" is put back as part of the "
+          "answer, and no copy is made",
+          code == 0 and answers.read_text() == decimal and copies_after == copies_before, err + out)
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: --check reads a wrapped answer's line opening with a decimal and \"(\" as part of the "
+          "answer",
+          code == 0 and "1. hook.py:12: Only the following version needs the fix: 3.12.4 (3.12.5 already rejects the "
+                        "input)" in check_out, check_out + check_err)
+    answers.write_text("1. (finding 1) Fixed the lookup; the retry waits\n3.5 s between attempts.\n"
+                       "2. (finding 3) Added the timeout case.\n")
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: --check reads a wrapped answer's line opening with a decimal and a space as part of the "
+          "answer",
+          code == 0 and "1. hook.py:12: Fixed the lookup; the retry waits 3.5 s between attempts." in check_out,
+          check_out + check_err)
+    answers.write_text("1. Fixed the lookup.\n2. Added the timeout case.\n")
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: --check's refusal of an answers file with no tags, as an earlier brief wrote it, prints "
+          "each finding's tagged start",
+          code == 1 and "\n  1. (finding 1) \n  2. (finding 3) " in check_err, check_out + check_err)
+    answers.write_text("1. (finding 3) Added the timeout case.\n")
+    code, check_out, check_err = run(root, repository, routes, "--check")
+    check("answers put back: --check's refusal of an answers file missing an entry prints each finding's tagged start",
+          code == 1 and "no entry for finding 1;" in check_err
+          and "\n  1. (finding 1) \n  2. (finding 3) " in check_err, check_out + check_err)
     answers.write_text("1. (finding 99) An answer to a finding of another review.\n2. (finding 3) Added the timeout "
                        "case.\n")
     code, check_out, check_err = run(root, repository, routes, "--check")
