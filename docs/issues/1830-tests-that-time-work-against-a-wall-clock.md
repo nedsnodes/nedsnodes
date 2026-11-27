@@ -33,6 +33,10 @@ Line numbers are on main at adb96dc59. The last column names the agent-seat whos
 
 The two 0.5-second limits are the likeliest to fail.
 
+## Rows rewritten
+
+- `scripts/markdown-edit-hard-wrapped-paragraph-reminder-hook-hack-test.py`, judging a 1.6 MB Markdown file: rewritten by PR [Hard-wrapped paragraph detector test compares CPU time on the full and a quarter-size text](https://github.com/nedsnodes/nedsnodes/pull/4608), merged 2026-11-26T21:25:16Z as c39734c38dd7. The test now runs the detector on the full text and on one a quarter its size and compares their CPU times.
+
 ## What to do
 
 merge-lane-2 sends each owner this issue's link. For each check it owns, the owner rewrites the check so that load cannot fail it, keeping what it proves:
