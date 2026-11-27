@@ -4470,6 +4470,66 @@ with tempfile.TemporaryDirectory() as tmp:
           "symlinks cannot be read from here",
           from_another_machine == str(home / "config" / "x.md"), repr(from_another_machine))
 
+    # A symlink to a file standing where a directory should be: the system refuses "./file-link/../e.md"
+    # with ENOTDIR, so --restore must refuse it too, not write beside the file the symlink leads to.
+    (tmp / "real" / "f.md").write_bytes(b"f\n")
+    (tmp / "file-link").symlink_to(tmp / "real" / "f.md")
+    os.chdir(str(tmp))
+    try:
+        code, out, errors, calls = run_restore(["./file-link/../e.md", "--restore", str(copy)])
+        try:
+            plain("./file-link/../e.md")
+            not_a_directory_refusal = None
+        except finder.CitedQueryCannotBePlaced as error:
+            not_a_directory_refusal = str(error)
+    finally:
+        os.chdir(directory_before)
+    check("--restore of a path through a symlink to a file and then .. is a usage error, exit 2, naming the "
+          "file the system cannot pass through, and writes nothing",
+          code == 2 and "Not a directory" in errors and str(tmp / "real" / "f.md") in os.path.realpath(
+              errors.split("Not a directory: ", 1)[-1].split(". Give", 1)[0])
+          and not (tmp / "real" / "e.md").exists() and not (tmp / "e.md").exists() and calls == [],
+          "exit=%s calls=%s\n%s\n%s" % (code, calls, out, errors))
+    check("cited query: ... and the search is refused the same way, since the system cannot reach that path",
+          not_a_directory_refusal is not None and "refuses a directory on its way: Not a directory"
+          in not_a_directory_refusal, repr(not_a_directory_refusal))
+
+    # A search placed through a symlink reads where the symlink leads now; a backup from before the symlink
+    # was made holds the file under the spelling as written, so the run names that spelling.
+    every_surface = []
+    for surface in ("localsnapshots", "git", "reflog", "logstore", "transcripts", "box", "timemachine"):
+        every_surface += ["--skip", surface]
+    os.chdir(str(tmp))
+    try:
+        code, through_link, errors, calls = run_restore(["./link/s.md", "--repo", str(repo)] + every_surface)
+        code_plain, plain_dir, errors_plain, _ = run_restore(["./real/s.md", "--repo", str(repo)] + every_surface)
+    finally:
+        os.chdir(directory_before)
+    cwd_seen = os.path.realpath(str(tmp))
+    check("search through a symlinked directory names the spelling as written, and how to search it too",
+          "./link/s.md runs through a symlink, so this searches %s, where the symlink leads now. A copy saved "
+          "before the symlink was made sits under %s; to search there too, run this again with that path in "
+          "place of ./link/s.md." % (os.path.join(cwd_seen, "real", "inner", "s.md"),
+                                    os.path.join(cwd_seen, "link", "s.md")) in through_link,
+          "exit=%s\n%s\n%s" % (code, through_link, errors))
+    check("search with no symlink on the way says nothing about one",
+          "runs through a symlink" not in plain_dir, "exit=%s\n%s\n%s" % (code_plain, plain_dir, errors_plain))
+
+    finder.locator.KNOWN_HOST_HOMES["ned-box"] = str(home)
+    try:
+        finder.socket.gethostname = lambda: "ned-box"
+        scp_searched = plain("nedlern@ned-box:~/config/nedschorus/x.md")
+        scp_as_written = plain("nedlern@ned-box:~/config/nedschorus/x.md", place=os.path.normpath)
+    finally:
+        finder.socket.gethostname = real_gethostname
+        finder.locator.KNOWN_HOST_HOMES.clear()
+        finder.locator.KNOWN_HOST_HOMES.update(known_homes_before)
+    check("cited query: the scp form naming this machine is searched where its symlink leads, and its "
+          "spelling as written stays at hand for the search to name",
+          scp_searched == os.path.join(os.path.realpath(str(home)), "nedsnodes", "inner", "x.md")
+          and scp_as_written == str(home / "config" / "nedschorus" / "x.md"),
+          "%r %r" % (scp_searched, scp_as_written))
+
     real_expanduser = os.path.expanduser
     os.path.expanduser = lambda given: given
     try:
