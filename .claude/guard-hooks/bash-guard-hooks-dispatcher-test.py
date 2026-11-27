@@ -215,6 +215,11 @@ for entries, case_name in ((json.dumps({"guards": []}), "an empty guard list"),
 # ---------------------------------------------------------------- the guard list is the settings' Bash hooks
 
 
+# A Bash hook that rewrites the call with updatedInput is no guard: the dispatcher combines no
+# updatedInput, so such a hook stays registered on its own.
+BASH_HOOKS_THAT_REWRITE_THE_CALL = ("scripts/background-bash-command-kind-bound-timeout-wrap-hook.py",)
+
+
 def settings_bash_hooks():
     settings = json.loads((REPOSITORY_ROOT / ".claude" / "settings.json").read_text())
     hooks = []
@@ -224,7 +229,8 @@ def settings_bash_hooks():
             continue
         for hook in entry["hooks"]:
             path = re.search(r'"\$CLAUDE_PROJECT_DIR"/(\S+)', hook["command"]).group(1)
-            hooks.append((path, hook.get("timeout", 60)))
+            if path not in BASH_HOOKS_THAT_REWRITE_THE_CALL:
+                hooks.append((path, hook.get("timeout", 60)))
     return hooks
 
 
