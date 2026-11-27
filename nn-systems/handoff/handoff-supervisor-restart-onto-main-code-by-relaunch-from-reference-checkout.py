@@ -252,6 +252,14 @@ def is_tmux_server(command_line: str) -> bool:
     return bool(words) and Path(words[0]).name.startswith("tmux")
 
 
+def why_not_a_leftover(listed_at_step_2, command_line: str) -> str:
+    if listed_at_step_2 is None:
+        return "step 2 did not list it"
+    if listed_at_step_2 != command_line:
+        return f"step 2 listed it as {listed_at_step_2}"
+    return "a tmux server"
+
+
 def end_process(process_id: int, command_line: str, sleep=time.sleep) -> str:
     """End the process with SIGTERM, then SIGKILL after the grace; return what was done."""
     if process_command_line(process_id) != command_line:
@@ -522,7 +530,8 @@ class SecondHalf:
             raise RestartFailure(
                 f"processes other than those left from the old agent-session have their working "
                 f"directory in {AGENTS_ROOT / self.seat}, so the program stopped: " + "; ".join(
-                    f"{process_id}: {command}" for process_id, command in others.items()))
+                    f"{process_id}: {command} ({why_not_a_leftover(listed_at_step_2.get(process_id), command)})"
+                    for process_id, command in others.items()))
         for process_id, command in listed_now.items():
             self.record(f"step 5: {end_process(process_id, command, sleep=self.sleep)}")
 
