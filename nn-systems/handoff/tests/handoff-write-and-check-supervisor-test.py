@@ -2110,7 +2110,7 @@ def run_handoff_deferral_fields_cases(workspace: Path):
     projects = home / ".claude" / "projects" / "-fixture-project"
     projects.mkdir(parents=True, exist_ok=True)
     handoffs = workspace / "deferral-handoffs"
-    handoffs.mkdir(parents=True, exist_ok=True)
+    (handoffs / "session-marker-files").mkdir(parents=True, exist_ok=True)
     session_id = "00000000-0000-4000-8000-00000000def0"
     began_at = datetime(2026, 10, 28, 20, 12, tzinfo=timezone.utc)
     try:

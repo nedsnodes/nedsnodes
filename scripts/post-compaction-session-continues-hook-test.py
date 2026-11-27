@@ -85,13 +85,13 @@ def reported(result, fault_words):
 
 
 def marker_for(home, session_id):
-    return Path(home) / ".claude" / "handoffs" / f"{session_id}-handoff-asked"
+    return Path(home) / ".claude" / "handoffs" / "session-marker-files" / f"{session_id}-handoff-asked"
 
 
 with tempfile.TemporaryDirectory() as workspace:
     workspace = Path(workspace)
     home = workspace / "home"
-    (home / ".claude" / "handoffs").mkdir(parents=True)
+    (home / ".claude" / "handoffs" / "session-marker-files").mkdir(parents=True)
 
     # A transcript with enough real dialog to clear the word floor, plus the
     # harness-injected noise the extractor is supposed to drop.

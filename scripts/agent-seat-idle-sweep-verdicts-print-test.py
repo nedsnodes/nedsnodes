@@ -102,6 +102,7 @@ class Machine:
         self.tasks = self.root / "tasks"
         for folder in (self.handoffs, self.agents, self.projects, self.tasks):
             folder.mkdir()
+        (self.handoffs / "session-marker-files").mkdir()
         self.claude_json = self.root / "claude.json"
         self.claude_json.write_text(json.dumps({"oauthAccount": {"accountUuid": "account-1"}}))
         self.bin = self.root / "bin"
@@ -614,7 +615,7 @@ try:
     # --- rule 3: a handoff put off, nothing running ----------------------------------------------
     machine = Machine()
     machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
-    marker = machine.handoffs / "s-1-handoff-deferred"
+    marker = machine.handoffs / "session-marker-files" / "s-1-handoff-deferred"
     marker.write_text("")
     os.utime(marker, (1793615400, 1793615400))
     _, verdicts, _ = machine.run()
@@ -656,7 +657,7 @@ try:
               "subagents": [], "background_commands": [],
               "workflows": [{"id": "wn6fctb8y", "started": "2026-11-02T11:20:00Z"}]}
           and verdicts["alpha"]["rule"] == 5, verdicts["alpha"])
-    marker = machine.handoffs / "s-1-handoff-deferred"
+    marker = machine.handoffs / "session-marker-files" / "s-1-handoff-deferred"
     marker.write_text("")
     _, verdicts, _ = machine.run()
     check("a handoff put off while a Workflow-tool run is running: not rule 3, which says nothing "

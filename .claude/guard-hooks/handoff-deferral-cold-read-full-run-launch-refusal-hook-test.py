@@ -270,7 +270,7 @@ def payload_cases(workspace):
 
 def marker_file_cases(workspace):
     handoffs = Path(workspace) / "marker-file-cases"
-    handoffs.mkdir()
+    (handoffs / markers.SESSION_MARKER_FILES_DIRECTORY_NAME).mkdir(parents=True)
     path = markers.handoff_deferred_marker_path(handoffs, SESSION_ID)
     check("no marker file reads as no deferral",
           markers.handoff_deferred_marker_read(handoffs, SESSION_ID) is None)

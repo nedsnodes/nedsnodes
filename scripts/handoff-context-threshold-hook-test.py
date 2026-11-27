@@ -1390,29 +1390,29 @@ with tempfile.TemporaryDirectory() as workspace:
     # redirect above gives the suite its own HOME -- and are removed on the
     # way out.
     PROBE_SESSION_ID = "handoff-threshold-hook-test-session"
-    marker_file = hook.HANDOFF_DIRECTORY / f"{PROBE_SESSION_ID}-handoff-asked"
+    marker_file = hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{PROBE_SESSION_ID}-handoff-asked"
     # The deferral cases get session ids of their own: one case asserts that no
     # marker exists, and a marker another case wrote would hide that failure.
     DEFERRAL_PROBE_SESSION_ID = "handoff-threshold-hook-test-deferral-session"
     CEILING_PROBE_SESSION_ID = "handoff-threshold-hook-test-ceiling-session"
     UNKNOWN_PROBE_SESSION_ID = "handoff-threshold-hook-test-unknown-count-session"
     deferral_marker_file = (
-        hook.HANDOFF_DIRECTORY / f"{DEFERRAL_PROBE_SESSION_ID}-handoff-asked")
+        hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{DEFERRAL_PROBE_SESSION_ID}-handoff-asked")
     ceiling_marker_file = (
-        hook.HANDOFF_DIRECTORY / f"{CEILING_PROBE_SESSION_ID}-handoff-asked")
+        hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{CEILING_PROBE_SESSION_ID}-handoff-asked")
     # The second marker: written the first time the hook defers, so the
     # deferral is said once instead of at every boundary.
     deferred_marker_file = (
-        hook.HANDOFF_DIRECTORY / f"{DEFERRAL_PROBE_SESSION_ID}-handoff-deferred")
+        hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{DEFERRAL_PROBE_SESSION_ID}-handoff-deferred")
     ceiling_deferred_marker_file = (
-        hook.HANDOFF_DIRECTORY / f"{CEILING_PROBE_SESSION_ID}-handoff-deferred")
+        hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{CEILING_PROBE_SESSION_ID}-handoff-deferred")
     unknown_marker_file = (
-        hook.HANDOFF_DIRECTORY / f"{UNKNOWN_PROBE_SESSION_ID}-handoff-asked")
+        hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{UNKNOWN_PROBE_SESSION_ID}-handoff-asked")
     unknown_deferred_marker_file = (
-        hook.HANDOFF_DIRECTORY / f"{UNKNOWN_PROBE_SESSION_ID}-handoff-deferred")
+        hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{UNKNOWN_PROBE_SESSION_ID}-handoff-deferred")
     CALLER_OWNED_PROBE_SESSION_ID = "handoff-threshold-hook-test-caller-owned-session"
     caller_owned_marker_file = (
-        hook.HANDOFF_DIRECTORY / f"{CALLER_OWNED_PROBE_SESSION_ID}-handoff-asked")
+        hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{CALLER_OWNED_PROBE_SESSION_ID}-handoff-asked")
     for probe_marker in (deferral_marker_file, ceiling_marker_file,
                          deferred_marker_file, ceiling_deferred_marker_file,
                          unknown_marker_file, unknown_deferred_marker_file,
@@ -1540,6 +1540,15 @@ with tempfile.TemporaryDirectory() as workspace:
               ("used 20% (33% counting the tokens its compactions dropped, the figure compared "
                "with the threshold and the ceiling)") in result.stderr,
               result.stderr[:200])
+        old_place_marker_file = hook.HANDOFF_DIRECTORY / marker_file.name
+        os.replace(marker_file, old_place_marker_file)
+        result = run_hook({"session_id": PROBE_SESSION_ID, "transcript_path": str(compacted_at)})
+        check("a handoff-asked marker an older checkout left in the handoff directory itself is "
+              "moved into session-marker-files/, and the session is not asked to hand off again",
+              result.returncode == 0 and result.stderr == ""
+              and marker_file.exists() and not old_place_marker_file.exists(),
+              f"code {result.returncode}, stderr {result.stderr[:200]}, "
+              f"moved {marker_file.exists()}, left {old_place_marker_file.exists()}")
         compacted_fractional = transcript_of(workspace, "compacted-fractional.jsonl", [
             compaction_record(137_000), usage_record(200_000)])  # 20% + 13.7% = 33.7%
         marker_file.unlink(missing_ok=True)
@@ -1566,9 +1575,9 @@ with tempfile.TemporaryDirectory() as workspace:
             for percentage in (29, 30, 31, 33, 34)}
 
         def get_ready_files(session_id):
-            return (hook.HANDOFF_DIRECTORY / f"{session_id}-handoff-get-ready-notice-sent",
-                    hook.HANDOFF_DIRECTORY / f"{session_id}-handoff-asked",
-                    hook.HANDOFF_DIRECTORY / f"{session_id}-handoff-deferred")
+            return (hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{session_id}-handoff-get-ready-notice-sent",
+                    hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{session_id}-handoff-asked",
+                    hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{session_id}-handoff-deferred")
 
         def get_ready_run(session_id, percentage, extra_arguments=(), extra_environment=None,
                           **payload):
@@ -1726,7 +1735,7 @@ with tempfile.TemporaryDirectory() as workspace:
                      "transcript_path": str(get_ready_at[31])})
                 check("the get-ready notice creates the handoff directory to record itself",
                       code == 2 and (hook.HANDOFF_DIRECTORY
-                                     / "handoff-threshold-hook-test-get-ready-fresh-handoff-get-ready-notice-sent").exists()
+                                     / "session-marker-files" / "handoff-threshold-hook-test-get-ready-fresh-handoff-get-ready-notice-sent").exists()
                       and "could not write" not in stderr,
                       f"code {code}, stderr {stderr!r}")
             finally:
@@ -1779,7 +1788,7 @@ with tempfile.TemporaryDirectory() as workspace:
         DROPPED_CEILING_PROBE_SESSION_ID = "handoff-threshold-hook-test-dropped-ceiling-session"
         dropped_ceiling_markers = (
             hook.handoff_asked_marker_path(DROPPED_CEILING_PROBE_SESSION_ID),
-            hook.HANDOFF_DIRECTORY / f"{DROPPED_CEILING_PROBE_SESSION_ID}-handoff-deferred")
+            hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{DROPPED_CEILING_PROBE_SESSION_ID}-handoff-deferred")
         compacted_below_ceiling = transcript_of(workspace, "compacted-below-ceiling.jsonl", [
             compaction_record(400_000), usage_record(200_000),  # 20% + 40% = 60%
             subagent_spawn_record("a2573a7737ae643dc", "Build the cold-read tool")])
@@ -1915,7 +1924,7 @@ with tempfile.TemporaryDirectory() as workspace:
               not deferred_marker_file.exists(), str(deferred_marker_file))
         # The handoff writer reads the deferral's start time after the fire.
         moved_deferred_marker_file = (
-            hook.HANDOFF_DIRECTORY / f"{DEFERRAL_PROBE_SESSION_ID}-handoff-deferred-fired")
+            hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{DEFERRAL_PROBE_SESSION_ID}-handoff-deferred-fired")
         check("firing keeps the deferral's record, moved aside, for the handoff writer",
               moved_deferred_marker_file.exists()
               and "deferral_began_at" in moved_deferred_marker_file.read_text(encoding="utf-8"),
@@ -2031,9 +2040,9 @@ with tempfile.TemporaryDirectory() as workspace:
         # the threshold check, so the promised handoff message never comes.
         COMPACTED_PROBE_SESSION_ID = "handoff-threshold-hook-test-compacted-deferral-session"
         compacted_marker_file = (
-            hook.HANDOFF_DIRECTORY / f"{COMPACTED_PROBE_SESSION_ID}-handoff-asked")
+            hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{COMPACTED_PROBE_SESSION_ID}-handoff-asked")
         compacted_deferred_marker_file = (
-            hook.HANDOFF_DIRECTORY / f"{COMPACTED_PROBE_SESSION_ID}-handoff-deferred")
+            hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{COMPACTED_PROBE_SESSION_ID}-handoff-deferred")
         compacted_payload = {"session_id": COMPACTED_PROBE_SESSION_ID}
         compacted_finished = transcript_of(workspace, "compacted-deferral-finished.jsonl", [
             usage_record(100_000, cache_read=130_000),  # 23%
@@ -2085,7 +2094,7 @@ with tempfile.TemporaryDirectory() as workspace:
             # and still send the instruction.
             compacted_deferred_marker_file.mkdir()
             compacted_moved_marker_file = (
-                hook.HANDOFF_DIRECTORY / f"{COMPACTED_PROBE_SESSION_ID}-handoff-deferred-fired")
+                hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{COMPACTED_PROBE_SESSION_ID}-handoff-deferred-fired")
             compacted_moved_marker_file.write_text("in the way\n", encoding="utf-8")
             try:
                 result = run_hook({**compacted_payload, "transcript_path": str(compacted_finished)})
@@ -2142,9 +2151,9 @@ with tempfile.TemporaryDirectory() as workspace:
         # the harness does, so the launch times are relative to the real clock.
         BACKGROUND_PROBE_SESSION_ID = "handoff-threshold-hook-test-background-task-session"
         background_marker_file = (
-            hook.HANDOFF_DIRECTORY / f"{BACKGROUND_PROBE_SESSION_ID}-handoff-asked")
+            hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{BACKGROUND_PROBE_SESSION_ID}-handoff-asked")
         background_deferred_marker_file = (
-            hook.HANDOFF_DIRECTORY / f"{BACKGROUND_PROBE_SESSION_ID}-handoff-deferred")
+            hook.HANDOFF_DIRECTORY / "session-marker-files" / f"{BACKGROUND_PROBE_SESSION_ID}-handoff-deferred")
         background_marker_file.unlink(missing_ok=True)
         background_deferred_marker_file.unlink(missing_ok=True)
         clock = datetime.now(timezone.utc)

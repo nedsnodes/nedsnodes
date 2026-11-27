@@ -107,7 +107,7 @@ with tempfile.TemporaryDirectory() as workspace:
     workspace = Path(workspace)
     home = workspace / "home"
     handoffs = home / ".claude" / "handoffs"
-    handoffs.mkdir(parents=True)
+    (handoffs / "session-marker-files").mkdir(parents=True)
 
     titled = workspace / "titled.jsonl"
     titled.write_text("\n".join([
@@ -121,7 +121,7 @@ with tempfile.TemporaryDirectory() as workspace:
     untitled.write_text(user_record("no title here") + "\n", encoding="utf-8")
 
     def marker(session_id):
-        return handoffs / f"{session_id}-handoff-asked"
+        return handoffs / "session-marker-files" / f"{session_id}-handoff-asked"
 
     # ---- no marker file ----------------------------------------------------
 
@@ -130,7 +130,8 @@ with tempfile.TemporaryDirectory() as workspace:
     check("no marker file: no output, exit 0", silent(result),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     check("no marker file: no file recording a shown notice written",
-          list(handoffs.iterdir()) == [], [path.name for path in handoffs.iterdir()])
+          list((handoffs / "session-marker-files").iterdir()) == [],
+          [path.name for path in (handoffs / "session-marker-files").iterdir()])
 
     # ---- marker file present, shown once -----------------------------------
 
@@ -142,7 +143,7 @@ with tempfile.TemporaryDirectory() as workspace:
           result.returncode == 0 and shown_notice(result) == expected_named("efficiency-renamed"),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     check("marker file present: the file recording the shown notice holds the marker file's modification time",
-          (handoffs / "s-once-handoff-asked-user-notice-shown").read_text(encoding="utf-8").strip()
+          (handoffs / "session-marker-files" / "s-once-handoff-asked-user-notice-shown").read_text(encoding="utf-8").strip()
           == "1000000000000")
 
     result = run_hook(payload, home, agent_seat_name="seat-a")
@@ -237,7 +238,7 @@ with tempfile.TemporaryDirectory() as workspace:
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
     marker("s-record-unwritable").write_text("40.0\n", encoding="utf-8")
-    (handoffs / "s-record-unwritable-handoff-asked-user-notice-shown").mkdir()
+    (handoffs / "session-marker-files" / "s-record-unwritable-handoff-asked-user-notice-shown").mkdir()
     result = run_hook({"session_id": "s-record-unwritable", "transcript_path": str(titled)},
                       home, agent_seat_name="seat-a")
     check("the file recording a shown notice cannot be read: exit 1, nothing on stdout, one stderr line",
@@ -246,9 +247,9 @@ with tempfile.TemporaryDirectory() as workspace:
           and result.stderr.startswith(hook.PROGRAM + ": "),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
-    # A home of its own, so that making its handoffs directory read-only touches no other case.
+    # A home of its own, so that making its marker directory read-only touches no other case.
     unwritable_home = workspace / "unwritable-home"
-    unwritable_handoffs = unwritable_home / ".claude" / "handoffs"
+    unwritable_handoffs = unwritable_home / ".claude" / "handoffs" / "session-marker-files"
     unwritable_handoffs.mkdir(parents=True)
     (unwritable_handoffs / "s-record-absent-handoff-asked").write_text("40.0\n", encoding="utf-8")
     unwritable_handoffs.chmod(0o555)

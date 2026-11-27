@@ -266,6 +266,7 @@ class Machine:
         self.home = self.root / "home"
         for folder in (self.handoffs, self.agents, self.projects, self.tasks, self.home):
             folder.mkdir()
+        (self.handoffs / "session-marker-files").mkdir()
         self.owner_task_list = self.tasks / OWNER_TASKS
         self.owner_task_list.mkdir()
         self.claude_json = self.root / "claude.json"
@@ -319,7 +320,7 @@ class Machine:
              "blockedBy": []}))
 
     def handoff_put_off(self, session="s-1"):
-        (self.handoffs / f"{session}-handoff-deferred").write_text("")
+        (self.handoffs / "session-marker-files" / f"{session}-handoff-deferred").write_text("")
 
     def script(self, *answers):
         self.answers.write_text(json.dumps(list(answers)))
@@ -501,7 +502,7 @@ machine.seat("alpha", DONE_TURN)
 machine.handoff_put_off()
 machine.script(sent_ok())
 machine.run(0)
-(machine.handoffs / "s-1-handoff-deferred").unlink()
+(machine.handoffs / "session-marker-files" / "s-1-handoff-deferred").unlink()
 machine.script()
 machine.run(20)
 check("rule 4 ends the wait: nothing to do, no escalation",
@@ -995,7 +996,7 @@ for opener in ("rule 5", "rule 3"):
     if opener == "rule 5":
         (machine.tasks / "nedsnodes-alpha-tasks" / "1.json").unlink()
     else:
-        (machine.handoffs / "s-1-handoff-deferred").unlink()
+        (machine.handoffs / "session-marker-files" / "s-1-handoff-deferred").unlink()
     machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
                    assistant(PROMISE, at(1)), turn_end(at(1)))
     machine.script(sent_ok())
@@ -3052,7 +3053,7 @@ machine.script(sent_ok())
 machine.run(16)
 machine.script()
 machine.run(32)
-(machine.handoffs / "s-1-handoff-deferred").unlink()
+(machine.handoffs / "session-marker-files" / "s-1-handoff-deferred").unlink()
 machine.append("alpha", user("more", at(40)), assistant(PROMISE, at(41)), turn_end(at(41)))
 machine.script(sent_ok())
 machine.run(47)
