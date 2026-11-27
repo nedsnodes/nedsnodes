@@ -325,6 +325,30 @@ class MergeQueuePullRequestMergeBatchRunner:
             "pr", "list", "--repo", REPOSITORY, "--label", HIGH_PRIORITY_LABEL, "--state", "open",
             "--limit", "1000", "--json", "number")}
 
+    def code_by_changed_files(self, waiting):
+        """Return the numbers of the waiting pull requests that GitHub lists, at their queued
+        heads, as changing a file that is not Markdown under docs/: code, with no compare call."""
+        owner, name = REPOSITORY.split("/")
+        fields = " ".join(f"p{int(line['pr'])}:pullRequest(number:{int(line['pr'])})"
+                          "{headRefOid files(first:100){nodes{path}}}" for line in waiting)
+        try:
+            found = self.gh_json("api", "graphql", "-f", f'query={{repository(owner:"{owner}",'
+                                 f'name:"{name}"){{{fields}}}}}')["data"]["repository"]
+            code = set()
+            for line in waiting:
+                entry = found.get(f"p{int(line['pr'])}") or {}
+                # GitHub lists the files changed from the base branch, not from main, so a
+                # stacked pull request can read as code here; that only orders it as code.
+                if entry.get("headRefOid") == line["head"] and any(
+                        not (node["path"].startswith("docs/") and node["path"].endswith(".md"))
+                        for node in entry["files"]["nodes"]):
+                    code.add(int(line["pr"]))
+            return code
+        except (ReadOrWriteFailed, KeyError, TypeError, AttributeError) as error:
+            self.log(f"the changed files of the waiting pull requests could not be read, so each "
+                     f"is classed by its own compare call: {error}")
+            return set()
+
     # Merge order
 
     def prose_only(self, line):
@@ -384,7 +408,10 @@ class MergeQueuePullRequestMergeBatchRunner:
                 return line, self.prose_only(line)
         wants_prose_only = in_a_row < PROSE_ONLY_MERGES_IN_A_ROW_BEFORE_A_CODE_MERGE
         wanted = "prose-only" if wants_prose_only else "code"
-        line = next((line for line in waiting if self.prose_only(line) == wants_prose_only), None)
+        code = self.code_by_changed_files(waiting)
+        line = next((line for line in waiting
+                     if (int(line["pr"]) not in code and self.prose_only(line)) == wants_prose_only),
+                    None)
         if line is None:
             self.log(f"next: pull request {waiting[0]['pr']}, the oldest, since after {in_a_row} "
                      f"prose-only merges in a row a {wanted} one goes next and none waits")
@@ -670,11 +697,18 @@ class MergeQueuePullRequestMergeBatchRunner:
         if exit_code == 0 and on_github:
             self.merged_cleanly = number
             self.in_progress_file.unlink(missing_ok=True)
-            self.notice(f"merged-{number}-{merge_commit[:12]}.txt",
-                        f"MERGED {number} {merge_commit} {author}\n"
-                        f"{self.follow_up_request(number)}")
+            notice_failure = None
+            try:
+                self.notice(f"merged-{number}-{merge_commit[:12]}.txt",
+                            f"MERGED {number} {merge_commit} {author}\n"
+                            f"{self.follow_up_request(number)}")
+            except ReadOrWriteFailed as error:
+                notice_failure = error
             # Written after the MERGED notice, so a failed write cannot cost the author it.
             count_failure = self.prose_only_merge_counted()
+            if notice_failure:
+                raise ReadOrWriteFailed(f"{notice_failure}"
+                                        + (f"\nAlso, {count_failure}" if count_failure else ""))
             if count_failure:
                 raise ReadOrWriteFailed(f"pull request {number} merged as {merge_commit} and its "
                                         f"MERGED notice is written, but {count_failure}")
