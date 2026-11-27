@@ -5,6 +5,16 @@ Each case runs the hook as a subprocess, its real stdin-to-stdout path, with HOM
 holding the alerts, in a scratch checkout. The hook claims alerts only on Linux, so each case sets the hook's
 sys.platform, and the suite passes on the Mac too. Prints one line per case and exits non-zero if any case fails.
 """
+
+import importlib.util
+import pathlib
+
+_start_and_end_lines_spec = importlib.util.spec_from_file_location(
+    "nn_test_suite_start_time_line_and_end_results_line_print_common",
+    pathlib.Path(__file__).resolve().parents[4] / "nn-systems/general-tools/nn-test-suite-start-time-line-and-end-results-line-print-common.py")
+_start_and_end_lines = importlib.util.module_from_spec(_start_and_end_lines_spec)
+_start_and_end_lines_spec.loader.exec_module(_start_and_end_lines)
+_start_and_end_lines.nn_test_suite_start_time_line_print_now_and_end_results_line_print_at_normal_exit_register()
 import importlib.util
 import json
 import os

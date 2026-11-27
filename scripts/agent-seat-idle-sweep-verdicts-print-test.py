@@ -10,6 +10,16 @@ read at the earlier read of the task list and never reaches that function's own 
 """
 
 import importlib.util
+import pathlib
+
+_start_and_end_lines_spec = importlib.util.spec_from_file_location(
+    "nn_test_suite_start_time_line_and_end_results_line_print_common",
+    pathlib.Path(__file__).resolve().parents[1] / "nn-systems/general-tools/nn-test-suite-start-time-line-and-end-results-line-print-common.py")
+_start_and_end_lines = importlib.util.module_from_spec(_start_and_end_lines_spec)
+_start_and_end_lines_spec.loader.exec_module(_start_and_end_lines)
+_start_and_end_lines.nn_test_suite_start_time_line_print_now_and_end_results_line_print_at_normal_exit_register()
+
+import importlib.util
 import json
 import os
 import re
@@ -1476,6 +1486,7 @@ try:
     stopped_temp = Path(tempfile.mkdtemp(dir=str(SUITE_ROOT)))
     stopped = subprocess.Popen([sys.executable, __file__], stdout=subprocess.PIPE, text=True,
                                env={**os.environ, STOPPED_BY_SIGTERM_RUN_VARIABLE: "1",
+                                    _start_and_end_lines.CHILD_RUN_ENVIRONMENT_VARIABLE: "1",
                                     "TMPDIR": str(stopped_temp)})
     stopped_root = Path(stopped.stdout.readline().strip())
     root_made = stopped_root.is_dir()

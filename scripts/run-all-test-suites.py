@@ -646,7 +646,6 @@ TEST_SUITE_PATHSPEC = "*-test.py"
 # would miss inputs. Leave shell suites unrecorded so selection always runs them.
 SHELL_TEST_SUITE_PATHSPEC = "*-test.sh"
 SKIPPED_CASE_LINE = re.compile(r"^SKIP\s")
-UNCAUGHT_PYTHON_TRACEBACK_LINE = "Traceback (most recent call last):"
 SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER = "[this machine cannot run it]"
 SKIPPED_CASE_LINE_THIS_MACHINE_CANNOT_RUN = re.compile(
     r"^SKIP\s+" + re.escape(SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER))
@@ -678,6 +677,12 @@ _attendance_check = importlib.util.module_from_spec(_attendance_check_spec)
 _attendance_check_spec.loader.exec_module(_attendance_check)
 AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES = _attendance_check.AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES
 
+_start_and_end_lines_spec = importlib.util.spec_from_file_location(
+    "nn_test_suite_start_time_line_and_end_results_line_print_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "nn-test-suite-start-time-line-and-end-results-line-print-common.py")
+start_and_end_lines = importlib.util.module_from_spec(_start_and_end_lines_spec)
+_start_and_end_lines_spec.loader.exec_module(start_and_end_lines)
 _path_names_spec = importlib.util.spec_from_file_location(
     "project_rename_path_names_before_and_after_common",
     Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
@@ -894,8 +899,8 @@ ADMISSION_WAITED_LINE_PREFIX = "seconds suites waited for admission: "
 # Readers of the runner's output pick its lines apart by these.
 FAILED_SUITE_LINE_PREFIX = "FAIL "
 NOT_RUN_SUITE_LINE_PREFIX = "NOT RUN "
-# EX_TEMPFAIL of sysexits.h: no suite exits 75 for any other reason.
-NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES = 75
+NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES = (
+    start_and_end_lines.NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES)
 SUITE_STOPPED_BY_AN_OUTSIDE_CAUSE_REASON_MAX_CHARACTERS = 300
 NO_SANDBOX_SUITE_LEFT_OUT_OF_SELECTIVE_TEST_RUN_LINE_PREFIX = "NO-SANDBOX SUITE LEFT OUT OF SELECTIVE TEST RUN "
 SUITE_THAT_RUNS_THE_REAL_CLAUDE_CLI_LEFT_OUT_OF_TEST_RUN_LINE_PREFIX = "SUITE THAT RUNS THE REAL CLAUDE CLI LEFT OUT OF TEST RUN "
@@ -2736,22 +2741,23 @@ def skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marke
 def test_suite_ran_to_the_end(result):
     """Whether the suite ended on its own, after running every case it would run.
 
-    A suite killed by a signal or its time limit, or one with case lines that exited nonzero
-    with no FAIL line or printed an uncaught Python traceback, stopped partway, as did a suite
-    NOT RUN or stopped by the run, which has no verdict of its own: its JUnit XML says
-    judged="false"."""
+    It did only when its output's last line is the END line every nn-test-suite prints when it
+    ends on its own, with the pass or fail verdict, and that verdict's exit code is the suite's.
+    A suite killed by a signal or its time limit, one that crashed, as an uncaught exception
+    does, one whose END line says it could not run, so tested nothing, or one NOT RUN or stopped
+    by the run, which has no verdict of its own and whose JUnit XML says judged="false", stopped
+    partway."""
     if (result["exit"] < 0 or result.get("timeout") is not None or suite_not_run(result)
             or result.get("stopped by")):
-        return False
-    if not result.get("cases") or result["exit"] == 0:
-        return True
-    if not any(case["verdict"] == "FAIL" for case in result["cases"]):
         return False
     try:
         text = read_text_without_following_symlinks(result["log"], errors="replace")
     except OSError:
         return False
-    return not any(line.startswith(UNCAUGHT_PYTHON_TRACEBACK_LINE) for line in text.splitlines())
+    lines = [line for line in text.splitlines() if line.strip()]
+    end = start_and_end_lines.NN_TEST_SUITE_END_LINE_REGEX.match(lines[-1]) if lines else None
+    return (end is not None and end["verdict"] != start_and_end_lines.NN_TEST_SUITE_COULD_NOT_RUN_HASHTAG
+            and start_and_end_lines.NN_TEST_SUITE_EXIT_CODE_OF_VERDICT_HASHTAG[end["verdict"]] == result["exit"])
 
 
 def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):

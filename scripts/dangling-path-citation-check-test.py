@@ -13,6 +13,16 @@ shell scripts, each naming a path the move had emptied.
 
 Run: python3 scripts/dangling-path-citation-check-test.py
 """
+
+import importlib.util
+import pathlib
+
+_start_and_end_lines_spec = importlib.util.spec_from_file_location(
+    "nn_test_suite_start_time_line_and_end_results_line_print_common",
+    pathlib.Path(__file__).resolve().parents[1] / "nn-systems/general-tools/nn-test-suite-start-time-line-and-end-results-line-print-common.py")
+_start_and_end_lines = importlib.util.module_from_spec(_start_and_end_lines_spec)
+_start_and_end_lines_spec.loader.exec_module(_start_and_end_lines)
+_start_and_end_lines.nn_test_suite_start_time_line_print_now_and_end_results_line_print_at_normal_exit_register()
 import importlib.util
 import os
 import shutil
@@ -1223,6 +1233,10 @@ with tempfile.TemporaryDirectory() as workspace:
     root = workspace / "repo"
     root.mkdir()
     build_repository(root)
+    (root / Path(_start_and_end_lines_spec.origin).relative_to(Path(__file__).resolve().parents[1])).parent.mkdir(
+        parents=True, exist_ok=True)
+    (root / Path(_start_and_end_lines_spec.origin).relative_to(Path(__file__).resolve().parents[1])).write_text(
+        Path(_start_and_end_lines_spec.origin).read_text(encoding="utf-8"), encoding="utf-8")
     (root / "scripts" / REMOVED_PATH_CITATION_SUITE.name).write_text(
         REMOVED_PATH_CITATION_SUITE.read_text(encoding="utf-8"), encoding="utf-8")
     commit_change(root, "scripts/tool-that-moves.py", "VALUE = 1\n")

@@ -19,6 +19,16 @@ No case sends a signal.
 Run: python3 nn-systems/handoff/tests/uncommitted-work-snapshots-test.py
 """
 
+import importlib.util
+import pathlib
+
+_start_and_end_lines_spec = importlib.util.spec_from_file_location(
+    "nn_test_suite_start_time_line_and_end_results_line_print_common",
+    pathlib.Path(__file__).resolve().parents[3] / "nn-systems/general-tools/nn-test-suite-start-time-line-and-end-results-line-print-common.py")
+_start_and_end_lines = importlib.util.module_from_spec(_start_and_end_lines_spec)
+_start_and_end_lines_spec.loader.exec_module(_start_and_end_lines)
+_start_and_end_lines.nn_test_suite_start_time_line_print_now_and_end_results_line_print_at_normal_exit_register()
+
 import atexit
 import contextlib
 import importlib.util
@@ -172,7 +182,8 @@ def new_clone():
                      LOG_STORE_WRITER_MODULE_RELATIVE, NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE,
                      MERGE_LANE_COMMON_MODULE_RELATIVE, REPOSITORY_NAME_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
                      GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE, ATTENDANCE_CHECK_MODULE_RELATIVE,
-                     PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE):
+                     PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE,
+                     Path(_start_and_end_lines_spec.origin).relative_to(REPOSITORY_ROOT)):
         (main / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPOSITORY_ROOT / relative, main / relative)
     (main / "tracked.txt").write_text("one\n")

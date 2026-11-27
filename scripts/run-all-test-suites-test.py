@@ -20,6 +20,16 @@ run does not trust the thing it is testing.
 Run: python3 scripts/run-all-test-suites-test.py   (exit 0 = all passed)
 """
 
+import importlib.util
+import pathlib
+
+_start_and_end_lines_spec = importlib.util.spec_from_file_location(
+    "nn_test_suite_start_time_line_and_end_results_line_print_common",
+    pathlib.Path(__file__).resolve().parents[1] / "nn-systems/general-tools/nn-test-suite-start-time-line-and-end-results-line-print-common.py")
+_start_and_end_lines = importlib.util.module_from_spec(_start_and_end_lines_spec)
+_start_and_end_lines_spec.loader.exec_module(_start_and_end_lines)
+_start_and_end_lines.nn_test_suite_start_time_line_print_now_and_end_results_line_print_at_normal_exit_register()
+
 import contextlib
 import datetime
 import fcntl
@@ -5032,24 +5042,54 @@ check("a SKIP line's case text drops SKIP and the this-machine-cannot-run-it mar
       and module.skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker("SKIP case b") == "case b")
 
 ran_to_the_end_directory = pathlib.Path(tempfile.mkdtemp(prefix="ran-to-the-end-"))
-crashed_log = ran_to_the_end_directory / "crashed.log"
-crashed_log.write_text("FAIL  case a: x\nTraceback (most recent call last):\n  boom\n")
-clean_log = ran_to_the_end_directory / "clean.log"
-clean_log.write_text("FAIL  case a: x\n      Traceback (most recent call last): quoted\n")
+
+
+def suite_log(name, text):
+    log = ran_to_the_end_directory / f"{name}.log"
+    log.write_text(text)
+    return log
+
+
+START_LINE = "START 2026-11-24T18:57:41Z\n"
+passed_log = suite_log("passed", START_LINE + "PASS  case a\nEND 2026-11-24T18:58:03Z passed=1 failed=0 #nc_test_suite_pass\n")
+failed_log = suite_log("failed", START_LINE + "FAIL  case a: x\nEND 2026-11-24T18:58:03Z passed=0 failed=1 #nc_test_suite_fail\n\n")
+crashed_log = suite_log("crashed", START_LINE + "FAIL  case a: x\nTraceback (most recent call last):\n  boom\n")
+crashed_before_first_case_log = suite_log(
+    "crashed-before-first-case", START_LINE + "Traceback (most recent call last):\nImportError: x\n")
+could_not_run_log = suite_log("could-not-run", START_LINE + "END 2026-11-24T18:58:03Z passed=0 failed=0 "
+                              "#nc_test_suite_could_not_run\n")
+end_without_verdict_log = suite_log("end-without-verdict", START_LINE + "PASS  case a\n"
+                                    "END 2026-11-24T18:58:03Z passed=1 failed=0\n")
+output_after_end_log = suite_log("output-after-end", START_LINE + "PASS  case a\n"
+                                 "END 2026-11-24T18:58:03Z passed=1 failed=0 #nc_test_suite_pass\nlate child output\n")
+no_end_log = suite_log("no-end", "PASS  case a\nall cases passed\n")
 failing_case = [case_line("FAIL", "case a: x")]
+passing_case = [case_line("PASS", "case a")]
 for how, result, expected in (
-        ("passed", {"exit": 0, "cases": failing_case[:0] + [case_line("PASS", "case a")]}, True),
-        ("failed a case and exited", {"exit": 1, "cases": failing_case, "log": clean_log}, True),
-        ("printed no case line and failed", {"exit": 1, "cases": []}, True),
-        ("was killed by a signal", {"exit": -9, "cases": failing_case, "log": clean_log}, False),
-        ("passed its time limit", {"exit": 1, "cases": failing_case, "log": clean_log,
+        ("passed and printed its pass END line last", {"exit": 0, "cases": passing_case, "log": passed_log},
+         True),
+        ("failed a case, printed its fail END line, and exited 1",
+         {"exit": 1, "cases": failing_case, "log": failed_log}, True),
+        ("crashed before its first case line, printing no END",
+         {"exit": 1, "cases": [], "log": crashed_before_first_case_log}, False),
+        ("crashed after a case line, printing no END", {"exit": 1, "cases": failing_case, "log": crashed_log},
+         False),
+        ("printed the could-not-run END line and exited 2", {"exit": 2, "cases": [], "log": could_not_run_log},
+         False),
+        ("exited 0 with a fail END line", {"exit": 0, "cases": failing_case, "log": failed_log}, False),
+        ("exited 1 with a pass END line", {"exit": 1, "cases": passing_case, "log": passed_log}, False),
+        ("exited 2 with a fail END line", {"exit": 2, "cases": failing_case, "log": failed_log}, False),
+        ("exited 1 with the could-not-run END line", {"exit": 1, "cases": [], "log": could_not_run_log}, False),
+        ("printed an END line with no verdict", {"exit": 0, "cases": passing_case,
+                                                 "log": end_without_verdict_log}, False),
+        ("exited 0 with no END line", {"exit": 0, "cases": passing_case, "log": no_end_log}, False),
+        ("printed more output after its END line", {"exit": 0, "cases": passing_case,
+                                                     "log": output_after_end_log}, False),
+        ("was killed by a signal", {"exit": -9, "cases": failing_case, "log": failed_log}, False),
+        ("passed its time limit", {"exit": 1, "cases": failing_case, "log": failed_log,
                                    "timeout": {"limit": 1}}, False),
         ("was NOT RUN", {"exit": 2, "cases": [], "test sandbox did not start": True}, False),
         ("was stopped by the run", {"exit": -15, "cases": [], "stopped by": "run"}, False),
-        ("failed after its last case line", {"exit": 1, "cases": [case_line("PASS", "case a")]},
-         False),
-        ("printed an uncaught traceback", {"exit": 1, "cases": failing_case, "log": crashed_log},
-         False),
         ("has an unreadable log", {"exit": 1, "cases": failing_case,
                                    "log": ran_to_the_end_directory / "missing.log"}, False)):
     check(f"a suite that {how} {'ran' if expected else 'did not run'} to the end",
@@ -5058,12 +5098,12 @@ for how, result, expected in (
 junit_directory = ran_to_the_end_directory / "junit"
 junit_directory.mkdir()
 module.write_case_times_suite_resources_and_junit_xml_of_run(junit_directory, [
-    {"suite": "scripts/a-test.py", "exit": 1, "seconds": 1.0, "log": clean_log,
+    {"suite": "scripts/a-test.py", "exit": 1, "seconds": 1.0, "log": failed_log,
      "skips": ["SKIP  case s: no Mac"],
      "cases": [dict(case_line("FAIL", "case a: x"), seconds=0.5, ended=0.5, unix_time=0.0)]},
-    {"suite": "scripts/b-test.py", "exit": 2, "seconds": 0.0, "log": clean_log, "skips": [],
+    {"suite": "scripts/b-test.py", "exit": 2, "seconds": 0.0, "log": failed_log, "skips": [],
      "cases": [], "test sandbox did not start": True},
-    {"suite": "scripts/c-test.py", "exit": 0, "seconds": 1.0, "log": clean_log, "skips": [],
+    {"suite": "scripts/c-test.py", "exit": 0, "seconds": 1.0, "log": failed_log, "skips": [],
      "cases": [dict(case_line("FAIL", "double(3)"), seconds=0.5, ended=0.5, unix_time=0.0),
                dict(case_line("PASS", "case c"), seconds=0.5, ended=1.0, unix_time=0.0)]}])
 junit_root = xml.etree.ElementTree.parse(junit_directory / "junit.xml").getroot()

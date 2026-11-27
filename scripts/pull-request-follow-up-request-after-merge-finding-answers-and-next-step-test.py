@@ -10,6 +10,16 @@ GitHub; a pre-push hook in the clone injects a refused push.
 Run: python3 scripts/pull-request-follow-up-request-after-merge-finding-answers-and-next-step-test.py
 """
 
+import importlib.util
+import pathlib
+
+_start_and_end_lines_spec = importlib.util.spec_from_file_location(
+    "nn_test_suite_start_time_line_and_end_results_line_print_common",
+    pathlib.Path(__file__).resolve().parents[1] / "nn-systems/general-tools/nn-test-suite-start-time-line-and-end-results-line-print-common.py")
+_start_and_end_lines = importlib.util.module_from_spec(_start_and_end_lines_spec)
+_start_and_end_lines_spec.loader.exec_module(_start_and_end_lines)
+_start_and_end_lines.nn_test_suite_start_time_line_print_now_and_end_results_line_print_at_normal_exit_register()
+
 import contextlib
 import importlib.util
 import io
@@ -1740,7 +1750,8 @@ def test_print_block():
     blocks = {subprocess.run([sys.executable, "-"], input=f"__file__ = {str(Path(__file__).resolve())!r}\n"
                              + helpers_only + "\n" + two_wordings_under_one_new_id,
                              capture_output=True, text=True, cwd=Path(__file__).resolve().parent.parent,
-                             env={**os.environ, "PYTHONHASHSEED": seed}).stdout
+                             env={**os.environ, "PYTHONHASHSEED": seed,
+                                  _start_and_end_lines.CHILD_RUN_ENVIRONMENT_VARIABLE: "1"}).stdout
               for seed in ("1", "2", "3", "4")}
     check(f"{PRINT_BLOCK} refuses a later review's two comments under one new Codex finding id, each alike but for "
           "that id an earlier finding, and refuses alike whatever PYTHONHASHSEED is",

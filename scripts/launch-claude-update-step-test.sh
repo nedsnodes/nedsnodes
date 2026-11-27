@@ -9,10 +9,13 @@ set -u
 
 SCRIPT_DIRECTORY=$(cd "$(dirname "$0")" && pwd)
 FAILURES=0
+PASSED=0
+START_AND_END_LINES="$SCRIPT_DIRECTORY/../nn-systems/general-tools/nn-test-suite-start-time-line-and-end-results-line-print-common.py"
+python3 "$START_AND_END_LINES" start
 
 check() {
     name="$1"; shift
-    if [ "$1" -eq 0 ]; then echo "PASS  $name"; else echo "FAIL  $name"; FAILURES=$((FAILURES + 1)); fi
+    if [ "$1" -eq 0 ]; then echo "PASS  $name"; PASSED=$((PASSED + 1)); else echo "FAIL  $name"; FAILURES=$((FAILURES + 1)); fi
 }
 
 WORKSPACE=$(mktemp -d)
@@ -324,5 +327,10 @@ check "the after-exit invocation pre-trusts inside the workspace, not the real H
     "$(grep -q 'seatprompt' "$WORKSPACE/home/.claude.json" 2>/dev/null; echo $?)"
 
 echo
-if [ "$FAILURES" -gt 0 ]; then echo "$FAILURES case(s) failed"; exit 1; fi
+if [ "$FAILURES" -gt 0 ]; then
+    echo "$FAILURES case(s) failed"
+    python3 "$START_AND_END_LINES" end "$PASSED" "$FAILURES" 1
+    exit
+fi
 echo "all cases passed"
+python3 "$START_AND_END_LINES" end "$PASSED" "$FAILURES" 0
