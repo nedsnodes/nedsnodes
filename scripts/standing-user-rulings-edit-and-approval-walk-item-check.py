@@ -315,7 +315,8 @@ def main(argv=None, stdin=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     lookup_parser = commands.add_parser(
-        "lookup", help="a JSON object of tags and key phrases on stdin, standing entries out, highest score first")
+        "lookup", help="a JSON object of tags and key phrases on stdin, standing entries out, highest score first",
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     lookup_parser.add_argument("--log-store", type=Path, default=index_program.DEFAULT_LOG_STORE)
     lookup_parser.add_argument("--repository-checkout", type=Path, default=HERE.parent)
     arguments = parser.parse_args(argv)

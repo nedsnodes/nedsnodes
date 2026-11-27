@@ -195,7 +195,13 @@ with tempfile.TemporaryDirectory() as directory:
           completed.returncode == 0 and json.loads(completed.stdout.splitlines()[0])["standing_entries_matched"] == 3,
           (completed.returncode, completed.stderr))
 
-    refusal_opening = "FAILED: the standing user-rulings lookup did not run, and printed no entries: "
+    completed = subprocess.run([sys.executable, str(PROGRAM), "lookup", "--help"], capture_output=True, text=True,
+                               timeout=60)
+    check("lookup --help gives the input object's keys, the score and the output",
+          completed.returncode == 0 and all(text in completed.stdout for text in (
+              "INPUT. One JSON object on stdin", "SCORE.", "OUTPUT.")), completed.stdout[:300])
+
+    refusal_opening ="FAILED: the standing user-rulings lookup did not run, and printed no entries: "
     for case_name, given, reason in (
             ("stdin that is not JSON", '{"tags": ["GHI 1"', "stdin is not JSON: "),
             ("an empty stdin", "", "stdin is not JSON: "),
