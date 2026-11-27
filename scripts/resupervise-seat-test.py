@@ -349,6 +349,7 @@ def run_missing_launcher_case(workspace: Path):
             "git-machine-readable-output-runner-and-parser-common.py",
             "agent-seat-task-list-new-pending-task-write-common.py",
             "git-redirecting-environment-variables-removal-common.py",
+            "agent-seat-subagents-and-workflows-running-at-once-limit-constant-common.py",
             "tmux-target-or-server-does-not-exist-error-pattern-common.py",
             "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py",
             "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py",

@@ -182,6 +182,13 @@ _next_step_lines_spec = importlib.util.spec_from_file_location(
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
+_running_at_once_limit_spec = importlib.util.spec_from_file_location(
+    "agent_seat_subagents_and_workflows_running_at_once_limit_constant_common",
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
+    / "agent-seat-subagents-and-workflows-running-at-once-limit-constant-common.py")
+running_at_once_limit = importlib.util.module_from_spec(_running_at_once_limit_spec)
+_running_at_once_limit_spec.loader.exec_module(running_at_once_limit)
+
 _session_handoff_field_names_spec = importlib.util.spec_from_file_location(
     "session_handoff_field_names", Path(__file__).with_name("session-handoff-field-names-common.py"))
 session_handoff_field_names = importlib.util.module_from_spec(_session_handoff_field_names_spec)
@@ -585,9 +592,50 @@ ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION = (
     "step's own item first, when it needs him, then the rest in the order "
     "/walk-me-through gives. When nothing needs him, open no approval-walk. "
     "2. While he answers, or at once when nothing needs him, take the next step, "
-    "then start each ready task on your task list: a task another agent-seat owns "
+    "then start the ready tasks listed below, up to "
+    f"{running_at_once_limit.SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT} "
+    "subagents at once, in the order listed: a task another agent-seat owns "
     "goes to that agent-seat, any other to a background subagent or Codex."
 )
+
+READY_TASKS_NOT_LISTED_INSTRUCTION_TEMPLATE = (
+    "The handoff-supervisor could not list your ready tasks, so none is listed here: {error}. "
+    "Tell the user this error. The due-task Stop hook lists your ready tasks, in the order to "
+    "start them, at the end of a turn when no approval-walk is open and none of your work is "
+    "running.")
+
+
+def ready_tasks_listed_in_start_order(home: Optional[Path] = None, environment=None) -> str:
+    """The open tasks of the agent-seat's task list that nothing recorded holds back, in the
+    due-task hook's start order under that hook's header, or "" when there is none. On a fault,
+    the instruction saying the tasks could not be listed."""
+    home = Path.home() if home is None else home
+    environment = os.environ if environment is None else environment
+    try:
+        hook = agent_seat_worktrees_and_branches_list.due_task_raise_hook_module()
+        directory = hook.task_list_directory(home, environment)
+        if directory is None:
+            return ""
+        tasks = hook.read_tasks(directory)
+        # Only read: the due-task hook alone writes its state file.
+        state = hook.read_state(hook.state_file_path(home, directory.name))
+        checker = hook.GitHubConditionChecker(state["checks"], time.time())
+        unheld, _ = hook.unheld_and_held_tasks(tasks, directory, checker, state["raised"])
+        return "\n".join(hook.unheld_tasks_listed_in_start_order(unheld, tasks))
+    except Exception as error:
+        print(f"handoff-supervisor: the ready tasks could not be listed: {type(error).__name__}: {error}",
+              file=sys.stderr)
+        return READY_TASKS_NOT_LISTED_INSTRUCTION_TEMPLATE.format(
+            error=f"{type(error).__name__}: {error}")
+
+
+def prompt_with_ready_tasks_listed_before_the_next_step(prompt: str, ready_tasks: str) -> str:
+    if not ready_tasks:
+        return prompt
+    opening, next_step_heading, next_step = prompt.partition(NEXT_STEP_HEADING)
+    if not next_step_heading:
+        return f"{prompt}\n\n{ready_tasks}"
+    return f"{opening}\n\n{ready_tasks}{next_step_heading}{next_step}"
 
 WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE = (
     "Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
@@ -2906,6 +2954,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                 launch_time_git_sync_report, overview_refresh_due, memory_review_due,
                 branch_state_instruction=branch_state_instruction,
                 waiting_approval_walk_item=waiting_approval_walk_item)
+            prompt = prompt_with_ready_tasks_listed_before_the_next_step(
+                prompt, ready_tasks_listed_in_start_order())
             if isinstance(ignition_plan, DialogIgnitionPlan):
                 conversation_tail_path_for_next_launch = ignition_plan.extract_path
             ignition_plan = None

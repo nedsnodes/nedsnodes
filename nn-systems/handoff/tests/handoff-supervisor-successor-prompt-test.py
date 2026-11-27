@@ -518,7 +518,8 @@ def run_launch_and_retention_cases(workspace: Path, recent: str):
               "step's own item first, when it needs him, then the rest in the order "
               "/walk-me-through gives. When nothing needs him, open no approval-walk. "
               "2. While he answers, or at once when nothing needs him, take the next step, "
-              "then start each ready task on your task list: a task another agent-seat owns "
+              "then start the ready tasks listed below, up to 3 subagents at once, in the order "
+              "listed: a task another agent-seat owns "
               "goes to that agent-seat, any other to a background subagent or Codex."),
           repr(supervisor.ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION))
     # This fixture passes no sync report and no roster, and its verbatim block
@@ -3286,8 +3287,54 @@ def run_retiring_session_id_from_the_handoff_cases(workspace: Path, recent: str)
           str(unknown.plan and unknown.plan.predecessor_session_directory))
 
 
+def run_ready_tasks_listed_in_start_order_cases(workspace: Path):
+    home = workspace / "ready-tasks-home"
+    environment = {"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-ready-seat-tasks"}
+    task_directory = home / ".claude" / "tasks" / "nedsnodes-ready-seat-tasks"
+    task_directory.mkdir(parents=True)
+    check("ready tasks: an empty task list lists nothing",
+          supervisor.ready_tasks_listed_in_start_order(home, environment) == "")
+    check("ready tasks: no task list id lists nothing",
+          supervisor.ready_tasks_listed_in_start_order(home, {}) == "")
+    for task_id, subject, blocked_by, status in (
+            ("5", "Low number", [], "pending"), ("6", "Others wait on it", [], "pending"),
+            ("7", "Waits on 6", ["6"], "pending"), ("8", "Done", [], "completed")):
+        (task_directory / f"{task_id}.json").write_text(json.dumps({
+            "id": task_id, "subject": subject, "status": status, "blockedBy": blocked_by}))
+    listed = supervisor.ready_tasks_listed_in_start_order(home, environment)
+    hook = supervisor.agent_seat_worktrees_and_branches_list.due_task_raise_hook_module()
+    check("ready tasks: the unheld tasks under the due-task hook's header, in its start order",
+          listed == "\n".join([hook.NEXT_ACTION_UNHELD_TASKS_HEADER,
+                               '- task 6 "Others wait on it"', '- task 5 "Low number"']), listed)
+    unlistable_home = workspace / "ready-tasks-unlistable-home"
+    (unlistable_home / ".claude" / "tasks").mkdir(parents=True)
+    (unlistable_home / ".claude" / "tasks" / "nedsnodes-ready-seat-tasks").write_text("not a directory")
+    with contextlib.redirect_stderr(io.StringIO()) as console:
+        failed = supervisor.ready_tasks_listed_in_start_order(unlistable_home, environment)
+    check("ready tasks: a task list that cannot be listed gives the instruction naming the error",
+          failed.startswith("The handoff-supervisor could not list your ready tasks, so none is "
+                            "listed here: NotADirectoryError")
+          and failed.endswith("Tell the user this error. The due-task Stop hook lists your ready "
+                              "tasks, in the order to start them, at the end of a turn when no "
+                              "approval-walk is open and none of "
+                              "your work is running.")
+          and "the ready tasks could not be listed: NotADirectoryError" in console.getvalue(),
+          (failed, console.getvalue()))
+    heading = supervisor.NEXT_STEP_HEADING
+    check("ready tasks: listed between the prompt's opening and its next step",
+          supervisor.prompt_with_ready_tasks_listed_before_the_next_step(
+              f"Opening.{heading}Do it.", "LIST") == f"Opening.\n\nLIST{heading}Do it.")
+    check("ready tasks: listed at the end of a prompt with no next step",
+          supervisor.prompt_with_ready_tasks_listed_before_the_next_step("Opening.", "LIST")
+          == "Opening.\n\nLIST")
+    check("ready tasks: nothing listed leaves the prompt as it was",
+          supervisor.prompt_with_ready_tasks_listed_before_the_next_step(
+              f"Opening.{heading}Do it.", "") == f"Opening.{heading}Do it.")
+
+
 with fixture.handoff_supervisor_suite_workspace() as workspace:
     recent_timestamp = run_offline_cases(workspace)
+    run_ready_tasks_listed_in_start_order_cases(workspace)
     run_launch_time_git_sync_cases(workspace)
     run_launch_time_git_sync_real_reports_into_successor_prompt_cases(workspace)
     run_supervisor_names_replaced_unknown_name_cases()

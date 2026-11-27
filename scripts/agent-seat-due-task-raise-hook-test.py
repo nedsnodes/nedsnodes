@@ -1628,11 +1628,15 @@ check("walk-document fenced around an unmoved heading, one checker: the answer f
 APPROVAL = "walk item 5, approved 2026-10-26"
 
 
-def approval_text(task_id, subject, approval=APPROVAL):
+def approval_text(task_id, subject, approval=APPROVAL, running=None):
+    """The approved text, word for word; `running` None is a payload with no background-work list."""
+    running_sentence = ("" if running is None else
+                        f" {running} of the 3 subagents and workflows you may run at once are running.")
     return (f'[rule due-task-approved-ready-task-forked-subagent-dispatch-reminder] Task {task_id} "{subject}" is '
-            f"ready and needs no decision from the user ({approval}). Set it in_progress with "
-            f"TaskUpdate, then dispatch a forked subagent for it now, with the Agent tool's "
-            f'isolation "worktree", and mark the task completed when the subagent reports it done.')
+            f"ready and needs no decision from the user ({approval}).{running_sentence} Set it "
+            f"in_progress with TaskUpdate, then dispatch a forked subagent for it, with the Agent "
+            f'tool\'s isolation "worktree", and mark the task completed when the subagent reports it '
+            f"done.")
 
 
 seat = Seat()
@@ -1748,7 +1752,94 @@ seat = IdleSeat()
 seat.task("118", metadata={"approval": APPROVAL})
 text = context_of(seat.stop()) or ""
 check("approval raise at an idle stop: the approval text, and no next-action prompt",
-      text == f'{approval_text("118", "Subject of task 118")}\n{DEFER_LINE}', repr(text))
+      text == f'{approval_text("118", "Subject of task 118", running=0)}\n{DEFER_LINE}', repr(text))
+
+
+# --- the approval raise names at most one task per stop, and none at the limit ----
+def running_entries(subagents=0, workflows=0, others=()):
+    return ([{"id": f"s{index}", "type": "subagent", "status": "running"} for index in range(subagents)]
+            + [{"id": f"w{index}", "type": "workflow", "status": "running"} for index in range(workflows)]
+            + list(others))
+
+
+check("the limit on running subagents and workflows is 3",
+      hook.SUBAGENTS_AND_WORKFLOWS_RUNNING_AT_ONCE_LIMIT == 3)
+check("running count: no list is None, and a list that is not a list is None",
+      hook.running_subagents_and_workflows({}) is None
+      and hook.running_subagents_and_workflows({"background_tasks": {"s1": "running"}}) is None)
+check("running count: subagents and workflows that run count; shells, finished work and "
+      "entries that are not objects do not",
+      hook.running_subagents_and_workflows({"background_tasks": running_entries(
+          subagents=1, workflows=1,
+          others=[{"id": "b1", "type": "shell", "status": "running"},
+                  {"id": "s9", "type": "subagent", "status": "completed"}, "s8"])}) == 2)
+
+for running, raised_now in ((2, True), (3, False), (4, False)):
+    seat = IdleSeat()
+    seat.task("120", metadata={"approval": APPROVAL})
+    seat.task("121", metadata=MET)
+    text = context_of(seat.stop(background_tasks=running_entries(subagents=running - 1, workflows=1))) or ""
+    state = json.loads(seat.state_path.read_text())
+    if raised_now:
+        check(f"approval raise with {running} running: named, with the running count",
+              approval_text("120", "Subject of task 120", running=running) + "\n" in text
+              and state["raised"]["120"] == {"approval": APPROVAL}, repr(text))
+    else:
+        check(f"approval raise with {running} running: no task named and nothing recorded for it, "
+              f"while Act on still raises",
+              "is ready" not in text and "Act on task 121 " in text
+              and "120" not in state["raised"], (repr(text), state["raised"]))
+        held_back_text = context_of(seat.stop(background_tasks=running_entries(subagents=2))) or ""
+        check(f"approval raise held back at {running} running: named at a later stop with 2 running",
+              held_back_text.startswith(approval_text("120", "Subject of task 120", running=2)),
+              repr(held_back_text))
+
+seat = Seat()
+seat.task("122", metadata={"approval": APPROVAL})
+seat.task("123", metadata={**MET, "approval": "an earlier approval"})
+seat.run()
+seat.run()
+seat.task("123", metadata={"prerequisites": [{"pr_merged": 903}], "approval": "an earlier approval"})
+seat.respond({"pr:903": {"state": "MERGED", "title": "T", "url": "https://x/903"}})
+payload_at_the_limit = json.dumps({**json.loads(STOP_PAYLOAD), "background_tasks": running_entries(subagents=3)})
+seat.run(stdin_text=payload_at_the_limit)
+record = json.loads(seat.state_path.read_text())["raised"]["123"]
+check("approval raise held back for new prerequisites met: the old prerequisites record is kept, "
+      "so a later stop raises the task",
+      record.get("prerequisites") == hook.canonical_prerequisites(MET["prerequisites"])
+      and "123" in (context_of(seat.run()) or ""), record)
+
+seat = Seat()
+seat.task("9", metadata={"approval": APPROVAL})
+seat.task("10", metadata={"approval": APPROVAL})
+seat.task("11", metadata={"approval": APPROVAL})
+seat.task("12", blocked_by=["11"])
+seat.task("13", blocked_by=["11"])
+seat.task("14", status="completed", blocked_by=["10"])
+named = []
+for _ in range(4):
+    text = context_of(seat.run()) or ""
+    named.append([word for word in text.split() if word.isdigit()][:1])
+check("approval raise: one task per stop, the one most open tasks wait on first, then the lowest "
+      "number, 9 before 10; then silent",
+      named == [["11"], ["9"], ["10"], []], named)
+check("start order: blockedBy counted from open tasks only, ties by task number",
+      hook.tasks_in_start_order(["10", "9", "11"], {
+          "10": {"status": "pending"}, "9": {"status": "pending"}, "11": {"status": "pending"},
+          "12": {"status": "completed", "blockedBy": ["10"]},
+          "13": {"status": "in_progress", "blockedBy": ["11", "11"]}}) == ["11", "9", "10"])
+
+seat = IdleSeat()
+seat.task("30", subject="Low number")
+seat.task("31", subject="Blocks another")
+seat.task("32", subject="Held", blocked_by=["31"])
+text = context_of(seat.stop()) or ""
+check("next-action: the start-subagents line is the approved text",
+      "Start subagents on up to 3 of the tasks listed below that need no review or approval from "
+      "the user, taking them in the order listed, and start the next as one finishes." in text, text)
+check("next-action: tasks listed in start order, the one another task waits on first",
+      text.find('- task 31 "Blocks another"') < text.find('- task 30 "Low number"')
+      and '- task 30 "Low number"' in text, text)
 
 shutil.rmtree(SUITE_ROOT, ignore_errors=True)
 print()
