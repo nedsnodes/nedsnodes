@@ -1572,7 +1572,9 @@ def run_git_here(arguments: list, working_directory: Path, timeout: int = 60):
 class LaunchTimeGitSyncReport(str):
     """A launch-time-git-sync report's text, with the sync's outcome beside it: whether the fetch
     of origin succeeded and the checkout then held all of main, and whether the checkout's commit
-    is now origin/main's. A plain str report has no such outcome, so it counts as neither."""
+    is now origin/main's. A plain str report has no such outcome, so it counts as neither.
+    After a fast-forward whose new commit cannot be read, checkout_has_main_after_a_fetch is
+    False although both hold, so that the successor is shown git's error."""
 
     def __new__(cls, text: str, checkout_has_main_after_a_fetch: bool,
                 checkout_is_at_main_commit: bool = False):
