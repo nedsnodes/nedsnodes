@@ -132,13 +132,17 @@ opens no task; and a task list directory that does not exist, so that each
 failure reaches only the cron log. With another --repo, --poll-once needs its own
 --poll-once-directory, so that the default state is never another repository's.
 With the default --repo, each --poll-once run then starts the merge queue's merges:
-when the merge queue file holds a waiting line, it runs the merge queue program's
-merge-batch-start --quiet, which starts nothing while a merge batch runs or the stop
-file exists. It starts one only when the queue file's size or an open pull request's
-nn-head-commit, or the set of open pull requests, has changed since the last start, so a
-stacked line the last batch passed over waits for its parent's merge. A run with no waiting line, or whose merge-batch-start prints nothing,
-writes no task and sends no message; an unreadable queue file, or a merge-batch-start
-that fails or hangs, opens one task.
+when the merge queue file holds a waiting line and the run's GitHub poll succeeded, it runs
+the merge queue program's merge-batch-start --quiet, with the watcher's token as GH_TOKEN,
+which starts nothing while a merge batch runs or the stop file exists. It runs it only when
+something the merge queue program decides a waiting line by has changed since the last
+batch started: the waiting lines, or a waiting pull request's nn-head-commit, base branch or
+the open pull requests whose branch is that base, so a stacked line the last batch passed
+over waits for its parent's merge or retarget; or when a merge batch left its in-progress
+file, so merge-batch-start reports DIED MID-MERGE. Only a STARTED outcome is recorded. A run
+with no waiting line, or whose merge-batch-start prints nothing, writes no task and sends no
+message; an unreadable queue file, a merge queue program that cannot be loaded, or a
+merge-batch-start that cannot run, fails or hangs, opens one task.
 A cron run, the loop watcher and the seed each hold a lock file
 beside the assignment file from reading it to replacing it.
 
@@ -1214,39 +1218,50 @@ def merge_queue_program_module():
     return module
 
 
-def merge_batch_start_inputs(arguments, state):
-    """What a merge batch acts on: the merge queue file's size and each open pull request's
-    nn-head-commit. A batch passes a stacked pull request over without appending a line, so
-    its line keeps waiting; a batch started again with these unchanged would only pass it over
-    again."""
-    return [os.path.getsize(arguments.merge_queue_file),
-            sorted([int(number), seen["head_sha"]] for number, seen in state["pull_requests"].items())]
+def merge_batch_start_inputs(queue_file, waiting, pull_requests):
+    """What the merge queue program decides each waiting line by: the line, and its pull
+    request's nn-head-commit and base branch while it is open, with the count of open pull
+    requests whose branch is that base, which makes the line stacked when it is one."""
+    by_number = pull_requests_by_number(pull_requests)
+    inputs = []
+    for line in waiting:
+        pull_request = by_number.get(int(line["pr"]))
+        base = pull_request["base_branch"] if pull_request else None
+        inputs.append([line.string, pull_request and pull_request["head_sha"], base,
+                       sum(other["head_branch"] == base for other in pull_requests)])
+    return [str(queue_file), inputs]
 
 
-def merge_batch_started_when_lines_wait(arguments, task_list_directory, state, state_path):
+def merge_batch_started_when_lines_wait(arguments, task_list_directory, state, state_path,
+                                        pull_requests, token):
     """Run the merge queue program's merge-batch-start --quiet when the merge queue file holds
-    a waiting line and something the batch acts on has changed since the last start, and
-    return the exit status. Nothing waiting, nothing changed, a merge batch already running
-    and a stop file all print nothing and write no task, so merge-lane-2 hears only of a
-    failure."""
-    queue = merge_queue_program_module()
-    runner = queue.MergeQueuePullRequestMergeBatchRunner(queue.parse_arguments(
-        ["--merge-queue-file", str(arguments.merge_queue_file), "merge-batch-list-waiting"]))
+    a waiting line and what the batch decides that line by has changed since the last batch
+    started, or a merge batch left its in-progress file, and return the exit status. Nothing
+    waiting, nothing changed, a merge batch already running and a stop file all print nothing
+    and write no task, so merge-lane-2 hears only of a failure."""
     try:
+        queue = merge_queue_program_module()
+    except Exception as error:
+        return failure_reported(task_list_directory, "the merge queue program cannot be loaded",
+                                f"{MERGE_QUEUE_PROGRAM}: {type(error).__name__}: {error}. No merge "
+                                f"batch starts until it loads; the poll and the review assignment "
+                                f"still ran.")
+    if arguments.merge_queue_file is None:
+        arguments.merge_queue_file = queue.DEFAULT_MERGE_QUEUE_FILE
+    try:
+        runner = queue.MergeQueuePullRequestMergeBatchRunner(queue.parse_arguments(
+            ["--merge-queue-file", str(arguments.merge_queue_file), "merge-batch-list-waiting"]))
         waiting = runner.waiting(runner.queue_lines())
-    except (queue.Stop, OSError) as error:
+    except (queue.Stop, OSError, ValueError) as error:
         return failure_reported(task_list_directory, "the merge queue file cannot be read",
                                 f"{arguments.merge_queue_file}: {error}. No merge batch starts "
                                 f"until it can be read; repair it, and the next run starts one.")
     if not waiting:
         return 0
-    try:
-        inputs = merge_batch_start_inputs(arguments, state)
-    except OSError as error:
-        return failure_reported(task_list_directory, "the merge queue file cannot be read",
-                                f"{arguments.merge_queue_file}: {error}. No merge batch starts "
-                                f"until it can be read; repair it, and the next run starts one.")
-    if state.get("merge_batch_started_for") == inputs:
+    inputs = merge_batch_start_inputs(arguments.merge_queue_file, waiting, pull_requests)
+    if (state.get("merge_batch_started_for") == inputs
+            and not (Path(arguments.merge_batches_directory or queue.DEFAULT_MERGE_BATCHES_DIRECTORY)
+                     / queue.MERGE_IN_PROGRESS_FILE_NAME).exists()):
         return 0
     command = [sys.executable, str(arguments.merge_queue_program),
                "--merge-queue-file", str(arguments.merge_queue_file),
@@ -1257,12 +1272,16 @@ def merge_batch_started_when_lines_wait(arguments, task_list_directory, state, s
                "merge-batch-start", "--quiet"]
     try:
         completed = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                                   timeout=MERGE_BATCH_START_TIMEOUT_SECONDS)
+                                   timeout=MERGE_BATCH_START_TIMEOUT_SECONDS,
+                                   env={**os.environ, "GH_TOKEN": token})
     except subprocess.TimeoutExpired:
         return failure_reported(task_list_directory, "merge-batch-start did not finish",
                                 f"{shlex.join(command)} ran over {MERGE_BATCH_START_TIMEOUT_SECONDS} "
                                 f"seconds and was killed; it only checks files and starts a "
                                 f"process, so run it by hand to see where it hangs.")
+    except OSError as error:
+        return failure_reported(task_list_directory, "merge-batch-start failed",
+                                f"{shlex.join(command)} could not be run: {error}")
     output = (completed.stdout + completed.stderr).strip()
     if output:
         emit(f"merge-batch-start: {output}")
@@ -1270,6 +1289,9 @@ def merge_batch_started_when_lines_wait(arguments, task_list_directory, state, s
         return failure_reported(task_list_directory, "merge-batch-start failed",
                                 f"{shlex.join(command)} exited {completed.returncode}: "
                                 f"{one_line_snippet(output or 'no output', FAILURE_REASON_SNIPPET_CHARS)}")
+    # Only a started batch acted on these inputs; any other outcome is asked again next run.
+    if not output.startswith("STARTED"):
+        return 0
     state["merge_batch_started_for"] = inputs
     try:
         poll_state_write(state_path, state)
@@ -1308,6 +1330,10 @@ def poll_once(arguments, assignments_file, options_in_use):
             return failure_reported(task_list_directory, "its GitHub token cannot be used",
                                     f"{reason}. Repair the token file.")
         SECRETS_TO_REDACT.append(token)
+        merge_queue_in_use = (arguments.merge_queue_file is not None
+                              or arguments.merge_queue_file_default)
+        no_merge_batch_starts = (" No merge batch starts until this is repaired."
+                                 if merge_queue_in_use else "")
         try:
             if arguments.poll_once_write_baseline:
                 return poll_once_write_baseline(arguments, token, state_path, events_path)
@@ -1340,19 +1366,23 @@ def poll_once(arguments, assignments_file, options_in_use):
             poll_state_write(state_path, state)
             events_task_opened_when_due(state, state_path, events_path, task_list_directory, now)
         except PollStateUnusable as error:
-            return failure_reported(task_list_directory, "its state cannot be used", str(error))
+            return failure_reported(task_list_directory, "its state cannot be used",
+                                    f"{error}{no_merge_batch_starts}")
         except EventFileCutBackFailed as error:
             # Its own subject, so an open append-failure task does not swallow it.
             return failure_reported(task_list_directory, "its polls record nothing until the event "
-                                    "file's last line is cut back", str(error))
+                                    "file's last line is cut back", f"{error}{no_merge_batch_starts}")
         except OSError as error:
             return failure_reported(task_list_directory, "it could not record or deliver events",
                                     f"{error}. The state file still holds the last run that "
                                     f"recorded its events, so the first run after this is repaired "
                                     f"finds this run's events again; lines already in "
-                                    f"{events_path} reach a later events task.")
-        merge_batch_status = (merge_batch_started_when_lines_wait(arguments, task_list_directory, state, state_path)
-                              if arguments.merge_queue_file is not None else 0)
+                                    f"{events_path} reach a later events task."
+                                    f"{no_merge_batch_starts}")
+        # A batch reads GitHub too, so a run whose poll failed leaves the start to the next.
+        merge_batch_status = (merge_batch_started_when_lines_wait(
+            arguments, task_list_directory, state, state_path, pull_requests, token)
+            if merge_queue_in_use and reason is None else 0)
         if reason is None:
             return merge_batch_status
         snippet = one_line_snippet(reason, FAILURE_REASON_SNIPPET_CHARS)
@@ -1361,7 +1391,7 @@ def poll_once(arguments, assignments_file, options_in_use):
                 task_list_directory, "GitHub queries keep failing",
                 f"{state['failed_polls']} polls in a row failed, the last with: {snippet}. "
                 f"No event is lost while the state file is kept, except a pull request that "
-                f"opens and closes during the outage.")
+                f"opens and closes during the outage.{no_merge_batch_starts}")
         warn(f"merge-lane-open-prs-watch-and-reviewer-assign: poll failed: {snippet}")
         return 1
 
@@ -1477,8 +1507,8 @@ def main(argv=None):
     # The default file holds the default repository's pull request numbers only.
     if assignments_file is None and repo_is_default:
         assignments_file = MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
-    if arguments.merge_queue_file is None and repo_is_default and arguments.poll_once:
-        arguments.merge_queue_file = merge_queue_program_module().DEFAULT_MERGE_QUEUE_FILE
+    arguments.merge_queue_file_default = (arguments.merge_queue_file is None and repo_is_default
+                                          and arguments.poll_once)
     options_in_use = [*(["--repo", arguments.repo] if not repo_is_default else []),
                       *(["--token-file", arguments.token_file]
                         if arguments.token_file != DEFAULT_TOKEN_FILE else [])]

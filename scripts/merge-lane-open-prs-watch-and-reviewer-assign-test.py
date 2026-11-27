@@ -1952,11 +1952,13 @@ class PollOnceMachine:
         self.merge_queue_program_exit = 0
         self.merge_queue_program_output = ""
         self.merge_queue_program_sleep = 0
+        self.merge_queue_program_tokens = scratch / "fake-merge-queue-program-tokens.txt"
 
     def fake_merge_queue_program_write(self):
         self.merge_queue_program.write_text(
-            "import sys, time\n"
+            "import os, sys, time\n"
             f"open({str(self.merge_queue_program_calls)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            f"open({str(self.merge_queue_program_tokens)!r}, 'a').write(os.environ.get('GH_TOKEN', '') + '\\n')\n"
             f"time.sleep({self.merge_queue_program_sleep})\n"
             f"print({self.merge_queue_program_output!r}, end='')\n"
             f"sys.exit({self.merge_queue_program_exit})\n", encoding="utf-8")
@@ -2644,27 +2646,123 @@ def run_poll_once_merge_batch_start_cases(scratch_root, token_file):
           and "cannot be read" in tasks[0]["subject"]
           and str(machine.merge_queue_file) in tasks[0]["description"], f"{code} {tasks}")
 
+    def calls(machine):
+        return len(machine.merge_queue_program_call_lines())
+
     machine = machine_for("merge-batch-stacked-line-waits", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program_output = "STARTED: a merge batch; its log is merge-batch.log\n"
+    stacked = dict(poll_once_pull_request(7), base_branch="branch-1")
+    machine.poll = [poll_once_pull_request(1), stacked]
     machine.run()
     code = machine.run()
-    check("a line still waiting on a second poll, with the queue file and the open pull requests "
-          "unchanged, as a stacked line the first batch passed over is, starts no second batch",
-          len(machine.merge_queue_program_call_lines()) == 1 and silent(machine, code),
-          f"{code} {machine.merge_queue_program_call_lines()} {machine.tasks_read()} {machine.output!r}")
-    machine.poll = []
-    code = machine.run()
-    check("once an open pull request leaves the open list, as the stacked line's parent does when it "
-          "merges, the next poll starts a batch again",
-          len(machine.merge_queue_program_call_lines()) == 2 and code == 0,
-          f"{code} {machine.merge_queue_program_call_lines()}")
+    check("a line still waiting on a second poll, with nothing it is decided by changed, as a "
+          "stacked line the first batch passed over is, starts no second batch",
+          calls(machine) == 1 and code == 0,
+          f"{code} {machine.merge_queue_program_call_lines()} {machine.tasks_read()}")
+    machine.poll = [poll_once_pull_request(1, head="b"), stacked, poll_once_pull_request(2)]
+    machine.run()
+    check("a new head or a newly opened pull request that the waiting line is not decided by "
+          "starts no batch", calls(machine) == 1, machine.merge_queue_program_call_lines())
+    machine.poll = [stacked, poll_once_pull_request(2)]
+    machine.run()
+    check("once the pull request whose branch is the stacked line's base leaves the open list, as "
+          "it does when it merges, the next poll starts a batch again",
+          calls(machine) == 2, machine.merge_queue_program_call_lines())
+    machine.poll = [dict(stacked, base_branch="main")]
+    machine.run()
+    check("a waiting pull request retargeted to main with its head unchanged starts a batch",
+          calls(machine) == 3, machine.merge_queue_program_call_lines())
     with machine.merge_queue_file.open("a", encoding="utf-8") as queue:
         queue.write(f"8 {'c' * 40} 2026-11-26T06:00:00Z nedlern (approved)\n")
+    machine.run()
+    check("a waiting line appended to the queue file makes the next poll start a batch again",
+          calls(machine) == 4, machine.merge_queue_program_call_lines())
+    machine.merge_batches.mkdir(exist_ok=True)
+    (machine.merge_batches / "merge-batch-merge-in-progress.txt").write_text("pull request 7\n")
+    machine.run()
+    check("a merge batch's in-progress file makes the next poll run merge-batch-start though "
+          "nothing else changed, so a batch that died reports DIED MID-MERGE",
+          calls(machine) == 5, machine.merge_queue_program_call_lines())
+    check("merge-batch-start runs with the watcher's token as GH_TOKEN",
+          machine.merge_queue_program_tokens.read_text(encoding="utf-8").splitlines()
+          == [FIXTURE_TOKEN] * 5,
+          # Never the token itself: without the fix the child sees the caller's real GH_TOKEN.
+          [token == FIXTURE_TOKEN for token in
+           machine.merge_queue_program_tokens.read_text(encoding="utf-8").splitlines()])
+
+    machine = machine_for("merge-batch-not-started-is-asked-again", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.run()
     code = machine.run()
-    check("a line appended to the queue file makes the next poll start a batch again",
-          len(machine.merge_queue_program_call_lines()) == 3 and code == 0,
-          f"{code} {machine.merge_queue_program_call_lines()}")
+    check("a merge-batch-start that starts nothing, as ALREADY RUNNING or STOPPED do quietly, is "
+          "not recorded, so the next poll runs it again",
+          calls(machine) == 2 and silent(machine, code),
+          f"{code} {machine.merge_queue_program_call_lines()} {machine.output!r}")
+
+    machine = machine_for("merge-batch-poll-failed", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.poll = "HTTP 502"
+    machine.run()
+    check("a run whose GitHub poll failed starts no merge batch, since the batch reads GitHub too",
+          calls(machine) == 0, machine.merge_queue_program_call_lines())
+
+    machine = machine_for("merge-queue-not-utf-8", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_file.write_bytes(b"\xff\n")
+    code = machine.run()
+    tasks = machine.tasks_read()
+    check("a merge queue file that is not UTF-8 starts nothing, makes --poll-once exit 1 and opens "
+          "one task naming the file",
+          code == 1 and calls(machine) == 0 and len(tasks) == 1
+          and "cannot be read" in tasks[0]["subject"]
+          and str(machine.merge_queue_file) in tasks[0]["description"], f"{code} {tasks}")
+
+    machine = machine_for("merge-batch-start-cannot-spawn", WAITING_MERGE_QUEUE_LINE + "\n")
+    saved_run = watcher_module.subprocess.run
+
+    def spawn_refused(command, **keywords):
+        if "merge-batch-start" in command:
+            raise BlockingIOError("[Errno 11] Resource temporarily unavailable")
+        return saved_run(command, **keywords)
+
+    watcher_module.subprocess.run = spawn_refused
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.subprocess.run = saved_run
+    tasks = machine.tasks_read()
+    check("a merge-batch-start that cannot be spawned makes --poll-once exit 1 and open one task",
+          code == 1 and len(tasks) == 1 and "merge-batch-start failed" in tasks[0]["subject"]
+          and "Resource temporarily unavailable" in tasks[0]["description"], f"{code} {tasks}")
+
+    machine = machine_for("merge-queue-program-cannot-load", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+    saved_module = watcher_module.merge_queue_program_module
+
+    def load_refused():
+        raise SyntaxError("invalid syntax")
+
+    watcher_module.merge_queue_program_module = load_refused
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.merge_queue_program_module = saved_module
+    tasks = [task for task in machine.tasks_read() if "cron job failed" in task["subject"]]
+    check("a merge queue program that cannot be loaded makes --poll-once exit 1 and open one task, "
+          "after the poll has recorded its events",
+          code == 1 and len(tasks) == 1 and "cannot be loaded" in tasks[0]["subject"]
+          and "invalid syntax" in tasks[0]["description"]
+          and any("OPENED" in line for line in machine.event_lines()),
+          f"{code} {tasks} {machine.event_lines()}")
+
+    machine = machine_for("merge-batch-state-unusable", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.state_path.write_text("not json", encoding="utf-8")
+    code = machine.run()
+    tasks = machine.tasks_read()
+    check("an unusable state file's task says that no merge batch starts until it is repaired",
+          code == 1 and len(tasks) == 1
+          and "No merge batch starts until this is repaired" in tasks[0]["description"],
+          f"{code} {tasks}")
 
     machine = machine_for("merge-batch-start-not-recorded", WAITING_MERGE_QUEUE_LINE + "\n")
+    machine.merge_queue_program_output = "STARTED: a merge batch; its log is merge-batch.log\n"
     saved_write = watcher_module.poll_state_write
 
     def write_refused_once_it_records_a_start(path, state):
@@ -2682,26 +2780,6 @@ def run_poll_once_merge_batch_start_cases(scratch_root, token_file):
           "and open one task saying every run starts a batch until it can",
           code == 1 and len(tasks) == 1 and "record the merge batch start" in tasks[0]["subject"]
           and "disk full" in tasks[0]["description"], f"{code} {tasks}")
-
-    machine = machine_for("merge-queue-size-unreadable", WAITING_MERGE_QUEUE_LINE + "\n")
-    saved_getsize = watcher_module.os.path.getsize
-
-    def getsize_refused(path):
-        if Path(path) == machine.merge_queue_file:
-            raise OSError("input/output error")
-        return saved_getsize(path)
-
-    watcher_module.os.path.getsize = getsize_refused
-    try:
-        code = machine.run()
-    finally:
-        watcher_module.os.path.getsize = saved_getsize
-    tasks = machine.tasks_read()
-    check("a merge queue file whose size cannot be read starts nothing, makes --poll-once exit 1 "
-          "and opens one task naming the file",
-          code == 1 and not machine.merge_queue_program_call_lines() and len(tasks) == 1
-          and "cannot be read" in tasks[0]["subject"]
-          and "input/output error" in tasks[0]["description"], f"{code} {tasks}")
 
 
 if __name__ == "__main__":
