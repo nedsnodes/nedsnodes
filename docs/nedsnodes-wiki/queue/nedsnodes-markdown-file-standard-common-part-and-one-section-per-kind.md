@@ -21,7 +21,7 @@ It contains a level-1 heading naming the project, then each rule that every agen
 A project instructions file leaves out:
 
 - A rule that one agent-seat, one skill or one kind of task alone needs: it goes in that seat-brief, skill or wiki page, and a rule names that file only when every agent-session must know to read it.
-- Steps that need no judgment, and the order of steps: a program holds them, as the code-prompt-code rule in `CLAUDE.md` says.
+- Steps that need no judgment, such as fetching exact files, and steps whose next step depends on a result, a condition, a count or a limit: a program holds them.
 - History and citations, which `CLAUDE.md` keeps out of standing instructions.
 
 A project instructions file holds no rule that belongs in a seat-brief, a skill, a wiki page or a program; the rule goes in that file.
@@ -44,7 +44,7 @@ A seat-brief leaves out:
 - How the agent-seat was started, who asked for it, and the incidents behind its rules.
 - Facts about another agent-seat or a machine that change on their own, such as which agent-seat merges pull requests; the seat-brief names the document that holds them.
 
-A seat-brief holds no procedure; a procedure belongs in a skill or a program. When a skill or a program takes over a rule, the rule leaves the seat-brief in the same change.
+A procedure of more than a few steps belongs in a skill or a program. When a skill or a program takes over a rule, the rule leaves the seat-brief in the same change.
 
 ## agent definition
 
@@ -97,7 +97,7 @@ A skill leaves out:
 - Steps that need no judgment, which its program does.
 - History and citations, which `CLAUDE.md` keeps out of standing instructions.
 
-A skill holds no fixed order of steps; that order belongs in a program.
+When steps run in any order, or in one order with no branch, loop or count, the skill keeps that order; a step among them that needs no judgment is still done by a program.
 
 ## session-handoff or next step file
 
