@@ -548,9 +548,9 @@ def codex_command(checkout: pathlib.Path, last_message: pathlib.Path, sandbox: s
         command += ["--add-dir", str(root)]
     if outside_git_checkout:
         command.append("--skip-git-repo-check")
-    if network:
-        # `codex exec` does not accept --search; this config key is what that flag sets.
-        command += ["-c", 'web_search="live"']
+    # `codex exec` does not accept --search; this config key is what that flag sets. Left
+    # unset, Codex still searches from its cache (codex-cli 0.169.1 takes "disabled").
+    command += ["-c", 'web_search="live"' if network else 'web_search="disabled"']
     if model:
         command += ["-m", model]
     if effort:
@@ -655,6 +655,8 @@ def main(argv=None) -> int:
                   parser, shared_subfolder))
     run_log = pathlib.Path(args.run_log).resolve() if args.run_log else report.with_name(
         report.name + ".run.log")
+    if len({brief, report, run_log}) != 3:
+        parser.error("--brief, -o and --run-log must name different files")
     # A report left by an earlier run must not pass for this run's.
     report.unlink(missing_ok=True)
     last_message = report.with_name(report.name + ".last-message")
@@ -747,17 +749,18 @@ def main(argv=None) -> int:
     if report_copy:
         print(f"{PROGRAM}: a copy of the report, which goes to the log-store, is at "
               f"{report_copy}", file=sys.stderr)
+    report_copy_note = f"\n{report_copy_error}" if report_copy_error else ""
     if worktree_to_commit:
         done, error = codex_or_gemini_finished_workspace_write_run_changes_commit(
             worktree_to_commit)
         if error:
-            return fail(f"{error}\nThe report is at {report}.")
+            return fail(f"{error}\nThe report is at {report}.{report_copy_note}")
         if done:
             print(f"{PROGRAM}: {done}", file=sys.stderr)
             error = codex_or_gemini_committed_run_test_suites_whose_recorded_inputs_changed_run(
                 worktree_to_commit, start_commit)
             if error:
-                return fail(f"{error}\nThe report is at {report}.")
+                return fail(f"{error}\nThe report is at {report}.{report_copy_note}")
     if report_copy_error:
         return fail(report_copy_error)
     print(f"report: {report}")

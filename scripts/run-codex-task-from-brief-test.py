@@ -303,10 +303,12 @@ try:
 
     completed, report, _ = run("report", "--no-network")
     arguments = json.loads(arguments_file.read_text())
-    check("--no-network takes away both the network and web search",
+    check("--no-network takes away the network and turns web search off, cached search included",
           completed.returncode == 0
-          and not any("network" in argument or "web_search" in argument
-                      for argument in arguments), repr(arguments))
+          and not any("network" in argument for argument in arguments)
+          and [argument for argument in arguments if "web_search" in argument]
+          == ['web_search="disabled"']
+          and arguments[arguments.index('web_search="disabled"') - 1] == "-c", repr(arguments))
 
     extra_root_one = scratch / "extra one"
     extra_root_two = scratch / "extra-two"
@@ -994,7 +996,15 @@ try:
           f"exit {completed.returncode}, stderr {completed.stderr!r}")
     reports_folder.unlink()
 
-    arguments_file.unlink()
+    for name, run_log_path in (("the brief", brief), ("the report", scratch / "report-report.md")):
+        arguments_file.unlink(missing_ok=True)
+        completed, _, _ = run("report", "--run-log", str(run_log_path))
+        check(f"a --run-log naming {name} exits 2 before Codex starts, and the brief is intact",
+              completed.returncode == 2 and "must name different files" in completed.stderr
+              and not arguments_file.exists() and brief.read_text() == "Do the task.\nSecond line.\n",
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    arguments_file.unlink(missing_ok=True)
     completed, _, _ = run("report", with_dash_o=False)
     check("without a log-store on the machine, a run without -o exits 2, says -o is required, "
           "and Codex is not started",
@@ -1195,8 +1205,17 @@ try:
     try:
         start = fresh_worktree()
         completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+        start_for_failing_suites = fresh_worktree()
+        failing_suites_completed, _ = run_in_worktree("change,message", "--sandbox", "workspace-write",
+                                                      test_suite_runner_mode="fail")
     finally:
         reports_folder.unlink()
+    check("a report copy that failed is reported also when the nn-test-suites fail after the commit",
+          failing_suites_completed.returncode == 1
+          and "failed after its commit" in failing_suites_completed.stderr
+          and "could not save the copy of the report that goes to the log-store"
+          in failing_suites_completed.stderr,
+          f"stderr {failing_suites_completed.stderr!r}")
     check("a write run whose report copy cannot be saved still commits its changes, then exits 1 "
           "saying so",
           completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start

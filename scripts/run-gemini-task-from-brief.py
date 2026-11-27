@@ -220,6 +220,7 @@ def main(argv=None):
     sandbox = agy_cell.credential_sandbox_program()
     stage = "preparing the sandbox"
     log_written_this_run = False
+    report_copy_error = None
     try:
         if sandbox is None or shutil.which(sandbox) is None:
             raise RuntimeError(f"required sandbox {sandbox or 'bwrap (Linux) or sandbox-exec (macOS)'} is unavailable")
@@ -288,7 +289,6 @@ def main(argv=None):
         if not report.is_file() or not report.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"agy exited 0 but wrote no report at {report}")
         # A copy that fails does not stop the commit: the run's changes are kept either way.
-        report_copy_error = None
         try:
             report_copy = (codex_task.
                            codex_or_gemini_task_report_copy_into_run_numbered_folder_on_a_machine_without_the_log_store(
@@ -319,6 +319,9 @@ def main(argv=None):
             raise report_copy_error
     except (OSError, UnicodeError, RuntimeError) as error:
         print(f"{PROGRAM}: failed while {stage}: {error}; output: {log_path}", file=sys.stderr)
+        if report_copy_error and error is not report_copy_error:
+            print(f"{PROGRAM}: also failed while saving the copy of the report that goes to the "
+                  f"log-store: {report_copy_error}", file=sys.stderr)
         status = 1
     else:
         print(f"report: {report}")

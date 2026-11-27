@@ -443,6 +443,17 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertIn("failed while saving the copy of the report that goes to the log-store",
                       result.stderr)
 
+    def test_report_copy_failure_is_reported_also_when_the_test_suites_fail(self):
+        self.make_checkout_a_worktree()
+        (self.home / ".claude").mkdir(exist_ok=True)
+        (self.home / ".claude" / "codex-or-gemini-task-run-reports").write_text("not a folder\n")
+        self.env["FAKE_TEST_SUITE_RUNNER_MODE"] = "fail"
+        result = self.run_in_worktree("change,message")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("failed after its commit", result.stderr)
+        self.assertIn("also failed while saving the copy of the report that goes to the log-store",
+                      result.stderr)
+
     def test_test_suites_that_fail_or_give_no_verdict_after_the_commit_exit_1_keeping_it(self):
         for runner_mode, said in (
                 ("fail", "failed after its commit: scripts/a-test.py, scripts/c-test.py."),
