@@ -225,6 +225,11 @@ def build_argument_parser(
              "exited 64 because the only template a cell would read was the "
              "one under prompts/. The stamp records the file's path.",
     )
+    parser.add_argument(
+        "--agent-binary-stdout-and-stderr-copy-file", metavar="PATH",
+        help="append the agent-binary's stdout and stderr to this file as they arrive, "
+             "so the grid can tell a cell that is still writing from a silent one",
+    )
     if cold_read_cell_launcher_own_command_line_options_adder:
         cold_read_cell_launcher_own_command_line_options_adder(parser)
     return parser
@@ -682,10 +687,60 @@ def report_is_written(report) -> bool:
         return False
 
 
+class AgentBinaryStdoutAndStderrCopyToFile:
+    """Appends each line the agent-binary prints, on stdout or stderr, to one file as it arrives;
+    with no path it writes nothing."""
+
+    def __init__(self, path=None):
+        self._file = open(path, "a", encoding="utf-8") if path else None  # pylint: disable=consider-using-with
+        self._lock = threading.Lock()
+
+    def write(self, line: str) -> None:
+        if self._file is not None:
+            with self._lock:
+                self._file.write(line)
+                self._file.flush()
+
+
+def run_reviewer_program_copying_its_output_as_it_arrives(
+    command: list, stdin_text, child_environment, pass_fds: tuple, output_copy: AgentBinaryStdoutAndStderrCopyToFile,
+) -> subprocess.CompletedProcess:
+    """Run `command` to its end, as subprocess.run with both streams captured would, while
+    output_copy gets each line as the program prints it."""
+    process = subprocess.Popen(  # pylint: disable=consider-using-with
+        command, stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cwd=REPO_ROOT, env=child_environment, text=True, pass_fds=pass_fds)
+    stdout_lines, stderr_lines = [], []
+
+    def read(stream, kept):
+        for line in stream:
+            kept.append(line)
+            output_copy.write(line)
+
+    readers = [threading.Thread(target=read, args=(process.stdout, stdout_lines), daemon=True),
+               threading.Thread(target=read, args=(process.stderr, stderr_lines), daemon=True)]
+    for reader in readers:
+        reader.start()
+    if stdin_text is not None:
+        # A program that exits before it reads its prompt closes the pipe; its exit code tells why.
+        try:
+            process.stdin.write(stdin_text)
+            process.stdin.close()
+        except BrokenPipeError:
+            pass
+    process.wait()
+    for reader in readers:
+        reader.join()
+    return subprocess.CompletedProcess(command, process.returncode, "".join(stdout_lines),
+                                       "".join(stderr_lines))
+
+
 def run_reviewer_program_in_own_process_group_until_timeout(
     command: list, stdin_text, child_environment, timeout_seconds: float,
     parse_agent_binary_final_result_from_stdout_line=None, report=None,
     report_wait_after_result_line_seconds: float = 0.0, pass_fds: tuple = (),
+    output_copy: AgentBinaryStdoutAndStderrCopyToFile = None,
 ) -> subprocess.CompletedProcess:
     """Run `command` in a session of its own and return its result; when it
     runs past `timeout_seconds`, kill its whole process group and return a
@@ -739,7 +794,7 @@ def run_reviewer_program_in_own_process_group_until_timeout(
             return run_reviewer_program_until_its_result_line(
                 process, command, stdin_text, timeout_seconds,
                 parse_agent_binary_final_result_from_stdout_line, report,
-                report_wait_after_result_line_seconds)
+                report_wait_after_result_line_seconds, output_copy or AgentBinaryStdoutAndStderrCopyToFile())
         try:
             stdout, stderr = process.communicate(stdin_text, timeout=timeout_seconds)
             return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
@@ -757,6 +812,7 @@ def run_reviewer_program_in_own_process_group_until_timeout(
 def run_reviewer_program_until_its_result_line(
     process: subprocess.Popen, command: list, stdin_text, timeout_seconds: float,
     parse_agent_binary_final_result_from_stdout_line, report, report_wait_after_result_line_seconds: float,
+    output_copy: AgentBinaryStdoutAndStderrCopyToFile,
 ) -> subprocess.CompletedProcess:
     """The line-by-line half of run_reviewer_program_in_own_process_group_until_timeout."""
     deadline = time.monotonic() + timeout_seconds
@@ -766,6 +822,7 @@ def run_reviewer_program_until_its_result_line(
     def read_stdout():
         for line in process.stdout:
             stdout_lines.append(line)
+            output_copy.write(line)
             if not run_ends:
                 ending = parse_agent_binary_final_result_from_stdout_line(line)
                 if ending is not None:
@@ -773,9 +830,13 @@ def run_reviewer_program_until_its_result_line(
                     result_line_or_stdout_closed.set()
         result_line_or_stdout_closed.set()
 
+    def read_stderr():
+        for line in process.stderr:
+            stderr_parts.append(line)
+            output_copy.write(line)
+
     readers = [threading.Thread(target=read_stdout, daemon=True),
-               threading.Thread(target=lambda: stderr_parts.append(process.stderr.read()),
-                                daemon=True)]
+               threading.Thread(target=read_stderr, daemon=True)]
     for reader in readers:
         reader.start()
     if stdin_text:
@@ -858,14 +919,17 @@ def run_model_chain(
     recognised_failure_texts=(), child_environment=None,
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
-    agent_binary_stdout_to_response_text=None,
+    agent_binary_stdout_to_response_text=None, agent_binary_stdout_and_stderr_copy_file=None,
 ) -> int:
     """Try models until one produces a report, then stamp the report.
 
     agent_binary_stdout_to_response_text, when given, turns each run's stdout into the
-    response text, for an agent-binary whose stdout is stream events, before anything reads it."""
+    response text, for an agent-binary whose stdout is stream events, before anything reads it.
+    agent_binary_stdout_and_stderr_copy_file, when given, gets every model's stdout and stderr appended as they
+    arrive."""
     # parse_agent_binary_final_result_from_stdout_line takes effect only with per_model_run_timeout_seconds.
     # build_invocation must apply the same per-model effort mapping used by the stamp.
+    output_copy = AgentBinaryStdoutAndStderrCopyToFile(agent_binary_stdout_and_stderr_copy_file)
     failed_attempts: list[str] = []
     produced_by = ""
     produced_tokens = ""
@@ -885,7 +949,10 @@ def run_model_chain(
         pass_fds = record_names.record_directory_being_written_lock_pass_fds_for_child_writers(report.parent)
         # Both streams carry failure diagnostics; stderr also carries the agent-binary's token total.
         try:
-            if per_model_run_timeout_seconds is None:
+            if per_model_run_timeout_seconds is None and agent_binary_stdout_and_stderr_copy_file:
+                completed = run_reviewer_program_copying_its_output_as_it_arrives(
+                    command, stdin_text, child_environment, pass_fds, output_copy)
+            elif per_model_run_timeout_seconds is None:
                 completed = subprocess.run(
                     command,
                     stdout=subprocess.PIPE,
@@ -901,7 +968,7 @@ def run_model_chain(
                 completed = run_reviewer_program_in_own_process_group_until_timeout(
                     command, stdin_text, child_environment, per_model_run_timeout_seconds,
                     parse_agent_binary_final_result_from_stdout_line, report,
-                    report_wait_after_result_line_seconds, pass_fds)
+                    report_wait_after_result_line_seconds, pass_fds, output_copy)
         except OSError as error:
             failed_attempts.append(f"{model}({type(error).__name__})")
             print(f"{program}: {model} could not be run: {error}", file=sys.stderr)
@@ -1110,6 +1177,7 @@ def run_cell(
             parse_agent_binary_final_result_from_stdout_line=parse_agent_binary_final_result_from_stdout_line,
             report_wait_after_result_line_seconds=report_wait_after_result_line_seconds,
             agent_binary_stdout_to_response_text=agent_binary_stdout_to_response_text,
+            agent_binary_stdout_and_stderr_copy_file=args.agent_binary_stdout_and_stderr_copy_file,
         )
         if exit_code == 0 and staging_directory is not None:
             exit_code = move_staged_report(program, reviewer_report, report)

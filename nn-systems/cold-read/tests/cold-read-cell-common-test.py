@@ -1125,6 +1125,29 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a stream with no result event, as from a claude that was stopped, is kept as it is",
           to_text(stream_without_result) == stream_without_result and to_text("not json\n") == "not json\n",
           repr(to_text(stream_without_result)[:200]))
+    # --agent-binary-stdout-and-stderr-copy-file gets the agent-binary's stdout and stderr as they arrive, which
+    # the grid's progress check watches, for the Claude and Codex cells alike.
+    for runtime_name, run_this_cell in (("claude", run_claude_cell), ("codex", run_codex_cell)):
+        shutil.rmtree(repository)
+        repository = build_scratch_repository(scratch)
+        report = (repository / "cold-read-records" / f"run-output-copy-{runtime_name}"
+                  / f"{runtime_name}-defect-hunt-second-strongest-model.md")
+        output_file = report.with_name(report.name + ".agent-binary-stdout-and-stderr-copy.log")
+        result = run_this_cell(
+            repository, stubs,
+            {"*": {"report": "FINDINGS: 1. something real\nclean sections: none\n",
+                   "stdout": "STUB STDOUT LINE\n", "stderr": "STUB STDERR LINE\n"}},
+            report, "--agent-binary-stdout-and-stderr-copy-file", str(output_file),
+        )
+        copied = output_file.read_text(encoding="utf-8") if output_file.is_file() else ""
+        check(f"the {runtime_name} cell copies the agent-binary's stdout and stderr to --agent-binary-stdout-and-stderr-copy-file",
+              result.returncode == 0 and "STUB STDOUT LINE\n" in copied and "STUB STDERR LINE\n" in copied,
+              f"exit {result.returncode}; copied={copied!r}; stderr={result.stderr[-1500:]!r}")
+    copying_runner_result = common_module.run_reviewer_program_copying_its_output_as_it_arrives(
+        [sys.executable, "-c", "import sys; sys.exit(3)"], "a prompt the program never reads\n" * 100_000,
+        None, (), common_module.AgentBinaryStdoutAndStderrCopyToFile())
+    check("a program that exits without reading its prompt gives its own exit code, not a broken pipe",
+          copying_runner_result.returncode == 3, repr(copying_runner_result))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
     report = repository / "cold-read-records" / "run-cause-b" / "codex-defect-hunt-second-strongest-model.md"
