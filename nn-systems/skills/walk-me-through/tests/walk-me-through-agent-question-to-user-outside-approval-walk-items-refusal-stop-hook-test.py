@@ -900,6 +900,33 @@ def modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(rul
         importlib.util.spec_from_file_location = real
 
 
+def test_the_case_against_ratings_the_message_lists_follow_the_walk_check_program():
+    case = Case()
+    case.reply("Should I merge the pull request now?")
+    real_load_module = hook.load_module
+
+    def load_with_a_new_rating(name, path):
+        module = real_load_module(name, path)
+        if Path(path) == Path(hook.WALK_CHECK_PROGRAM):
+            module.EVERY_RATING = ("none", "weak", "fierce")
+        return module
+
+    payload = {"hook_event_name": "Stop", "session_id": "test-session", "transcript_path": str(case.transcript),
+               "cwd": str(case.checkout), "stop_hook_active": False}
+    environment = attendance_check.environment_without_agent_session_attendance_variables(os.environ)
+    environment.update({hook.LOG_PATH_VARIABLE: str(case.log),
+                        "NEDSNODES_EMERGENCY_STOP_FOLDER": str(case.calls.parent / "no-emergency-stop")})
+    hook.load_module = load_with_a_new_rating
+    try:
+        output = hook.output_for(payload, environment,
+                                 model=lambda lines, indexes, *arguments, **keywords: (list(indexes)[0], None))
+    finally:
+        hook.load_module = real_load_module
+    reason = json.loads(output)["reason"] if output else ""
+    check("the message lists the ratings the walk check program accepts, a rating added there included",
+          "a rating, none, weak or fierce." in reason, reason)
+
+
 def test_every_pattern_reading_list_or_quotation_marks_follows_the_walk_finder_rule():
     modules = modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(r"(?:Q\s+)")
     if modules is None:

@@ -325,7 +325,7 @@ REFUSAL_INSTRUCTIONS = (
     "it does; it ignores a `>` quote mark or a list mark such as `-` or `1.` at the start of a line, bold, italic "
     "and code marks, and letter case, so you may add or drop those. "
     "Just before the alternative, state the strongest case against the recommendation on one line that opens with "
-    "`#case_against` and a rating, none, weak, medium, strong or very strong. "
+    "`#case_against` and a rating, {ratings}. "
     "Give the item one recommendation and one alternative, and end it with the recommendation stated as an "
     "action, as in `Recommendation: <what you recommend doing>.` State the alternative before it, as in "
     "`The alternative: <what D does instead>.`",
@@ -837,6 +837,7 @@ def output_for(payload, environment, model=model_judgement):
               "document": document, "waits_on_tag": check_and_close.WALK_WAITS_ON_TAG,
               "category_tags": ", ".join(f"`{check_and_close.WALK_CATEGORY_TAG}{category}`"
                                          for category in check_and_close.WALK_CATEGORIES),
+              "ratings": ", ".join(check_and_close.EVERY_RATING[:-1]) + " or " + check_and_close.EVERY_RATING[-1],
               "closing_lines_named": SEVERAL_CLOSING_LINES_NAMED if numbers[1:] else ONE_CLOSING_LINE_NAMED,
               "closing_lines": "\n".join(closing), "not_in_backticks": current_item_hook.NOT_IN_BACKTICKS,
               "closing_lines_no_item_added": "\n".join(closing_no_item_added), "no_page": NO_PAGE_TEMPLATE.format(
