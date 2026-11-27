@@ -986,9 +986,11 @@ def run_launch_time_git_sync_cases(workspace: Path):
         Path("/tmp/dialog-0002.md"),
         {"written-at": "2026-11-22T09:00:00Z", "next-step": "finish the supervisor"},
         launch_time_git_sync_report=report)
-    check("a refused fast-forward whose error holds a success phrase stays in the successor's prompt",
+    check("a refused fast-forward whose error holds a success phrase stays in the successor's prompt, "
+          "and git's outcome, not the phrase, says the checkout is not at main",
           report.startswith("launch-time-git-sync: main left as is — ")
-          and supervisor.LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN in report
+          and " is current with main" in report
+          and not getattr(report, "checkout_is_at_main_commit", False)
           and report in phrase_prompt, phrase_prompt)
 
     # Bring the branch level, then put it one behind, for the diverged case.
@@ -2805,6 +2807,162 @@ def run_generation_continues_past_numbered_files_on_disk_cases(workspace: Path):
           state.get("generation") == 21, str(state))
 
 
+def run_conversation_tail_last_lines_cases(workspace: Path):
+    """A successor's launch leaves the conversation-tail's last 100 lines, under a heading, in
+    the file the MessageDisplay hook shows the user, and none of them in the launched prompt,
+    which the agent reads; a shorter conversation-tail is left whole, and a launch whose
+    extraction failed leaves no file."""
+    directory = workspace / "conversationtaillastlines"
+    directory.mkdir(parents=True)
+
+    def handoff_launch(agent, extract_dialog):
+        """One in-process handoff carry-over at boot; returns the handoff directory and the
+        (session id, prompt) of each launch."""
+        handoff_directory = directory / agent
+        handoff_directory.mkdir()
+        settings = supervisor.SupervisorSettings(
+            agent=agent, working_directory=workspace, handoff_directory=handoff_directory,
+            agent_command="unused-stub-agent", first_prompt="")
+        settings.handoff_path.write_text(
+            "written-at: 2026-11-24T00:00:00Z\nnext-step: resume the audit\n"
+            "session-handoff-sequence-number: 5\nwritten-by-session: retiring-session\n",
+            encoding="utf-8")
+        supervisor.write_supervisor_state(
+            settings.state_path,
+            {"consumed_counter": 4, "launched_session_id": "retiring-session", "generation": 1})
+        launches = []
+
+        def launch_recording(agent_command, session_id, working_directory, prompt, **_):
+            launches.append((session_id, prompt))
+            return StubLaunchedSession(0)
+
+        with supervisor_names_replaced(
+                extract_dialog=extract_dialog,
+                launch_agent_session=launch_recording,
+                launch_time_git_sync=lambda working_directory: "launch-time-git-sync: stubbed",
+                memory_review_due_lines=lambda: (),
+                stdin_isatty=False), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            supervisor.supervise_sessions(settings)
+        return handoff_directory, launches
+
+    def extract_dialog_writing(line_count):
+        def writing_extract_dialog(session_id, working_directory, output_path):
+            output_path.write_text("".join(f"turn {number}\n" for number in range(1, line_count + 1)),
+                                   encoding="utf-8")
+            return True
+        return writing_extract_dialog
+
+    def display_file(handoff_directory, session_id):
+        return supervisor.successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path_for_session_id(
+            handoff_directory, session_id)
+
+    def expected_display_text(extract_path, first, last):
+        return (supervisor.CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
+                    line_count=last - first + 1, conversation_tail_path=extract_path)
+                + "\n".join(f"turn {number}" for number in range(first, last + 1))
+                + supervisor.CONVERSATION_TAIL_LAST_LINES_FOOTER)
+
+    handoff_directory, launched = handoff_launch("tailedsuccessor", extract_dialog_writing(150))
+    extract_path = handoff_directory / "tailedsuccessor-dialog-0002.md"
+    check("CONVERSATION-TAIL LAST LINES: the launched successor's prompt holds none of the "
+          "conversation-tail's lines, so the agent is not given them",
+          len(launched) == 1 and "turn 150" not in launched[0][1]
+          and "The end of the last session" not in launched[0][1]
+          and launched[0][1].endswith(supervisor.NEXT_STEP_HEADING + "resume the audit"),
+          repr(launched)[-400:])
+    display_path = display_file(handoff_directory, launched[0][0]) if launched else None
+    check("CONVERSATION-TAIL LAST LINES: the launch leaves the last 100 of 150 lines, under the "
+          "heading, in the display file named for the launched session",
+          display_path is not None and display_path.is_file()
+          and display_path.read_text(encoding="utf-8") == expected_display_text(extract_path, 51, 150),
+          repr(display_path and display_path.exists() and display_path.read_text(encoding="utf-8")[:300]))
+
+    handoff_directory, launched = handoff_launch("shorttailsuccessor", extract_dialog_writing(37))
+    extract_path = handoff_directory / "shorttailsuccessor-dialog-0002.md"
+    display_path = display_file(handoff_directory, launched[0][0]) if launched else None
+    check("CONVERSATION-TAIL LAST LINES: a conversation-tail of 37 lines is left whole",
+          display_path is not None and display_path.is_file()
+          and display_path.read_text(encoding="utf-8") == expected_display_text(extract_path, 1, 37),
+          repr(display_path and display_path.exists() and display_path.read_text(encoding="utf-8")[:300]))
+
+    def failing_extract_dialog(session_id, working_directory, output_path):
+        return False
+
+    handoff_directory, untailed = handoff_launch("untailedsuccessor", failing_extract_dialog)
+    check("CONVERSATION-TAIL LAST LINES: when the extraction fails, no display file is left",
+          len(untailed) == 1 and not display_file(handoff_directory, untailed[0][0]).exists(),
+          repr(sorted(path.name for path in handoff_directory.iterdir())))
+
+    separator_directory = workspace / "separator-tail"
+    separator_directory.mkdir()
+    separator_tail = separator_directory / "separator-dialog.md"
+    separator_tail.write_text("first still first\nsecond\n", encoding="utf-8")
+    supervisor.conversation_tail_last_lines_display_file_write(
+        separator_directory, "separatorsession", separator_tail)
+    separator_display = display_file(separator_directory, "separatorsession").read_text(encoding="utf-8")
+    check("CONVERSATION-TAIL LAST LINES: a line holding U+2028 counts as one file line",
+          separator_display.startswith(supervisor.CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
+              line_count=2, conversation_tail_path=separator_tail))
+          and "first still first\nsecond" in separator_display,
+          repr(separator_display[:300]))
+
+    unwritable_directory = workspace / "unwritable-display"
+    unwritable_directory.mkdir()
+    display_file(unwritable_directory, "unwritablesession").mkdir()
+    unwritable_tail = unwritable_directory / "unwritable-dialog.md"
+    unwritable_tail.write_text("turn 1\n", encoding="utf-8")
+    reported = io.StringIO()
+    raised = None
+    with contextlib.redirect_stderr(reported):
+        try:
+            supervisor.conversation_tail_last_lines_display_file_write(
+                unwritable_directory, "unwritablesession", unwritable_tail)
+        except OSError as error:
+            raised = error
+    check("CONVERSATION-TAIL LAST LINES: a display file that cannot be written is reported, "
+          "not raised, so the successor still launches",
+          raised is None and "because writing " in reported.getvalue()
+          and str(display_file(unwritable_directory, "unwritablesession")) in reported.getvalue()
+          and f"stays whole at {unwritable_tail}" in reported.getvalue(),
+          repr((raised, reported.getvalue())))
+
+    carriage_return_directory = workspace / "carriage-return-tail"
+    carriage_return_directory.mkdir()
+    carriage_return_tail = carriage_return_directory / "carriage-return-dialog.md"
+    carriage_return_tail.write_bytes(
+        "".join(f"turn {number}\n" for number in range(1, 101)).replace("turn 1\n", "turn\r1\n", 1)
+        .encode("utf-8"))
+    supervisor.conversation_tail_last_lines_display_file_write(
+        carriage_return_directory, "carriagereturnsession", carriage_return_tail)
+    carriage_return_display = display_file(
+        carriage_return_directory, "carriagereturnsession").read_bytes().decode("utf-8")
+    check("CONVERSATION-TAIL LAST LINES: a bare carriage return inside the first of 100 file lines "
+          "does not split it, so all 100 lines are shown under a heading counting 100",
+          carriage_return_display.startswith(supervisor.CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
+              line_count=100, conversation_tail_path=carriage_return_tail) + "turn\r1\nturn 2\n")
+          and carriage_return_display.endswith("turn 100" + supervisor.CONVERSATION_TAIL_LAST_LINES_FOOTER),
+          repr(carriage_return_display[:300]))
+
+    unreadable_directory = workspace / "unreadable-tail"
+    unreadable_directory.mkdir()
+    missing_tail = unreadable_directory / "missing-dialog.md"
+    reported = io.StringIO()
+    raised = None
+    with contextlib.redirect_stderr(reported):
+        try:
+            supervisor.conversation_tail_last_lines_display_file_write(
+                unreadable_directory, "unreadablesession", missing_tail)
+        except OSError as error:
+            raised = error
+    check("CONVERSATION-TAIL LAST LINES: a conversation-tail that cannot be read is reported as a "
+          "read failure, not raised and not as a write failure, and no display file is left",
+          raised is None and f"because reading the conversation-tail {missing_tail} failed"
+          in reported.getvalue() and "stays whole" not in reported.getvalue()
+          and not display_file(unreadable_directory, "unreadablesession").exists(),
+          repr((raised, reported.getvalue())))
+
+
 def run_spawned_subagent_roster_cases(workspace: Path, recent: str):
     """The successor is told which subagents were still working when the
     session it replaces ended, and that it may need to re-commission
@@ -3147,6 +3305,7 @@ with fixture.handoff_supervisor_suite_workspace() as workspace:
     run_boot_ignition_case(workspace)
     run_boot_ignition_without_a_conversation_tail_cases(workspace)
     run_generation_continues_past_numbered_files_on_disk_cases(workspace)
+    run_conversation_tail_last_lines_cases(workspace)
     run_first_prompt_file_cases(workspace)
     run_multi_line_next_step_cases(workspace, recent_timestamp)
     run_launch_and_retention_cases(workspace, recent_timestamp)

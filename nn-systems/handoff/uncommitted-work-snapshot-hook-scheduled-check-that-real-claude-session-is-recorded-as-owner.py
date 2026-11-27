@@ -20,13 +20,12 @@ nn-systems/general-tools/scheduled-jobs-on-each-machine.json.
 
 WHAT ONE RUN DOES, in order.
 
-  1. Makes a scratch clone holding the hook and the four modules it needs:
-     nn-systems/handoff/uncommitted-work-snapshots.py and
-     scripts/worktree-owner-file-read-and-write.py, which the hook loads, and
-     nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py
-     and nn-systems/general-tools/agent-seat-task-list-new-pending-task-write-common.py,
-     which the first of those loads. The clone has one commit and sits in a
-     temporary directory.
+  1. Makes a scratch clone holding the hook and every file under scripts/ and
+     nn-systems/ that loading the hook's module,
+     nn-systems/handoff/uncommitted-work-snapshots.py, reads, as the working
+     tree has them; a probe that loads that module finds the files, so the clone
+     follows the module's imports without a list kept by hand. The clone has one
+     commit and sits in a temporary directory.
   2. Runs `claude -p` on Haiku from that clone, with the hook registered for
      Bash calls through --settings, and asks it to run one shell command that
      writes the file LIVE_CHECK_FILE_NAME.
@@ -84,11 +83,7 @@ SYSTEM_DIRECTORY = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SYSTEM_DIRECTORY.parent.parent
 MODULE_RELATIVE = Path("nn-systems/handoff/uncommitted-work-snapshots.py")
 HOOK_RELATIVE = Path("scripts/uncommitted-work-snapshot-hook.py")
-OWNER_FILE_MODULE_RELATIVE = Path("scripts/worktree-owner-file-read-and-write.py")
-GIT_OUTPUT_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
-TASK_WRITE_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/agent-seat-task-list-new-pending-task-write-common.py")
+SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY = ("scripts", "nn-systems")
 LIVE_CHECK_FILE_NAME = "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner-marker-file-created-by-real-claude-session.txt"
 LIVE_CHECK_PROMPT = (f"Run this one shell command and nothing else: "
                      f"echo live > {LIVE_CHECK_FILE_NAME}")
@@ -136,10 +131,54 @@ def default_claude_program():
     return shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude")
 
 
+# Run in a fresh interpreter, so the files it reports are the ones loading the modules reads,
+# not ones this process loaded already.
+LOADED_FILES_PROBE_SOURCE = """
+import importlib.util, os, sys
+root, directories, modules = os.path.realpath(sys.argv[1]), sys.argv[2].split(os.pathsep), sys.argv[3:]
+prefixes = tuple(os.path.join(root, directory) + os.sep for directory in directories)
+opened = set()
+def note(event, arguments):
+    # Writes left out: loading a module whose bytecode is not cached writes a temporary file
+    # beside the cache file.
+    if (event == "open" and isinstance(arguments[0], str)
+            and not arguments[2] & (os.O_WRONLY | os.O_RDWR)):
+        path = os.path.realpath(arguments[0])
+        if "__pycache__" in path.split(os.sep):
+            # A module whose cached bytecode is fresh is loaded without opening its source.
+            path = importlib.util.source_from_cache(path)
+        if path.startswith(prefixes):
+            opened.add(os.path.relpath(path, root))
+sys.addaudithook(note)
+for number, relative in enumerate(modules):
+    spec = importlib.util.spec_from_file_location(f"probed_{number}", os.path.join(root, relative))
+    spec.loader.exec_module(importlib.util.module_from_spec(spec))
+sys.stdout.write("\\0".join(sorted(opened)))
+"""
+
+
+def files_the_hook_loads():
+    """The hook and the files under the code directories that loading its module reads."""
+    completed = subprocess.run(
+        [sys.executable, "-c", LOADED_FILES_PROBE_SOURCE, str(REPOSITORY_ROOT),
+         os.pathsep.join(SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY),
+         str(MODULE_RELATIVE)],
+        capture_output=True, text=True, check=False,
+        env=runner.environment_without_git_redirecting_variables())
+    if completed.returncode != 0:
+        raise RuntimeError(f"loading {MODULE_RELATIVE} from the working tree failed: "
+                           f"{(completed.stderr.strip().splitlines() or ['no detail'])[-1]}")
+    return sorted({str(HOOK_RELATIVE), *filter(None, completed.stdout.split("\0"))})
+
+
 def make_scratch_clone(clone):
     git(clone.parent, "init", "-q", str(clone))
-    for relative in (MODULE_RELATIVE, HOOK_RELATIVE, GIT_OUTPUT_MODULE_RELATIVE,
-                     TASK_WRITE_MODULE_RELATIVE, OWNER_FILE_MODULE_RELATIVE):
+    # Only the files the hook loads: the repository's .claude/settings.json and CLAUDE.md would
+    # load the project's own hooks and instructions into the live claude run, and copying more
+    # makes every copied file an input of this check's test suite.
+    # Copied from the working tree, not HEAD: the mutation runner and an agent testing an edit
+    # run the suite on uncommitted code.
+    for relative in files_the_hook_loads():
         (clone / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPOSITORY_ROOT / relative, clone / relative)
     (clone / ".gitignore").write_text("__pycache__/\n")

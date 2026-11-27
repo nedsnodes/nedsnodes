@@ -21,6 +21,7 @@ A change is the difference an agent's work makes, from before it starts to after
 ## Exceptions: changes that need no approval, even when they fall under the list above
 
 - A user-approved-change.
+- An edit to a wiki page whose plan the user has approved, carrying out a general instruction he gave for that page, for each part of the edit that makes no decision he has not made; the commit message quotes his instruction, the agent brings him the other parts, and, unlike the other exceptions, the agent tells him in one line what changed.
 - Coining a system-term and adding its entry to the glossary of its system; when the system's directory has no glossary, creating that glossary there and listing it at the top of the project glossary, as Step 5 of `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md` says. This exception does not cover changing or removing an entry.
 - Deleting a guarded-file, as the project glossary defines it, even one the user has not retired and whose change the list above covers, such as `CLAUDE.md`, a skill or a hook; the guarded-file hook, `.claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-ask-hook.py`, does not ask about a deletion either. A rename or a move is not a deletion: it is judged as the paragraph that begins "A change is the difference an agent's work makes" says. Emptying a file is a change to its text, not a deletion.
 - Removing whole sentences, list items, table rows or paragraphs of prose from any file other than `CLAUDE.md`, when nothing is added or reworded and no removed sentence states a user-ruling.
@@ -35,6 +36,7 @@ A change is the difference an agent's work makes, from before it starts to after
 - Rewording a sentence of prose to remove an ambiguity or a contradiction, when the rest of the same document or the latest user-ruling on the subject settles which meaning is intended.
 - Carrying out a decision the user already made: merging a clean pull request, deleting what he retired, closing a finished task or GHI, or recording the decision in a GHI's outcome section.
 - A change an approval-walk item makes when the /walk-me-through skill's rule for items that need no answer from the user settled the item without asking the user, and the walk-minutes record it as not asked.
+- Updating a page in `docs/nedsnodes-wiki/` so that what it says about the code, the machines or the project matches how they are on main and on the machines, or as the pull request that carries the update will make them, when the update neither adds nor changes anything that the page directs, decides or plans. When the code or a machine differs from what the page says was decided, tell the user instead of updating the page. This exception covers prose only, and not the project glossary, `docs/nedsnodes-wiki/nedsnodes-sdlc-terms.md`, `docs/nedsnodes-wiki/nedsnodes-ordinary-hyphenated-words-list.md` or the word table in `docs/nedsnodes-wiki/nedsnodes-style-guide.md`.
 
 ## Terms
 

@@ -105,6 +105,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import pathlib
 import re
 import sys
@@ -279,11 +280,11 @@ def main() -> int:
     parser = build_judge_argument_parser()
     args = parser.parse_args()
 
-    # Snapshot before launch to distinguish this run’s writes; None means unchecked, not clean.
+    # Snapshot before launch to distinguish this run’s writes; a WriteDetectorUnavailable baseline means unchecked, not clean.
     try:
         baseline = common.working_tree_state()
     except common.WriteDetectorUnavailable as error:
-        baseline = None
+        baseline = error
         print(f"{PROGRAM}: could not snapshot the working tree ({error}); "
               "stray writes will not be checked for this run.", file=sys.stderr)
 
@@ -325,6 +326,7 @@ def main() -> int:
         cell_started_at=cell_started_at,
         prompt_file_argument=args.prompt_file,
         model_to_effort=model_to_effort,
+        child_environment=claude_cell.claude_cell_environment_copy_without_claude_code_task_list_id(os.environ),
     )
 
 

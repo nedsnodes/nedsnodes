@@ -39,8 +39,8 @@ it up with no change here.
 """
 
 import importlib.util
+import os
 import pathlib
-import re
 import sys
 
 _common_spec = importlib.util.spec_from_file_location(
@@ -78,6 +78,18 @@ ALLOWED_TOOLS = "Read,Grep,Glob,Write,WebFetch"
 # --allowedTools adds to the user's own allow rules, which may allow some Bash commands; explicitly
 # deny both Bash and Monitor to remove shell access, including access to keychain credentials.
 DISALLOWED_TOOLS = "Bash,Monitor"
+
+# A cell reads as a reader new to the project: CLAUDE.md, the glossaries and the text, and nothing of the
+# agent-seat that launched it. The local setting source carries the agent-seat's CLAUDE.local.md; user,project
+# still loads CLAUDE.md. --tools leaves out the definitions of every tool the cell may not call.
+CONTEXT_LIMITING_FLAGS = ("--setting-sources", "user,project", "--disable-slash-commands", "--tools", ALLOWED_TOOLS)
+
+
+def claude_cell_environment_copy_without_claude_code_task_list_id(environment) -> dict:
+    """Return a copy of environment without CLAUDE_CODE_TASK_LIST_ID, whose task list would reach the cell
+    as a reminder."""
+    return {name: value for name, value in environment.items() if name != "CLAUDE_CODE_TASK_LIST_ID"}
+
 
 # Disable hooks without disabling CLAUDE.md: hooks can block reports or rebase the reviewed checkout.
 # Read deny patterns need // for absolute paths; authentication happens outside model tools.
@@ -121,29 +133,15 @@ def invocation_builder(effort: str, parsed_arguments=None):
             "--output-format", "text",
             "--allowedTools", ALLOWED_TOOLS,
             "--disallowedTools", DISALLOWED_TOOLS,
+            *CONTEXT_LIMITING_FLAGS,
         ]
         return command, prompt
     return build_invocation
 
 
-def model_family_name(model: str) -> str:
-    """Return the family name used by Claude's model-limit messages."""
-    parts = model.split("-")
-    return (parts[1] if len(parts) > 1 and parts[1] else model).capitalize()
-
-
-# Match the CLI's failure messages at line starts; model-limit prefixes use the current model family.
-def recognised_failure_texts_for_model(model: str) -> list:
-    family = model_family_name(model)
-    return [
-        common.RecognisedFailureText(
-            "account-limit", "You've hit your ", common.DETAIL_IS_REST_OF_LINE,
-            re.compile(r"(?:\S+ ){0,3}limit\b")),
-        common.RecognisedFailureText(
-            "model-limit", f"You've reached your {family} limit", family),
-        common.RecognisedFailureText(
-            "logged-out", "Not logged in", common.DETAIL_IS_WHOLE_LINE),
-    ]
+RECOGNISED_FAILURE_TEXTS = (
+    common.RecognisedFailureText("logged-out", "Not logged in", common.DETAIL_IS_WHOLE_LINE),
+)
 
 
 def main() -> int:
@@ -153,8 +151,9 @@ def main() -> int:
         tier_to_model_chain=TIER_TO_CLAUDE_MODEL_CHAIN,
         tier_to_effort=TIER_TO_REASONING_EFFORT,
         invocation_builder=invocation_builder,
-        recognised_failure_texts_for_model=recognised_failure_texts_for_model,
+        recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
         cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
+        child_environment=claude_cell_environment_copy_without_claude_code_task_list_id(os.environ),
     )
 
 

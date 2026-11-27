@@ -74,6 +74,12 @@ MAC_FULL_TEST_RUN_PLIST = {
     "StandardOutPath": "/Users/el/.claude/scheduled-full-test-run-of-main.log",
     "StandardErrorPath": "/Users/el/.claude/scheduled-full-test-run-of-main.log",
 }
+NED_BOX_STANDING_USER_RULINGS_STORE_LINE = (
+    "* * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
+    "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.py"
+    " --failures-only >> /home/nedlern/.claude/"
+    "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.log"
+    " 2>&1")
 NED_BOX_SESSION_DIALOGS_LINE = (
     "*/10 * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
     "log-store-session-dialogs-refresh-hack.py --failures-only >> "
@@ -131,12 +137,12 @@ MAC_REMOTE_CONTROL_RECONNECT_WATCHER_LINE = (
     "* * * * * /opt/homebrew/bin/python3 /Users/el/Projects/nedsnodes/nn-systems/handoff/"
     "handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher.py >> "
     "/Users/el/.claude/handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher.log 2>&1")
-# The prune of the guarded-file hook's copies of removed checkouts, last in the table.
+# The prune of the guarded-file hook's copies of committed versions or of removed checkouts, last in the table.
 NED_BOX_GUARDED_FILE_PRUNE_LINE = (
     "0 7 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/general-tools/"
-    "guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.py >> "
-    "/home/nedlern/.claude/guarded-file-versions-and-approvals-store-removed-checkout-"
-    "copies-prune.log 2>&1")
+    "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py >> "
+    "/home/nedlern/.claude/guarded-file-versions-and-approvals-store-copies-of-committed-"
+    "versions-or-removed-checkouts-prune.log 2>&1")
 # The deletion of exited agent-sessions' Claude Code temp folders, on ned-box alone.
 NED_BOX_TEMP_FOLDERS_DELETE_LINE = (
     "30 7 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/general-tools/"
@@ -172,19 +178,19 @@ NED_BOX_GHI_MD_EDIT_PULL_REQUESTS_MERGE_LINE = (
     "merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.py >> "
     "/home/nedlern/.claude/merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.log 2>&1")
 MAC_GUARDED_FILE_PRUNE_PLIST = {
-    "Label": "com.nedsnodes.guarded-file-versions-and-approvals-store-removed-checkout-"
-             "copies-prune",
+    "Label": "com.nedsnodes.guarded-file-versions-and-approvals-store-copies-of-committed-"
+             "versions-or-removed-checkouts-prune",
     "ProgramArguments": ["/opt/homebrew/bin/python3",
                          "/Users/el/Projects/nedsnodes/nn-systems/general-tools/"
-                         "guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.py"],
+                         "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py"],
     "EnvironmentVariables": {
         "PATH": "/Users/el/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:"
                 "/usr/sbin:/sbin"},
     "StartCalendarInterval": {"Hour": 7, "Minute": 0},
     "StandardOutPath": "/Users/el/.claude/guarded-file-versions-and-approvals-store-"
-                       "removed-checkout-copies-prune.log",
+                       "copies-of-committed-versions-or-removed-checkouts-prune.log",
     "StandardErrorPath": "/Users/el/.claude/guarded-file-versions-and-approvals-store-"
-                         "removed-checkout-copies-prune.log",
+                         "copies-of-committed-versions-or-removed-checkouts-prune.log",
 }
 # The nn-shared-database's nightly backup on ned-box and its copy to the Mac.
 NED_BOX_NN_SHARED_DATABASE_BACKUP_LINE = (
@@ -204,6 +210,10 @@ MAC_NN_SHARED_DATABASE_BACKUP_COPY_PLIST = {
     "StandardErrorPath": "/Users/el/.claude/nn-shared-database-newest-backup-copy-to-mac.log",
 }
 # The deletion of agent-seat terminal captures older than seven days, last in the table.
+NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE = (
+    "* * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
+    "merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once >> "
+    "/home/nedlern/.claude/merge-lane-open-prs-watch-and-reviewer-assign-poll-once.log 2>&1")
 NED_BOX_TERMINAL_CAPTURES_DELETE_LINE = (
     "45 5 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/handoff/"
     "agent-seat-terminal-captures-older-than-seven-days-delete.py >> "
@@ -338,7 +348,8 @@ check("the table's jobs are the two typed by hand before this program, the workt
       "requests' check, approval and merge, the daily search for credential files no "
       "cold-read-cell is denied, the weekly count of each hook rule ID in both machines' "
       "transcripts, the one count of cold-read-fast-read finding outcomes, the deletion of "
-      "old agent-seat terminal captures, and no other",
+      "old agent-seat terminal captures, the open-pull-request watcher's poll, the standing "
+      "user-rulings store's each-minute add, and no other",
       sorted(real_jobs) == ["agent-seat-idle-sweep-headless-judge-wake-messages-send-and-"
                             "user-alerts-write",
                             "agent-seat-terminal-captures-older-than-seven-days-delete",
@@ -350,17 +361,20 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "check-user-alert-write",
                             "cold-read-fast-read-finding-outcomes-count-as-user-alert-once-14-days-after-own-first-"
                             "cron-run",
-                            "guarded-file-versions-and-approvals-store-removed-checkout-"
-                            "copies-prune",
+                            "guarded-file-versions-and-approvals-store-copies-of-committed-"
+                            "versions-or-removed-checkouts-prune",
                             "handoff-agent-crash-watcher",
                             "handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-"
                             "tmux-typing-watcher",
                             "log-store-session-dialogs-refresh",
                             "merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge",
+                            "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job",
                             "nn-shared-database-newest-backup-copy-to-mac",
                             "nn-shared-database-nightly-backup-with-integrity-check",
                             "no-sandbox-test-suites-run-on-main-in-a-quiet-gap",
                             "scheduled-full-test-run-of-main",
+                            "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-"
+                            "anchor-list-for-hooks-write",
                             "transcript-mirror-to-log-store",
                             "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner"],
       sorted(real_jobs))
@@ -388,8 +402,8 @@ remote_control_watcher = real_jobs[
 remote_control_watcher_documentation = (
     REPOSITORY_ROOT / remote_control_watcher["program"]).read_text(encoding="utf-8")
 guarded_file_prune_documentation = (
-    REPOSITORY_ROOT / real_jobs["guarded-file-versions-and-approvals-store-removed-"
-                                "checkout-copies-prune"]["program"]).read_text(encoding="utf-8")
+    REPOSITORY_ROOT / real_jobs["guarded-file-versions-and-approvals-store-copies-of-"
+                                "committed-versions-or-removed-checkouts-prune"]["program"]).read_text(encoding="utf-8")
 temp_folders_delete = real_jobs["claude-code-temp-folders-of-exited-agent-sessions-delete"]
 check("the temp-folder deletion runs on ned-box alone, at 07:30, and its program documents the "
       "table's line",
@@ -514,6 +528,8 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
       and printed.getvalue().splitlines() == [
           "machine: ned-box (linux, /home/nedlern)",
           "transcript-mirror-to-log-store — cron line:", NED_BOX_MIRROR_LINE,
+          "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-"
+          "hooks-write — cron line:", NED_BOX_STANDING_USER_RULINGS_STORE_LINE,
           "log-store-session-dialogs-refresh — cron line:", NED_BOX_SESSION_DIALOGS_LINE,
           "scheduled-full-test-run-of-main — cron line:", NED_BOX_FULL_TEST_RUN_LINE,
           "no-sandbox-test-suites-run-on-main-in-a-quiet-gap — cron line:",
@@ -527,7 +543,7 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "cron line:", NED_BOX_REMOTE_CONTROL_RECONNECT_WATCHER_LINE,
           "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner — cron line:",
           NED_BOX_OWNER_CHECK_LINE,
-          "guarded-file-versions-and-approvals-store-removed-checkout-copies-prune — cron "
+          "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune — cron "
           "line:", NED_BOX_GUARDED_FILE_PRUNE_LINE,
           "nn-shared-database-nightly-backup-with-integrity-check — cron line:",
           NED_BOX_NN_SHARED_DATABASE_BACKUP_LINE,
@@ -542,7 +558,9 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "cold-read-fast-read-finding-outcomes-count-as-user-alert-once-14-days-after-own-first-cron-run — cron "
           "line:", NED_BOX_FINDING_OUTCOMES_COUNT_LINE,
           "agent-seat-terminal-captures-older-than-seven-days-delete — cron line:",
-          NED_BOX_TERMINAL_CAPTURES_DELETE_LINE],
+          NED_BOX_TERMINAL_CAPTURES_DELETE_LINE,
+          "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job — cron line:",
+          NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE],
       (exit_code, printed.getvalue(), errors.getvalue()))
 printed, errors = io.StringIO(), io.StringIO()
 with redirect_stdout(printed), redirect_stderr(errors):
@@ -560,9 +578,10 @@ full_test_run_part, _, clean_and_owner_check_part = mac_printed.partition(clean_
 clean_and_watcher_part, _, owner_check_and_prune_part = clean_and_owner_check_part.partition(owner_check_heading)
 clean_part, _, remote_control_watcher_part = clean_and_watcher_part.partition(
     remote_control_watcher_heading)
-prune_heading = ("guarded-file-versions-and-approvals-store-removed-checkout-copies-prune — "
+prune_heading = ("guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune — "
                  "launchd job, /Users/el/Library/LaunchAgents/com.nedsnodes.guarded-file-"
-                 "versions-and-approvals-store-removed-checkout-copies-prune.plist:\n")
+                 "versions-and-approvals-store-copies-of-committed-versions-or-removed-"
+                 "checkouts-prune.plist:\n")
 owner_check_part, _, prune_and_backup_copy_part = owner_check_and_prune_part.partition(prune_heading)
 backup_copy_heading = ("nn-shared-database-newest-backup-copy-to-mac — launchd job, "
                        "/Users/el/Library/LaunchAgents/com.nedsnodes.nn-shared-database-"

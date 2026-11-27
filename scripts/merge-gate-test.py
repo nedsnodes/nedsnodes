@@ -27,7 +27,8 @@ The stand-in logs every call with the GH_TOKEN it saw. Every case that reaches
 gh asserts it was called, that each call named the case's pull request, and
 that the token was the one in the case's token file, so a case cannot pass by
 reaching the real gh or the real credential. Cases that must stop before gh
-assert the log is empty.
+assert the log is empty. A run in which the stand-in fails for a reason of its own,
+such as a call it was given no route for, fails the suite whatever its case expects.
 
 Exit codes are asserted exactly: 0 passed, 1 refused, 2 could not run.
 
@@ -84,13 +85,18 @@ its review is any other account's, or the merge account's posted after
 reviewed-since: the 722 case at the approval and the pytorch case at drisspg's
 review hold that.
 
-The mutation section reruns named cases against a mutated COPY of the gate in a
-scratch directory, one mutation per fix, and requires each to go red. The file
-under test is never modified, so no revert can discard uncommitted work. Each
-mutation asserts that its replacement text was found. An unmutated copy is run
-after all mutations as the control. Each copy has a copy of the description
-reader, pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py, beside
-it, because the gate runs the reader from its own directory; the reader's
+Every case runs once, before the mutations, against an unmutated COPY of the
+gate in a scratch directory, made as each mutated copy is made, so a case that
+goes red on a mutated copy went red because of the mutation and not because the
+copy lacks a file the gate needs. The mutation section then reruns named cases
+against a mutated copy, one mutation per fix, and requires each to go red. The
+file under test is never modified, so no revert can discard uncommitted work.
+Each mutation asserts that its replacement text was found. After the mutations,
+case A1, everything in order, runs against the real scripts/merge-gate.sh, so
+the gate is shown to pass where it is installed, not only as a copy. Each copy
+has a copy of the description reader,
+pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py,
+beside it, because the gate runs the reader from its own directory; the reader's
 patterns are mutation-checked by the reader's own test.
 
 F7, UNSTABLE on the merge-state allow-list, has no case by the user's ruling.
@@ -128,10 +134,13 @@ repository's endpoint stands for an open issue there, which is not printed.
 Run: python3 scripts/merge-gate-test.py
 """
 
+import contextlib
 import datetime
+import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -158,33 +167,80 @@ LINK_LOOKUP = re.compile(r"repos/[^/]+/[^/]+/issues/[0-9]+")
 failures = []
 scratch = Path(tempfile.mkdtemp(prefix="merge-gate-test-"))
 
-GH_STAND_IN = r'''#!/usr/bin/env python3
-import json, os, re, sys
-argv = sys.argv[1:]
-with open(os.environ["MERGE_GATE_TEST_GH_CALL_LOG"], "a") as log:
-    log.write(json.dumps({"argv": argv, "gh_token": os.environ.get("GH_TOKEN")}) + "\n")
-routes = json.load(open(os.environ["MERGE_GATE_TEST_GH_ROUTES"]))
-if argv[:2] == ["pr", "view"]:
-    key = "body" if argv[argv.index("--json") + 1] == "body" else "state"
-elif argv[:1] == ["api"] and re.fullmatch(r"repos/[^/]+/[^/]+/issues/[0-9]+", argv[1]):
-    key = "link " + argv[1]
-elif argv[:1] == ["api"]:
-    endpoint = argv[1]
-    channel = ("review-comments" if re.search(r"/reviews/[0-9]+/comments$", endpoint) else
-               "reviews" if endpoint.endswith("/reviews") else
-               "issue" if "/issues/" in endpoint else
-               "inline" if endpoint.endswith("/comments") else "unknown")
-    key = channel + (":paginated" if "--paginate" in argv else ":first-page")
-else:
-    key = "unknown"
-route = routes.get(key)
-if route is None:
-    sys.stderr.write("merge-gate-test stand-in: unarranged gh call %r\n" % (argv,))
-    sys.exit(97)
-sys.stdout.buffer.write(open(route["stdout_file"], "rb").read())
-sys.stderr.write(route.get("stderr", ""))
-sys.exit(route.get("exit", 0))
-'''
+# Launched about 1300 times a test run, so it is bash, which starts in about a tenth of
+# Python's time. It calls nothing through PATH, because some cases cut PATH down to the
+# stand-in's own directory. The route keys are written into its case statement, and each
+# call is logged as NUL-separated fields: the field count, then the token, then argv.
+# Each exit it makes for a reason of its own also goes in a failure log that run_gate reads,
+# because the gate turns every gh failure into the same exit 2 and message, and a route
+# may script any exit code.
+# An exported BASH_ENV is not handled: bash sources it before the stand-in reads GH_TOKEN.
+GH_STAND_IN_TEMPLATE = f"#!{BASH}\n" + r"""stand_in_failed() {
+  printf 'merge-gate-test stand-in: %s\n' "$2" >&2
+  printf '%s\n' "$2" >>"$MERGE_GATE_TEST_GH_STAND_IN_FAILURE_LOG"
+  exit "$1"
+}
+log=$MERGE_GATE_TEST_GH_CALL_LOG
+if [ "${GH_TOKEN+set}" = set ]; then token="1$GH_TOKEN"; else token=0; fi
+printf '%s\0' "$(($# + 1))" "$token" "$@" >>"$log" ||
+  stand_in_failed 96 "could not log the call to $log"
+arguments=("$@")
+key=unknown
+if [ "$1" = pr ] && [ "$2" = view ]; then
+  key=missing-json
+  for ((index = 2; index < $#; index++)); do
+    if [ "${arguments[index]}" = --json ]; then
+      if [ "${arguments[index + 1]}" = body ]; then key=body; else key=state; fi
+      break
+    fi
+  done
+elif [ "$1" = api ] && [[ $2 =~ ^repos/[^/]+/[^/]+/issues/[0-9]+$ ]]; then
+  key="link $2"
+elif [ "$1" = api ]; then
+  if [[ $2 =~ /reviews/[0-9]+/comments$ ]]; then key=review-comments
+  elif [[ $2 == */reviews ]]; then key=reviews
+  elif [[ $2 == */issues/* ]]; then key=issue
+  elif [[ $2 == */comments ]]; then key=inline
+  fi
+  page=first-page
+  for argument in "$@"; do [ "$argument" = --paginate ] && page=paginated; done
+  key="$key:$page"
+fi
+case "$key" in
+@ROUTES@
+esac
+printf -v call ' %q' "$@"
+stand_in_failed 97 "unarranged gh call:$call"
+"""
+
+
+def gh_stand_in(routes, case_dir):
+    """The gh stand-in for one case: each route's stdout in a file of the case's own, sent
+    with the real cat, its short stderr written by bash itself, then its exit status."""
+    cat = shlex.quote(shutil.which("cat"))
+    arms = []
+    for number, (key, route) in enumerate(routes.items()):
+        stdout_file = case_dir / f"route-{number}-stdout"
+        stdout_file.write_bytes(route["stdout"].encode("utf-8", "surrogateescape"))
+        stderr = route.get("stderr", "")
+        sent = shlex.quote(str(stdout_file))
+        arms.append(f"  {shlex.quote(key)}) {cat} {sent}"
+                    + f" || stand_in_failed 98 {shlex.quote(f'could not send {stdout_file}')};"
+                    + (f" printf %s {shlex.quote(stderr)} >&2;" if stderr else "")
+                    + f" exit {int(route.get('exit', 0))} ;;")
+    return GH_STAND_IN_TEMPLATE.replace("@ROUTES@", "\n".join(arms))
+
+
+def gh_calls(call_log):
+    """The stand-in's log as {"argv", "gh_token"} records, gh_token None when GH_TOKEN was unset."""
+    fields = call_log.read_bytes().decode("utf-8", "surrogateescape").split("\0")
+    calls, position = [], 0
+    while position < len(fields) - 1:
+        count = int(fields[position])
+        token, *argv = fields[position + 1:position + 1 + count]
+        calls.append({"argv": argv, "gh_token": token[1:] if token.startswith("1") else None})
+        position += 1 + count
+    return calls
 
 
 def check(case_name, condition, detail=""):
@@ -403,9 +459,6 @@ def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=
         (token_dir / "ned-review-merge.token").write_text(token)
     stand_in_dir = case_dir / "bin"
     stand_in_dir.mkdir()
-    stand_in = stand_in_dir / "gh"
-    stand_in.write_text(GH_STAND_IN)
-    stand_in.chmod(0o755)
     if jq_failing_filter is not None:
         (stand_in_dir / "jq").write_text(JQ_STAND_IN)
         (stand_in_dir / "jq").chmod(0o755)
@@ -416,17 +469,25 @@ def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=
         (stand_in_dir / "python3").chmod(0o755)
     routes = dict(routes)
     routes.setdefault("body", {"stdout_file": str(captured(DESCRIPTION_WITH_ROOT_CAUSE))})
-    routes_file = case_dir / "routes.json"
-    routes_file.write_text(json.dumps(routes))
+    routes = {key: {**route, "stdout": Path(route["stdout_file"]).read_text(
+                  encoding="utf-8", errors="surrogateescape")}
+              for key, route in routes.items()}
+    # The routes served, defaults included, for G4 to read beside the case's home.
+    (case_dir / "routes.json").write_text(json.dumps(routes))
+    stand_in = stand_in_dir / "gh"
+    stand_in.write_text(gh_stand_in(routes, case_dir))
+    stand_in.chmod(0o755)
     call_log = case_dir / "gh-calls.jsonl"
     call_log.write_text("")
+    failure_log = case_dir / "gh-stand-in-failures"
+    failure_log.write_text("")
     environment = {key: value for key, value in os.environ.items() if key != "GH_TOKEN"}
     environment.update(
         HOME=str(home),
         PATH=path_override(stand_in_dir) if path_override else
         f"{stand_in_dir}{os.pathsep}{os.environ['PATH']}",
-        MERGE_GATE_TEST_GH_ROUTES=str(routes_file),
-        MERGE_GATE_TEST_GH_CALL_LOG=str(call_log))
+        MERGE_GATE_TEST_GH_CALL_LOG=str(call_log),
+        MERGE_GATE_TEST_GH_STAND_IN_FAILURE_LOG=str(failure_log))
     if jq_failing_filter is not None:
         environment.update(MERGE_GATE_TEST_JQ_FAILING_FILTER=jq_failing_filter,
                            MERGE_GATE_TEST_REAL_JQ=shutil.which("jq"))
@@ -445,7 +506,13 @@ def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=
         command = [BASH, str(gate), *arguments]
     completed = subprocess.run(command, capture_output=True, text=True, env=environment,
                                timeout=120, cwd=cwd)
-    calls = [json.loads(line) for line in call_log.read_text().splitlines() if line]
+    calls = gh_calls(call_log)
+    # A failed check of its own, not only the case's verdict: a mutation counts a false
+    # verdict as caught.
+    stand_in_failures = failure_log.read_text()
+    if stand_in_failures:
+        check(f"the gh stand-in served every call of merge-gate.sh {shlex.join(arguments)}",
+              False, stand_in_failures.strip())
     return Run(completed, calls, home)
 
 
@@ -518,6 +585,33 @@ def case_gate_run_from_another_directory_finds_its_reader(gate):
     elsewhere = Path(tempfile.mkdtemp(dir=scratch))
     run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(), cwd=elsewhere)
     return run.code == 0 and "gate passed" in run.stdout, run.summary()
+
+
+fixtures_opened_here = None
+
+
+def fixture_open_noted(event, arguments):
+    if event == "open" and fixtures_opened_here is not None and isinstance(arguments[0], str):
+        fixtures_opened_here.add(arguments[0])
+
+
+sys.addaudithook(fixture_open_noted)
+
+
+def case_every_served_fixture_is_opened_by_the_suite_itself(gate):
+    """The runner's input recorder sees only this process: the -IS stand-in loads no recorder."""
+    global fixtures_opened_here
+    routes = base_routes()
+    fixtures_opened_here = set()
+    try:
+        run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], routes)
+    finally:
+        opened, fixtures_opened_here = fixtures_opened_here, None
+    # The routes run_gate served, its own defaults included, not the routes this case passed in.
+    served = json.loads((run.home.parent / "routes.json").read_text())
+    unopened = sorted({route["stdout_file"] for route in served.values()
+                       if route["stdout_file"] not in opened})
+    return run.code == 0 and not unopened, f"not opened by the suite: {unopened}; {run.summary()}"
 
 
 NEW_ACTIVITY_COUNT_OPTION = "--print-new-activity-count-after-reviewed-since-bound"
@@ -611,8 +705,16 @@ def no_sandbox_state(**last_run_fields):
     return state
 
 
+def gate_copy_whose_clone_is_no_repository(gate):
+    """A failed run's notice runs git log on the clone beside the gate. Run on the checkout,
+    that git log makes scripts/run-all-test-suites.py select this suite whenever any file
+    is added; a copy's clone is a scratch directory."""
+    return gate_copy(gate.read_text())
+
+
 def case_no_sandbox_notice_for_a_failed_run_and_the_gate_still_passes(gate):
-    run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(),
+    run = run_gate(gate_copy_whose_clone_is_no_repository(gate), BASE_PR, BASE_HEAD,
+                   BASE_APPROVAL["submitted_at"], base_routes(),
                    no_sandbox_suites_state=NO_SANDBOX_FAILED_RUN)
     return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
             and NO_SANDBOX_NOTICE_HEADING in run.stderr
@@ -622,7 +724,8 @@ def case_no_sandbox_notice_for_a_failed_run_and_the_gate_still_passes(gate):
 
 def case_no_sandbox_notice_leaves_a_refusal_a_refusal(gate):
     other = captured_value("nedschorus-nedschorus-636-pr-view-state.json", "headRefOid")
-    run = run_gate(gate, BASE_PR, other, BASE_APPROVAL["submitted_at"], base_routes(),
+    run = run_gate(gate_copy_whose_clone_is_no_repository(gate), BASE_PR, other,
+                   BASE_APPROVAL["submitted_at"], base_routes(),
                    no_sandbox_suites_state=NO_SANDBOX_FAILED_RUN)
     return (refused_with(run, BASE_PR, "head moved") and NO_SANDBOX_NOTICE_HEADING in run.stderr,
             run.summary())
@@ -1596,9 +1699,11 @@ def case_follow_up_link_with_a_sub_path(gate):
         link_route("open pull request", "repos/nedsnodes/nedsnodes/issues/1636"))
 
 
-def self_link_refused(gate, link, normalised_link):
+def self_link_refused(gate, link, normalised_link, lookup_endpoint):
     line = f"#root_cause_not_fixed the harness drops the variable. #follow_up {link}"
-    run = description_with_lines_run(gate, [line], [])
+    # The lookup is served, so a gate that looks the link up fails this case by not refusing,
+    # not by making a call the gh stand-in was given no route for.
+    run = description_with_lines_run(gate, [line], [link_route("open pull request", lookup_endpoint)])
     return (refused_with(
         run, BASE_PR,
         f"GATE REFUSED (#{BASE_PR}): the description's line `{line}` names after `#follow_up` "
@@ -1616,12 +1721,12 @@ def self_link_refused(gate, link, normalised_link):
 
 def case_follow_up_link_to_this_pull_request(gate):
     link = f"https://github.com/nedsnodes/nedsnodes/pull/{BASE_PR}"
-    return self_link_refused(gate, link + "/files", link)
+    return self_link_refused(gate, link + "/files", link, f"repos/nedsnodes/nedsnodes/issues/{BASE_PR}")
 
 
 def case_follow_up_issue_form_link_to_this_pull_request_in_other_letter_case(gate):
     link = f"https://github.com/Nedschorus/nedschorus/issues/{BASE_PR}"
-    return self_link_refused(gate, link, link)
+    return self_link_refused(gate, link, link, f"repos/Nedschorus/nedschorus/issues/{BASE_PR}")
 
 
 def case_follow_up_pull_request_link_whose_number_is_an_issue(gate):
@@ -2062,6 +2167,8 @@ CASES = [
     ("MARKS the marks check failing could not run", case_marks_check_program_fails),
     ("G3 the gate run from a directory other than its own finds the description reader",
      case_gate_run_from_another_directory_finds_its_reader),
+    ("G4 the suite itself opens every fixture the gh stand-in serves, so the runner records it",
+     case_every_served_fixture_is_opened_by_the_suite_itself),
     ("H1 a not-fixed hashtag line whose #follow_up link is a Markdown citation passes",
      case_follow_up_hashtag_with_a_markdown_citation),
     ("H1 a #follow_up link that ends a sentence passes", case_follow_up_bare_link_ending_a_sentence),
@@ -2398,22 +2505,62 @@ def run_cases(gate, label):
     return passed
 
 
+def check_stand_in_fails_when_it_cannot_send_or_log():
+    """Without these exits, a case could pass on an empty response, an unlogged call or an
+    unarranged call; each must also reach the failure log run_gate reads."""
+    case_dir = Path(tempfile.mkdtemp(dir=scratch))
+    stand_in = case_dir / "gh"
+    stand_in.write_text(gh_stand_in({"body": {"stdout": "{}"}}, case_dir))
+    stand_in.chmod(0o755)
+    call_log = case_dir / "gh-calls"
+    (case_dir / "route-0-stdout").unlink()
+    for name, call_log_path, argv_tail, code, reason in (
+            ("send a route's stdout", call_log, ["pr", "view", "1", "--json", "body"], 98, "could not send"),
+            ("log a call", case_dir, ["pr", "view", "1", "--json", "body"], 96, "could not log"),
+            ("find a route for a call", call_log, ["pr", "list"], 97, "unarranged gh call")):
+        failure_log = case_dir / f"gh-stand-in-failures-{code}"
+        result = subprocess.run([str(stand_in), *argv_tail], capture_output=True, text=True,
+                                env={**os.environ, "MERGE_GATE_TEST_GH_CALL_LOG": str(call_log_path),
+                                     "MERGE_GATE_TEST_GH_STAND_IN_FAILURE_LOG": str(failure_log)})
+        logged = failure_log.read_text() if failure_log.exists() else ""
+        check(f"the gh stand-in fails, in its failure log too, when it cannot {name}",
+              result.returncode == code and reason in result.stderr and reason in logged,
+              f"exit {result.returncode}, stderr {result.stderr.strip()!r}, failure log {logged!r}")
+
+
+def check_run_gate_fails_a_run_whose_stand_in_failed():
+    """With its inline route gone, the case that scripts an inline-channel failure still
+    passes on the gate's exit 2, so run_gate itself must fail."""
+    routes = {key: route for key, route in base_routes().items() if key != "inline:paginated"}
+    failures_before = len(failures)
+    # Its FAIL line is the expected outcome here, so it is kept off the suite's output.
+    with contextlib.redirect_stdout(io.StringIO()):
+        run_gate(GATE, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], routes)
+    recorded = failures[failures_before:]
+    del failures[failures_before:]
+    check("run_gate records a failed check when the gh stand-in fails for a reason of its own",
+          len(recorded) == 1 and recorded[0].startswith("the gh stand-in served every call"),
+          f"failed checks recorded: {recorded!r}")
+
+
 def main():
     if BASH is None:
         raise SystemExit("merge-gate-test: bash is not on PATH")
     check_every_fixture_has_a_capture_record()
+    check_stand_in_fails_when_it_cannot_send_or_log()
+    check_run_gate_fails_a_run_whose_stand_in_failed()
     check("the CLEAN spelling came from a capture", CLEAN == "CLEAN", f"read {CLEAN!r}")
     open_before = open_file_descriptor_count()
-    first = run_cases(GATE, "")
+    unmutated = run_cases(gate_copy(GATE.read_text()), "unmutated copy: ")
     run_mutations()
-    # The control: an unmutated copy, run after every mutation.
-    control_gate = gate_copy(GATE.read_text())
-    control = run_cases(control_gate, "control after mutations: ")
+    real_gate_name = f"real merge-gate.sh: {case_name_of(case_a1_pass_control)}"
+    real_gate_ok, real_gate_detail = case_a1_pass_control(GATE)
+    check(real_gate_name, real_gate_ok, real_gate_detail)
     open_after = open_file_descriptor_count()
     check("no file descriptor is left open by the cases and mutations",
           open_after == open_before, f"{open_before} open before them, {open_after} after")
-    print(f"\n{first} of {len(CASES)} cases passed; the unmutated control after the "
-          f"mutations passed {control} of {len(CASES)}")
+    print(f"\n{unmutated} of {len(CASES)} cases passed on the unmutated copy; case A1 "
+          f"{'passed' if real_gate_ok else 'failed'} on the real merge-gate.sh")
     shutil.rmtree(scratch, ignore_errors=True)
     if failures:
         print(f"\n{len(failures)} check(s) failed:")
