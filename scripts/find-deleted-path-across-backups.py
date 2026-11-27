@@ -117,6 +117,10 @@ one back, and no search writes over a file where it stands. A copy
 never replaces a file already in that folder. A version this run can only
 reach through a mount it did not make, a Time Machine snapshot or an unmounted
 local snapshot, gets a printed command that copies it into the same folder.
+A surface copies at most one hit itself; every other hit it found, an older
+snapshot or another copy in the log-store, is listed after "NOT COPIED:" with
+the command that copies it there, so a version only an older hit holds is not
+missed by an agent that reads the folder alone.
 It never writes backup state, which
 agents are forbidden to do (.claude/guard-hooks/backup-and-snapshot-write-guard.py
 holds the tool path; the rule binds shell commands too). Restoring is not a
@@ -268,7 +272,9 @@ Usage:
 
 Each FOUND surface says where this run copied what it found, under
 ~/Downloads/nedschorus-found-copies/<time of the search>/, or prints the command
-that copies it there when the copy needs a mount. Once you have chosen a copy,
+that copies it there when the copy needs a mount.
+Every hit it did not copy follows "NOT COPIED:", with the command that copies it there.
+Once you have chosen a copy,
 `--restore <copy>` copies it to <path>, creating any missing parent directories
 and replacing any file already there. Search and --restore read <path> the same
 way: a path written from the current directory ("./x.md", "../x.md") is taken
@@ -464,6 +470,10 @@ BOX_LOG_STORE_CONNECT_TIMEOUT_SECONDS = 5
 BOX_TRANSCRIPTS_DIR_MISSING = 3
 
 
+# The guarded-file hook's messages name this heading, so an agent can find every hit it must still hash.
+DELETED_PATH_BACKUP_SEARCH_UNCOPIED_HIT_COMMANDS_HEADING = "NOT COPIED:"
+
+
 class SurfaceReport:
     """One surface's result and recovery instructions."""
 
@@ -482,6 +492,8 @@ class SurfaceReport:
         self.versions = list(versions or [])
         self.copied = []
         self.copy_failures = []
+        # One command per hit this run neither copies nor hashes, each copying its hit into the found-copies folder.
+        self.uncopied_hit_commands = []
 
     def render(self):
         out = ["%-15s %s" % (self.surface, self.status)]
@@ -489,6 +501,12 @@ class SurfaceReport:
             out.append("    " + line)
         for command in self.recovery:
             out.append("    $ " + command)
+        if self.uncopied_hit_commands:
+            out.append("    %s %d hit(s) this run did not copy; each command below copies one into %s:"
+                       % (DELETED_PATH_BACKUP_SEARCH_UNCOPIED_HIT_COMMANDS_HEADING, len(self.uncopied_hit_commands),
+                          found_copies_folder().path))
+            for command in self.uncopied_hit_commands:
+                out.append("    $ " + command)
         return "\n".join(out)
 
 
@@ -979,9 +997,12 @@ def search_time_machine_after(blob_id, path, seen, runner=run_command, prompt_fo
     check = ("then check that `git hash-object` of the copy prints %s; another id means the version was replaced "
              "before that snapshot" % blob_id)
     if outcome == "hit":
-        return SurfaceReport("time machine", FOUND, lines + ["it holds %s; %s" % (path, check)],
-                             _time_machine_manual_recovery(snapshot, device, path, clear_first=bool(release_failure)),
-                             prints_copy_command=True, copy_command_may_ask_password=True)
+        report = SurfaceReport("time machine", FOUND, lines + ["it holds %s; %s" % (path, check)],
+                               _time_machine_manual_recovery(snapshot, device, path,
+                                                             clear_first=bool(release_failure)),
+                               prints_copy_command=True, copy_command_may_ask_password=True)
+        report.uncopied_hit_commands = [" && ".join(_time_machine_manual_recovery(snapshot, device, path))]
+        return report
     if outcome == "miss":
         return SurfaceReport("time machine", NOT_FOUND, lines + ["it does not hold %s" % path])
     return SurfaceReport("time machine", UNAVAILABLE, lines + ["could not search it — %s" % detail, check],
@@ -1115,6 +1136,13 @@ def search_local_snapshots(wanted, repo, runner=run_command, mount_point=LOCAL_S
         if len(hits) > 5:
             lines.append("    ... and %d older" % (len(hits) - 5))
         best_snapshot, best_where, best_read_in_place = hits[0]
+        uncopied = []
+        for snapshot, where, read_in_place in hits:
+            if (snapshot, where, read_in_place) == hits[0] and read_in_place:
+                continue
+            name = "localsnapshot-%s-%s" % (_snapshot_name_stamp(snapshot), os.path.basename(probe_path))
+            uncopied.append(_copy_into_found_copies_command(where + probe_path, name) if read_in_place
+                            else " && ".join(_local_snapshot_recovery(snapshot, probe_path, mount_point)))
         if best_read_in_place:
             # Already mounted where it sits: this run copies it out; only a mount of its own is left to release.
             version = FoundVersion("localsnapshot-%s-%s" % (_snapshot_name_stamp(best_snapshot),
@@ -1122,11 +1150,14 @@ def search_local_snapshots(wanted, repo, runner=run_command, mount_point=LOCAL_S
                                    "file", best_where + probe_path)
             release = ([_local_snapshot_clear_mount_point_command(mount_point)] if best_where == mount_point
                        else [])
-            return SurfaceReport("local snapshots", FOUND, lines, release + run_release, [version])
-        return SurfaceReport("local snapshots", FOUND, lines,
-                             _local_snapshot_recovery(best_snapshot, probe_path, mount_point, clear_first)
-                             + run_release,
-                             prints_copy_command=True)
+            report = SurfaceReport("local snapshots", FOUND, lines, release + run_release, [version])
+        else:
+            report = SurfaceReport("local snapshots", FOUND, lines,
+                                   _local_snapshot_recovery(best_snapshot, probe_path, mount_point, clear_first)
+                                   + run_release,
+                                   prints_copy_command=True)
+        report.uncopied_hit_commands = uncopied
+        return report
 
     if searched:
         lines.append("searched %s .. %s and none of them has it" % (searched[-1], searched[0]))
@@ -1268,6 +1299,17 @@ def _copy_into_found_copies_command(source, name):
     folder = found_copies_folder()
     return "mkdir -p %s && cp -n %s %s" % (shlex.quote(folder.path), shlex.quote(source),
                                            shlex.quote(folder.destination(name)))
+
+
+def _copy_file_into_found_copies_command(kind, source, name, host=None):
+    """A command that copies a file this machine reads, or ned-box's file over ssh, into the found-copies folder."""
+    if kind != "box-file":
+        return _copy_into_found_copies_command(source, name)
+    folder = found_copies_folder()
+    destination = shlex.quote(folder.destination(name))
+    return "mkdir -p %s && [ ! -e %s ] && ssh -o BatchMode=yes %s %s > %s" % (
+        shlex.quote(folder.path), destination, shlex.quote(host), shlex.quote("cat -- " + shlex.quote(source)),
+        destination)
 
 
 def _snapshot_name_stamp(snapshot_name):
@@ -1698,9 +1740,15 @@ def search_log_store(wanted, log_store_root, box_ssh_host, runner=run_command, s
     if unread:
         lines.append("(%s)" % unread_line)
     newest_time, newest_path = at_wanted_path[0][0], at_wanted_path[0][1]
+    kind = "file" if store_is_here else "box-file"
     version = FoundVersion("logstore-%s-%s" % (_name_stamp_from_epoch(newest_time), os.path.basename(newest_path)),
-                           "file" if store_is_here else "box-file", newest_path, host=box_ssh_host)
-    return SurfaceReport("log-store", FOUND, lines, versions=[version])
+                           kind, newest_path, host=box_ssh_host)
+    report = SurfaceReport("log-store", FOUND, lines, versions=[version])
+    report.uncopied_hit_commands = [
+        _copy_file_into_found_copies_command(
+            kind, path, "logstore-%s-%s" % (_name_stamp_from_epoch(mtime), os.path.basename(path)), box_ssh_host)
+        for mtime, path in at_wanted_path[1:]]
+    return report
 
 
 def _log_store_listing(hits, list_every_name):
@@ -1989,11 +2037,19 @@ def search_timeshift(wanted, box_ssh_host, snapshot_root, search_roots, runner=r
         lines.append("(find failed under %d snapshot director%s, first: %s — those were not searched)"
                      % (len(unsearched), "y" if len(unsearched) == 1 else "ies", unsearched[0]))
     newest = hits[0]
-    snapshot_directory = newest[len(snapshot_root):].lstrip("/").split("/", 1)[0] if newest.startswith(
+    kind = "file" if on_ned_box else "box-file"
+    version = FoundVersion(_timeshift_copy_name(newest, snapshot_root), kind, newest, host=box_ssh_host)
+    report = SurfaceReport("timeshift", FOUND, lines, versions=[version])
+    report.uncopied_hit_commands = [
+        _copy_file_into_found_copies_command(kind, hit, _timeshift_copy_name(hit, snapshot_root), box_ssh_host)
+        for hit in hits[1:]]
+    return report
+
+
+def _timeshift_copy_name(hit, snapshot_root):
+    snapshot_directory = hit[len(snapshot_root):].lstrip("/").split("/", 1)[0] if hit.startswith(
         snapshot_root) else "snapshot"
-    version = FoundVersion("timeshift-%s-%s" % (snapshot_directory, os.path.basename(newest)),
-                           "file" if on_ned_box else "box-file", newest, host=box_ssh_host)
-    return SurfaceReport("timeshift", FOUND, lines, versions=[version])
+    return "timeshift-%s-%s" % (snapshot_directory, os.path.basename(hit))
 
 
 def _timeshift_probe_script(wanted, snapshot_root, search_roots):
@@ -2110,10 +2166,13 @@ def search_time_machine(wanted, newest_date_held=None, snapshot_limit=DEFAULT_TI
     if hits:
         for snapshot, hit in hits:
             lines.append("%s holds %s" % (snapshot, hit))
-        return SurfaceReport("time machine", FOUND, lines,
-                             _time_machine_manual_recovery(hits[0][0], device, hits[0][1],
-                                                           clear_first=bool(stuck)),
-                             prints_copy_command=True, copy_command_may_ask_password=not rule_carried_it)
+        report = SurfaceReport("time machine", FOUND, lines,
+                               _time_machine_manual_recovery(hits[0][0], device, hits[0][1],
+                                                             clear_first=bool(stuck)),
+                               prints_copy_command=True, copy_command_may_ask_password=not rule_carried_it)
+        report.uncopied_hit_commands = [" && ".join(_time_machine_manual_recovery(snapshot, device, hit))
+                                        for snapshot, hit in hits]
+        return report
     if searched:
         lines.append("searched %s and did not find it" % ", ".join(searched))
     if unsearched:
@@ -2496,6 +2555,12 @@ def render_summary(reports):
                            "above say.")
     else:
         out.append("No surface that could be searched has it.")
+    uncopied = sum(len(r.uncopied_hit_commands) for r in reports)
+    if uncopied:
+        out.append("%d hit(s) were not copied or hashed: each surface lists its own after %r, with the command "
+                   "that copies each into %s; a version counts as found nowhere only once every copy there is "
+                   "hashed." % (uncopied, DELETED_PATH_BACKUP_SEARCH_UNCOPIED_HIT_COMMANDS_HEADING,
+                                found_copies_folder().path))
     if candidates:
         out.append("Candidates only, not counted as found: %s — check their content before saying it does not exist."
                    % ", ".join(r.surface for r in candidates))

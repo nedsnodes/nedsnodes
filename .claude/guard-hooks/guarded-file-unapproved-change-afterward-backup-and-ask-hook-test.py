@@ -39,6 +39,13 @@ SETTINGS = Path(__file__).resolve().parents[2] / ".claude" / "settings.json"
 failures = 0
 
 
+
+def uncopied_hit_commands_heading_the_finder_prints(finder):
+    """The heading the finder prints before the commands for the hits it did not copy, read from its source."""
+    found = re.search(r'^DELETED_PATH_BACKUP_SEARCH_UNCOPIED_HIT_COMMANDS_HEADING = "([^"]+)"$', finder.read_text(),
+                      re.MULTILINE)
+    return found.group(1) if found else "<the finder defines no DELETED_PATH_BACKUP_SEARCH_UNCOPIED_HIT_COMMANDS_HEADING>"
+
 def check(name, condition, detail=None):
     global failures
     if condition:
@@ -660,6 +667,30 @@ def cases(scratch):
     check("--restore refuses when the approved version is in neither its copy nor git",
           result.returncode == 1 and "neither the guarded-file store's copies of that file nor the git repository" in result.stderr
           and claude.read_text() == "project v3, shell\n", (result.stderr, claude.read_text()))
+    finder = HOOK.resolve().parents[2] / "scripts" / "find-deleted-path-across-backups.py"
+    check("and has the agent search the backups for that version, by its blob id and by its "
+          "path, and put back a copy that matches, before calling it lost",
+          finder.is_file()
+          and f"python3 {finder} --repo {world.repo} {approved_key}\n" in result.stderr
+          and f"python3 {finder} --repo {world.repo} {claude}\n" in result.stderr
+          and f"git hash-object -- <copy>` prints {approved_key}" in result.stderr
+          and f"cp -- <copy> {claude}\n" in result.stderr
+          and "If no copy is the approved version" in result.stderr, result.stderr)
+    mark = uncopied_hit_commands_heading_the_finder_prints(finder)
+    check("and has every hit the search did not copy fetched and hashed, by the mark the finder "
+          "prints before them, naming no backup kind",
+          "saves every copy" not in result.stderr
+          and f"lists every hit it did not copy after \"{mark}\"" in result.stderr
+          and f"as found nowhere, run every command listed after \"{mark}\", giving the user any "
+              "whose sudo asks for his password, then hash every copy in that folder" in result.stderr
+          and "Timeshift snapshot it lists" not in result.stderr, result.stderr)
+    found_copy = world.scratch / "found-copy"
+    found_copy.write_text("project v2, approved edit\n")
+    run_found = subprocess.run(["/bin/sh", "-c", f"cp -- {found_copy} {claude}"], check=False)
+    check("putting back a found copy of the approved version with the refusal's cp settles the "
+          "file, and the hook asks nothing more",
+          run_found.returncode == 0 and world.run() == "" and world.run() == "",
+          claude.read_text())
 
     world = fresh(scratch, "git-holds-check-fails")
     claude = world.repo / "CLAUDE.md"
@@ -1224,8 +1255,33 @@ def cases(scratch):
     check("a first-run version git has pruned is reported, with a warning against --restore",
           "git no longer holds it" in message and rebased_away in message
           and f"Do not run --restore on {claude}" in message, message)
+    finder = HOOK.resolve().parents[2] / "scripts" / "find-deleted-path-across-backups.py"
+    check("and has the agent search the backups for that version by its path, and put back a "
+          "copy that matches, before telling the user it is lost",
+          f"python3 {finder} --repo {world.repo} {claude}\n" in message
+          and f"git hash-object -- <copy>` prints {rebased_away}" in message
+          and f"put that copy back with: cp -- <copy> {claude}\n" in message
+          and "If no copy is the version" in message, message)
+    mark = uncopied_hit_commands_heading_the_finder_prints(finder)
+    check("and has every hit the search did not copy fetched and hashed, instead of claiming it "
+          "saves every copy",
+          "saves every copy" not in message
+          and f"Before you count {rebased_away} as found nowhere, run every command listed after "
+              f"\"{mark}\"" in message, message)
     check("and stays recorded, so the next change reports it again",
           state.get("first_run_versions") == {str(claude): rebased_away}, state)
+    found_copy = world.scratch / "found-copy"
+    found_copy.write_text("project rebased away\n")
+    subprocess.run(["/bin/sh", "-c", f"cp -- {found_copy} {claude}"], check=True)
+    message = world.run()
+    check("putting back a found copy of the pruned first-run version, as the message says, gets "
+          "an ask about that version",
+          f"{claude}, version {rebased_away}" in message, message)
+    world.marker('The user said "no, put back the copy from the backup"')
+    result = world.command("--approve", claude, rebased_away)
+    check("and that ask's --approve, with his words, approves it, so the hook asks nothing more",
+          result.returncode == 0 and world.run() == "" and world.run() == "",
+          (result.stdout, result.stderr))
 
     # -- once the path has an approved version, a lost first-run version is dropped, not
     # reported again, and not approved over it should git hold it again
@@ -1675,27 +1731,110 @@ def cases(scratch):
     check("the declined new file is not asked about again once it is deleted",
           world.run() == "", world.store_file(skill, "log"))
 
-    # -- a new file with no approved version, which origin/main does not hold, may be deleted
+    def offered_rm(message):
+        """The rm command the message offers, as printed; None when it offers none."""
+        line = next((line for line in message.splitlines() if "rm -- " in line), None)
+        return line and line[line.index("rm -- "):]
+
+    def printed_command(message, line_start):
+        """The python3 command on the message's line that starts with line_start, as printed."""
+        line = next(line for line in message.splitlines() if line.startswith(line_start))
+        return line[line.index("python3 "):]
+
+    def run_in_shell(world, command):
+        return subprocess.run(["/bin/sh", "-c", command], capture_output=True, text=True,
+                              env=world.environment(), cwd=str(world.repo), timeout=120)
+
+    # -- a new file with no approved version, which origin/main does not hold, may be deleted;
+    # the offered rm runs as printed, with its shell quoting, on a path holding a space
     world = fresh(scratch, "new-file-deletion-offered")
-    stray = world.repo / ".claude" / "skills" / "stray" / "SKILL.md"
+    stray = world.repo / ".claude" / "skills" / "stray skill" / "SKILL.md"
     stray.parent.mkdir(parents=True)
     stray.write_text("a skill no one approved\n")
-    offer = f"rm -- {stray}"
     subagent_stop = "If you are any other subagent, stop"
     message = world.run()
+    offer = offered_rm(message)
     check("the ask about a new file that has no approved version and that origin/main does not "
           "hold offers its deletion, before the line that stops a subagent",
-          offer in message and message.index(offer) < message.index(subagent_stop), message)
+          offer is not None and message.index(offer) < message.index(subagent_stop), message)
     reminder = world.run()
     check("the reminder about that new file offers its deletion, before the line that stops a "
           "subagent",
-          "Reminder" in reminder and offer in reminder
+          "Reminder" in reminder and offer is not None and offered_rm(reminder) == offer
           and reminder.index(offer) < reminder.index(subagent_stop), reminder)
-    subprocess.run(offer.split(), check=True)
+    result = run_in_shell(world, offer or "false")
+    check("the offered rm, run in a shell exactly as printed, deletes the file whose path holds a "
+          "space", result.returncode == 0 and not stray.exists() and stray.parent.is_dir(),
+          (offer, result.stderr))
     check("the offered rm settles the new file without asking the user, and the version it held "
           "stays in the store",
           world.run() == "" and world.approved_in_log(stray, "deleted", "deletion")
           and len(world.versions(stray)) >= 1, world.store_file(stray, "log"))
+
+    # -- once the offered rm deletes a stray new file, the --approve and --restore commands of an
+    # ask that covers it and a change the agent keeps still work, skipping the deleted file
+    for mode, line_start in (("--approve", "If he approves,"), ("--restore", "If he declines, run:")):
+        world = fresh(scratch, "stray-file-deleted-after-ask-" + mode.lstrip("-"))
+        claude = world.repo / "CLAUDE.md"
+        stray = world.repo / ".claude" / "skills" / "stray" / "SKILL.md"
+        stray.parent.mkdir(parents=True)
+        stray.write_text("a skill no one approved\n")
+        claude.write_text("project v2\n")
+        kept = world.key(claude)
+        message = world.run()
+        command = printed_command(message, line_start)
+        run_in_shell(world, offered_rm(message) or "false")
+        if mode == "--approve":
+            marker = world.marker('The user said "yes" to the change to CLAUDE.md')
+        result = run_in_shell(world, command)
+        check(f"{mode} refuses a pair whose file is gone while no run of the hook has recorded "
+              "the deletion",
+              result.returncode == 1 and "no longer holds" in result.stderr
+              and claude.read_text() == "project v2\n", (command, result.stderr))
+        world.run()
+        result = run_in_shell(world, command)
+        if mode == "--approve":
+            check("the ask's --approve, run after the offered rm, approves the kept change and "
+                  "skips the deleted file",
+                  result.returncode == 0 and kept in world.store_file(claude, "approved")
+                  and f"Skipped {stray}" in result.stdout and not marker.exists(),
+                  (command, result.stdout, result.stderr))
+            stray.write_text("a skill no one approved\n")
+            stray_key = world.key(stray)
+            world.run()
+            stray.unlink()
+            world.run()
+            marker = world.marker('The user said "yes" to the stray skill')
+            result = world.command("--approve", stray, stray_key)
+            check("an --approve whose every file was deleted after the ask approves nothing, says "
+                  "so, and spends the marker",
+                  result.returncode == 0 and f"Skipped {stray}" in result.stdout
+                  and "Approved" not in result.stdout and not marker.exists(),
+                  (result.stdout, result.stderr))
+        else:
+            check("the ask's --restore, run after the offered rm, puts back the kept change's "
+                  "approved version and skips the deleted file",
+                  result.returncode == 0 and claude.read_text() == "project v1\n"
+                  and not stray.exists() and f"Skipped {stray}" in result.stdout,
+                  (command, result.stdout, result.stderr))
+
+    # -- a file with an approved version that was deleted after the ask is not skipped, so a
+    # declined change does not leave it deleted
+    for mode in ("--approve", "--restore"):
+        world = fresh(scratch, "approved-file-deleted-after-ask-" + mode.lstrip("-"))
+        claude = world.repo / "CLAUDE.md"
+        claude.write_text("project v2\n")
+        asked = world.key(claude)
+        world.run()
+        claude.unlink()
+        world.run()
+        if mode == "--approve":
+            world.marker('The user said "yes" to the change to CLAUDE.md')
+        result = world.command(mode, claude, asked)
+        check(f"{mode} still refuses a file with an approved version that was deleted after the "
+              "ask",
+              result.returncode == 1 and "no longer holds" in result.stderr
+              and "Skipped" not in result.stdout, (result.stdout, result.stderr))
 
     # -- a file with an approved version is not offered for deletion
     world = fresh(scratch, "approved-file-deletion-not-offered")
@@ -1739,6 +1878,36 @@ def cases(scratch):
     check("the ask about a new file that the store keeps no copy of does not offer its deletion",
           "A guarded file changed" in message and world.versions(committed) == ["log"]
           and "rm --" not in message, (message, world.versions(committed)))
+
+    # -- nor is an empty one: a copy the store does not hold is not read as a copy of the empty
+    # file, whose bytes are also none
+    world = fresh(scratch, "uncopied-empty-new-file-deletion-not-offered")
+    empty = world.repo / ".claude" / "skills" / "empty" / "SKILL.md"
+    empty.parent.mkdir(parents=True)
+    empty.write_text("")
+    world.git("add", ".")
+    world.git("commit", "-qm", "the agent commits an empty skill")
+    message = world.run()
+    check("the ask about an empty new file that the store keeps no copy of does not offer its "
+          "deletion",
+          "A guarded file changed" in message and world.versions(empty) == ["log"]
+          and "rm --" not in message, (message, world.versions(empty)))
+
+    # -- finding the approved version of an empty file needs no copy, since git holds the empty
+    # file's blob
+    world = fresh(scratch, "uncopied-empty-approved-version-restored")
+    claude = world.repo / "CLAUDE.md"
+    claude.write_text("")
+    world.git("commit", "-qam", "CLAUDE.md emptied by a reviewed pull request")
+    world.git("update-ref", "refs/remotes/origin/main", "HEAD")
+    world.run()
+    claude.write_text("project v2\n")
+    world.run()
+    result = world.command("--restore", claude, world.key(claude))
+    check("--restore puts back an approved empty version the store keeps no copy of",
+          result.returncode == 0 and claude.read_text() == ""
+          and "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391" not in world.versions(claude),
+          (result.stdout, result.stderr, world.versions(claude)))
 
     # -- declining deletions whose folders are gone
     world = fresh(scratch, "deleted-folders")
@@ -2301,9 +2470,9 @@ def cases(scratch):
 
     hook.os = StoreCountingOs()
     for name in ("read", "append", "copy"):
-        def counted(self, *arguments, _method=getattr(hook.Store, name)):
+        def counted(self, *arguments, _method=getattr(hook.Store, name), **keywords):
             store["access"] += 1
-            return _method(self, *arguments)
+            return _method(self, *arguments, **keywords)
         setattr(hook.Store, name, counted)
 
     def counted_run(directory):

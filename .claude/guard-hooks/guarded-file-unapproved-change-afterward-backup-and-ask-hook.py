@@ -31,6 +31,11 @@ unapproved, unless origin/main holds it or it is a deletion.
     python3 <this file> --approve <path> <hash> [<path> <hash> ...]
     python3 <this file> --restore <path> <hash> [<path> <hash> ...]
 
+Both skip a pair whose file has no approved version and was deleted after the ask, once a run
+has recorded the deletion.
+When --restore finds the approved version in neither the store nor git, it names the program
+that searches the backups for it.
+
 Design and tests: docs/issues/1268-catch-a-guarded-file-changed-without-the-user.md.
 
 Exit status: the hook always exits 0, since the tool call has already happened. --approve and
@@ -198,20 +203,59 @@ STORE_FAILED = (
     "checked against the versions the user approved: {reason}.\n"
     "Tell the user what failed, with this remedy: {remedy}\n"
     "Once the store can be reached, the next tool call checks the files again.")
+# The finder copies some hits and lists every other one after its "NOT COPIED:" mark, so a message must not let
+# the agent call a version lost from the saved folder alone.
+FINDER_COPIES_NOT_ALL_CHECKED = (
+    "The search copies some hits into a folder it names, and lists every hit it did not copy after "
+    "\"NOT COPIED:\", each with a command that copies it into that folder. A copy holds version {blob} when "
+    "`git hash-object -- <copy>` prints {blob}. Before you count {blob} as found nowhere, run every command "
+    "listed after \"NOT COPIED:\", giving the user any whose sudo asks for his password, then hash every copy "
+    "in that folder.\n")
 FIRST_RUN_VERSION_LOST = (
     "[rule guarded-file-changed-without-approval-ask-user-afterward] "
     "The guarded-file backup could not approve version {blob} of {path}, the version this "
     "checkout held when the backup first ran here: git no longer holds it, most likely pruned "
-    "after a reset or a rebase. {path} has no other approved version, so python3 {program} "
-    "--restore on it would delete the file.\n"
+    "after a reset or a rebase, and the backup kept no copy of it. {path} has no other approved "
+    "version, so python3 {program} --restore on it would delete the file.\n"
     "If you are a subagent, do not run --restore on {path}; pass this message to the agent "
     "that dispatched you, and do none of the steps below.\n"
     "Do not run --restore on {path}, even if the user declines its change.\n"
-    "When you ask the user about {path}'s change, as this hook's message about that change "
-    "says, tell him first: \"The guarded-file backup lost the approved version of {path}, "
-    "because git pruned it, so {path} has no version to go back to if you decline.\" If he "
-    "declines, ask him what {path} should hold instead, and make that edit.\n"
+    "A backup may still hold version {blob}. Before you ask the user about {path}'s change, as "
+    "this hook's message about that change says, search for it: python3 {finder} --repo "
+    "{checkout} {quoted_path}\n"
+    "The search looks for {path} in the Mac's local snapshots, git and its reflog, the "
+    "log-store, agent transcripts, Timeshift on ned-box and Time Machine. " + FINDER_COPIES_NOT_ALL_CHECKED +
+    "If a copy is the version, tell the user first: \"Git pruned the approved version of "
+    "{path}, but a backup holds it at <copy>.\"\n"
+    "If a copy is the version and he declines the change, put that copy back with: "
+    "cp -- <copy> {quoted_path}\n"
+    "If you put that copy back, this hook then asks about {path} at version {blob}: write his "
+    "words declining the change into {marker} and run that message's --approve command, since "
+    "he chose that version.\n"
+    "If no copy is the version, tell the user first: \"The guarded-file backup lost the approved "
+    "version of {path}: git pruned it, and no backup the search reached holds it, so {path} has "
+    "no version to go back to if you decline.\" Name each place the search says it could not "
+    "reach. If he declines, ask him what {path} should hold instead, and make that edit.\n"
     "This message comes again with each change to {path} until a version of it is approved.")
+APPROVED_VERSION_KEPT_NOWHERE = (
+    "the approved version {blob} of {path} is in neither the guarded-file store's copies of that "
+    "file nor the git repository of its checkout, so this command has nothing to put back, and "
+    "{path} still holds the declined version. A backup may still hold the approved version: "
+    "before you tell anyone it is lost, search for it with both of these commands:\n"
+    "python3 {finder} --repo {checkout} {blob}\n"
+    "python3 {finder} --repo {checkout} {quoted_path}\n"
+    "The first searches git, the guarded-file store, and the Timeshift (ned-box) or Time Machine "
+    "(Mac) snapshot taken after this hook first saw the version; the second searches for {path} "
+    "in the Mac's local snapshots, git and its reflog, the log-store, agent transcripts, "
+    "Timeshift and Time Machine. " + FINDER_COPIES_NOT_ALL_CHECKED +
+    "If a copy is the approved version, put it back with: cp -- <copy> {quoted_path}\n"
+    "If no copy is the approved version, including when the searches find only other versions, "
+    "tell the user that the approved version of {path} is in none of the places the searches "
+    "reached, name each place the searches say they could not reach, and ask him what {path} "
+    "should hold instead.\n"
+    "If you are a subagent and no copy is the approved version, report this to the agent that "
+    "dispatched you instead of asking the user.")
+FIND_DELETED_PATH_PROGRAM = CLONE_ROOT / "scripts" / "find-deleted-path-across-backups.py"
 REMEDY_NED_BOX = "check that {store} exists and that nedlern can write to it."
 REMEDY_MAC = ("check that ned-box is up and that the Mac has mounted ned-box's home share at "
               "/Volumes/nedhome with {store} in it.")
@@ -458,14 +502,15 @@ class Store:
         self.missing.difference_update(prefixes)
         return fd
 
-    def read(self, path: str, name: str) -> bytes:
+    def read(self, path: str, name: str, missing=b""):
+        """The stored file's bytes; missing when the store holds no such file."""
         fd = self.path_directory(path, create=False)
         if fd is None:
-            return b""
+            return missing
         try:
             file_fd = os.open(name, os.O_RDONLY, dir_fd=fd)
         except FileNotFoundError:
-            return b""
+            return missing
         finally:
             os.close(fd)
         try:
@@ -541,7 +586,10 @@ class Store:
     def copied_version(self, path: str, copy_hash: str, log):
         """The copy's bytes when they match its name or a hash of its own bytes that a seen line
         of log records beside the name, as for a file a line-ending filter changes; else None."""
-        data = self.read(path, copy_hash)
+        # A missing copy is not a copy of the empty file, whose bytes are also b"".
+        data = self.read(path, copy_hash, missing=None)
+        if data is None:
+            return None
         own_hash = blob_hash(data)
         if own_hash == copy_hash or any(
                 fields[5] == copy_hash and fields[7] == own_hash
@@ -1476,7 +1524,7 @@ def run_hook(payload):
             for path in (set(plan[15])
                          - {path for path, _ in unreadable}):  # pragma: no mutate, every unreadable path is one of plan[15], so `^` gives the same set
                 del first_run[path]
-            lost += unreadable
+            lost += [(path, blob, plan[13][0]) for path, blob in unreadable]
             first_run.update({path: changed[path][2] for path in skipped})  # pragma: no mutate, a checkout's file has one string as key and copy hash, so [3] reads the same
         for path, (now, _, key, copy_hash) in changed.items():
             if now is None:
@@ -1496,8 +1544,11 @@ def run_hook(payload):
         write_state(plan[1], state)
         asks += plan_asks
         reminders += plan_reminders
-    return [FIRST_RUN_VERSION_LOST.format(path=path, blob=blob, program=HOOK_PATH)
-            for path, blob in lost] + messages(asks, reminders)
+    return [FIRST_RUN_VERSION_LOST.format(
+        path=path, blob=blob, program=HOOK_PATH,
+        finder=shlex.quote(str(FIND_DELETED_PATH_PROGRAM)), checkout=shlex.quote(str(checkout)),
+        quoted_path=shlex.quote(path), marker=APPROVAL_MARKER_NAME)
+            for path, blob, checkout in lost] + messages(asks, reminders)
 
 
 def renames(store, changed, state_files, approved_first):
@@ -1629,17 +1680,33 @@ def approve(pairs, cwd: Path):
     else:
         how, extra_fields = HOW_USER, []
     marker_time = os.stat(marker).st_mtime_ns
+
+    def not_shown(path, key, now):
+        return Refused(f"{path} no longer holds version {key} but {now}, so the user was not "
+                       "shown this version. Show him the change the hook's latest message "
+                       "gives, and ask him again")
+
+    gone = set()
     for path, key in pairs:
         now = current_version(path)[0]
-        if now != key:
-            raise Refused(f"{path} no longer holds version {key} but {now}, so the user was not "
-                          "shown this version. Show him the change the hook's latest message "
-                          "gives, and ask him again")
+        if now == DELETED and key != DELETED:
+            gone.add(path)
+        elif now != key:
+            raise not_shown(path, key, now)
 
     def work(store, end):
         logs = {path: store.log(path) for path, _ in pairs}
+        for path, key in pairs:
+            # A file with no approved version deleted after the ask, as by the rm the ask
+            # offered, is skipped once this hook has recorded the deletion, which needs no
+            # approval; a file with an approved version still refuses, so it is not left deleted.
+            if path in gone and (DELETED not in store.approved(path)
+                                 or newest_approved(store, path, logs[path], key) is not None):
+                raise not_shown(path, key, DELETED)
         if how != HOW_USER:
             for path, key in pairs:
+                if path in gone:
+                    continue
                 seen = first_seen_time(logs[path], key)
                 # Equal times count as the marker coming after, so the change goes to the user.
                 if seen is None or marker_time >= seen:
@@ -1652,13 +1719,17 @@ def approve(pairs, cwd: Path):
         if time.monotonic() > end:
             raise StoreUnreachable("the deadline passed before the approval was recorded")
         for path, key in pairs:
+            if path in gone:
+                continue
             if key not in store.approved(path):
                 store.approve(path, key)
             log_line(store, path, "approved", "command-line", "", key, how, *extra_fields)
         return True
 
     run_command_work(work)
-    lines = [f"Approved {path} at version {key}." for path, key in pairs]
+    lines = [f"Skipped {path}: it was deleted after the ask, and this hook has recorded the "
+             "deletion, which needs no approval." if path in gone
+             else f"Approved {path} at version {key}." for path, key in pairs]
     try:
         marker.unlink(missing_ok=True)
     except OSError as error:
@@ -1668,14 +1739,22 @@ def approve(pairs, cwd: Path):
 
 
 def restore(pairs):
-    """Put back the newest approved version of each declined (path, hash)."""
-    current, held = {}, set()
+    """Put back the newest approved version of each declined (path, hash), skipping a file
+    deleted since the ask once this hook has recorded the deletion."""
+
+    def changed_since_shown(path, key, now):
+        return Refused(f"{path} no longer holds the declined version {key} but {now}, so it "
+                       "changed after the user was shown it. Show him the change the hook's "
+                       "latest message gives, and ask him again")
+
+    current, held, gone = {}, set(), set()
     for path, key in pairs:
         now = current_version(path)
+        if now[0] == DELETED and key != DELETED:
+            gone.add(path)
+            continue
         if now[0] != key:
-            raise Refused(f"{path} no longer holds the declined version {key} but {now[0]}, so it "
-                          "changed after the user was shown it. Show him the change the hook's "
-                          "latest message gives, and ask him again")
+            raise changed_since_shown(path, key, now[0])
         current[path] = now
         checkout = guard().enclosing_repository_root(Path(path).parent)
         try:
@@ -1687,8 +1766,15 @@ def restore(pairs):
             pass
 
     def work(store, end):
-        plan = []
+        plan, lines = [], []
         for path, key in pairs:
+            if path in gone:
+                if DELETED not in store.approved(path) or newest_approved(
+                        store, path, store.log(path), key) is not None:
+                    raise changed_since_shown(path, key, DELETED)
+                lines.append(f"Skipped {path}: it was deleted after the ask, and this hook has "
+                             "recorded the deletion, so there is nothing to put back.")
+                continue
             _, copy_hash, data = current[path]
             if key != DELETED and path not in held:
                 store.copy(path, copy_hash, data)
@@ -1703,13 +1789,15 @@ def restore(pairs):
             if newest is not None:
                 content = store.kept_version(path, newest[1], log)
                 if content is None:
-                    raise StoreUnreachable(f"the approved version {newest[1]} of {path} is in "
-                                           "neither the guarded-file store's copies of that "
-                                           "file nor the git repository of its checkout")
+                    checkout = guard().enclosing_repository_root(Path(path).parent)
+                    raise StoreUnreachable(APPROVED_VERSION_KEPT_NOWHERE.format(
+                        blob=newest[1], path=path, quoted_path=shlex.quote(path),
+                        finder=shlex.quote(str(FIND_DELETED_PATH_PROGRAM)),
+                        checkout=shlex.quote(str(checkout or CLONE_ROOT))))
             plan.append((path, key, newest, content))
         if time.monotonic() > end:
             raise StoreUnreachable("the deadline passed before any version was put back")
-        lines, failed = [], []
+        failed = []
         for path, key, newest, content in plan:
             try:
                 if content is None:
@@ -1735,7 +1823,7 @@ def restore(pairs):
     lines, failed = run_command_work(work)
     for path, key in pairs:
         checkout = guard().enclosing_repository_root(Path(path).parent)
-        if checkout is None or key == DELETED or path in failed:
+        if checkout is None or key == DELETED or path in failed or path in gone:
             continue
         relative = os.path.relpath(path, checkout)
         # A repository with no commit yet has no commit to hold the declined version.
