@@ -294,7 +294,9 @@ AA_SKILL_TEXT = (
 DISCUSSION_SETTLED_SKILL_TEXT = (
     "When the discussion of an item finds a better way than its recommendation, whether its alternative or an idea "
     "the item does not name, rewrite the item's recommendation as that way and its alternative as the old "
-    "recommendation, show the revised item, and record only an answer given to the revised item."
+    "recommendation, update its `#case_against` to the strongest case against the new recommendation, and its "
+    "`#new` and `#new_if_d` lines so that `#new` holds what A adds and `#new_if_d` what D adds, show the revised "
+    "item, and record only an answer given to the revised item."
 )
 WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE = (
     "Act on this line only if the discussion of the waiting approval-walk item found a better way than its "
