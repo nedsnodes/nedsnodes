@@ -6,9 +6,10 @@ limited to docstrings, comments and tool-message-to-agent strings get codex-revi
 A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in_source,
 in nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py, finds;
 any other string, such as a regular expression, a command's argument or a path,
-carries behaviour, so a change to it is a behaviour change; so does a module constant's value
-the collector marks collected_string_is_module_constant_whose_value_also_steers_the_program, such as MODE in print(MODE) and
-if requested_mode == MODE:.
+carries behaviour, so a change to it is a behaviour change; so does any string in the value of
+an assignment at module level, such as MODE's in MODE = "fast" with print(MODE), even when the
+collector lists it for its cold-read-fast-read, because the program may also compare or look up
+that value elsewhere.
 Python behaviour changes and other code get claude-and-codex-review-and-head-tests-tier. Prose gets
 no-reviewer-tier. Settings, Bash guards and registered hooks always get
 claude-and-codex-review-and-head-tests-tier; all of .claude/guard-hooks/ does too,
@@ -511,17 +512,34 @@ def nearest_call_prints_its_argument(node, parents, helper_printers):
 
 def tool_message_to_agent_string_literal_positions(tree, source):
     """The positions of the literal pieces of each tool-message-to-agent string whose change is graded
-    as a message change; a module constant's value that also steers the program, as
-    collected_string_is_module_constant_whose_value_also_steers_the_program says, is left out, so a change to it is a behaviour change."""
+    as a message change. A string in the value of an assignment at module level is left out, so a change
+    to it is a behaviour change: the program may also compare or look up a module constant's value."""
     entry_positions = {(entry["line"], entry["column"], entry["end_line"], entry["end_column"])
-                       for entry in tool_message_to_agent_string_nodes_in_source(source)
-                       if not entry["collected_string_is_module_constant_whose_value_also_steers_the_program"]}
+                       for entry in tool_message_to_agent_string_nodes_in_source(source)}
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     helper_printers = helper_printers_in_tree(tree)
+    module_constant_value_node_ids = module_level_assignment_value_node_ids(tree)
     return set().union(*(literal_piece_positions(node) for node in ast.walk(tree)
                          if isinstance(node, (ast.Constant, ast.JoinedStr, ast.BinOp))
+                         and id(node) not in module_constant_value_node_ids
                          and source_position(node) in entry_positions
                          and nearest_call_prints_its_argument(node, parents, helper_printers)))
+
+
+def module_level_assignment_value_node_ids(tree):
+    """The ids of every node inside the value of an assignment, annotated assignment or += made in the
+    module's own scope, outside any function or class body, as in MODE = "fast"."""
+    ids = set()
+    pending = list(tree.body)
+    while pending:
+        statement = pending.pop()
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign)) and statement.value is not None:
+            ids.update(id(node) for node in ast.walk(statement.value))
+        pending.extend(child for child in ast.iter_child_nodes(statement)
+                       if isinstance(child, (ast.stmt, ast.excepthandler, ast.match_case)))
+    return ids
 
 
 class SyntaxTreeWithoutDocstringsOrToolMessageToAgentStringValues(ast.NodeTransformer):
