@@ -5,8 +5,9 @@ initial-agent-instructions:
 successor_initial_agent_instructions_line_naming_waiting_approval_walk_item
 on fixture walk-minutes and walk-documents (open, closed, paused, no `#item_page` line, a failed
 publish, a failed-publish value equal to the walk finder's but not the same
-object, a link sorting after that value, two open walks, several waiting items, no point, an unreadable
-walk), and where the line goes in the prompts both ignition plans compose and
+object, a link sorting after that value, two open walks, one of them named by the next step,
+a reused item number, several waiting items, no point, an unreadable walk), and where the line
+goes in the prompts both ignition plans compose and
 in the prompt the launch site hands the successor.
 
 Run: python3 nn-systems/handoff/tests/handoff-supervisor-successor-initial-agent-instructions-line-naming-waiting-approval-walk-item-test.py
@@ -37,8 +38,8 @@ WALK_DOCUMENT = (
     "## Item 3 of 3\n\nRecommendation: none.\n")
 
 
-def lines_for(root):
-    return supervisor.successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(root)
+def lines_for(root, next_step=""):
+    return supervisor.successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(root, next_step)
 
 
 def walk_in(root, minutes, document=WALK_DOCUMENT, name=WALK):
@@ -54,10 +55,11 @@ def walk_in(root, minutes, document=WALK_DOCUMENT, name=WALK):
 def approved_line(walk, count_and_point, link, count):
     """The line the user approved for a waiting item with a page link, filled in."""
     return (f"Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
-            f"{link}. Before your first message, open that page with the Artifact tool. If it is gone, publish "
-            f"the item again from docs/walk/{walk}.md and append the line \"#item_page item {count} <new link>\" "
-            f"to docs/walk/{walk}-minutes.md. Show the item in full, and end your first message with its closing "
-            f"line, holding the link that opens.")
+            f"{link}. Before your first message, check, with the Artifact tool's read action, that the link "
+            f"still works. If the read fails, publish the item again from docs/walk/{walk}.md and append the line "
+            f"\"#item_page item {count} <new link>\" to docs/walk/{walk}-minutes.md. Show the item in full, and "
+            f"end your first message with the item's closing line, holding the link that works: this one, or "
+            f"the new link when you published again.")
 
 
 def without_link_line(walk, count_and_point, count):
@@ -117,6 +119,14 @@ def run_walk_minutes_cases(workspace):
     walk_in(root, "#next_to_present item 2 of 3\n#item_page item 1 of 3 https://claude.ai/artifact/ItemOne\n")
     check("no `#item_page` line for the waiting item: the line says so and says to publish it",
           lines_for(root) == (without_link_line(WALK, f"2 of 3, {POINT},", "2 of 3"),), repr(lines_for(root)))
+
+    root = workspace / "file-item-page"
+    file_link = "file:///Volumes/nedhome/agents/fixture/docs/walk/item-2.html"
+    walk_in(root, OPEN_MINUTES + f"#item_page item 2 of 3 {file_link}\n")
+    check("a newest `#item_page` line holding a `file:` link: the line keeps it and asks for no Artifact read",
+          lines_for(root) == (supervisor.WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE.format(
+              walk=WALK, count_and_point=f"2 of 3, {POINT},", count="2 of 3", link=file_link),)
+          and "Artifact tool's read action" not in lines_for(root)[0], repr(lines_for(root)))
 
     root = workspace / "publish-failed"
     walk_in(root, OPEN_MINUTES + "#item_page item 2 of 3 publish failed: the Artifact tool timed out\n")
@@ -188,6 +198,149 @@ def run_walk_minutes_cases(workspace):
           lines_for(root) == (approved_line("fixture-older-walk", "1 of 3, Keep the first thing,",
                                             "https://claude.ai/artifact/Old", "1 of 3"),),
           repr(lines_for(root)))
+
+    older_line = (approved_line("fixture-older-walk", "1 of 3, Keep the first thing,",
+                                "https://claude.ai/artifact/Old", "1 of 3"),)
+    os.utime(older, (1_000_000_000, 1_000_000_000))
+    named = lines_for(root, "Continue approval-walk fixture-older-walk at item 1.")
+    check("two open walks, the next step naming the one with the older walk-minutes: that one",
+          named == older_line, repr(named))
+    prefix_only = lines_for(root, "Continue approval-walk fixture-older-walk-2 at item 1.")
+    check("two open walks, the next step naming only a longer name that begins with one walk's name: the latest",
+          prefix_only == expected, repr(prefix_only))
+    by_minutes_path = lines_for(root, "Read docs/walk/fixture-older-walk-minutes.md and continue.")
+    check("two open walks, the next step naming the older one only by its walk-minutes path: that one",
+          by_minutes_path == older_line, repr(by_minutes_path))
+    backup_first = lines_for(root, f"Compare docs/walk/fixture-older-walk-minutes.md.bak, then continue approval-walk {WALK}.")
+    check("two open walks, the next step naming a backup of one's walk-minutes before the other walk: the other",
+          backup_first == expected, repr(backup_first))
+    editor_backup_first = lines_for(
+        root, f"Compare docs/walk/fixture-older-walk-minutes.md~, then continue approval-walk {WALK}.")
+    check("two open walks, the next step naming an editor backup of one's walk-minutes before the other walk: the other",
+          editor_backup_first == expected, repr(editor_backup_first))
+    line_reference = lines_for(root, "Read docs/walk/fixture-older-walk-minutes.md:143 and continue.")
+    check("two open walks, the next step naming one's walk-minutes with a line reference: that one",
+          line_reference == older_line, repr(line_reference))
+    line_range = lines_for(root, f"Read docs/walk/fixture-older-walk-minutes.md:143-150, then {WALK}.")
+    check("two open walks, the next step naming one's walk-minutes with a line range first: that one",
+          line_range == older_line, repr(line_range))
+    bold = lines_for(root, f"Continue approval-walk **fixture-older-walk** at item 1, not {WALK}.")
+    check("two open walks, the next step naming one in bold first: that one", bold == older_line, repr(bold))
+    curly_quoted = lines_for(root, f"Continue approval-walk \u201cfixture-older-walk\u201d at item 1, not {WALK}.")
+    check("two open walks, the next step naming one in curly quotes first: that one",
+          curly_quoted == older_line, repr(curly_quoted))
+    sentence_end = lines_for(root, "Read docs/walk/fixture-older-walk-minutes.md.")
+    check("two open walks, the next step ending a sentence with one's walk-minutes path: that one",
+          sentence_end == older_line, repr(sentence_end))
+    first_action_older = lines_for(
+        root, "## First action\n- Continue approval-walk fixture-older-walk at item 1.\n\n"
+              f"## Facts not held elsewhere\n- {WALK} waits on the user's answer to item 2.\n")
+    check("two open walks, the first action naming the older one and a later line the newer: the older one",
+          first_action_older == older_line, repr(first_action_older))
+    first_action_newer = lines_for(
+        root, f"## First action\n- Continue approval-walk {WALK} at item 2.\n\n"
+              "## Facts not held elsewhere\n- fixture-older-walk is paused in all but name.\n")
+    check("two open walks, the first action naming the newer one and a later line the older: the newer one",
+          first_action_newer == expected, repr(first_action_newer))
+
+    root = workspace / "reused-number"
+    walk_in(root, "#next_to_present item 2 of 3\n" f"#item_page item 2 of 3 {LINK}\n",
+            document=WALK_DOCUMENT + "\n## Item 2 of 4: Old proposal\n\nRecommendation: old.\n")
+    reused = lines_for(root)
+    check("two headings for the waiting item, told apart by M: the point of the heading the walk-minutes' M picks",
+          reused == expected, f"{reused!r}\nexpected {expected!r}")
+
+    root = workspace / "several-items-later-heading-naming-the-first"
+    walk_in(root, "#next_to_present items 2 and 3 of 4\n" f"#item_page item 2 of 4 {LINK}\n",
+            document="# Fixture\n\n## Item 1 of 4: First\n\nRecommendation: one.\n\n"
+                     "## Item 2 of 4: Current\n\nRecommendation: two.\n\n"
+                     "## Items 2 and 3 of 5: Other\n\nRecommendation: three.\n")
+    several = lines_for(root)
+    check("several waiting items, a later item's heading naming the first too: the first item's own point",
+          several == (approved_line(WALK, "2 of 4, Current,", LINK, "2 of 4"),), repr(several))
+
+    root = workspace / "several-items-later-first-named"
+    walk_in(root, "#next_to_present items 3 and 2 of 4\n" f"#item_page item 3 of 4 {LINK}\n",
+            document="# Fixture\n\n## Item 1 of 4: First\n\nRecommendation: one.\n\n"
+                     "## Item 2 of 4: Earlier in the document\n\nRecommendation: two.\n\n"
+                     "## Item 3 of 4: Named first\n\nRecommendation: three.\n")
+    first_named = lines_for(root)
+    check("several waiting items, the first-named one's heading later in the walk-document: its own point",
+          first_named == (approved_line(WALK, "3 of 4, Named first,", LINK, "3 of 4"),), repr(first_named))
+
+    root = workspace / "several-items-later-named-one-without-heading"
+    walk_in(root, "#next_to_present items 3 and 2 of 4\n" f"#item_page item 3 of 4 {LINK}\n",
+            document="# Fixture\n\n## Item 1 of 4: First\n\nRecommendation: one.\n\n"
+                     "## Item 3 of 4: Named first\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        one_missing = lines_for(root)
+    check("several waiting items, a later-named one with no heading: the line, without the point, then the error",
+          len(one_missing) == 1 and one_missing[0].startswith(approved_line(WALK, "3 of 4", LINK, "3 of 4"))
+          and "could not read the item's text" in one_missing[0] and "`Item 2`" in one_missing[0],
+          repr(one_missing))
+
+    root = workspace / "several-items-no-total-later-named-one-without-heading"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
+                     "## Item 3 of 3: Last\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        no_total = lines_for(root)
+    check("several waiting items, no total, a later-named one with no heading: the `#item_page` line still has `of M`",
+          len(no_total) == 1 and no_total[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "`Item 2`" in no_total[0], repr(no_total))
+
+    root = workspace / "several-items-no-total-first-named-one-without-heading"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 2 of 3: Named second\n\nRecommendation: two.\n\n"
+                     "## Item 3 of 3: Last\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        first_missing = lines_for(root)
+    check("several waiting items, no total, the first-named one with no heading: the `#item_page` line still has `of M`",
+          len(first_missing) == 1 and first_missing[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "`Item 1`" in first_missing[0], repr(first_missing))
+
+    root = workspace / "several-items-no-total-first-named-one-repeated"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
+                     "## Item 1 of 2: Named first again\n\nRecommendation: one again.\n\n"
+                     "## Item 2 of 3: Named second\n\nRecommendation: two.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        first_repeated = lines_for(root)
+    check("several waiting items, no total, the first-named one's heading repeated, one giving the counted M: "
+          "the `#item_page` line still has `of M`, and the counted M does not settle the repeated heading",
+          len(first_repeated) == 1 and first_repeated[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "more than one heading for `Item 1`" in first_repeated[0], repr(first_repeated))
+
+    root = workspace / "several-items-first-repeated-later-missing"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
+                     "## Item 1 of 4: Named first again\n\nRecommendation: one again.\n\n"
+                     "## Item 3 of 3: Last\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        both_problems = lines_for(root)
+    check("several waiting items, the first-named one's heading repeated and a later one's missing: one error names both",
+          len(both_problems) == 1 and "no heading `Item 2`" in both_problems[0]
+          and "more than one heading for `Item 1`" in both_problems[0], repr(both_problems))
+
+    root = workspace / "no-total-no-item-heading"
+    walk_in(root, "#next_to_present item 1\n", document="# Fixture\n\nNo item headings here.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        no_headings = lines_for(root)
+    check("no total and no item heading: the `#item_page` line has no `of 0`, and the error says why",
+          len(no_headings) == 1 and no_headings[0].startswith(without_link_line(WALK, "1", "1"))
+          and "of 0" not in no_headings[0] and "no heading with a running count" in no_headings[0],
+          repr(no_headings))
+
+    root = workspace / "no-total-hook-fails-to-load"
+    walk_in(root, "#next_to_present item 1\n",
+            document="# Fixture\n\n## Item 1 of 2: First\n\nRecommendation: one.\n\n"
+                     "## Item 2 of 2: Second\n\nRecommendation: two.\n")
+    with fixture.supervisor_names_replaced(WALK_SHORT_ANSWER_HOOK_PATH=root / "no-such-hook.py"), \
+            contextlib.redirect_stdout(io.StringIO()):
+        hook_unloadable = lines_for(root)
+    check("no total and a short-answer hook that fails to load: the `#item_page` line still has `of M`, then the error",
+          len(hook_unloadable) == 1 and hook_unloadable[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "could not read the item's text" in hook_unloadable[0], repr(hook_unloadable))
 
     root = workspace / "open-and-paused"
     paused = walk_in(root, "#next_to_present item 1 of 3\n#approval_walk_paused away\n", name="fixture-paused-walk")
@@ -266,6 +419,15 @@ def run_walk_minutes_cases(workspace):
               OPEN_MINUTES + failed[0] + "\n", parser).get("2") == walk_finder.ITEM_PAGE_PUBLISH_FAILED,
           repr(failed))
 
+    no_total = without_link_line(WALK, "1", "1")
+    no_total_filled = [quoted_item_page_lines(no_total)[0].replace("<new link>", "https://claude.ai/artifact/Republished"),
+                       quoted_item_page_lines(no_total)[1].replace("<what the Artifact tool said>", "it timed out")]
+    check("with no total known, each `#item_page` line the no-link line asks for, filled in, is read by the walk finder",
+          [walk_finder.newest_item_page_link_per_item_from_walk_minutes("#next_to_present item 1\n" + line + "\n",
+                                                                        parser).get("1") for line in no_total_filled]
+          == ["https://claude.ai/artifact/Republished", walk_finder.ITEM_PAGE_PUBLISH_FAILED],
+          repr(no_total_filled))
+
     root = workspace / "walk-finder-missing"
     walk_in(root, OPEN_MINUTES)
     with fixture.supervisor_names_replaced(WALK_FINDER_PATH=root / "no-such-walk-finder.py"), \
@@ -299,17 +461,22 @@ def run_prompt_placement_cases(workspace):
           repr(with_line))
 
     # Through the launch site: a supervisor starting a fresh agent-session from an unconsumed handoff, in a
-    # working directory holding an open walk, hands the successor the line.
+    # working directory holding two open walks, the next step naming the one with the older walk-minutes; the
+    # launch site must pass the next step, or the line would name the newer walk.
     root = workspace / "launch"
-    walk_in(root, OPEN_MINUTES)
+    newer = walk_in(root, OPEN_MINUTES)
+    older = walk_in(root, "#next_to_present item 1 of 3\n#item_page item 1 of 3 https://claude.ai/artifact/Old\n",
+                    name="fixture-older-walk")
+    os.utime(older, (1_000_000_000, 1_000_000_000))
+    os.utime(newer, (2_000_000_000, 2_000_000_000))
     handoff_directory = root / "handoffs"
     handoff_directory.mkdir(parents=True)
     settings = supervisor.SupervisorSettings(
         agent="fixture-seat", working_directory=root, handoff_directory=handoff_directory,
         agent_command="unused-stub-agent", first_prompt="")
     settings.handoff_path.write_text(
-        "written-at: 2026-11-10T00:00:00Z\nnext-step: resume the audit\nsession-handoff-sequence-number: 5\n",
-        encoding="utf-8")
+        "written-at: 2026-11-10T00:00:00Z\nnext-step: continue approval-walk fixture-older-walk\n"
+        "session-handoff-sequence-number: 5\n", encoding="utf-8")
     supervisor.write_supervisor_state(settings.state_path, {"consumed_counter": 4, "generation": 4})
     launched_prompts = []
 
@@ -317,6 +484,8 @@ def run_prompt_placement_cases(workspace):
         launched_prompts.append(prompt)
         return fixture.StubLaunchedSession(0)
 
+    older_line = approved_line("fixture-older-walk", "1 of 3, Keep the first thing,",
+                               "https://claude.ai/artifact/Old", "1 of 3")
     console = io.StringIO()
     with fixture.supervisor_names_replaced(
             launch_agent_session=launch_recording,
@@ -326,8 +495,9 @@ def run_prompt_placement_cases(workspace):
             memory_review_due_lines=lambda: (),
             stdin_isatty=False), contextlib.redirect_stdout(console):
         supervisor.supervise_sessions(settings)
-    check("launch site: the successor's first prompt carries the line right after the approval-walk instruction",
-          len(launched_prompts) == 1 and f"{instruction} {line} " in launched_prompts[0],
+    check("launch site, two open walks, the next step naming the older: the successor's first prompt carries the "
+          "older walk's line right after the approval-walk instruction",
+          len(launched_prompts) == 1 and f"{instruction} {older_line} " in launched_prompts[0],
           f"{launched_prompts!r}\n{console.getvalue()[-900:]}")
 
 

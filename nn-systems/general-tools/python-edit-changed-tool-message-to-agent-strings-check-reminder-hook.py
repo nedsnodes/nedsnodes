@@ -6,7 +6,7 @@ its cold-read-fast-read command: the hook writes each message's text to a file
 of its own under the temporary directory, because cold-read-fast-read.py reads
 only files, and the file's name becomes the cold-read-record's name. The text
 written is the message as the agent reads it, without Python's quotes, with
-each placeholder shown as <its source>, or as its value when it names a
+each placeholder shown as <filled in: its source>, or as its value when it names a
 module-level string constant, as the collector's
 text_as_agent_reads_it_with_placeholder_stand_ins says, so the reader is not handed
 Python source.
@@ -75,7 +75,9 @@ _checkout_path_spec.loader.exec_module(checkout_path)
 HOOK_NAME = "python-edit-changed-tool-message-to-agent-strings-check-reminder"
 PAGE_PATH = ("docs/nedsnodes-wiki/"
              "nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md")
-FAST_READ_COMMAND = "python3 nn-systems/cold-read/cold-read-fast-read.py --target {target}"
+# A tool-message-to-agent is written for an agent.
+FAST_READ_COMMAND = ("python3 nn-systems/cold-read/cold-read-fast-read.py --target {target} "
+                     "--text-intended-reader-category agent-readable")
 FAST_READ_TARGET_DIRECTORY_NAME = "tool-message-to-agent-fast-read-targets"
 EDIT_TOOL_NAMES = ("Edit", "MultiEdit")
 INSPECTED_TOOL_NAMES = (*EDIT_TOOL_NAMES, "Write")

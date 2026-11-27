@@ -35,9 +35,9 @@ fails before any model cost is spent.
 
 Operating rules:
 
-- Both agent-binaries on every audit — the claude CLI (claude-fable-5-1, falling
-  back to claude-opus-5 when Fable produces no review) and
-  gpt-6.1-sol (the codex CLI), at xhigh reasoning effort. Each audit
+- Both agent-binaries on every audit — the claude CLI (claude-fable-5-2, falling
+  back to claude-opus-5-5 when Fable produces no review) and
+  gpt-6.2-sol (the codex CLI), at xhigh reasoning effort. Each audit
   therefore runs as two review agents, one per agent-binary, named
   `<audit>-adversarial-prompt-<runtime>`, such as `cut-adversarial-prompt-claude`
   (the `--adversarial-prompt` flag still takes the short `<audit>`, such as
@@ -142,8 +142,8 @@ Running a sanity-check, and reading its output:
   prints the `record:` line and the record's path.
 - An agent that saves no report is launched once more by the runner, with the
   same prompt, in the same copy, unless the cause is one only the user can
-  clear or the launch timed out. The cause classes: `logged-out`,
-  `agent-binary-missing`, `account-limit` and `model-limit`, which only the
+  clear or the launch timed out. The cause classes: `logged-out` and
+  `agent-binary-missing`, which only the
   user can clear and which are never relaunched; `timeout`, the launch cut off
   after an hour, never relaunched, because the same launch would cost the same
   hour; `exit-<code>`, any other failed launch, whose detail is the last line
@@ -297,6 +297,18 @@ import typing
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 RECORDS_DIRECTORY_NAME = "sanity-check-records"
+SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION = (
+    "Note this failed model in sanity-check-finding-dispositions.md; the runner has already "
+    "recorded it.")
+SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION = (
+    "Before you trust this quote, look for it in git history or on the web, and record what "
+    "you found in sanity-check-finding-dispositions.md.")
+SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION = (
+    "The runner discards these writes with the review copy; note this warning in "
+    "sanity-check-finding-dispositions.md.")
+SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION = (
+    "Set this warning aside in sanity-check-finding-dispositions.md as needing no action: the "
+    "runner wrote the cell's report over the stray file.")
 RECORDS_ROOT = REPO_ROOT / RECORDS_DIRECTORY_NAME
 # The record reaches the log-store by program, not by an agent remembering to
 # run one, the way nn-systems/cold-read/cold-read-grid.py ships its own.
@@ -348,16 +360,14 @@ def _cold_read_cell_program(file_name: str):
 
 
 # What each agent-binary prints when a launch fails for a reason it can name
-# (logged out, a usage limit), per agent-binary: a function from the model to the
-# texts, which common.classify_failed_attempt matches against the start of
+# (logged out), per agent-binary: the texts that
+# common.classify_failed_attempt matches against the start of
 # each line the agent-binary wrote. Each text was captured from a real run and
 # is kept, with its source, beside the cold-read cell that met it; taken from
 # there, not copied, so a text added for one instrument is recognised by both.
-RECOGNISED_FAILURE_TEXTS_FOR_MODEL = {
-    "claude": _cold_read_cell_program(
-        "cold-read-claude-cell.py").recognised_failure_texts_for_model,
-    "codex": _cold_read_cell_program(
-        "cold-read-codex-cell.py").recognised_failure_texts_for_model,
+RECOGNISED_FAILURE_TEXTS = {
+    "claude": _cold_read_cell_program("cold-read-claude-cell.py").RECOGNISED_FAILURE_TEXTS,
+    "codex": _cold_read_cell_program("cold-read-codex-cell.py").RECOGNISED_FAILURE_TEXTS,
 }
 
 # The signals that end a run early and that this runner answers by stopping
@@ -491,7 +501,7 @@ IGNORED_PATHS_WATCHED_FOR_WRITES = (RECORDS_DIRECTORY_NAME,)
 IGNORED_PATH_STATUS_CODE = "!!"
 
 # The claude agent-binary's chain, tried in order until one produces a review.
-# "claude-fable-5" is obsolete, and Fable is sometimes unavailable, so Opus 5
+# "claude-fable-5" is obsolete, and Fable is sometimes unavailable, so Opus 5.5
 # stands behind it and ends the chain.
 #
 # WHAT COUNTS AS A FAILURE WORTH FALLING BACK FROM follows the house chain,
@@ -500,10 +510,10 @@ IGNORED_PATH_STATUS_CODE = "!!"
 # one event — no review was produced — so the chain advances on all three.
 # That module is not imported here: it is built around the cold-read cell's
 # command line and report file, and this runner has neither.
-CLAUDE_MODEL_CHAIN = ("claude-fable-5-1", "claude-opus-5")
-# Matches cold-read-codex-cell.py's `deep` tier; the id needs codex-cli 0.159.1
+CLAUDE_MODEL_CHAIN = ("claude-fable-5-2", "claude-opus-5-5")
+# Matches cold-read-codex-cell.py's `deep` tier; the id needs codex-cli 0.169.1
 # or later.
-CODEX_MODEL = "gpt-6.1-sol"
+CODEX_MODEL = "gpt-6.2-sol"
 # xhigh for both agent-binaries, by the user's calibration and a tier probe of both:
 # max earned neither slot.
 REASONING_EFFORT = "xhigh"
@@ -639,7 +649,6 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # The run was stopped: the chain does not go on to a model whose
             # review nobody is left to save.
             break
-        recognised_texts = RECOGNISED_FAILURE_TEXTS_FOR_MODEL["claude"](model)
         # dontAsk: a tool call --allowedTools does not allow is refused, with no one to ask.
         command = [
             *command_line_prefix.claude_code_headless_run_command_line_prefix_build("dontAsk"),
@@ -669,7 +678,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # the run. run_cell's own OSError handler still covers the codex
             # agent-binary, which has no chain to advance.
             failed_attempts.append(f"{model}({type(error).__name__})")
-            print(f"WARNING: {model} could not be run: {error}", flush=True)
+            print_warning_with_its_next_step(f"{model} could not be run: {error}", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
                 start_error=str(error))
@@ -698,20 +707,20 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             failed_attempts.append(f"{model}(exit{completed.returncode})")
             if completed.stdout:
                 print(completed.stdout, flush=True)
-            print(f"WARNING: {model} failed (exit {completed.returncode})", flush=True)
+            print_warning_with_its_next_step(f"{model} failed (exit {completed.returncode})", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
-                exit_code=completed.returncode, recognised_texts=recognised_texts)
+                exit_code=completed.returncode, recognised_texts=RECOGNISED_FAILURE_TEXTS["claude"])
             continue
         if not completed.stdout.strip():
             # Exiting 0 with nothing to show is the ending that looks most like
             # success to a caller reading only the exit code, and the report it
             # would save is an empty review carrying a provenance stamp.
             failed_attempts.append(f"{model}(no-report)")
-            print(f"WARNING: {model} exited 0 but produced no review", flush=True)
+            print_warning_with_its_next_step(f"{model} exited 0 but produced no review", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr=completed.stderr or "", exit_code=0,
-                recognised_texts=recognised_texts)
+                recognised_texts=RECOGNISED_FAILURE_TEXTS["claude"])
             continue
         return 0, completed.stdout, model, "+".join(failed_attempts), None
     return 1, "", "", "+".join(failed_attempts), last_cause
@@ -842,7 +851,7 @@ def run_codex(prompt: str, checkout: pathlib.Path = None) -> tuple:
             cause = common.classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
                 exit_code=completed.returncode,
-                recognised_texts=RECOGNISED_FAILURE_TEXTS_FOR_MODEL["codex"](CODEX_MODEL))
+                recognised_texts=RECOGNISED_FAILURE_TEXTS["codex"])
             return completed.returncode, "", CODEX_MODEL, "", cause
         return (0, last_message_path.read_text(encoding="utf-8", errors="replace"),
                 CODEX_MODEL, "", None)
@@ -981,8 +990,9 @@ def quote_scan(corpus: tuple, report: str, cell: str) -> None:
                 continue
             normalized = normalized_for_quote_match(fragment)
             if not any(normalized in file_text for file_text in corpus):
-                print(f'WARNING: {cell} quote found in no tracked file: '
-                      f'"{fragment[:60]}"', flush=True)
+                print_warning_with_its_next_step(
+                    f'{cell} quote found in no tracked file: "{fragment[:60]}"',
+                    SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION)
 
 
 def missing_report_phrases(adversarial_prompt: str, text: str) -> list:
@@ -1439,8 +1449,11 @@ class RunOutputCopiedToRecordLog:
     is held and written when `attach` names the file. `detach` closes the file
     before the record is shipped, so the copy in the log-store is the whole
     log and the add-only shipper finds it unchanged when the dispositions file
-    is shipped after it. The cells print from several threads; the lock keeps
-    the file's writes whole.
+    is shipped after it. The cells print from several threads, and print()
+    writes its text and its newline as two writes; so each thread's text is
+    held until its line ends, and only whole lines are written, under the
+    lock, to the stream and the file alike. One write of several lines, such
+    as a WARNING line with its instruction, stays together.
     """
 
     def __init__(self, stream) -> None:
@@ -1455,19 +1468,31 @@ class RunOutputCopiedToRecordLog:
         self._held = []
         self._file = None
         self._lock = threading.Lock()
+        self._unended_line_of_this_thread = threading.local()
+
+    def _write_out(self, text: str) -> None:
+        self.stream.write(text)
+        if self._file is not None:
+            self._file.write(text)
+        elif self._held is not None:
+            self._held.append(text)
 
     def write(self, text: str) -> int:
-        self.stream.write(text)
         with self._lock:
-            if self._file is not None:
-                self._file.write(text)
-            elif self._held is not None:
-                self._held.append(text)
+            pending = getattr(self._unended_line_of_this_thread, "text", "") + text
+            whole_lines, newline, unended = pending.rpartition("\n")
+            self._unended_line_of_this_thread.text = unended
+            if newline:
+                self._write_out(whole_lines + newline)
         return len(text)
 
     def flush(self) -> None:
-        self.stream.flush()
         with self._lock:
+            unended = getattr(self._unended_line_of_this_thread, "text", "")
+            if unended:
+                self._unended_line_of_this_thread.text = ""
+                self._write_out(unended)
+            self.stream.flush()
             if self._file is not None:
                 self._file.flush()
 
@@ -1479,6 +1504,7 @@ class RunOutputCopiedToRecordLog:
             self._held = None
 
     def detach(self) -> None:
+        self.flush()
         with self._lock:
             if self._file is not None:
                 self._file.close()
@@ -1598,9 +1624,10 @@ def launch_cell_once(cell: str, adversarial_prompt: str, runtime: str, prompt: s
         git_check_failed_after_a_cell(cell, f"whether {cell} modified the review copy", failure,
                                       rerun_command)
     if stray:
-        print(f"WARNING: the review copy was modified outside the cells' scratch "
-              f"directories, seen when {cell} finished: {', '.join(stray)}",
-              flush=True)
+        print_warning_with_its_next_step(
+            f"the review copy was modified outside the cells' scratch "
+            f"directories, seen when {cell} finished: {', '.join(stray)}",
+            SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION)
     # After the worktree check, so a cell that ran to the end has its writes
     # compared whatever it returned; before the quote scan and the write, so a
     # text that is not a report raises no warnings to triage, never lands as a
@@ -1626,10 +1653,20 @@ def launch_cell_once(cell: str, adversarial_prompt: str, runtime: str, prompt: s
         + "\n\n" + output,
     )
     if overwrote_stray_write:
-        print(f"WARNING: {cell} found a stray write at its own report path and "
-              f"overwrote it: {out_path}", flush=True)
+        print_warning_with_its_next_step(
+            f"{cell} found a stray write at its own report path and overwrote it: {out_path}",
+            SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION)
     print(f"saved: {out_path}", flush=True)
     return None
+
+
+def print_warning_with_its_next_step(warning: str, next_step_instruction: str) -> None:
+    """Print a WARNING line and the line after it that says what to do about it."""
+    # One write: cells run on parallel threads, and two prints let another cell's
+    # line land between these, where a Monitor filter for the line after each
+    # WARNING would show it in place of the instruction.
+    sys.stdout.write(f"WARNING: {warning}\n{next_step_instruction}\n")
+    sys.stdout.flush()
 
 
 def git_check_failed_after_a_cell(cell: str, what: str, failure, rerun: str) -> None:
