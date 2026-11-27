@@ -12,10 +12,10 @@ Fails, naming the hashtag and a file:
   - a hashtag used in a tracked file but not listed, searching every file but the glossary itself, docs/walk/ and
     cold-read-records/, which quote old text, docs/issues/, whose GHI-MDs quote proposed hashtags, and test files,
     whose fixtures hold made-up ones;
-  - a hashtag listed but used in no tracked file other than the glossary, searching every one, test files included,
-    because a program may write a hashtag it builds from parts, such as `#case_against_` and a rating, that only a
-    test spells whole;
-  - a bullet not written `` - `#<name>#` — <definition> ``, a name listed twice, names out of alphabetical order, or a
+  - a hashtag listed but used in no tracked file other than the glossary and this suite, searching every other one,
+    test files included, because a program may write a hashtag it builds from parts, such as `#case_against_` and a
+    rating, that only a test spells whole;
+  - a bullet, opening `- `, `* ` or `+ `, not written `` - `#<name>#` — <definition> ``, a name listed twice, names out of alphabetical order, or a
     one-word name other than those in use when hashtags came to take two or more words.
 """
 import importlib.util
@@ -35,6 +35,8 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 TOP = Path(__file__).resolve().parent.parent
 GLOSSARY = "docs/nedsnodes-wiki/nedsnodes-hashtag-glossary.md"
+# This suite's fixtures spell made-up hashtags, so they are no use of a listed one.
+THIS_SUITE = Path(__file__).resolve().relative_to(TOP).as_posix()
 NOT_SEARCHED_FOR_USES = (GLOSSARY, "docs/walk/", "cold-read-records/", "docs/issues/")
 TEST_FILE = re.compile(r"(?:^|/)tests?/|-test\.(?:py|sh)$|(?:^|/)[^/]*-test-[^/]*/")
 # A link to a heading, `](#heading)`, never ends with `#`, so only an open hashtag cannot start right after `(`.
@@ -42,19 +44,22 @@ NOT_A_CLOSED_HASHTAG_START = r"(?<![\w/.&;#\]])"
 NOT_AN_OPEN_HASHTAG_START = r"(?<![\w/.&;#(\]])"
 NAME = r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*"
 CLOSED = re.compile(NOT_A_CLOSED_HASHTAG_START + rf"#({NAME})#")
-OPEN_OF_TWO_OR_MORE_WORDS = re.compile(NOT_AN_OPEN_HASHTAG_START + r"#([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?![\w#<-])")
+OPEN_HASHTAG_END = r"(?![\w#<-])"
+OPEN_OF_TWO_OR_MORE_WORDS = re.compile(NOT_AN_OPEN_HASHTAG_START + r"#([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"
+                                       + OPEN_HASHTAG_END)
+ANY_BULLET = re.compile(r"^[-*+] ")
 BULLET = re.compile(rf"^- `#({NAME})#` — \S")
 # The one-word hashtags in use when hashtags came to take two or more words; no other may be one word.
 ONE_WORD_HASHTAGS_KEPT = frozenset({"code", "data", "edit", "new", "prose", "reason", "rejected", "replaces"})
 OPEN_ONE_WORD_KEPT = re.compile(NOT_AN_OPEN_HASHTAG_START + "#(" + "|".join(sorted(ONE_WORD_HASHTAGS_KEPT))
-                                + r")(?![\w#<-])")
+                                + ")" + OPEN_HASHTAG_END)
 
 
 def listed_names(glossary_text):
     """(the names the glossary's bullets list, in page order, problems with its bullets)."""
     names, problems = [], []
     for number, line in enumerate(glossary_text.split("\n"), 1):
-        if not line.startswith("- "):
+        if not ANY_BULLET.match(line):
             continue
         bullet = BULLET.match(line)
         if bullet is None:
@@ -88,8 +93,8 @@ def hashtags_used(texts):
 
 def is_used(name, texts):
     use = re.compile(f"{NOT_A_CLOSED_HASHTAG_START}#{re.escape(name)}#"
-                     f"|{NOT_AN_OPEN_HASHTAG_START}#{re.escape(name)}(?![\\w-])")
-    return any(use.search(text) for path, text in texts.items() if path != GLOSSARY)
+                     f"|{NOT_AN_OPEN_HASHTAG_START}#{re.escape(name)}{OPEN_HASHTAG_END}")
+    return any(use.search(text) for path, text in texts.items() if path not in (GLOSSARY, THIS_SUITE))
 
 
 def problems_in(texts):
@@ -200,6 +205,15 @@ one_word = problems_in(with_texts({GLOSSARY: GOOD_GLOSSARY + "- `#task#` — a n
                                    "docs/c.md": "#task S1\n"}))
 check("a one-word hashtag not kept from before the two-word rule fails", any("is one word" in p for p in one_word),
       one_word)
+star_doubled = problems_in(with_glossary(GOOD_GLOSSARY + "* `#root_cause#` — again.\n"))
+check("a bullet opening `* ` fails its form", any("is not written" in p for p in star_doubled), star_doubled)
+only_in_this_suite = problems_in(with_texts({"docs/a.md": "#next_to_present item 3\n#new text\n",
+                                             THIS_SUITE: "'#root_cause the cause'\n"}))
+check("a listed hashtag used only in this suite's own fixtures fails",
+      any("lists #root_cause#, which no" in p for p in only_in_this_suite), only_in_this_suite)
+placeholder_only = problems_in(with_texts({"docs/a.md": "#next_to_present item 3\n#new text\n#root_cause<id>\n"}))
+check("a listed hashtag used only as the start of a placeholder, such as #root_cause<id>, fails",
+      any("lists #root_cause#, which no" in p for p in placeholder_only), placeholder_only)
 empty = problems_in(with_glossary("# Hashtag glossary\n"))
 check("a glossary with no readable bullet fails rather than passes", any("lists no hashtag" in p for p in empty), empty)
 check("a missing glossary fails", any("is not a tracked file" in p for p in problems_in({"docs/a.md": "#x_y\n"})),
