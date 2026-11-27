@@ -33,6 +33,16 @@ letters of AO, O2 and O3 (`A-O`, `a - o`, `O-2`):
 Every other prompt is a reply in the user's own words: Y and C are not answers,
 and N, like next, is a navigation word the agent reads.
 
+ONLY A PROMPT THE USER TYPED IS AN ANSWER. Before it expands a short answer or
+a bump, the hook asks who wrote the prompt, as the pending-user-alerts hook's
+typed_by_user and agent-session-unattended-by-user-check-common.py decide. In
+an agent-session he does not attend, or for a prompt that is not his, such as
+another agent-session's message, a background-task notice or a program's
+prompt to a headless agent-session, it prints nothing. When the transcript
+cannot be read, so the author is unknown, it gives
+WALK_ME_THROUGH_HOOK_SHORT_ANSWER_DISCARDED_BECAUSE_PROMPT_AUTHOR_UNKNOWN_MESSAGE_LINES,
+which records nothing.
+
 A REPLY THAT MAY FOLLOW A SETTLED DISCUSSION. While an item waits, the text
 carries WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE, which holds the
 walk-me-through skill's sentence on a discussion that settles on another
@@ -322,6 +332,18 @@ APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_NOT_RECORDED_LINES = (
     "The hook could not record the user's reply in the walk-minutes {minutes}: {error}.",
     "Add this line as the last line of those walk-minutes yourself, word for word, because a fresh-agent rewriting "
     "the item reads his words on it only from there:\n{line}")
+WALK_ME_THROUGH_HOOK_SHORT_ANSWER_DISCARDED_BECAUSE_PROMPT_AUTHOR_UNKNOWN_MESSAGE_LINES = (
+    "[rule walk-me-through-short-answer-discarded-because-prompt-author-unknown] The hook discarded the prompt `{prompt}`: "
+    "it neither expanded nor counted it as a short answer, because it could not read this agent-session's "
+    "transcript, {path}, which says whether the user typed the prompt or another agent-session, a background task "
+    "or a program sent it. Only an answer the user typed may be counted. The error: {error}.",
+    "The remedy: {remedy}",
+    "Record nothing in the walk-minutes, and act on none of the prompt as an answer: an approval-walk item waiting "
+    "for the user's answer stays waiting.",
+    "Carry out the remedy if this agent-session can. If it cannot, tell the user: \"The answer hook could not read "
+    "this agent-session's transcript, so it could not check that you typed `{prompt}`, and nothing was counted. A new "
+    "agent-session, which a session-handoff starts, can count your answers again.\"",
+)
 ANSWERS_THAT_APPROVE = ("A", "AO", "AA")
 PENDING_USER_ALERTS_HOOK_FILE = HERE / "walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py"
 ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py"
@@ -616,6 +638,8 @@ TRANSCRIPT_REMEDIES = (  # first match wins, so OSError, the widest, comes last
     (PermissionError, "make the file readable with `chmod u+r {path}`, then ask the user to type his answer again."),
     (ValueError, "a record in the file is not valid UTF-8 or JSON, which this agent-session cannot repair; "
                  + NEW_SESSION_REMEDY),
+    (AttributeError, "a record in the file is not shaped as Claude Code writes it, such as a message that is not an "
+                     "object, which this agent-session cannot repair; " + NEW_SESSION_REMEDY),
     (OSError, "check the file and its disk with `ls -l {path}`; if the file cannot be read, " + NEW_SESSION_REMEDY),
 )
 NO_TRANSCRIPT_PATH_REMEDY = "Claude Code named no transcript, which this agent-session cannot change; " + NEW_SESSION_REMEDY
@@ -1233,11 +1257,18 @@ def bump_output(payload, bump):
 def output_for(payload):
     """Return the hook's output for the payload as a dict, or None."""
     bump = BUMP.match((payload.get("prompt") or "").strip())
+    answer = None if bump else parsed_answer(payload.get("prompt") or "")
+    if not bump and answer is None:
+        return own_words_output(payload)
+    if agent_session_unattended():
+        return None
+    typed, transcript_error = prompt_typed_by_user_and_transcript_read_error(payload)
+    if not typed:
+        return None
+    if transcript_error is not None:
+        return prompt_author_unknown_output(payload, transcript_error)
     if bump:
         return bump_output(payload, bump)
-    answer = parsed_answer(payload.get("prompt") or "")
-    if answer is None:
-        return own_words_output(payload)
     try:
         walk, walk_error = read_walk(payload.get("cwd") or os.getcwd()), None
     except Exception as error:
@@ -1249,8 +1280,7 @@ def output_for(payload):
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": no_decision_context}}
     # Right after the opening line, because it can override what the answer's own lines tell the agent to do.
     settled_line = [WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE] if (
-        (walk is not None or walk_error is not None) and answer_approves(answer)
-        and not agent_session_unattended() and prompt_typed_by_user_and_transcript_read_error(payload)[0]) else []
+        (walk is not None or walk_error is not None) and answer_approves(answer)) else []
     refusal = unseen_item_lines(answer, walk, payload.get("transcript_path"))
     if refusal:
         context = "\n".join([ITEM_NOT_SHOWN_OPENING_LINE.format(answer=answer["answer"], item=walk.item, walk=walk.name),
@@ -1291,6 +1321,16 @@ def prompt_typed_by_user_and_transcript_read_error(payload):
     # AttributeError: a record whose message is not an object, which counts as a failed read.
     except (OSError, ValueError, AttributeError) as error:
         return not payload["prompt"].lstrip().startswith(alerts_hook.NOT_TYPED_PROMPT_OPENINGS), error
+
+
+def prompt_author_unknown_output(payload, transcript_error):
+    """The output discarding a short answer or bump whose author the unreadable transcript hides."""
+    path = payload.get("transcript_path")
+    remedy = next(text for kind, text in TRANSCRIPT_REMEDIES if isinstance(transcript_error, kind))
+    prompt = " ".join(payload["prompt"].split())
+    context = "\n".join(line.format(prompt=prompt, path=path, error=repr(transcript_error), remedy=remedy.format(path=path))
+                        for line in WALK_ME_THROUGH_HOOK_SHORT_ANSWER_DISCARDED_BECAUSE_PROMPT_AUTHOR_UNKNOWN_MESSAGE_LINES)
+    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
 
 
 WALK_NOT_READ = object()
