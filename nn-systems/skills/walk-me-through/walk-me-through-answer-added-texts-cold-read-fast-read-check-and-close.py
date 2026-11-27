@@ -1579,6 +1579,8 @@ ITEM_READ_NOT_RUN = ("{item}: no new cold-read-fast-read: your changes since its
                      "number, path, file or program name, link, or line holding \"Recommendation:\", "
                      "\"The alternative:\" or `#case_against`.")
 RULING_DAYS_APPLIED = 90
+# Set by the tests, so that a citation they date from today and the check measuring its age read the same day.
+RULING_AGE_TODAY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_RULING_AGE_TODAY_OVERRIDE"
 STANDING_DOCUMENT_PLACE_CITED = re.compile(
     r"(?:GHI-MD\s*\d+|[\w./-]*(?:CLAUDE|AGENTS|SKILL)\.md|docs/nedsnodes-wiki/[\w./&-]+|docs/issues/[\w./-]+"
     r"|[\w./-]*design\.md|[\w./-]+-instructions\.md)`?(?:'s)?,?\s+(?:at\s+)?(?:lines?\s+\d+|section\b)")
@@ -2774,7 +2776,9 @@ def refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(c
     if not dates:
         raise Failure(RULING_UNDATED.format(item=item, citation=spanned, limit=RULING_DAYS_APPLIED))
     earliest = min(dates)
-    days = (datetime.date.today() - earliest).days
+    override = os.environ.get(RULING_AGE_TODAY_OVERRIDE_ENVIRONMENT_VARIABLE)
+    today = datetime.date.fromisoformat(override) if override else datetime.date.today()
+    days = (today - earliest).days
     if days > RULING_DAYS_APPLIED:
         raise Failure(RULING_TOO_OLD.format(item=item, citation=spanned, date=earliest.isoformat(), days=days,
                                             limit=RULING_DAYS_APPLIED))

@@ -65,8 +65,12 @@ _scratch_directory_common_spec.loader.exec_module(_scratch_directory_common)
 SUITE_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removing_killed_runs_leftovers(
     "answer-added-texts-fast-read-check-test-")
 WALK_NAME = "poem-page-2026-10-12"
+# Read once and given to every run of the program, so that a citation dated from today and the check measuring its
+# age agree on the day even when midnight passes during the suite.
+TODAY = datetime.date.today()
+RULING_AGE_TODAY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_RULING_AGE_TODAY_OVERRIDE"
 # check refuses a ruling from walk-minutes over 90 days old, so a citation that must pass is dated from today.
-RECENT_RULING_DATE = (datetime.date.today() - datetime.timedelta(days=10)).isoformat()
+RECENT_RULING_DATE = (TODAY - datetime.timedelta(days=10)).isoformat()
 FAILURE_PREFIX = "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close "
 LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE"
 AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_AGENT_HOMES_DIRECTORY_OVERRIDE"
@@ -334,6 +338,7 @@ class Case:
                            GH_STAND_IN_CALLS=str(self.gh_calls))
         environment.setdefault(LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.log_store))
         environment.setdefault(AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.agent_homes))
+        environment.setdefault(RULING_AGE_TODAY_OVERRIDE_ENVIRONMENT_VARIABLE, TODAY.isoformat())
         # Set, never inherited: the agent-session running this suite would otherwise name the title search cache files.
         environment.pop(AGENT_SESSION_ID_ENVIRONMENT_VARIABLE, None)
         if agent_session_id is not None:
@@ -5498,7 +5503,7 @@ def test_the_read_step_offers_no_settling_for_an_item_whose_settling_has_no_clos
 
 
 def days_ago(days):
-    return (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    return (TODAY - datetime.timedelta(days=days)).isoformat()
 
 
 def test_already_decided_refuses_a_ruling_from_walk_minutes_over_90_days_old_writing_nothing():
@@ -5606,6 +5611,16 @@ def test_an_item_whose_only_choice_is_now_or_later_settles_citing_the_users_ruli
               in case.minutes.read_text()
           and closed.stdout.startswith("item 3 of 9 is recorded in the minutes as settled without being shown"),
           described(closed) + case.minutes.read_text())
+
+
+def test_an_item_settles_as_now_over_later_after_its_rulings_date_is_over_90_days_old():
+    case = Case(document=NOW_OVER_LATER_DOCUMENT)
+    checked = case.run("check", NOW_OVER_LATER, environment=dict(
+        os.environ, **{RULING_AGE_TODAY_OVERRIDE_ENVIRONMENT_VARIABLE: "2027-06-01"}))
+    check("check --now-over-later-already-decided settles the item on 2027-06-01, when the user's ruling of "
+          "2026-11-09 it cites is over 90 days old, because the age check does not apply to that ruling",
+          checked.returncode == 0 and "settled without asking the user, already decided by " in case.minutes.read_text(),
+          described(checked) + case.minutes.read_text())
 
 
 def test_an_item_with_parts_options_or_a_new_if_d_text_is_not_settled_as_now_over_later():
