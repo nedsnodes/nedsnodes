@@ -215,7 +215,7 @@ GIT_IN_PROGRESS_MARKERS = tuple(GIT_IN_PROGRESS_OPERATION_BY_MARKER)
 # moved by anyone but its author, and then only forward.
 # No commit on top can clear a conflict with main, so a pushed branch that
 # conflicts is sent to scripts/branch-conflict-check.py, whose report says
-# whether it is rebased or its pull request replaced.
+# how the conflict is cleared.
 # The runner selects the suites a change can affect, so no agent picks them by hand.
 SELECTIVE_TEST_RUN_COMMAND = (
     "python3 scripts/run-all-test-suites.py "
@@ -1227,8 +1227,8 @@ def merges_from_main(checkout: Path):
     WHY A CLEAN RE-MERGE IS THE TEST. A merge that resolved a real conflict
     with main has the same shape as the banned catch-up — a merge commit whose
     second parent is on main — but this detector reports catch-ups only; a
-    conflict with main is answered by the rebase or the replacement pull
-    request scripts/branch-conflict-check.py reports, never by this detector.
+    conflict with main is answered as scripts/branch-conflict-check.py
+    reports, never by this detector.
     Re-merging the parents tells the two apart: parents that CONFLICT mean the
     merge resolved a conflict, so it is skipped; parents that merge cleanly
     mean the merge was unnecessary, which is the banned catch-up, and it is

@@ -65,7 +65,8 @@ def fake_runner(*, resolves=True, base_resolves=None, head_resolves=None,
                 ls_remote=(0, ""), own_commits=(0, ""), unpushed_commits=(0, ""),
                 holder_refs=(0, ""), open_pull_requests_by_branch=None,
                 checked_out_head=RESOLVED_HEAD, local_branches_at=(0, ""),
-                worktree_list=(0, "")):
+                worktree_list=(0, ""),
+                draft_state=(0, '{"isDraft": false, "headRefName": "pr-branch"}')):
     """A runner that answers git and gh without touching either.
 
     base_resolves and head_resolves override `resolves` for one side, so a case
@@ -103,7 +104,8 @@ def fake_runner(*, resolves=True, base_resolves=None, head_resolves=None,
 
     checked_out_head is the hash HEAD^{commit} resolves to, the checked head
     by default; local_branches_at answers `git for-each-ref --points-at`, and
-    worktree_list `git worktree list --porcelain`.
+    worktree_list `git worktree list --porcelain`; draft_state answers `gh pr
+    view --json isDraft,headRefName`, by default a pull request marked ready.
     """
     refs = dict(full_refs or {})
     gh_queue = list(gh_results or [])
@@ -163,6 +165,8 @@ def fake_runner(*, resolves=True, base_resolves=None, head_resolves=None,
             branch = command[command.index("--head") + 1]
             return (open_pull_requests_by_branch or {}).get(branch, open_pull_requests)
         if command[:2] == ["gh", "pr"]:
+            if "isDraft,headRefName" in command:
+                return draft_state
             if "headRefOid" in command:
                 return gh_head_status, (gh_head or "")
             if "baseRefName" in command:
@@ -514,8 +518,7 @@ status, lines = run(fake_runner(merge_tree_status=1))
 case("CONFLICT text is one instruction per line, naming the commit", lines == [
     "VERDICT: CONFLICT -- %s conflicts with origin/main." % HEAD_LABEL,
     "ANSWER: none -- this run was given no branch to look up an open pull "
-    "request for, so it cannot say whether the branch is rebased or its pull "
-    "request replaced.",
+    "request for, so it cannot say how the conflict is cleared.",
     "Rerun with --pull-request <number> if the branch has an open pull "
     "request, or with --branch <branch name> otherwise.",
 ])
@@ -544,9 +547,9 @@ status, lines = run(
     fake_runner(merge_tree_status=0, gh_results=[(0, "CONFLICTING")]),
     pull_request=353, reads=3)
 case("the CONFLICT block stays contiguous ahead of GitHub's lines",
-     len(lines) >= 9 and lines[0].startswith("VERDICT: CONFLICT")
-     and lines[7].startswith("Open a new pull request whose description")
-     and lines[8].startswith("GITHUB:"))
+     len(lines) >= 13 and lines[0].startswith("VERDICT: CONFLICT")
+     and lines[11].startswith("Open a new pull request whose description")
+     and lines[12].startswith("GITHUB:"))
 
 # A commit git cannot read the subject of -- GitHub's pushed head, never
 # fetched -- is named by its hash alone; the run's verdict is unchanged.
@@ -684,8 +687,7 @@ def clean_block(base="origin/main", label=HEAD_LABEL):
 
 ANSWER_NONE_NO_BRANCH = [
     "ANSWER: none -- this run was given no branch to look up an open pull "
-    "request for, so it cannot say whether the branch is rebased or its pull "
-    "request replaced.",
+    "request for, so it cannot say how the conflict is cleared.",
     "Rerun with --pull-request <number> if the branch has an open pull "
     "request, or with --branch <branch name> otherwise.",
 ]
@@ -701,11 +703,10 @@ def understand_lines(base="origin/main"):
     ]
 
 
-def replace_lines(number, base="origin/main"):
+def replace_steps_lines(number, base="origin/main"):
     return [
-        "ANSWER: replace -- pull request #%s is open, so it is replaced by a new "
-        "pull request; its branch is never rebased, merged into or force-pushed."
-        % number,
+        "If even after asking you cannot make both changes work, replace "
+        "pull request #%s instead:" % number,
         "If %s already holds this branch's work, close pull request #%s with a "
         "comment naming the commit or pull request on %s that holds it, and stop."
         % (base, number, base),
@@ -718,6 +719,38 @@ def replace_lines(number, base="origin/main"):
         "followed by pull request #%s's URL, then close pull request #%s with a "
         "comment naming the new one." % (number, number),
     ]
+
+
+def fix_round_lines(number, branch="pr-branch", base="origin/main", caveat=()):
+    return [
+        "ANSWER: merge-main-at-next-fix-round -- pull request #%s is marked ready, so %s is merged "
+        "into it only in its next fix-round, as that round's first commit, so "
+        "that no push moves its frozen-head under a running review." % (number, base),
+    ] + list(caveat) + [
+        "Push nothing to its branch %s outside that round." % branch,
+        "The fix-round program, python3 scripts/pull-request-fix-round-author-"
+        "brief-from-blocking-findings-and-one-commit-every-finding-answered-"
+        "check.py %s, starts that merge once a merge-lane's review of the pull "
+        "request requests changes, which its review does for this conflict even "
+        "when it finds nothing else." % number,
+        "If the pull request is already approved, ask merge-lane-2 with "
+        "SendMessage for a review of its head that requests changes for this "
+        "conflict.",
+    ] + replace_steps_lines(number, base)
+
+
+def draft_merge_lines(number, branch="pr-branch", base="origin/main", remote="origin",
+                      caveat=()):
+    return [
+        "ANSWER: merge -- pull request #%s is a draft, so %s is merged into its "
+        "branch %s at once; the branch is never rebased or force-pushed."
+        % (number, base, branch),
+    ] + list(caveat) + understand_lines(base) + [
+        "Run git merge %s, resolving each conflict so that both changes work." % base,
+    ] + give_up_lines("merge", base) + [
+        "Push it with git push %s HEAD:%s, without --force, then carry on with "
+        "what you were doing." % (remote, branch),
+    ] + replace_steps_lines(number, base)
 
 
 def give_up_lines(command, base="origin/main"):
@@ -776,16 +809,19 @@ def from_elsewhere(lines, start_line, branch, remote="origin"):
     return [lines[0], start_line] + lines[1:-1] + [last]
 
 
-def pushed_history_replace_lines(branch, holder, number, base="origin/main"):
+def pushed_history_caveat(branch, holder, number):
     return [
-        "ANSWER: replace -- branch %s has no open pull request, but its commits "
-        "are already on origin's branch %s, whose pull request #%s is open, so "
-        "pull request #%s is replaced by a new pull request; neither branch is "
-        "rebased, merged into or force-pushed." % (branch, holder, number, number),
-        "If branch %s was not cut to fix pull request #%s, do not close or "
-        "replace that pull request; ask its author with SendMessage how to clear "
-        "the conflict." % (branch, number),
-    ] + replace_lines(number, base)[1:]
+        "Branch %s has no open pull request, but its commits are already on "
+        "origin's branch %s, whose pull request #%s is open, so the conflict is "
+        "cleared as for that pull request." % (branch, holder, number),
+        "If branch %s was not cut to fix pull request #%s, do not merge into, "
+        "close or replace that pull request; ask its author with SendMessage how "
+        "to clear the conflict." % (branch, number),
+    ]
+
+
+def pushed_history_fix_round_lines(branch, holder, number, base="origin/main"):
+    return fix_round_lines(number, holder, base, pushed_history_caveat(branch, holder, number))
 
 
 def pushed_history_merge_lines(branch, named, base="origin/main", remote="origin"):
@@ -805,7 +841,7 @@ def pushed_history_merge_lines(branch, named, base="origin/main", remote="origin
 
 
 def answer_lines(pull_request=None, base="origin/main"):
-    return (replace_lines(pull_request, base) if pull_request is not None
+    return (fix_round_lines(pull_request, base=base) if pull_request is not None
             else list(ANSWER_NONE_NO_BRANCH))
 
 
@@ -1543,6 +1579,9 @@ with open(os.environ["STUB_GH_LOG"], "a") as log:
 if os.environ.get("STUB_GH_FAIL"):
     sys.exit(1)
 field = sys.argv[sys.argv.index("--json") + 1]
+if field == "isDraft,headRefName":
+    print(os.environ.get("STUB_GH_DRAFT_STATE", '{"isDraft": false, "headRefName": "pr-branch"}'))
+    sys.exit(0)
 by_head = json.loads(os.environ.get("STUB_GH_NUMBER_BY_HEAD", "{}"))
 if "--head" in sys.argv and sys.argv[sys.argv.index("--head") + 1] in by_head:
     print(by_head[sys.argv[sys.argv.index("--head") + 1]])
@@ -2052,7 +2091,7 @@ def real_repository_cases(root):
         "The checked commit %s is branch conflict-topic, not the one checked out "
         "here: first run git switch conflict-topic, because every step below acts "
         "on HEAD." % conflict_topic_hash[:12])
-    for number_answer, want in (('[{"number": 812}]', replace_lines(812)),
+    for number_answer, want in (('[{"number": 812}]', fix_round_lines(812)),
                                 ("[]", from_elsewhere(rebase_lines("conflict-topic"),
                                                       switch_first, "conflict-topic"))):
         status, lines, calls = run_here("--head", "conflict-topic", "--branch",
@@ -2081,8 +2120,8 @@ def real_repository_cases(root):
     commit_in(fix_checkout, "fix.txt", "the fix\n", "fix on top")
     for gh_answer, want, label in (
             ('[{"number": 905}]',
-             pushed_history_replace_lines("pr-branch-fix", "pr-branch", 905),
-             "the pull request's replace answer"),
+             pushed_history_fix_round_lines("pr-branch-fix", "pr-branch", 905),
+             "the pull request's fix-round answer"),
             ("[]", pushed_history_merge_lines("pr-branch-fix", "origin/pr-branch"),
              "the merge answer when that branch has no open pull request")):
         status, lines, calls = run_here(cwd=fix_checkout, gh=dict(
@@ -2241,8 +2280,8 @@ case("a failed listing of main's commits on a file says so, with the command",
          % (RESOLVED_HEAD[:12], RESOLVED_BASE[:12]) in lines)
 
 for label, answer, want in (
-        ("an open pull request is replaced", (0, '[{"number": 812}]'),
-         replace_lines(812)),
+        ("an open pull request marked ready waits for its fix-round",
+         (0, '[{"number": 812}]'), fix_round_lines(812)),
         ("no open pull request is rebased", (0, "[]"), rebase_lines())):
     log = []
     status, lines = run_branch(fake_runner(merge_tree_status=1, log=log,
@@ -2255,9 +2294,36 @@ for label, answer, want in (
          ["gh", "pr", "list", "--state", "open", "--head", "topic", "--json",
           "number"] in log)
 
+log = []
+status, lines = run_branch(fake_runner(
+    merge_tree_status=1, log=log, open_pull_requests=(0, '[{"number": 812}]'),
+    draft_state=(0, '{"isDraft": true, "headRefName": "topic"}')), branch="topic")
+case("--branch: a draft pull request has main merged in at once and pushed",
+     status == CHECK.EXIT_CONFLICT
+     and lines[1:] == draft_merge_lines(812, "topic")
+     and ["gh", "pr", "view", "812", "--json", "isDraft,headRefName"] in log)
+
+for label, answer, why in (
+        ("gh fails", (1, ""), "gh pr view exited 1"),
+        ("gh prints what is not JSON", (0, "not json"),
+         "gh pr view printed what this run could not read"),
+        ("gh prints no isDraft", (0, '{"headRefName": "topic"}'),
+         "gh pr view printed what this run could not read")):
+    status, lines = run_branch(fake_runner(
+        merge_tree_status=1, open_pull_requests=(0, '[{"number": 812}]'),
+        draft_state=answer), branch="topic")
+    case("--branch, whether the pull request is a draft unknown because %s: the "
+         "conflict stands and no answer is given, saying why" % label,
+         status == CHECK.EXIT_CONFLICT and lines[1:] == [
+             "ANSWER: none -- pull request #812 is open, but whether it is a draft "
+             "could not be looked up (%s), so this run cannot say whether "
+             "origin/main is merged into it now or in its next fix-round." % why,
+             "If gh is logged out or cannot reach GitHub, fix that, then rerun.",
+         ])
+
 LOOKUP_FAILED = ("ANSWER: none -- whether branch topic has an open pull request "
-                 "could not be looked up (%s), so this run cannot say whether it "
-                 "is rebased or its pull request replaced.")
+                 "could not be looked up (%s), so this run cannot say how the "
+                 "conflict is cleared.")
 for label, answer, why in (
         ("gh fails", (1, ""), "gh pr list exited 1"),
         ("gh prints what is not JSON", (0, "not json"),
@@ -2358,9 +2424,18 @@ def run_pushed_history(log=None, **answers):
 log = []
 status, lines = run_pushed_history(
     log, open_pull_requests_by_branch={"pr-branch": (0, '[{"number": 905}]')})
-case("pushed history: a holder branch's open pull request gives its replace answer",
+case("pushed history: a holder branch's open pull request gives its fix-round answer",
      status == CHECK.EXIT_CONFLICT
-     and lines[1:] == pushed_history_replace_lines("topic", "pr-branch", 905))
+     and lines[1:] == pushed_history_fix_round_lines("topic", "pr-branch", 905))
+
+status, lines = run_pushed_history(
+    open_pull_requests_by_branch={"pr-branch": (0, '[{"number": 905}]')},
+    draft_state=(0, '{"isDraft": true, "headRefName": "pr-branch"}'))
+case("pushed history: a holder branch's draft pull request has main merged in and "
+     "pushed to that pull request's branch",
+     status == CHECK.EXIT_CONFLICT
+     and lines[1:] == draft_merge_lines(
+         905, caveat=pushed_history_caveat("topic", "pr-branch", 905)))
 case("pushed history: the holder is the remote branch that has the newest pushed "
      "commit, and origin/HEAD is not asked about",
      ["git", "for-each-ref", "--format=%(refname)", "--contains", PUSHED_COMMIT,
