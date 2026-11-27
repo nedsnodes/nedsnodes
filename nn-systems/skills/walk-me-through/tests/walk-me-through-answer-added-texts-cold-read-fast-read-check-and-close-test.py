@@ -8279,10 +8279,12 @@ def test_a_forked_run_that_cannot_make_its_output_files_raises_the_error_that_st
     program = case.root / "never-runs.py"
     program.write_text("def main():\n    pass\n")
     real_open = os.open
+    injected = []
 
     def disk_full(path, *arguments):
         if "forked-run-" in str(path):
-            raise OSError(errno.ENOSPC, "No space left on device", str(path))
+            injected.append(OSError(errno.ENOSPC, "No space left on device", str(path)))
+            raise injected[-1]
         return real_open(path, *arguments)
 
     os.open = disk_full
@@ -8290,7 +8292,7 @@ def test_a_forked_run_that_cannot_make_its_output_files_raises_the_error_that_st
         case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
     except OSError as error:
         check("a forked run whose output file cannot be made raises the error that stopped it",
-              error.errno == errno.ENOSPC, repr(error))
+              error is injected[-1], repr(error))
     else:
         check("a forked run whose output file cannot be made raises", False)
     finally:
@@ -8303,11 +8305,13 @@ def test_a_forked_run_whose_second_output_file_cannot_be_made_closes_the_first()
     program.write_text("def main():\n    pass\n")
     real_open = os.open
     opened = []
+    injected = []
 
     def second_disk_full(path, *arguments):
         if "forked-run-" in str(path):
             if opened:
-                raise OSError(errno.ENOSPC, "No space left on device", str(path))
+                injected.append(OSError(errno.ENOSPC, "No space left on device", str(path)))
+                raise injected[-1]
             opened.append(real_open(path, *arguments))
             return opened[-1]
         return real_open(path, *arguments)
@@ -8317,7 +8321,7 @@ def test_a_forked_run_whose_second_output_file_cannot_be_made_closes_the_first()
         case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
     except OSError as error:
         check("a forked run whose second output file cannot be made raises the error that stopped it",
-              error.errno == errno.ENOSPC, repr(error))
+              error is injected[-1], repr(error))
     else:
         check("a forked run whose second output file cannot be made raises", False)
     finally:
@@ -8331,15 +8335,16 @@ def test_a_forked_run_whose_second_output_file_cannot_be_made_closes_the_first()
     check("a forked run whose second output file cannot be made closes the first before the error goes on", closed)
 
 
+class SimulatedStop(BaseException):
+    """Not SystemExit, so a real stop from the suite's SIGTERM handler is not taken for a case's own."""
+
+
 def test_a_forked_run_stopped_while_closing_its_copies_of_the_output_files_kills_and_reaps_its_child():
     case = Case()
     program = case.root / "sleeps-at-once.py"
     program.write_text("import time\ndef main():\n    time.sleep(60)\n")
     real_fork, real_close = os.fork, os.close
     children = []
-
-    class SimulatedStop(BaseException):
-        """Not SystemExit, so a real stop from the suite's SIGTERM handler is not taken for this one."""
 
     def recorded_fork():
         child = real_fork()
@@ -8381,13 +8386,13 @@ def test_a_forked_run_stopped_while_waiting_kills_and_reaps_its_child():
         if not pid_file.exists() or not pid_file.read_text():
             signal.setitimer(signal.ITIMER_REAL, 0.2)
             return
-        raise SystemExit(1)
+        raise SimulatedStop
 
     previous = signal.signal(signal.SIGALRM, stopped)
     signal.setitimer(signal.ITIMER_REAL, 0.2)
     try:
         forked_run_of(case, "sleeps", source)
-    except SystemExit:
+    except SimulatedStop:
         pid = int(pid_file.read_text())
         try:
             os.kill(pid, 0)
