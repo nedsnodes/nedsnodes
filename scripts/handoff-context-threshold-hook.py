@@ -66,6 +66,13 @@ _deferred_marker_file_specification = importlib.util.spec_from_file_location(
 handoff_deferred_marker_and_refused_commands_files_common = importlib.util.module_from_spec(_deferred_marker_file_specification)
 _deferred_marker_file_specification.loader.exec_module(handoff_deferred_marker_and_refused_commands_files_common)
 
+# Claude Code lists a background command as the timeout-wrap hook rewrote it; its kind is the original's.
+_timeout_wrap_hook_specification = importlib.util.spec_from_file_location(
+    "background_bash_command_kind_bound_timeout_wrap_hook",
+    Path(__file__).resolve().with_name("background-bash-command-kind-bound-timeout-wrap-hook.py"))
+background_bash_command_timeout_wrap_hook = importlib.util.module_from_spec(_timeout_wrap_hook_specification)
+_timeout_wrap_hook_specification.loader.exec_module(background_bash_command_timeout_wrap_hook)
+
 HANDOFF_DIRECTORY = Path.home() / ".claude" / "handoffs"
 
 # Compaction clears this shared marker because the session id survives.
@@ -276,6 +283,8 @@ _COMPILED_WAIT_LIMIT_KINDS = [
 def background_task_kind_and_wait_limit_minutes_from_command(command) -> tuple:
     """Return (kind, wait-limit in minutes) of the first kind with a pattern that matches the whole
     command; a command no pattern matches, or None for an unknown command, gets the no-match limit."""
+    command = background_bash_command_timeout_wrap_hook.background_bash_command_unwrapped_from_kind_bound_timeout(
+        command)
     if isinstance(command, str):
         for kind, patterns, minutes in _COMPILED_WAIT_LIMIT_KINDS:
             if any(pattern.fullmatch(command) for pattern in patterns):

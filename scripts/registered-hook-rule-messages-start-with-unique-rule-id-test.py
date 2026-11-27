@@ -54,6 +54,8 @@ HOOK_FAILED = "says the hook failed or could not check, and lets the act through
 NOT_A_RULE = "no message for a rule: text the hook hands on as data"
 COMMAND_MODE = "printed when an agent runs the file as a command, not when it runs as a hook"
 USER_ONLY_NOTICE = "a systemMessage Claude Code shows the user and not the agent"
+WRAPPED_COMMAND_PRINTS_IT = ("printed by the background command the hook rewrote, when timeout stops it, "
+                             "in the text the user approved word for word")
 
 # (hook path, constant name): why the constant opens no message for a rule.
 CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
@@ -276,6 +278,9 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/style-guide-word-checker-markdown-edit-hook-hack.py", "MORE_HITS_LINE"): LATER_PART,
     ("scripts/uncommitted-work-snapshot-hook.py", "NOT_PROTECTED_MESSAGE"): HOOK_FAILED,
     ("nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py", "BRANCHES_NOT_FULLY_ON_GITHUB_NEXT_STEP_MESSAGE"): LATER_PART,
+    ("scripts/background-bash-command-kind-bound-timeout-wrap-hook.py", "BACKGROUND_COMMAND_KIND_BOUND_TIMEOUT_STOP_MESSAGE"): WRAPPED_COMMAND_PRINTS_IT,
+    ("scripts/background-bash-command-kind-bound-timeout-wrap-hook.py", "PULL_REQUEST_WAIT_AS_TASK_PREREQUISITE_INSTEAD_OF_POLLING_INSTRUCTION"): WRAPPED_COMMAND_PRINTS_IT,
+    ("scripts/background-bash-command-kind-bound-timeout-wrap-hook.py", "TIMEOUT_PROGRAM_MISSING_MESSAGE"): HOOK_FAILED,
 }
 
 # Hook path: why the hook prints no message for a rule.
@@ -284,6 +289,7 @@ HOOKS_THAT_PRINT_NO_RULE_MESSAGE = {
     "nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py": "it only puts the conversation-tail's last lines, written by the handoff-supervisor, above the successor's first message on the user's screen, which the agent does not see",
     "nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py": "it shows the user a systemMessage, which the agent does not see, and otherwise reports only its own failure",
     "scripts/uncommitted-work-snapshot-hook.py": "it speaks only when it could not keep a work-snapshot, which reports its own failure",
+    "scripts/background-bash-command-kind-bound-timeout-wrap-hook.py": "it rewrites the command, whose own output carries the stop message, and otherwise reports only that it could not bound the command",
 }
 
 # (hook path, rule ID): every message constant of that hook the ID opens, when it opens

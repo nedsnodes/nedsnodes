@@ -45,8 +45,9 @@ spec = importlib.util.spec_from_file_location("bash_guards_replay", SCRIPT_PATH)
 replay = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(replay)
 
-# Every Bash hook loads the shell reader, so new-process mode switches one reader per hook.
-BASH_HOOK_COUNT = len(replay.bash_hook_files(REPOSITORY_ROOT))
+# Every Bash hook but these loads the shell reader, so new-process mode switches one reader per such hook.
+BASH_HOOKS_THAT_LOAD_NO_SHELL_READER = {"scripts/background-bash-command-kind-bound-timeout-wrap-hook.py"}
+BASH_HOOK_COUNT = len(replay.bash_hook_files(REPOSITORY_ROOT) - BASH_HOOKS_THAT_LOAD_NO_SHELL_READER)
 
 failures = []
 
@@ -990,8 +991,10 @@ try:
 
     guards, switched, _, _ = replay.guards_loaded(REPOSITORY_ROOT, True)
     check("new-process mode switches the shell reader each guard loads",
-          switched == BASH_HOOK_COUNT and all(guard.shell_reader._read_in_a_new_process for guard in guards.values()),
-          {key: guard.shell_reader._read_in_a_new_process for key, guard in guards.items()})
+          switched == BASH_HOOK_COUNT and all(guard.shell_reader._read_in_a_new_process for key, guard in guards.items()
+                                              if key not in BASH_HOOKS_THAT_LOAD_NO_SHELL_READER),
+          {key: guard.shell_reader._read_in_a_new_process for key, guard in guards.items()
+           if key not in BASH_HOOKS_THAT_LOAD_NO_SHELL_READER})
 
     killing_child_on_ls = commit_with_reader_changed_in_its_long_running_child(
         "import signal; os.kill(os.getpid(), signal.SIGKILL)", scratch)
