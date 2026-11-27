@@ -189,17 +189,24 @@ NUMBER_LIST = rf"{NUMBER}(?:{NUMBER_JOINER}{NUMBER})*(?![\d.]\d)"
 VALUE_COUNT = re.compile(rf"^items?\s+({NUMBER_LIST})(?:\s+of\s+(\d+)\b)?", re.I)
 HEADING_COUNT = re.compile(rf"^[*_\s]*items?\s+({NUMBER_LIST})\s+of\s+(\d+)\b", re.I)
 WITHDRAWN_HEADING_ITEMS = re.compile(rf"\bitems?\s+({NUMBER_LIST})", re.I)
-# Atomic, so a label's number is never shortened to fit what follows it: `**Item 6.2** shows` cannot be read as
-# `**Item 6` followed by `.`. Every label reads its number through this one piece.
-WHOLE_NUMBER = rf"(?>{NUMBER})"
+
+
+def atomic_named_group(name, pattern):
+    """A named group that, once matched, never gives text back, so a label's number is not shortened to fit what
+    follows it: `**Item 6.2** shows` cannot be read as `**Item 6` followed by `.`. A lookahead does not backtrack
+    once it has matched, and the backreference consumes what it captured. Python's own atomic group needs 3.11,
+    and the Mac's system python3, which runs the hooks that load this module, is 3.9."""
+    return rf"(?=(?P<{name}>{pattern}))(?P={name})"
+
+
 # Within a heading shared by several items, an item's opening may leave out `of M`, the heading giving it, when
 # it is a label: the number, read whole, ends the label, so a mention such as `**Item 6** of 8`, `Item 6 depends`
 # or `Item 60 of the` is not one. In bold the label ends at `:`, `.` or `,`, or at the bold's end followed by one
 # of those, a dash or the line's end; plain, at `:` or `.` followed by a space or the line's end.
 ITEM_LABEL = re.compile(
-    rf"^(?:(?P<bold>\*\*|__)item\s+(?P<bold_number>{WHOLE_NUMBER})(?:\s+of\s+(?P<total>\d+))?"
+    rf"^(?:(?P<bold>\*\*|__)item\s+{atomic_named_group('bold_number', NUMBER)}(?:\s+of\s+(?P<total>\d+))?"
     rf"(?=\s*[:.,]|(?P=bold)\s*(?:[:.,\-–—]|$))"
-    rf"|item\s+(?P<plain_number>{WHOLE_NUMBER})[:.](?=\s|$))", re.I)
+    rf"|item\s+{atomic_named_group('plain_number', NUMBER)}[:.](?=\s|$))", re.I)
 APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = "No decision here; type N or next to continue."
 SUB_STEP_NO_DECISION_CLOSING_LINE = re.compile(
     rf"^\s*(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\((\S+)\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
@@ -219,8 +226,8 @@ RUNNING_COUNT_TOTAL = re.compile(rf"\b(items?\s+{NUMBER_LIST})\s+of\s+\d+\b", re
 # After `Item`, the numbers, read whole, must end the label, so a title that only opens with an item's number, as in
 # `## Item 36's three added texts`, is an unnumbered item. Group `numbers` holds the numbers.
 ITEM_LABEL_WITHOUT_COUNT = re.compile(
-    rf"^[*_\s]*(?:item\s+(?P<numbers>(?>{NUMBER_LIST}))[*_]*(?:\s*[:.,\-\u2013\u2014][*_]*(?=\s|$)|\s*$)"
-    rf"|items\s+(?P<plural_numbers>(?>{NUMBER_LIST}))(?=[\s*_:.,;\-\u2013\u2014]|$))", re.I)
+    rf"^[*_\s]*(?:item\s+{atomic_named_group('numbers', NUMBER_LIST)}[*_]*(?:\s*[:.,\-\u2013\u2014][*_]*(?=\s|$)|\s*$)"
+    rf"|items\s+{atomic_named_group('plural_numbers', NUMBER_LIST)}(?=[\s*_:.,;\-\u2013\u2014]|$))", re.I)
 UNNUMBERED_ITEM_HEADING_MARKUP = "##"
 # The close step of the answer program puts this right after a deferred item's running count. It holds a colon, so
 # every pattern that reads a heading past its count reads approval_walk_item_heading_with_deferred_note_removed's line.
