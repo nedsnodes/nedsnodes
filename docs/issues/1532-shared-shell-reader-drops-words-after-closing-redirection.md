@@ -1,5 +1,5 @@
 ---
-issue: "[Shared shell reader drops words after closing redirection; force-push guard misses --force](https://github.com/nedschorus/nedschorus/issues/1532)"
+issue: "[Shared shell reader drops words after closing redirection; force-push guard misses --force](https://github.com/nedsnodes/nedsnodes/issues/1532)"
 ---
 
 # Shared shell reader drops words after closing redirection; force-push guard misses --force
