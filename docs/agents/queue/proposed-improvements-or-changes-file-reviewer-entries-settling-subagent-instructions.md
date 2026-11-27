@@ -28,7 +28,7 @@ Work through every open entry in them before you report, even when one of them g
 - **Related entries**, sharing one cause: make one change for all of them, and record it as one attempt under each, by naming them all in one `attempt` command for each file they are in.
 - **Independent entries**: handle each on its own.
 
-## 3. Work on an entry: at most 3 attempts
+## 3. Work on an entry: at most 3 attempts, or 4 for the only entry open
 
 An attempt is one effort to settle an entry: reading its sources, finding out whether it is real and worth doing, and, when it is, making the change. Record each attempt with the `attempt` subcommand once you have done the work, saying in `--found` what you did, what you read and what you found, with the words of each source you rely on, on one line, and naming each source you read with one `--source`: a path in this repository, a log-store path, `PR <number>` or `GHI <number>`. After an attempt brings an entry to 3 attempts, the program says so. When that attempt found the entry not worth doing, run `second-agent-verdict` as "Not worth doing" says: if the second agent disagrees, the program marks the entry as needing the user. Give `attempt` the `--outcome` your attempt reached; after a third attempt whose outcome is `left-open`, the program marks the entry as needing the user; when no other entry is open in any proposed-improvements-or-changes-file of its GHI-MD, the program waits for a fourth `left-open` attempt before it marks the entry.
 
@@ -72,9 +72,9 @@ Only these three kinds of entry, and nothing else:
 
 - an entry whose change would alter a document that step 2 of `.claude/skills/cold-read/SKILL.md` sends to a cold-read-full-run, in a way that its step 9 sends to the user: `--because cold-read-document`;
 - an entry that asks whether a user-ruling should change, because the sources show that the user-ruling still applies and the GHI-MD goes against it: `--because user-ruling-change`;
-- an entry still open after 3 attempts: `--because three-attempts`.
+- an entry still open after its last attempt: `--because three-attempts`.
 
-In `--why`, say in one sentence what the user must decide; for three attempts, what the attempts could not settle. Do not ask him yourself.
+In `--why`, say in one sentence what the user must decide; for `three-attempts`, what the attempts could not settle. Do not ask him yourself.
 
 ## 5. Your report
 
