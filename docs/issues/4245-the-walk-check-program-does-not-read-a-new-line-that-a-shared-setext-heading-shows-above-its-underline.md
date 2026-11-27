@@ -42,7 +42,7 @@ Two functions each decided which lines of the walk-document belong to an item th
 
 Pull request [Walk check: collect an item's marks from the line ranges its shown copy uses](https://github.com/nedsnodes/nedsnodes/pull/4244) merged on 2026-11-23 at 09:31:01Z. It moved the range rule into one finder function, `approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line`, which the shown copy and the check both read, and added the test above. That test passes on main at 3ed355cdf, in a run of its whole suite that exited 0.
 
-One finding from that pull request's review is fixed by its follow-up, the open pull request [Walk item page test: pin the blank lines below a shared setext heading's indented further line](https://github.com/nedsnodes/nedsnodes/pull/4382).
+One finding from that pull request's review is fixed by its follow-up, pull request [Walk item page test: pin the blank lines below a shared setext heading's indented further line](https://github.com/nedsnodes/nedsnodes/pull/4382), which merged on 2026-11-23 at 12:06:44Z.
 
 Three other findings from that review still hold on main and were not fixed, because `CLAUDE.md`'s rule for proposing a guard is not met:
 
