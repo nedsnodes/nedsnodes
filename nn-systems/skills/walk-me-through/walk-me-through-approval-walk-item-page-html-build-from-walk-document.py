@@ -11,7 +11,8 @@ styles and fonts in walk-me-through-approval-walk-item-page-html-head-styles-and
 and a `<main>` with the walk's name and the item's text rendered from Markdown, its heading as the page's `<h1>`.
 N and M are the running count of the item's heading; the walk name is the walk-document's file name without `.md`.
 
-The item is found as the walk-me-through hooks and the walk check program find it, through
+The item is found as the walk-me-through hooks and the walk check program,
+walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py, find it, through
 walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py: its unit runs from the heading that
 names it to the next item, a sub-step such as `### Item 4.1 of 9` being an item of its own. An item that shares a
 heading with others keeps only its own lines, from its opening, such as `**Item 12:**`, to the next opening; with
@@ -20,12 +21,12 @@ heading below it in its section starts no item, so the versions under it are on 
 item's page carries whole, its Withdrawn versions included, a heading that names several of its sub-steps, such as
 `### Items 4.1 and 4.2 of 9` on item 4's page.
 
-The skill links a sub-step's closing line to the page of the item the sub-step belongs to, such as item 4's page
-for sub-step 4.1, so item 4's page carries, after its own lines, each of its sub-steps under the sub-step's own
+The skill ends the message that shows a sub-step with a link to the page of the item the sub-step belongs to, such
+as item 4's page for sub-step 4.1, so item 4's page carries, after its own lines, each of its sub-steps under the sub-step's own
 heading. It takes them wherever they sit below item 4, as the walk finder's
 approval_walk_item_sub_step_units_below_item_in_walk_document says, so an item standing between two of them stays
-off item 4's page and the sub-steps after it are on it, while an older version's `### Item 4.2 of 8` below a later
-item stays off. A sub-step's own
+off item 4's page and the sub-steps after it are on it, while a sub-step below a later item whose
+total differs from item 4's, such as `### Item 4.2 of 8` under `## Item 4 of 9`, is an older version and stays off. A sub-step's own
 page, built with 4.1, holds that sub-step's lines and its own sub-steps, such as 4.1.1, and none of its siblings':
 under `### Items 4.1 and 4.2 of 9` it keeps only 4.1's lines, as for any heading shared by several items. Under a heading that names an item and its sub-steps, as in
 `## Items 12 to 12.2 of 13`, item 12's page also carries the lines of each sub-step that has an opening of its
@@ -33,7 +34,7 @@ own, such as `**Item 12.1:**`, and leaves off a sub-step with none; it puts thes
 order, each line once, so a sub-step's lines that item 12's own already hold are not repeated.
 
 The text is rendered with the shared
-CommonMark parser, each line break kept, as the walk-document shows it. A paragraph that opens with
+CommonMark parser, nn-systems/general-tools/markdown-commonmark-parser-with-tables-common.py, each line break kept, as the walk-document shows it. A paragraph that opens with
 `Recommendation:` gets the class `rec`, and one that opens with `#approval_walk_`, such as `#approval_walk_item_waits_on`, gets the class `tag`.
 
 LINKS BETWEEN PAGES. The walk-minutes, the walk-document's sibling `<walk name>-minutes.md`, record each page's link
@@ -183,7 +184,7 @@ def link_owners(item_page_lines, walk_finder):
     return owners
 
 
-def own_page_links_in_number_order(item_page_lines, walk_finder, numbers_with_heading):
+def walk_item_page_previous_next_chain_links_in_number_order(item_page_lines, walk_finder, numbers_with_heading):
     """Return [(number, link)] of each item or sub-step in numbers_with_heading whose newest `#item_page` link is a
     page of its own, one no line of a lower number ever recorded, in number order."""
     newest = {number: link for number, link, _ in item_page_lines if link != walk_finder.ITEM_PAGE_PUBLISH_FAILED}
@@ -318,7 +319,7 @@ def main(argv):
             if arguments.version is not None and link is not None and owner != arguments.item:
                 raise Refused(SHARED_PAGE.format(number=arguments.item, minutes=minutes, link=link, owner=owner))
             before, after = neighbour_links(
-                own_page_links_in_number_order(item_page_lines, walk_finder, numbers_with_heading(text)), arguments.item)
+                walk_item_page_previous_next_chain_links_in_number_order(item_page_lines, walk_finder, numbers_with_heading(text)), arguments.item)
             if before is None:
                 notes.append(NO_PREVIOUS_LINK.format(reason=NO_ITEM_BEFORE.format(number=arguments.item, minutes=minutes)))
             elif arguments.version is None:

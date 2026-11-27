@@ -3,7 +3,7 @@
 
 Each case runs the program as a subprocess on a scratch walk-document, except three that load modules: the
 missing-parser case, which makes the program's parser module raise, the `#item_page` reader case, and the
-own_page_links_in_number_order case. Prints one line per case and exits non-zero if any case fails.
+walk_item_page_previous_next_chain_links_in_number_order case. Prints one line per case and exits non-zero if any case fails.
 """
 import importlib.util
 import shlex
@@ -658,7 +658,7 @@ def run_item_page_line_reader_cases():
                     ("63", walk_finder.ITEM_PAGE_PUBLISH_FAILED, None)], lines)
 
 
-def run_own_page_links_in_number_order_case():
+def run_walk_item_page_previous_next_chain_links_in_number_order_case():
     specification = importlib.util.spec_from_file_location("item_page_builder", PROGRAM)
     builder = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(builder)
@@ -672,8 +672,8 @@ def run_own_page_links_in_number_order_case():
         "#item_page item 5.1 of 9 https://claude.ai/artifact/SubStep51\n"
         "#item_page item 5.2 of 9 www.example.com/item5\n"
         "#item_page item 7 of 9 publish failed: the Artifact tool timed out\n", parser_module.markdown_parser())
-    links = builder.own_page_links_in_number_order(lines, walk_finder, {"2", "3", "5", "5.1", "5.2", "7"})
-    check("own_page_links_in_number_order keeps each page of its own, one sorting above `publish failed` included, "
+    links = builder.walk_item_page_previous_next_chain_links_in_number_order(lines, walk_finder, {"2", "3", "5", "5.1", "5.2", "7"})
+    check("walk_item_page_previous_next_chain_links_in_number_order keeps each page of its own, one sorting above `publish failed` included, "
           "and drops failed publishes and a sub-step whose line records its item's page",
           links == [("2", "https://claude.ai/artifact/Item2"), ("5", "www.example.com/item5"),
                     ("5.1", "https://claude.ai/artifact/SubStep51")], links)
@@ -689,7 +689,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     run_parser_missing_case(scratch)
     run_page_link_cases(scratch)
     run_item_page_line_reader_cases()
-    run_own_page_links_in_number_order_case()
+    run_walk_item_page_previous_next_chain_links_in_number_order_case()
 
 if failures:
     print(f"\n{len(failures)} case(s) failed")
