@@ -354,6 +354,19 @@ LEADING_TRACING_LOGGER_TIMESTAMP = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\s+")
 
 
+AGY_ERROR_LINE_PREFIX = "AGY_ERROR:"
+# Gemini's words when the Ultra sign-in's quota is used up; a retry fails the
+# same way until the quota resets. They count only on a line agy opens with its
+# error prefix: the cell's output also carries the model's own text, which can quote them.
+GEMINI_ULTRA_QUOTA_TEXT = "Individual quota reached"
+
+
+def gemini_ultra_quota_error_line(output: str) -> str:
+    """agy's own error line in `output` when it names the Ultra sign-in's quota, else ""."""
+    return next((line for line in output.splitlines()
+                 if line.startswith(AGY_ERROR_LINE_PREFIX) and GEMINI_ULTRA_QUOTA_TEXT in line), "")
+
+
 class RecognisedFailureText(typing.NamedTuple):
     """An agent-binary failure prefix, cause class, and rule for extracting the detail."""
 

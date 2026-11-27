@@ -76,8 +76,7 @@ WHEN A COLD-READ-CELL FAILS (nedschorus#413; the design, user-reviewed
 2026-09-16 and 2026-09-17, is
 nn-systems/cold-read/cold-read-grid-cell-failure-handling.tool.design.md). Every
 cold-read-cell whose attempt ends without a landed report is retried once,
-at once, with the same model -- no cold-read-cell is special (user-ruled
-2026-09-11) -- and the first attempt's log is kept as
+at once, with the same model, and the first attempt's log is kept as
 `<report file name>.attempt-1.stderr.log`. Each failed attempt is reported
 with its CAUSE, the `cause:` line the cold-read-cell program prints
 (nn-systems/cold-read/cold-read-cell-common.py, classify_failed_attempt) or, when it left
@@ -85,7 +84,14 @@ none, one the cold-read-grid names itself: `RETRYING:` at the first failure,
 `FAILED (exit N):` at the second, after which the report is ABSENT. Two
 first failures are not retried and go straight to `FAILED` and absence: a
 cause the user can clear (cell_common.USER_CLEARABLE_CAUSE_CLASSES), which a
-retry would only meet again, and an attempt stopped at the time limit. The
+retry would only meet again, and an attempt stopped at the time limit.
+One failure is neither retried nor absent: when Gemini refuses the Gemini
+Neon defect-hunt cell because its quota is used up, which a retry would only
+meet again, the cell is skipped, its log is kept, the run counts as complete
+without its report, and the closing text says the cell was skipped because
+Gemini's quota was used up. The grid knows that refusal by agy's own error
+line, which cell_common.gemini_ultra_quota_error_line finds in
+the attempt's log. The
 time limit is 2 hours per attempt, counted on time.monotonic(), which leaves
 out time the machine was asleep on both Linux (CLOCK_MONOTONIC) and macOS
 (mach_absolute_time), so a Mac that sleeps overnight does not trip it; the
@@ -102,9 +108,9 @@ frozen copy changed, whatever else happened. When any report is absent
 every .md file in the record is marked `<!-- INCOMPLETE SET: ... -->`, and
 when an absent report's cause is one the user can clear the closing text
 ends "Tell the user: ...", which repeats each such cause as the run's
-summary. Apart from the retry, a cause changes what is reported, never what
-is decided: the absence, the closing text and the exit code turn only on
-whether a report landed.
+summary. Apart from the retry and the Gemini quota skip, a cause changes
+what is reported, never what is decided: the absence, the closing text and
+the exit code turn only on whether a report landed.
 
 QUESTION 4, WHAT SHOULD BE CODE, IS ASKED ONCE PER RUN, beside the cells
 above, by the eighth cold-read-cell, launched at the same time as the seven: the claude launcher on the model and effort the
@@ -154,9 +160,10 @@ since the count last started ends the attempt: its closing text says to tell
 the user instead of starting a new run, and a run launched after it is refused
 until the user rules.
 
-Exit codes: 0 all seven cold-read-cells of the two passes ran and the record
-reached the log-store, whether or not the Question 4 report landed, 1 one or
-more of their seven reports are absent or the record did not reach the
+Exit codes: 0 all seven cold-read-cells of the two passes ran, or all but a
+Gemini cell skipped on Gemini's quota, and the record reached the log-store,
+whether or not the Question 4 report landed, 1 one or more of their seven
+reports are absent or the record did not reach the
 log-store, or both, 2 no cold-read-cell was launched (a bad invocation, a cold-read-target
 this instrument refuses to review, or a cold-read-target that could not be
 frozen into the cold-read-record), 3 the frozen copy changed while the
@@ -267,6 +274,8 @@ GEMINI_NEON_DEFECT_HUNT_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 40 * 60
 GEMINI_NEON_DEFECT_HUNT_CELL = GridCell(
     "agy", "defect-hunt", "fast", "gemini-4-neon-high", "high",
     GEMINI_NEON_DEFECT_HUNT_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS)
+GEMINI_NEON_DEFECT_HUNT_CELL_NAME = (f"{GEMINI_NEON_DEFECT_HUNT_CELL.runtime}-hunt-"
+                                     f"{GEMINI_NEON_DEFECT_HUNT_CELL.model}")
 GRID_CELLS = tuple(
     GridCell(runtime, cell_pass, tier, None, effort)
     for runtime in ("claude", "codex")
@@ -371,6 +380,12 @@ SOME_LANDED_OPENING = (
     "{landed} of {launched} reports landed in {record_dir}. The set is valid "
     "and incomplete: triage the reports that landed.")
 NONE_LANDED_OPENING = "No report landed in {record_dir}, so there is nothing to triage."
+GEMINI_QUOTA_SKIPPED_ALL_OTHERS_LANDED_OPENING = (
+    "All {landed} reports of the cells that ran landed in {record_dir}, one file per "
+    "reviewer; the set is complete without the Gemini cell's report.")
+GEMINI_QUOTA_SKIPPED_SENTENCE = (
+    "The Gemini cell {cell} was skipped because Gemini's quota was used up: it was not "
+    "retried, and its report is not counted as absent (log: {log_path}).")
 WHAT_SHOULD_BE_CODE_QUESTION_ANSWERED_LINE = (
     "Question 4, What should be code, is answered in {report_path}, by one more "
     "reviewer of the same frozen-copy. Triage its numbered items as you triage the "
@@ -891,6 +906,8 @@ class RunOutcome(typing.NamedTuple):
     moved_mid_run: typing.Optional[tuple]
     # The Question 4 cell's absence, kept out of `absent`: it fails no run.
     what_should_be_code_question_absent: dict
+    # Log of the Gemini cell skipped on a quota refusal, which a retry would only meet again.
+    gemini_quota_skipped_log: typing.Optional[pathlib.Path] = None
 
 
 def cell_name_of(report_path: pathlib.Path) -> str:
@@ -1224,7 +1241,11 @@ def wait_for_cells(running: dict,
                 cause_class, detail = ((TIMED_OUT_CAUSE_CLASS, TIMED_OUT_CAUSE_DETAIL) if timed_out
                                        else cause_of_failed_attempt(attempt, code, log_lines))
                 cause = f"{cause_class}{cell_common.CAUSE_SEPARATOR}{detail}"
-                if (attempt.attempt == 1 and not timed_out
+                if (name == GEMINI_NEON_DEFECT_HUNT_CELL_NAME and not timed_out
+                        and cell_common.gemini_ultra_quota_error_line(
+                            "\n".join(log_lines))):
+                    outcome = outcome._replace(gemini_quota_skipped_log=attempt.stderr_path)
+                elif (attempt.attempt == 1 and not timed_out
                         and cause_class not in cell_common.USER_CLEARABLE_CAUSE_CLASSES):
                     kept = report_path.with_name(report_path.name + ".attempt-1.stderr.log")
                     attempt.stderr_path.rename(kept)
@@ -1497,6 +1518,12 @@ def main() -> int:
             print("Stopped before finishing: " + ", ".join(outcome.stopped) + ".")
         if absences:
             print(absences)
+    elif not outcome.absent and outcome.gemini_quota_skipped_log:
+        print(GEMINI_QUOTA_SKIPPED_ALL_OTHERS_LANDED_OPENING.format(
+            landed=len(outcome.landed), record_dir=record_dir))
+        print()
+        print(COMPLETION_BODY.format(record_dir=record_dir,
+                                     read_until="every report that landed", record_absences=""))
     elif not outcome.absent:
         print(ALL_LANDED_OPENING.format(record_dir=record_dir))
         print()
@@ -1517,6 +1544,9 @@ def main() -> int:
     if question_4_line and not target_changed:
         print()
         print(question_4_line)
+    if outcome.gemini_quota_skipped_log:
+        print(GEMINI_QUOTA_SKIPPED_SENTENCE.format(
+            cell=GEMINI_NEON_DEFECT_HUNT_CELL_NAME, log_path=outcome.gemini_quota_skipped_log))
     if tell:
         print(tell)
     # A changed target invalidates the review; missing reports only make the review incomplete.
