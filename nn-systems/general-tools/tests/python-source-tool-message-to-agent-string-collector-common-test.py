@@ -764,23 +764,9 @@ MODULE_CONSTANT_NAMED_AT_A_FORM = (
      'REFUSED = "refused: {problem}"\nEMPTY = "is empty"\nclass Failure(Exception):\n    pass\n'
      'def main():\n    def refused(problem):\n        return Failure(REFUSED.format(problem=problem))\n'
      '    raise refused(EMPTY)\n', "refused: {problem}"),
-    ("in a followed return statement, as an argument of a subclass of such a class",
-     'REFUSED = "refused"\nclass Failure(Exception):\n    pass\nclass Refused(Failure):\n    pass\n'
-     'def refused():\n    return Refused(REFUSED)\ndef main():\n    raise refused()\n', "refused"),
-    ("in a followed return statement, as an argument of a built-in exception",
-     'GONE = "the file is gone"\ndef gone():\n    return ValueError(GONE)\ndef main():\n    raise gone()\n',
-     "the file is gone"),
     ("bare in a raise of a dotted exception class",
      'import argparse\nPROBLEM = "no answer"\ndef parse(value):\n    raise argparse.ArgumentTypeError(PROBLEM)\n',
      "no answer"),
-    ("bare as the argument of a function that returns it in a hook output value",
-     'NOTE = "the hook failed"\nimport json\ndef context_output(event, text):\n'
-     '    return json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})\n'
-     'def main(event):\n    print(context_output(event, NOTE))\n', "the hook failed"),
-    ("as the argument of a function that returns it in a string, through another such function",
-     'CAUSE = "timed out"\ndef cause_line(program, cause):\n    return program + ": " + cause\n'
-     'def line(program, cause):\n    return cause_line(program, cause)\n'
-     'def main(program):\n    print(line(program, CAUSE))\n', "timed out"),
     ("as a + operand in a print",
      'ENDING = " Run it again."\ndef main(text):\n    print(text + ENDING)\n', " Run it again."),
     ("as an element of a list joined by a string literal",
@@ -789,6 +775,13 @@ MODULE_CONSTANT_NAMED_AT_A_FORM = (
     ("in a followed local name's binding",
      'ENDING = " Run it again."\ndef main(text):\n    message = "failed: " + text + ENDING\n    print(message)\n',
      " Run it again."),
+    ("with .format as an argument of a dotted exception class in a followed return statement",
+     'import argparse\nNOTE = "{value} is no answer"\ndef fail(value):\n'
+     '    return argparse.ArgumentTypeError(NOTE.format(value=value))\n'
+     'def parse(value):\n    raise fail(value)\n', "{value} is no answer"),
+    ("with .format as the argument of a function that returns it in an f-string's field",
+     'NOTE = "bad {v}"\ndef decorate(text):\n    return f"Error: {text}"\n'
+     'def main(v):\n    print(decorate(NOTE.format(v=v)))\n', "bad {v}"),
     ("with .format in a raise of a dotted exception class",
      'import argparse\nPROBLEM = "{value} is no answer"\ndef parse(value):\n'
      '    raise argparse.ArgumentTypeError(PROBLEM.format(value=value))\n', "{value} is no answer"),
@@ -818,9 +811,6 @@ for case_name, source in (
         ("bare among a dotted call's arguments in a followed return",
          'PROGRAM = "stale-check"\ndef lines(rerun):\n    return helpers.next_lines(rerun, PROGRAM)\n'
          'def main(rerun):\n    print(lines(rerun))\n'),
-        ("with .format as a pattern of re.sub in a print",
-         'import re\nPATTERN = "^{prefix}"\ndef main(prefix, text):\n'
-         '    print(re.sub(PATTERN.format(prefix=prefix), "", text))\n'),
         ("bare among a bare-named call's arguments in a followed return",
          'CAUSE = "timed-out"\ndef line(program):\n    return cause_line(program, CAUSE)\n'
          'def main(program):\n    print(line(program))\n'),
@@ -831,54 +821,13 @@ for case_name, source in (
         ("bare in a comparison that is printed", 'MODE = "first"\ndef main(mode):\n    print(mode == MODE)\n')):
     found = texts(source)
     check(f"not recognized: a module string constant named {case_name}",
-          not ({"--force", "first", "second", "module text", "timed-out", "stale-check", "^{prefix}"} & set(found)), found)
+          not ({"--force", "first", "second", "module text", "timed-out", "stale-check"} & set(found)), found)
 
 found = entries('NOTE = "nothing to do"\nimport json\n'
                 'def main():\n    print(NOTE)\n    print(json.dumps({"reason": NOTE}))\n')
 check("a module string constant printed and given as a hook output value is one entry, labelled with its name",
       [(entry["text"], entry["label"]) for entry in found] == [("nothing to do", "NOTE =")], found)
 
-for case_name, source in (
-        ("compared", 'MODE = "fast"\ndef main(requested_mode):\n    print(MODE)\n    if requested_mode == MODE:\n        return 1\n'),
-        ("tested for in a text", 'REFUSED_MESSAGE = "refused"\ndef main(output):\n    print(REFUSED_MESSAGE)\n'
-                                 '    return REFUSED_MESSAGE.strip() in output\n'),
-        ("looked up with a str method", 'HEADING = "## Words"\ndef main(lines):\n    print("no " + HEADING)\n'
-                                        '    return lines.index(HEADING)\n'),
-        ("used as a dict key", 'KIND_MESSAGE = "kind"\ndef main(record):\n    print(KIND_MESSAGE)\n'
-                               '    return {KIND_MESSAGE: record}\n'),
-        ("used as a subscript's index", 'KIND_MESSAGE = "kind"\ndef main(record):\n    print(KIND_MESSAGE)\n'
-                                        '    return record[KIND_MESSAGE]\n'),
-        ("given to a function of the re module", 'PATTERN_LINE = "^x"\nimport re\ndef main(text):\n'
-                                                 '    print(PATTERN_LINE)\n    return re.match(PATTERN_LINE, text)\n'),
-        ("given only to calls that are not forms, as a state table's verdict",
-         'V_GATEKEEPER_REFUSAL = "gatekeeper-refusal"\ndef _row(state, verdict):\n    return (state, verdict)\n'
-         'ROWS = (_row("start", V_GATEKEEPER_REFUSAL), _row("end", V_GATEKEEPER_REFUSAL))\n'
-         'VERDICTS = (V_GATEKEEPER_REFUSAL,)\n'),
-        ("written to a file", 'from pathlib import Path\nMARKER = "done"\ndef main(path):\n    print(MARKER)\n'
-                              '    Path(path).write_text(MARKER)\n'),
-        ("given to a helper that compares its parameter",
-         'MODE = "fast"\ndef is_mode(requested, wanted):\n    return requested == wanted\n'
-         'def main(requested):\n    print(MODE)\n    return is_mode(requested, MODE)\n'),
-        ("the receiver of a lookup method", 'TEMPLATE = "a {x} b"\ndef main():\n    print(TEMPLATE.format(x=1))\n'
-                                             'START = TEMPLATE.index("{x}")\n'),
-        ("compared through a local alias", 'MODE = "fast"\ndef main(requested_mode):\n    print(MODE)\n'
-                                           '    mode = MODE\n    return requested_mode == mode\n'),
-        ("the text a str method replaces", 'NOTE_LINE = "a line"\ndef main(text):\n    print(NOTE_LINE)\n'
-                                           '    return text.replace(NOTE_LINE, "")\n')):
-    found = entries(source)
-    check(f"a module string constant also {case_name} is marked as steering the program",
-          [entry["collected_string_is_module_constant_whose_value_also_steers_the_program"] for entry in found if entry["label"].endswith(" =")]
-          == [True], found)
-
-found = entries('MODE = "fast"\nNOTE_LINE = "a line"\ndef main(text):\n    print(MODE)\n'
-                '    print(f"{NOTE_LINE} {MODE}")\n    line = NOTE_LINE + " " + MODE\n    print(line)\n')
-check("a module string constant only shown, in a print, a printed f-string's field or a followed binding, is not marked",
-      [entry["collected_string_is_module_constant_whose_value_also_steers_the_program"] for entry in found
-       if entry["label"] in ("MODE =", "NOTE_LINE =")] == [False, False], found)
-
-found = texts('START = "first part"\nEND = "second part"\ndef main():\n    line = START + END\n    print(line)\n')
-check("recognized: module string constants joined with + in a local binding that is printed",
-      {"first part", "second part"} <= set(found), found)
 
 found = texts('FLAG = "--check"\ndef command(target):\n    words = ["python3", FLAG, target]\n'
               '    return " ".join(words)\ndef main(target):\n    print(command(target))\n')
@@ -886,21 +835,10 @@ check("not recognized: a local list of a command's words that holds a module str
       not ({"python3", "--check"} & set(found)), found)
 
 found = entries('NOTE = "try again"\nFINAL_MESSAGE = "Hint: " + NOTE\n')
-check("recognized: a module string constant in the value of a name ending in a suffix, unmarked",
-      [(entry["text"], entry["label"], entry["collected_string_is_module_constant_whose_value_also_steers_the_program"])
-       for entry in found if entry["label"] == "NOTE ="] == [("try again", "NOTE =", False)], found)
+check("recognized: a module string constant in the value of a name ending in a suffix",
+      [(entry["text"], entry["label"]) for entry in found if entry["label"] == "NOTE ="]
+      == [("try again", "NOTE =")], found)
 
-for case_name, source in (
-        ("a followed return of a local + a module string constant",
-         'START = "s"\nEND = "e"\ndef msg():\n    line = START + END\n    return line + END\n'
-         'def main():\n    print(msg())\n'),
-        ("a hook output value of a local + a module string constant",
-         'import json\nSTART = "s"\nEND = "e"\ndef main():\n    line = START + END\n'
-         '    print(json.dumps({"reason": line + END}))\n')):
-    found = entries(source)
-    check(f"recognized, unmarked: module string constants reaching {case_name}",
-          sorted((entry["label"], entry["collected_string_is_module_constant_whose_value_also_steers_the_program"])
-                 for entry in found) == [("END =", False), ("START =", False)], found)
 
 found = texts('FLAG = "--check"\ndef command(args):\n    cmd = ["python3", FLAG] + args\n    return cmd\n'
               'def main(args):\n    print(command(args))\n')

@@ -96,7 +96,7 @@ os.execv(os.environ[{REAL_GIT_VARIABLE!r}], ["git", *sys.argv[1:]])
 BASELINE_FILE_CONTENTS = {
     "docs/review-note.md": "A prose heading\n\nOld prose.\n\n```python\nprint('old')\n```\n",
     "operative-note.md": "Old prose outside docs.\n",
-    "scripts/example-program.py": '"""Old module documentation."""\n# Old comment\nVALUE_MESSAGE = "old"\n\ndef show_value():\n    """Old function documentation."""\n    print(VALUE_MESSAGE)\n    return 1\n',
+    "scripts/example-program.py": '"""Old module documentation."""\n# Old comment\n\ndef show_value():\n    """Old function documentation."""\n    print("old")\n    return 1\n',
     "scripts/example-program-test.py": 'EXPECTED = "old"\nassert EXPECTED\n',
     "scripts/guard-example.py": 'REFUSED_GIT_SUBCOMMANDS = ["push", "reset"]\n\ndef refused(c):\n    return c in REFUSED_GIT_SUBCOMMANDS\n',
     "scripts/pattern-example.py": 'import re\nPATTERN = re.compile(r"^git push\\b")\nLIMIT = 1\n',
@@ -284,8 +284,13 @@ def run_unit_cases():
     for case_name, source in tool_message_to_agent_string_cases:
         check(f"normalized AST ignores a tool-message-to-agent string: {case_name}",
               normalized(source) == normalized(source.replace("old", "new")))
-    check("normalized AST ignores a printed module constant named as a message",
-          normalized('CHECK_MESSAGE = "old"\nprint(CHECK_MESSAGE)\n') == normalized('CHECK_MESSAGE = "new"\nprint(CHECK_MESSAGE)\n'))
+    for case_name, source in (
+            ("named as a message and printed", 'CHECK_MESSAGE = "old"\nprint(CHECK_MESSAGE)\n'),
+            ("only printed", 'NOTE = "old"\ndef main():\n    print(NOTE)\n'),
+            ("only raised", 'NOTE = "old"\ndef main():\n    raise ValueError(NOTE)\n'),
+            ("assigned inside a module-level if", 'if True:\n    NOTE_MESSAGE = "old"\nprint(NOTE_MESSAGE)\n')):
+        check(f"normalized AST keeps a module constant's value {case_name}",
+              normalized(source) != normalized(source.replace("old", "new")))
     steering_constant_source = 'MODE = "old"\ndef main(requested_mode):\n    print(MODE)\n    if requested_mode == MODE:\n        return 1\n'
     check("normalized AST keeps a printed module constant that is also compared",
           normalized(steering_constant_source) != normalized(steering_constant_source.replace("old", "new")))
