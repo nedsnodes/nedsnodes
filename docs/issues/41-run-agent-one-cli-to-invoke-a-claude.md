@@ -17,6 +17,9 @@ Headless halves: `codex exec` (MEASURED live 2026-08-03: read-only sandbox, `-C`
 
 **Correction, 2026-10-01.** Both halves run headless today, and `scripts/d-review-codex-cell.py` is no longer on main: the cells `nn-systems/cold-read/cold-read-claude-cell.py`, `nn-systems/cold-read/cold-read-codex-cell.py` and `nn-systems/cold-read/cold-read-agy-cell.py` run `claude`, `codex` and `agy` headless and share `nn-systems/cold-read/cold-read-cell-common.py`, which `scripts/sanity-check-attacks.py` also calls.
 
+**Correction, 2026-11-26.** Three names in this document have since moved. `scripts/sanity-check-attacks.py` is now `scripts/sanity-check-adversarial-prompts.py` (commit b3b9a8bf7, 2026-10-13). d-review was renamed md-review (commit 9afe3c91a, 2026-08-05) and then cold-read (commit cb8b569cb, pull request 178, 2026-08-28), so "d-review" here names today's cold-read, and the `d-review/prompts/` directory of design point 4 is `.claude/skills/cold-read/prompts/`. The `claude -p` half marked UNMEASURED above is the Claude half that the 2026-10-01 correction reports running headless, in `nn-systems/cold-read/cold-read-claude-cell.py`; that paragraph's rule, that every headless-Claude flag combination is verified before it is relied on, still applies to the combinations run-agent will pass. The Relations line "First caller: d-review" means d-review's Codex-cell script, `scripts/d-review-codex-cell.py`, which is no longer on main.
+#open_question Which program takes the place of `scripts/d-review-codex-cell.py` as run-agent's first caller.
+
 ## Design points (boss-ruled 2026-08-03)
 
 1. **Instruction files are the context floor, selected by working directory.** The `--cd` choice decides which CLAUDE.md / AGENTS.md rides along under the prompt. Probe matrix owed at build: which invocation modes load which instruction files, per agent-binary (currently assumed, not measured).
