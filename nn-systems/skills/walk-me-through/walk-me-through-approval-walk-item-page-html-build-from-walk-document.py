@@ -41,22 +41,26 @@ on an `#item_page` line, read through the walk finder's approval_walk_item_page_
 a page gets a "Previous" link to the page of the item before, when there is one: the item or sub-step with the
 highest number below this one's, in number order, so 4.2 before 4.10, whose newest `#item_page` line with a link
 gives that link. It gets a "Next" link to the page of the item after, the lowest such number above it, when there is
-one. So the links chain every page of its own: 4, 4.1, 4.2 … 4.10, then 5. A sub-step whose newest link is the page
-of an item numbered below it, as when its line records its item's page, shares that page and stays out of the chain,
-and a failed publish's line is no link. When there is no Previous link, such as when the walk-minutes are missing,
-the program prints why.
+one. So the links chain every page of its own: 4, 4.1, 4.2 … 4.10, then 5. A sub-step whose newest link any line of
+a lower number ever recorded, as when its line records its item's page, shares that page and stays out of the chain,
+even after that item gets a new page. A number no heading of the walk-document names, such as a sub-step whose heading
+is now marked Withdrawn, stays out too. A failed publish's line, `#item_page item N of M publish failed: <reason>`,
+is no link. When there is no Previous link, such as when the walk-minutes are missing, the program prints why.
 
 The item after has no link yet when this item's first page is built, so that page cannot be given its Next link in the
 same invocation of the program. On an item's or a sub-step's first page, built without --version, when that page has a Previous
 link, the program prints the command that rebuilds the earlier item's page, the one the Previous link opens, with --version
 set to that item's next version, to run once this item's page is published and its `#item_page` line recorded; the earlier
-item's page then gets its Next link to this one. An item's `#item_page`
+item's page then gets its Next link to this one. When such a first page also has a Next link, because the page after
+was published first, the program prints the same kind of command for that later page, which then gets its Previous
+link to this one. An item's `#item_page`
 lines with a link, read oldest first, count versions from 1, each one more than the line before or the version it
 states when that is higher, so the last line's version is the highest; the item's next version is one more.
 A stated version can skip ahead, because an agent may republish a page without recording a line for it, as when
 `#item_page item 2 of 19 <link> (version 4)` follows a single earlier line for item 2; a bare line after it is then
 version 5, and the item's next version 6. Building a page with --version prints the link it is to be published to, its
-item's newest `#item_page` link, if any.
+item's newest `#item_page` link, if any. It refuses --version for a sub-step whose newest link is a lower number's
+page, and names the number to build instead, because the page built would replace that item's page.
 
 It does not copy the files an item links into the page: each link stays as the walk-document writes it, so a
 `file:///Volumes/nedhome/...` link opens only on the user's Mac. Of the lines the paragraphs above put on the page,
@@ -105,12 +109,22 @@ WRITTEN_REPUBLISH = ("Wrote {output}: publish it with the Artifact tool to {link
                      "its title is \"{title}\".")
 NO_PREVIOUS_LINK = "The page has no Previous link: {reason}."
 NO_MINUTES = "the walk-minutes {minutes} do not exist"
-NO_ITEM_BEFORE = "no item or sub-step numbered below {number} has an `#item_page` line with a page of its own in {minutes}"
+NO_ITEM_BEFORE = ("no item or sub-step numbered below {number} that a heading of the walk-document names has an "
+                  "`#item_page` line with a page of its own in {minutes}")
+SHARED_PAGE = (
+    "REFUSED: no page written: item {number}'s newest `#item_page` line in {minutes} records {link}, the page of item {owner}, so item {number} has no page of its own to republish, and a page built for it would replace item {owner}'s.\n"
+    "To change the text on that page, build item {owner} instead: run this program with {owner} in place of {number}.\n"
+    "To give item {number} a page of its own, build it without --version, publish the file as a new page, and record its link on a new `#item_page` line.")
 ITEM_BEFORE_NEXT_LINK = (
     "Item {before}'s page, {link}, has no Next link to this page yet, because this page has no link until it is published.\n"
     "Once you have published {output} and recorded its `#item_page` line in {minutes}, run\n"
     "{command}\n"
     "and publish the file it writes as it says, to {link}, so that item {before}'s page links to this one.")
+ITEM_AFTER_PREVIOUS_LINK = (
+    "Item {after}'s page, {link}, was published before this one, so its Previous link skips this page.\n"
+    "Once you have published {output} and recorded its `#item_page` line in {minutes}, run\n"
+    "{command}\n"
+    "and publish the file it writes as it says, to {link}, so that item {after}'s page links back to this one.")
 
 
 class Refused(Exception):
@@ -159,16 +173,23 @@ def number_order(number):
     return tuple(int(part) for part in number.split("."))
 
 
-def own_page_links_in_number_order(item_page_lines, walk_finder):
-    """Return [(number, link)] of each item or sub-step whose newest `#item_page` link is a page of its own,
-    in number order."""
+def link_owners(item_page_lines, walk_finder):
+    """Return {link: the lowest number, in number order, of any `#item_page` line that records it}."""
+    owners = {}
+    for number, link, _ in item_page_lines:
+        if link != walk_finder.ITEM_PAGE_PUBLISH_FAILED and (
+                link not in owners or number_order(number) < number_order(owners[link])):
+            owners[link] = number
+    return owners
+
+
+def own_page_links_in_number_order(item_page_lines, walk_finder, numbers_with_heading):
+    """Return [(number, link)] of each item or sub-step in numbers_with_heading whose newest `#item_page` link is a
+    page of its own, one no line of a lower number ever recorded, in number order."""
     newest = {number: link for number, link, _ in item_page_lines if link != walk_finder.ITEM_PAGE_PUBLISH_FAILED}
-    links, seen = [], set()
-    for number in sorted(newest, key=number_order):
-        if newest[number] not in seen:
-            links.append((number, newest[number]))
-            seen.add(newest[number])
-    return links
+    owners = link_owners(item_page_lines, walk_finder)
+    return [(number, newest[number]) for number in sorted(newest, key=number_order)
+            if number in numbers_with_heading and owners[newest[number]] == number]
 
 
 def next_version(item_page_lines, walk_finder, number):
@@ -235,6 +256,19 @@ def approval_walk_item_page_html_and_title_build_from_walk_document(document, te
     return page, title
 
 
+def numbers_with_heading(text):
+    """Return the item and sub-step numbers a heading or opening of text names, a Withdrawn heading's excepted."""
+    walk_finder, parser_module = walk_finder_and_parser_module()
+    return {number for unit in walk_finder.item_unit_spans(text, markdown_parser(parser_module)) for number in unit[0]}
+
+
+def rebuild_command(document, number, output, version):
+    """Return the command that builds item number's page again, as version version, into a file beside output."""
+    rebuilt = Path(output).with_name(f"item-{number}-version-{version}.html")
+    return shlex.join(["python3", str(Path(__file__).resolve()), str(document), str(number), str(rebuilt),
+                       "--version", str(version)])
+
+
 def item_page_lines_or_none(minutes):
     """Return (the walk finder, the walk-minutes' `#item_page` lines), or None when the minutes file does not exist."""
     if not minutes.exists():
@@ -278,18 +312,25 @@ def main(argv):
             notes.append(NO_PREVIOUS_LINK.format(reason=NO_MINUTES.format(minutes=minutes)))
         else:
             walk_finder, item_page_lines = found
-            before, after = neighbour_links(own_page_links_in_number_order(item_page_lines, walk_finder), arguments.item)
             link = next((each for number, each, _ in reversed(item_page_lines) if number == arguments.item
                          and each != walk_finder.ITEM_PAGE_PUBLISH_FAILED), None)
+            owner = link_owners(item_page_lines, walk_finder).get(link)
+            if arguments.version is not None and link is not None and owner != arguments.item:
+                raise Refused(SHARED_PAGE.format(number=arguments.item, minutes=minutes, link=link, owner=owner))
+            before, after = neighbour_links(
+                own_page_links_in_number_order(item_page_lines, walk_finder, numbers_with_heading(text)), arguments.item)
             if before is None:
                 notes.append(NO_PREVIOUS_LINK.format(reason=NO_ITEM_BEFORE.format(number=arguments.item, minutes=minutes)))
             elif arguments.version is None:
-                before_version = next_version(item_page_lines, walk_finder, before[0])
-                before_output = Path(arguments.output).with_name(f"item-{before[0]}-version-{before_version}.html")
-                command = shlex.join(["python3", str(Path(__file__).resolve()), str(document), str(before[0]), str(before_output),
-                                      "--version", str(before_version)])
+                command = rebuild_command(document, before[0], arguments.output,
+                                          next_version(item_page_lines, walk_finder, before[0]))
                 notes.append(ITEM_BEFORE_NEXT_LINK.format(before=before[0], link=before[1], output=arguments.output,
                                                           minutes=minutes, command=command))
+            if after is not None and arguments.version is None:
+                command = rebuild_command(document, after[0], arguments.output,
+                                          next_version(item_page_lines, walk_finder, after[0]))
+                notes.append(ITEM_AFTER_PREVIOUS_LINK.format(after=after[0], link=after[1], output=arguments.output,
+                                                             minutes=minutes, command=command))
         page, title = approval_walk_item_page_html_and_title_build_from_walk_document(
             document, text, arguments.item, arguments.version, before, after)
     except Refused as refusal:

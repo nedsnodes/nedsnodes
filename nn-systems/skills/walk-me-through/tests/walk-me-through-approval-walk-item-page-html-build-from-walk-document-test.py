@@ -547,8 +547,22 @@ def run_page_link_cases(scratch):
     result, page = built(scratch, "3")
     check("the first item with a page gets no Previous link, and the printout says no item before has one",
           result.returncode == 0 and page_links(page) == '<nav class="pages"><a href="https://claude.ai/artifact/Item4">'
-          'Next: item 4</a></nav>' and "The page has no Previous link: no item or sub-step numbered below 3 has an "
-          "`#item_page` line with a page of its own" in result.stdout and "python3 " not in result.stdout, result)
+          'Next: item 4</a></nav>' and "The page has no Previous link: no item or sub-step numbered below 3 that a "
+          "heading of the walk-document names has an `#item_page` line with a page of its own" in result.stdout, result)
+    commands = [line for line in result.stdout.split("\n") if line.startswith("python3 ")]
+    check("a first page built after the page of the item numbered after it prints the command that rebuilds that "
+          "later page, and no other, so the later page's Previous link stops skipping this one",
+          len(commands) == 1 and f" 4 {scratch / 'item-4-version-3.html'} --version 3" in commands[0]
+          and "Item 4's page, https://claude.ai/artifact/Item4, was published before this one, so its Previous link "
+          "skips this page" in result.stdout
+          and "to https://claude.ai/artifact/Item4, so that item 4's page links back to this one" in result.stdout,
+          result.stdout)
+    with minutes.open("a", encoding="utf-8") as appended:
+        appended.write("#item_page item 3 of 9 https://claude.ai/artifact/Item3New\n")
+    rebuilt = subprocess.run(shlex.split(commands[0]), capture_output=True, text=True) if commands else None
+    page = (scratch / "item-4-version-3.html").read_text(encoding="utf-8") if rebuilt and rebuilt.returncode == 0 else ""
+    check("that printed command, run once this page's line is recorded, gives the later page a Previous link to it",
+          '<a href="https://claude.ai/artifact/Item3New">Previous: item 3</a>' in page_links(page), (rebuilt, page))
     minutes.write_text("#item_page item 3 of 9 https://claude.ai/artifact/Item3\n", encoding="utf-8")
     result, page = built(scratch, "5")
     check("one line that states no version is version 1, so the next version is 2",
@@ -581,19 +595,41 @@ def run_page_link_cases(scratch):
     check("a sub-step's first page prints the command that rebuilds the page before it, so that page links to it",
           "Item 3's page, https://claude.ai/artifact/Item3, has no Next link" in result.stdout
           and f" 3 {scratch / 'item-3-version-8.html'} --version 8" in result.stdout, result.stdout)
+    sub_steps = WALK_DOCUMENT.replace("## Items 5 and 6 of 9", "### Item 4.2 of 9: a second default\n\nOn.\n\n"
+                                      "### Item 4.3 of 9: a third default\n\nOn.\n\n"
+                                      "### Item 4.10 of 9: a tenth default\n\nOn.\n\n## Items 5 and 6 of 9")
     minutes.write_text("#item_page item 4 of 9 https://claude.ai/artifact/Item4\n"
                        "#item_page item 4.10 of 9 https://claude.ai/artifact/SubStep410\n"
                        "#item_page item 4.2 of 9 https://claude.ai/artifact/SubStep42\n"
                        "#item_page item 4.3 of 9 https://claude.ai/artifact/Item4\n"
                        "#item_page item 5 of 9 https://claude.ai/artifact/Item5\n", encoding="utf-8")
-    result, page = built(scratch, "4.1", "--version", "2")
+    result, page = built(scratch, "4.1", "--version", "2", document=sub_steps)
     check("a sub-step's page links its item and the next page in number order, 4.2 before 4.10",
           page_links(page) == '<nav class="pages"><a href="https://claude.ai/artifact/Item4">Previous: item 4</a> '
           '<a href="https://claude.ai/artifact/SubStep42">Next: item 4.2</a></nav>', page_links(page))
-    result, page = built(scratch, "5", "--version", "2")
+    result, page = built(scratch, "5", "--version", "2", document=sub_steps)
     check("item 5's Previous link opens the last sub-step page before it in number order, 4.10, "
           "and 4.3, whose line records item 4's page, stays out",
           '<a href="https://claude.ai/artifact/SubStep410">Previous: item 4.10</a>' in page_links(page), page_links(page))
+    withdrawn = sub_steps.replace("### Item 4.10 of 9", "### Withdrawn: Item 4.10 of 9")
+    result, page = built(scratch, "5", "--version", "2", document=withdrawn)
+    check("a sub-step whose heading is marked Withdrawn leaves the chain, so item 5's Previous link opens "
+          "4.2's page, not the withdrawn 4.10's",
+          '<a href="https://claude.ai/artifact/SubStep42">Previous: item 4.2</a>' in page_links(page), page_links(page))
+    result, page = built(scratch, "4.3", "--version", "2", document=sub_steps)
+    check("republishing a sub-step whose newest line records its item's page is refused, naming the item to build, "
+          "so the item's page is not replaced by one whose Previous link opens itself",
+          result.returncode == 1 and page == "" and "item 4.3's newest `#item_page` line" in result.stderr
+          and "the page of item 4" in result.stderr and "run this program with 4 in place of 4.3" in result.stderr,
+          result)
+    minutes.write_text("#item_page item 4 of 9 https://claude.ai/artifact/Item4\n"
+                       "#item_page item 4.1 of 9 https://claude.ai/artifact/Item4\n"
+                       "#item_page item 4 of 9 https://claude.ai/artifact/Item4New\n", encoding="utf-8")
+    result, page = built(scratch, "5")
+    check("a sub-step that recorded its item's page stays out of the chain after the item gets a new page, so item "
+          "5's Previous link opens item 4's new page, not the superseded one",
+          page_links(page) == '<nav class="pages"><a href="https://claude.ai/artifact/Item4New">Previous: item 4</a>'
+          '</nav>' and "Item 4's page, https://claude.ai/artifact/Item4New" in result.stdout, (page_links(page), result))
     result, page = built(scratch, "x")
     check("an item number no heading can name is refused with exit 1 when walk-minutes exist, not a crash",
           result.returncode == 1 and "has no heading for item x" in result.stderr and page == "", result)
@@ -636,7 +672,7 @@ def run_own_page_links_in_number_order_case():
         "#item_page item 5.1 of 9 https://claude.ai/artifact/SubStep51\n"
         "#item_page item 5.2 of 9 www.example.com/item5\n"
         "#item_page item 7 of 9 publish failed: the Artifact tool timed out\n", parser_module.markdown_parser())
-    links = builder.own_page_links_in_number_order(lines, walk_finder)
+    links = builder.own_page_links_in_number_order(lines, walk_finder, {"2", "3", "5", "5.1", "5.2", "7"})
     check("own_page_links_in_number_order keeps each page of its own, one sorting above `publish failed` included, "
           "and drops failed publishes and a sub-step whose line records its item's page",
           links == [("2", "https://claude.ai/artifact/Item2"), ("5", "www.example.com/item5"),
