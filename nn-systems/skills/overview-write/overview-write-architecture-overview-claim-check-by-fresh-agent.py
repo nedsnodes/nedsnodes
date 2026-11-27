@@ -11,22 +11,36 @@ a program so that no step depends on an agent remembering it:
    the overview's text at its path there.
 3. Stage 1: runs that commit's scripts/md-drift-lint.py on the overview. A
    finding stops the program before any model runs.
-4. Stage 2: runs one fresh-agent, `claude -p` with hooks disabled and only
-   read and search tools, in that worktree. The prompt points it at stage 2
-   of the page, gives the three ranks of a contradicted or unsupported claim
-   (must fix, fix later, nit), since the page at an older commit lacks them,
-   and fixes the report's form, so this program can count the verdicts and
-   ranks. --writer-answers FILE gives it the writer's answers to verdicts the
-   writer disputes, as the page's rounds allow. FILE is free text that quotes
-   each disputed assertion and gives the answer with the quoted line it rests
-   on; this program does not read it, only passes its path to every
-   fresh-agent, and refuses a FILE that is not a file.
+4. Stage 2: splits the overview into claims, one per sentence and one per
+   line of a fenced block, headings, the **Checked against:** line and the
+   pointer line of step 7 left out, each keyed by its whitespace-normalized
+   text. It reads the claim records of the newest report for the overview,
+   whatever overview blob that report names, that holds claim records; with
+   no such report, no claim keeps a verdict. A claim keeps its recorded
+   verdict and evidence when that verdict is supported, the files it rests on
+   have the same git blobs at this commit as recorded, it rests on at least
+   one file, and --writer-answers FILE does not quote it. The files a claim
+   rests on are the repository paths its text names in backticks and those
+   its evidence names; a bare file name counts when exactly one file in the
+   commit has it, and is otherwise passed over. Every
+   other claim goes, numbered from 1, to one fresh-agent, `claude -p` with
+   hooks disabled and only read and search tools, in that worktree, with the
+   whole overview for context; when no claim does, no fresh-agent runs. The
+   prompt points it at stage 2 of the page, gives the three ranks of a
+   contradicted or unsupported claim (must fix, fix later, nit), since the
+   page at an older commit lacks them, and fixes the report's form, so this
+   program can count the verdicts and ranks and match each to its claim.
+   --writer-answers FILE gives it the writer's answers to verdicts the writer
+   disputes, as the page's rounds allow. FILE is free text that quotes each
+   disputed assertion and gives the answer with the quoted line it rests on;
+   this program reads it only to find the claims it quotes, passes its path
+   to every fresh-agent, and refuses a FILE that is not a file.
 5. For each claim ranked must fix, runs one more fresh-agent, all of them in
    parallel, given that claim and not the first verdict or rank. The claim
    keeps the rank must fix only when that second answer ranks it must fix
    again; otherwise it is ranked fix later.
-6. Writes the report, the second answers after it, under a header this
-   program writes, to
+6. Writes the report, the second answers after it and the claim records
+   last, under a header this program writes, to
    <report directory>/<overview file name without .md>/<overview blob>-<UTC time>.md,
    where <report directory> is --report-directory, by default
    /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports.
@@ -67,7 +81,11 @@ reads reports with
 find_newest_architecture_overview_claim_check_report_path_and_result_for_overview_git_blob() from this file.
 
 Does not handle: counting rounds (the page stops the check at round 3 and
-sends what is left to the user; no report records what he decides); an
+sends what is left to the user; no report records what he decides); a
+supported claim made false by a change to a file it does not rest on, which
+keeps its verdict; a claim whose meaning depends on another sentence, such as
+"the same file" after a sentence naming the file, which keeps its verdict when
+only that other sentence changes; an
 overview not on the path the page gives; a run on the Mac, where the
 log-store is not local; a repository without origin/main, which is refused;
 another claim check appending the same claim between this run's last read of
@@ -116,7 +134,9 @@ import argparse
 import collections
 import concurrent.futures
 import datetime
+import hashlib
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -176,6 +196,16 @@ VERDICT_LINE = re.compile(r"^VERDICT (\d+) (supported|contradicted|unsupported)(
 COUNTS_LINE = re.compile(r"^COUNTS supported=(\d+) contradicted=(\d+) unsupported=(\d+)\s*$", re.MULTILINE)
 Claim = collections.namedtuple("Claim", "number verdict rank assertion evidence")
 
+CLAIM_RECORDS_SECTION_HEADING = "# Claim records, one JSON object per line"
+FENCED_BLOCK_DELIMITER = re.compile(r"^\s*(`{3,}|~{3,})")
+LIST_ITEM_MARKER = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+TABLE_DELIMITER_ROW = re.compile(r"^[\s|:-]+$")
+BACKTICK_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
+# A sentence ends at . ! or ? followed by a space and a capital, a backtick, an asterisk or an opening quote or
+# bracket; a full stop inside a path or a backtick span ends nothing.
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z`*\"'(\[])")
+REPOSITORY_PATH_CANDIDATE = re.compile(r"[\w.-]*[./][\w./-]*")
+
 PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_PATH_TEMPLATE = (
     "nn-systems/{system}/docs/{system}-architecture-overview-proposed-improvements-or-changes-entries.md")
 # The file's name and directory sit in separate backtick spans: stage 1 lints the overview at the checked-against
@@ -201,15 +231,17 @@ Give each contradicted or unsupported assertion one of three ranks:
 """
 
 FRESH_AGENT_PROMPT_TEMPLATE = """\
-You are the fresh-agent of stage 2 of the section "Checking an overview" in {page}. Read that page, then check the nn-architecture-overview {overview} against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Stage 1 has passed. Do stage 2 as the page says, leaving out what the page says is not checked against the code. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
+You are the fresh-agent of stage 2 of the section "Checking an overview" in {page}. Read that page, and read the nn-architecture-overview {overview} for context. Then check each assertion listed below, a sentence or a diagram line of that overview, against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Stage 1 has passed. Check each assertion as stage 2 of the page says. An assertion the page says is not checked against the code, such as what the system is for, gets the verdict supported with the evidence line `not checked against the code`; an assertion that also gives a one-clause reason is checked on what it says about the code. Name each file in your evidence, each file an absence's searches covered included, by its path from the top of the repository, as in `nn-systems/handoff/handoff-supervisor.py:2333`: a program compares those files at later commits to decide which verdicts it keeps without a new check. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
 {ranks}{writer_answers}
-Your final message is the report. A program counts its verdicts and ranks and treats a report in any other form as a failed check, so write it in this form:
-- One block per assertion, which the page calls a row, numbered from 1 in the overview's order. Each block starts with the line `VERDICT <number> supported: <the assertion>`, or `VERDICT <number> <verdict> <rank>: <the assertion>`, where <verdict> is contradicted or unsupported and <rank> is must-fix, fix-later or nit. The lines after it, in any form, give the evidence the page asks for that verdict; the program copies them into the record of an assertion ranked fix later.
+The assertions to check:
+{assertions}
+Your final message is the report. A program matches each verdict to its assertion by number and treats a report in any other form as a failed check, so write it in this form:
+- One block per assertion listed above, with its number there, every one once and in that order. Each block starts with the line `VERDICT <number> supported: <the assertion>`, or `VERDICT <number> <verdict> <rank>: <the assertion>`, where <verdict> is contradicted or unsupported and <rank> is must-fix, fix-later or nit. The lines after it, in any form, give the evidence the page asks for that verdict; the program copies them into the record of an assertion ranked fix later.
 - The last line is `COUNTS supported=<number> contradicted=<number> unsupported=<number>`.
 """
 
 RECHECK_PROMPT_TEMPLATE = """\
-You are a fresh-agent checking one assertion of the nn-architecture-overview {overview} against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Read stage 2 of the section "Checking an overview" in {page} for how to check an assertion and the evidence each verdict needs, then check this assertion only. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
+You are a fresh-agent checking one assertion of the nn-architecture-overview {overview} against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Read stage 2 of the section "Checking an overview" in {page} for how to check an assertion and the evidence each verdict needs, then check this assertion only. Name each file in your evidence by its path from the top of the repository. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
 The assertion: {assertion}
 {ranks}{recheck_writer_answers}
 Your final message is the report. A program reads it and treats a report in any other form as a failed check, so write it in this form:
@@ -218,7 +250,7 @@ Your final message is the report. A program reads it and treats a report in any 
 """
 
 FRESH_AGENT_WRITER_ANSWERS_TEMPLATE = """\
-The overview's writer disputes verdicts of an earlier check. The file {answers} names each disputed assertion and gives the writer's answer, with the quoted line it rests on. Check every assertion as above; for each disputed one, read the writer's answer too, and give the verdict the code bears out.
+The overview's writer disputes verdicts of an earlier check. The file {answers} names each disputed assertion and gives the writer's answer, with the quoted line it rests on. Check every assertion listed below as above; for each disputed one, read the writer's answer too, and give the verdict the code bears out.
 """
 
 RECHECK_WRITER_ANSWERS_TEMPLATE = """\
@@ -333,8 +365,15 @@ def find_newest_architecture_overview_claim_check_report_path_and_result_for_ove
     return newest, "no result line in the report's header"
 
 
-def claims_from_fresh_agent_report(report):
-    """Return (the report's claims, None), or (None, a result saying why the report is malformed)."""
+def claims_from_fresh_agent_report(report, assertions):
+    """Return (the report's claims, None), or (None, a result saying why the report is malformed).
+
+    assertions are the texts the fresh-agent was given, numbered from 1; each claim takes its text from them, not
+    from the fresh-agent's restatement, so that its key matches the overview's sentence. A restatement that differs
+    from the assertion given its number, whitespace aside, makes the report malformed, because the verdict could
+    then belong to another assertion."""
+    if not assertions and not report:
+        return [], None
     matches = list(VERDICT_LINE.finditer(report))
     counts = COUNTS_LINE.findall(report)
     if not matches:
@@ -342,11 +381,16 @@ def claims_from_fresh_agent_report(report):
     numbers = [int(match.group(1)) for match in matches]
     if numbers != list(range(1, len(numbers) + 1)):
         return None, "malformed: the VERDICT lines are not numbered 1, 2, 3 and on in order"
+    if len(numbers) != len(assertions):
+        return None, f"malformed: {len(numbers)} VERDICT lines, for {len(assertions)} assertion(s) given"
     if len(counts) != 1:
         return None, f"malformed: {len(counts)} COUNTS lines, not one"
     claims = []
     for index, match in enumerate(matches):
-        number, verdict, rank, assertion = int(match.group(1)), match.group(2), match.group(3), match.group(4).strip()
+        number, verdict, rank = int(match.group(1)), match.group(2), match.group(3)
+        assertion = assertions[number - 1]
+        if normalized_claim(match.group(4)) != normalized_claim(assertion):
+            return None, f"malformed: VERDICT {number} restates an assertion other than assertion {number} given"
         if verdict == "supported" and rank is not None:
             return None, f"malformed: VERDICT {number} is supported but has the rank {rank}"
         if verdict != "supported" and rank not in RANKS:
@@ -390,24 +434,114 @@ def claims_ranked_after_recheck(claims, recheck_reports):
         if claim.rank != RANK_MUST_FIX:
             ranked.append(claim)
             continue
-        recheck, malformed = claims_from_fresh_agent_report(recheck_reports[claim.number])
+        recheck, malformed = claims_from_fresh_agent_report(recheck_reports[claim.number], [claim.assertion])
         if malformed:
             return None, f"malformed: the recheck of VERDICT {claim.number} is {malformed}"
-        if len(recheck) != 1:
-            return None, f"malformed: the recheck of VERDICT {claim.number} has {len(recheck)} VERDICT lines, not one"
         ranked.append(claim._replace(rank=RANK_MUST_FIX if recheck[0].rank == RANK_MUST_FIX else RANK_FIX_LATER))
     return ranked, None
 
 
-def result_from_fresh_agent_report(report, recheck_reports=None):
-    """Return the claims after the recheck, or None for a malformed report, and the result for the report's header."""
-    claims, malformed = claims_from_fresh_agent_report(report)
+def result_from_fresh_agent_report(report, assertions, recheck_reports=None):
+    """Return the judged claims after the recheck, or None for a malformed report, and the result for the report's
+    header; a kept claim is always supported with no rank, so it changes neither."""
+    claims, malformed = claims_from_fresh_agent_report(report, assertions)
     if malformed:
         return None, malformed
     claims, malformed = claims_ranked_after_recheck(claims, recheck_reports or {})
     if malformed:
         return None, malformed
     return claims, result_from_ranked_claims(claims)
+
+
+def overview_claims_split_from_text(text):
+    """Return the overview's claims in order, each once: every sentence outside a fenced block and every non-blank
+    line inside one, leaving out headings, table delimiter rows, the **Checked against:** line and the pointer line
+    to the proposed-improvements-or-changes-file, which this program asks for."""
+    claims, opening_fence = [], None
+    for line in text.splitlines():
+        fence = FENCED_BLOCK_DELIMITER.match(line)
+        if fence and (opening_fence is None or (fence.group(1)[0] == opening_fence[0]
+                                                and len(fence.group(1)) >= len(opening_fence))):
+            opening_fence = fence.group(1) if opening_fence is None else None
+            continue
+        in_fenced_block = opening_fence is not None
+        if not line.strip() or (not in_fenced_block and (
+                line.lstrip().startswith("#") or TABLE_DELIMITER_ROW.fullmatch(line)
+                or line.startswith(overview_path_reader.CHECKED_AGAINST_PREFIX)
+                or line.startswith(PROPOSED_IMPROVEMENTS_OR_CHANGES_POINTER_LINE_TEMPLATE.split("{")[0]))):
+            continue
+        claims += [line] if in_fenced_block else sentences_split_outside_backtick_spans(LIST_ITEM_MARKER.sub("", line))
+    unique = {}
+    for claim in claims:
+        unique.setdefault(overview_claim_key_hashed_from_claim_text(claim), normalized_claim(claim))
+    return list(unique.items())
+
+
+def sentences_split_outside_backtick_spans(line):
+    masked = BACKTICK_SPAN.sub(lambda span: "`" + "x" * (len(span.group(0)) - 2) + "`", line)
+    starts = [0, *(match.end() for match in SENTENCE_END.finditer(masked)), len(line)]
+    return [line[start:end].strip() for start, end in zip(starts, starts[1:]) if line[start:end].strip()]
+
+
+def overview_claim_key_hashed_from_claim_text(text):
+    return hashlib.sha256(normalized_claim(text).encode("utf-8")).hexdigest()[:16]
+
+
+def git_blob_by_path_at_commit(repository, commit):
+    listing = run_git(repository, "ls-tree", "-r", "-z", commit).stdout
+    blobs = {}
+    for entry in filter(None, listing.split("\0")):
+        mode_type_object, path = entry.split("\t", 1)
+        if mode_type_object.split()[1] == "blob":
+            blobs[path] = mode_type_object.split()[2]
+    return blobs
+
+
+def repository_paths_named_in_text(text, blobs):
+    """Return the paths of blobs that the text names: a path from the top of the repository, or a bare file name that
+    one path in blobs ends with."""
+    paths_by_name = collections.defaultdict(list)
+    for path in blobs:
+        paths_by_name[path.rsplit("/", 1)[-1]].append(path)
+    named = set()
+    for candidate in REPOSITORY_PATH_CANDIDATE.findall(text):
+        candidate = candidate.removeprefix("./").rstrip(".")
+        if candidate in blobs:
+            named.add(candidate)
+        elif "/" not in candidate and len(paths_by_name.get(candidate, ())) == 1:
+            named.add(paths_by_name[candidate][0])
+    return sorted(named)
+
+
+def overview_claim_cited_file_blob_hashes_by_path(assertion, evidence, blobs, overview_path):
+    """Return {path: blob} of the files a claim rests on: the paths its text names in backticks and those its
+    evidence names, the overview itself left out, since its text at the commit is not the text checked."""
+    named = {path for span in BACKTICK_SPAN.finditer(assertion) for path in repository_paths_named_in_text(span.group(0), blobs)}
+    named |= set(repository_paths_named_in_text(evidence or "", blobs))
+    return {path: blobs[path] for path in sorted(named - {overview_path})}
+
+
+def claim_records_of_newest_report_holding_them(destination_directory):
+    """Return (the newest report for the overview that holds claim records, {claim key: record}), or (None, {}).
+
+    Reports are named <overview blob>-<UTC time>.md, so they are ordered by the time, not the whole name."""
+    reports = sorted(destination_directory.glob("*-*.md"), key=lambda path: path.name.split("-", 1)[1], reverse=True)
+    for report in reports:
+        text = report.read_text(encoding="utf-8")
+        heading = f"\n{CLAIM_RECORDS_SECTION_HEADING}\n"
+        if heading not in text:
+            continue
+        records = [json.loads(line) for line in text.rsplit(heading, 1)[1].splitlines() if line.strip()]
+        return report, {record["key"]: record for record in records}
+    return None, {}
+
+
+def overview_claim_last_verdict_can_be_kept_without_fresh_agent_rejudging(record, writer_answers_text, blobs):
+    """A supported verdict is kept while every file it rests on is unchanged, it rests on at least one file, and the
+    writer does not quote the claim as disputed."""
+    return (record is not None and record["verdict"] == "supported" and bool(record["files"])
+            and all(blobs.get(path) == blob for path, blob in record["files"].items())
+            and normalized_claim(record["claim"]) not in writer_answers_text)
 
 
 def nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path):
@@ -567,19 +701,20 @@ def text_at_revision_or_empty(repository, revision, path):
     return run_git(repository, "show", f"{revision}:{path}").stdout
 
 
-def fresh_agent_prompt(template, overview_path, commit, writer_answers, assertion=None):
+def fresh_agent_prompt(template, overview_path, commit, writer_answers, assertion=None, assertions=()):
     return template.format(
         page=HOW_TO_PAGE, overview=overview_path, commit=commit, assertion=assertion,
+        assertions="".join(f"{number}. {text}\n" for number, text in enumerate(assertions, 1)),
         ranks=CLAIM_RANK_DEFINITIONS_FOR_FRESH_AGENT_PROMPT,
         writer_answers=FRESH_AGENT_WRITER_ANSWERS_TEMPLATE.format(answers=writer_answers) if writer_answers else "",
         recheck_writer_answers=RECHECK_WRITER_ANSWERS_TEMPLATE.format(answers=writer_answers) if writer_answers else "")
 
 
-def recheck_reports_for_must_fix_claims(worktree, overview_path, commit, writer_answers, report):
+def recheck_reports_for_must_fix_claims(worktree, overview_path, commit, writer_answers, report, assertions):
     """Run one fresh-agent per claim the report ranks must fix, in parallel; return {claim number: its report}.
 
     A malformed report has no claims to recheck; the caller reports it as malformed."""
-    claims, _malformed = claims_from_fresh_agent_report(report)
+    claims, _malformed = claims_from_fresh_agent_report(report, assertions)
     must_fix = [claim for claim in claims or () if claim.rank == RANK_MUST_FIX]
     if not must_fix:
         return {}
@@ -678,6 +813,15 @@ def check_overview_claims(arguments):
         raise ClaimCheckRefusal(f"--writer-answers {arguments.writer_answers} is not a file.\n"
                                 "To pass the writer's answers: write them to a file and give its path.")
     writer_answers = arguments.writer_answers.resolve() if arguments.writer_answers else None
+    writer_answers_text = normalized_claim(writer_answers.read_text(encoding="utf-8")) if writer_answers else ""
+    destination_directory = overview_write_architecture_overview_claim_check_report_directory_for_overview(report_directory, overview_path)
+    blobs = git_blob_by_path_at_commit(repository, commit)
+    _last_report, last_records = claim_records_of_newest_report_holding_them(destination_directory)
+    overview_claims = overview_claims_split_from_text(text)
+    kept_records = {key: last_records[key] for key, _claim in overview_claims
+                    if overview_claim_last_verdict_can_be_kept_without_fresh_agent_rejudging(last_records.get(key), writer_answers_text, blobs)}
+    to_judge = [(key, claim) for key, claim in overview_claims if key not in kept_records]
+    assertions = [claim for _key, claim in to_judge]
 
     with tempfile.TemporaryDirectory(prefix=PROGRAM + "-") as temporary:
         # git records a worktree by its resolved path; once the folder is deleted, an unresolved path (macOS /var is a
@@ -705,9 +849,10 @@ def check_overview_claims(arguments):
                                         f"{lint.stdout}{lint.stderr}"
                                         "Do what its output says, then run this again.", exit_code=4)
             report = run_fresh_agent(worktree, fresh_agent_prompt(
-                FRESH_AGENT_PROMPT_TEMPLATE, overview_path, commit, writer_answers))
+                FRESH_AGENT_PROMPT_TEMPLATE, overview_path, commit, writer_answers,
+                assertions=assertions)) if assertions else ""
             recheck_reports = recheck_reports_for_must_fix_claims(worktree, overview_path, commit, writer_answers,
-                                                                  report)
+                                                                  report, assertions)
         finally:
             worktree_removal_failure = failure_removing_worktree(repository, worktree)
             if worktree_removal_failure:
@@ -717,15 +862,15 @@ def check_overview_claims(arguments):
                       f"{worktree}`, then check that `git -C {repository} worktree list` no longer shows {worktree}; if it does, tell "
                       "the user.", file=sys.stderr)
 
-    claims, result = result_from_fresh_agent_report(report, recheck_reports)
+    claims, result = result_from_fresh_agent_report(report, assertions, recheck_reports)
     new_fix_later_claims, covering_entries, covering_answer, decided_text = (
         fix_later_claims_uncovered_by_unsettled_entries_after_judge_run(repository, overview_path, claims) if claims
         else ([], {}, None, None))
-    destination_directory = overview_write_architecture_overview_claim_check_report_directory_for_overview(report_directory, overview_path)
     destination_directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S-%fZ")
     destination = destination_directory / f"{blob}-{stamp}.md"
-    ranks = ", ".join(f"{count} {rank}" for rank, count in rank_counts(claims).items()) if claims else "none"
+    ranks = (", ".join(f"{count} {rank}" for rank, count in rank_counts(claims).items())
+             if claims is not None else "none")
     appended_sections = "".join(f"\n\n# Recheck of VERDICT {number}, which the report above ranks must-fix\n\n{recheck}"
                                 for number, recheck in sorted(recheck_reports.items()))
     if covering_answer is not None:
@@ -737,9 +882,20 @@ def check_overview_claims(arguments):
             refuse_when_proposed_improvements_or_changes_file_changed_since_decided(repository, overview_path, decided_text)
         fix_later_file = write_fix_later_claims_to_proposed_improvements_or_changes_file(
             repository, overview_path, new_fix_later_claims, commit, destination, fix_later_for_regular_maintenance)
+        judged = {key: claim for (key, _claim), claim in zip(to_judge, claims)}
+        records = [kept_records.get(key) or {
+            "key": key, "claim": judged[key].assertion, "verdict": judged[key].verdict, "rank": judged[key].rank,
+            "evidence": judged[key].evidence,
+            "files": overview_claim_cited_file_blob_hashes_by_path(judged[key].assertion, judged[key].evidence, blobs, overview_path),
+            "judged_in": str(destination), "verdict_number_in_judged_in_report": judged[key].number}
+            for key, _claim in overview_claims]
+        appended_sections += f"\n\n{CLAIM_RECORDS_SECTION_HEADING}\n\n" + "".join(
+            json.dumps(record, ensure_ascii=False) + "\n" for record in records)
     destination.write_text(
         f"overview: {overview_path}\noverview blob: {blob}\nrevision: {revision}\nchecked against: {commit}\n"
-        f"writer answers: {writer_answers or 'none'}\n{RESULT_LINE_PREFIX}{result}\n"
+        f"writer answers: {writer_answers or 'none'}\n"
+        f"claims kept from an earlier report: {len(kept_records)} of {len(overview_claims)}\n"
+        f"{RESULT_LINE_PREFIX}{result}\n"
         f"ranks after the recheck: {ranks}\n\n{report}{appended_sections}", encoding="utf-8")
     print(f"{PROGRAM}: {result}. Report: {destination}")
     if claims is None:

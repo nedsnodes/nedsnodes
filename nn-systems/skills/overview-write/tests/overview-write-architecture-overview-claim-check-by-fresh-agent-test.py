@@ -82,7 +82,8 @@ sys.stdout.write(answer["stdout"])
 sys.exit(answer["exit_code"])
 """
 
-GOOD_REPORT = "VERDICT 1 supported: the program exists\n  nn-systems/example/tool.py:1 `x = 1`\nCOUNTS supported=1 contradicted=0 unsupported=0\n"
+# GOOD_REPORT's evidence names no file, so its verdict is never kept and every case that gives it runs the fresh-agent.
+GOOD_REPORT = "VERDICT 1 supported: the program exists\n  not checked against the code\nCOUNTS supported=1 contradicted=0 unsupported=0\n"
 UNSUPPORTED_REPORT = "VERDICT 1 unsupported must-fix: the program exists\nCOUNTS supported=0 contradicted=0 unsupported=1\n"
 
 
@@ -126,14 +127,22 @@ class Fixture:
 
     def commit(self, message):
         self.git("add", "-A")
-        self.git("commit", "-q", "-m", message)
+        self.git("commit", "-q", "--allow-empty", "-m", message)
         return self.git("rev-parse", "HEAD")
 
-    def commit_overview(self, checked_against=None, body="# Example overview\n\nThe example system.\n"):
+    def commit_overview(self, checked_against=None, body="# Example overview\n\nthe program exists\n"):
         line = "" if checked_against is False else "\n" + claim_check.overview_path_reader.CHECKED_AGAINST_LINE_TEMPLATE.format(
             commit=checked_against or self.code_commit) + "\n"
         self.write(OVERVIEW, body + line)
         return self.commit("overview")
+
+    def commit_overview_claims(self, *claims, checked_against=None):
+        """Commit an overview whose claims are exactly these, one paragraph each, so a canned report's VERDICT lines
+        can match them in number."""
+        return self.commit_overview(checked_against, body="# Example overview\n\n" + "".join(f"{claim}\n\n" for claim in claims))
+
+    def overview_blob(self):
+        return self.git("rev-parse", f"HEAD:{OVERVIEW}")
 
     def answer(self, *, claude_stdout=GOOD_REPORT, claude_exit=0, lint_stdout="", lint_exit=0,
                claude_sleep=0, lint_sleep=0, rechecks=None, covering_judge=None):
@@ -193,9 +202,13 @@ def recheck(verdict_and_rank, assertion="b"):
     return f"VERDICT 1 {verdict_and_rank}: {assertion}\nCOUNTS {counts}\n"
 
 
+def assertions_restated_in(report):
+    return [match.group(4).strip() for match in claim_check.VERDICT_LINE.finditer(report)]
+
+
 def run_unit_cases():
     def result(report, rechecks=None):
-        return claim_check.result_from_fresh_agent_report(report, rechecks)[1]
+        return claim_check.result_from_fresh_agent_report(report, assertions_restated_in(report), rechecks)[1]
 
     all_supported = claim_check.OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_ALL_CLAIMS_SUPPORTED
     no_must_fix = claim_check.OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_NO_MUST_FIX_CLAIM_REMAINS
@@ -204,15 +217,15 @@ def run_unit_cases():
     check("a must-fix claim the recheck ranks must-fix again gives the counts of what remains",
           result(must_fix_report, {2: recheck("contradicted must-fix")})
           == "must-fix claims remain: 1 must-fix, 0 fix-later, 0 nit")
-    claims, _ = claim_check.result_from_fresh_agent_report(must_fix_report, {2: recheck("unsupported fix-later")})
+    claims, _ = claim_check.result_from_fresh_agent_report(must_fix_report, ["a", "b"], {2: recheck("unsupported fix-later")})
     check("a must-fix claim the recheck ranks fix-later is ranked fix-later, and no must-fix claim remains",
           result(must_fix_report, {2: recheck("unsupported fix-later")}) == no_must_fix
           and claims[1].rank == claim_check.RANK_FIX_LATER, claims)
     check("a must-fix claim the recheck finds supported is ranked fix-later",
-          claim_check.result_from_fresh_agent_report(must_fix_report, {2: recheck("supported")})[0][1].rank
+          claim_check.result_from_fresh_agent_report(must_fix_report, ["a", "b"], {2: recheck("supported")})[0][1].rank
           == claim_check.RANK_FIX_LATER)
     check("a must-fix claim the recheck ranks nit is ranked fix-later",
-          claim_check.result_from_fresh_agent_report(must_fix_report, {2: recheck("contradicted nit")})[0][1].rank
+          claim_check.result_from_fresh_agent_report(must_fix_report, ["a", "b"], {2: recheck("contradicted nit")})[0][1].rank
           == claim_check.RANK_FIX_LATER)
     check("fix-later and nit claims alone leave no must-fix claim, with no recheck",
           result("VERDICT 1 unsupported fix-later: a\nVERDICT 2 contradicted nit: b\n"
@@ -232,10 +245,35 @@ def run_unit_cases():
     check("a recheck with two VERDICT lines makes the result malformed",
           result(must_fix_report, {2: "VERDICT 1 supported: b\nVERDICT 2 supported: c\n"
                                       "COUNTS supported=2 contradicted=0 unsupported=0\n"})
-          == "malformed: the recheck of VERDICT 2 has 2 VERDICT lines, not one")
+          == "malformed: the recheck of VERDICT 2 is malformed: 2 VERDICT lines, for 1 assertion(s) given")
+    check("a report with fewer VERDICT lines than the assertions given is malformed",
+          claim_check.claims_from_fresh_agent_report(GOOD_REPORT, ["a", "b"])
+          == (None, "malformed: 1 VERDICT lines, for 2 assertion(s) given"))
+    check("no assertions to judge and no report give no claims and no malformed result",
+          claim_check.result_from_fresh_agent_report("", [])
+          == ([], all_supported))
+    claims, _ = claim_check.claims_from_fresh_agent_report(
+        "VERDICT 1 supported:   the  program exists \nCOUNTS supported=1 contradicted=0 unsupported=0\n",
+        ["the program exists"])
+    check("a claim takes its text from the assertion it was given, and a restatement differing only in whitespace "
+          "is accepted", claims[0].assertion == "the program exists", claims)
+    check("a restatement other than the assertion given its number makes the report malformed",
+          claim_check.claims_from_fresh_agent_report(GOOD_REPORT, ["The overview's own sentence."])
+          == (None, "malformed: VERDICT 1 restates an assertion other than assertion 1 given"))
+    check("swapped VERDICT blocks, numbered in order, make the report malformed instead of binding a must-fix verdict "
+          "to the other claim",
+          claim_check.claims_from_fresh_agent_report(
+              "VERDICT 1 supported: B\nVERDICT 2 contradicted must-fix: A\n"
+              "COUNTS supported=1 contradicted=1 unsupported=0\n", ["A", "B"])
+          == (None, "malformed: VERDICT 1 restates an assertion other than assertion 1 given"))
+    check("a ``` line inside a ~~~ fence does not close it",
+          [text for _, text in claim_check.overview_claims_split_from_text(
+              "~~~\nA --> B\n```\nB --> C\n~~~\nProse. More.\n")] == ["A --> B", "```", "B --> C", "Prose.", "More."])
+    check("a full stop inside a double-backtick span ends no sentence",
+          claim_check.sentences_split_outside_backtick_spans("Run ``v1. Next`` now. Done.") == ["Run ``v1. Next`` now.", "Done."])
     claims, _ = claim_check.claims_from_fresh_agent_report(
         "VERDICT 1 contradicted fix-later: a\n  x.py:3 `y`\nVERDICT 2 supported: b\n  z.py:1 `w`\n"
-        "COUNTS supported=1 contradicted=1 unsupported=0\n")
+        "COUNTS supported=1 contradicted=1 unsupported=0\n", ["a", "b"])
     check("each claim keeps the lines after its VERDICT line as its evidence, without the COUNTS line",
           [claim.evidence for claim in claims] == ["  x.py:3 `y`", "  z.py:1 `w`"], claims)
     check("a COUNTS line that disagrees with the VERDICT lines is malformed",
@@ -325,6 +363,69 @@ def run_covering_judge_unit_cases():
               and "a new claim" in expected.read_text(encoding="utf-8"), written)
 
 
+def run_claim_split_and_kept_verdict_unit_cases():
+    pointer_line = claim_check.overview_pointer_line_to_proposed_improvements_or_changes_file(OVERVIEW)
+    text = ("# Example overview\n\n" + pointer_line + "\n\n## Components\n\n"
+            "The tool sets x. It reads `a. B` first! Is it fast? yes, in `nn-systems/example/tool.py`.\n\n"
+            "- `scripts/one.py`: runs once. Then stops.\n1. A numbered item.\n\n"
+            "| Name | Job |\n|---|---|\n| tool | sets x |\n\n"
+            "```\ntool ──> x\n\n# not a heading inside a fence\n```\n\nThe tool sets x.\n\n"
+            + claim_check.overview_path_reader.CHECKED_AGAINST_LINE_TEMPLATE.format(commit="a" * 40) + "\n")
+    claims = [claim for _key, claim in claim_check.overview_claims_split_from_text(text)]
+    check("the overview splits into one claim per sentence and per fenced line, each once, leaving out headings, the "
+          "pointer line, table delimiter rows, list markers and the **Checked against:** line, and no full stop inside "
+          "a backtick span ends a sentence",
+          claims == ["The tool sets x.", "It reads `a. B` first!", "Is it fast? yes, in `nn-systems/example/tool.py`.",
+                     "`scripts/one.py`: runs once.", "Then stops.", "A numbered item.", "| Name | Job |",
+                     "| tool | sets x |", "tool ──> x", "# not a heading inside a fence"], claims)
+    keys = dict((claim, key) for key, claim in claim_check.overview_claims_split_from_text(text))
+    edited = dict((claim, key) for key, claim in claim_check.overview_claims_split_from_text(
+        text.replace("Then stops.", "Then  stops   at once.")))
+    check("editing one sentence changes only that claim's key, and whitespace alone changes no key",
+          {claim: key for claim, key in edited.items() if claim != "Then stops at once."}
+          == {claim: key for claim, key in keys.items() if claim != "Then stops."}
+          and claim_check.overview_claim_key_hashed_from_claim_text("a  b\n c") == claim_check.overview_claim_key_hashed_from_claim_text("a b c"), edited)
+
+    blobs = {"nn-systems/example/tool.py": "1" * 40, "scripts/one.py": "2" * 40, "a/same.py": "3" * 40,
+             "b/same.py": "4" * 40, OVERVIEW: "5" * 40}
+    check("a text names a blob by its path from the top, after ./ or before a line number or a full stop, or by a bare "
+          "file name only one path has",
+          claim_check.repository_paths_named_in_text(
+              "./scripts/one.py:3 `x`; tool.py:1; same.py:2; see nn-systems/example/tool.py. gone.py", blobs)
+          == ["nn-systems/example/tool.py", "scripts/one.py"])
+    check("a claim rests on the paths its backtick spans and its evidence name, never on the overview itself",
+          claim_check.overview_claim_cited_file_blob_hashes_by_path("`scripts/one.py` runs, unlike tool.py", f"{OVERVIEW}:3 and a/same.py:1", blobs, OVERVIEW)
+          == {"a/same.py": "3" * 40, "scripts/one.py": "2" * 40})
+
+    record = {"key": "k", "claim": "the tool sets x", "verdict": "supported", "rank": None, "evidence": "",
+              "files": {"nn-systems/example/tool.py": "1" * 40}}
+    for case, changed_record, answers, kept in (
+            ("a supported verdict whose files are unchanged is kept", record, "", True),
+            ("a claim the last report lacks is judged again", None, "", False),
+            ("a verdict other than supported is judged again", {**record, "verdict": "unsupported", "rank": "nit"}, "", False),
+            ("a claim the writer's answers quote is judged again", record, "i dispute: the tool sets x, because", False),
+            ("a claim whose file has another blob is judged again", {**record, "files": {"nn-systems/example/tool.py": "9" * 40}}, "", False),
+            ("a claim whose file is gone is judged again", {**record, "files": {"gone.py": "1" * 40}}, "", False),
+            ("a claim that rests on no file is judged again", {**record, "files": {}}, "", False)):
+        check(case, claim_check.overview_claim_last_verdict_can_be_kept_without_fresh_agent_rejudging(changed_record, answers, blobs) is kept)
+
+    with tempfile.TemporaryDirectory(prefix="overview-claim-check-test-") as temporary:
+        directory = Path(temporary)
+        check("a report directory with no report gives no claim records",
+              claim_check.claim_records_of_newest_report_holding_them(directory) == (None, {}))
+        heading = claim_check.CLAIM_RECORDS_SECTION_HEADING
+        older = directory / f"{'f' * 40}-2026-11-01T00-00-00-000000Z.md"
+        older.write_text(f"result: x\n\nbody\n\n{heading}\n\n" + json.dumps({**record, "key": "older"}) + "\n")
+        newer = directory / f"{'0' * 40}-2026-11-02T00-00-00-000000Z.md"
+        newer.write_text(f"result: x\n\nbody\n\n{heading}\n\n" + json.dumps({**record, "key": "newer"}) + "\n")
+        check("the newest report is found by its time, whatever overview blob its name starts with",
+              claim_check.claim_records_of_newest_report_holding_them(directory) == (newer, {"newer": {**record, "key": "newer"}}))
+        newest_without_records = directory / f"{'1' * 40}-2026-11-03T00-00-00-000000Z.md"
+        newest_without_records.write_text("result: malformed: no VERDICT line\n\nI could not check it.\n")
+        check("a newer report without claim records, such as a malformed one, is passed over for the newest that has them",
+              claim_check.claim_records_of_newest_report_holding_them(directory)[0] == newer)
+
+
 def last_stdout_line(result):
     lines = result.stdout.strip().splitlines()
     return lines[-1] if lines else ""
@@ -334,7 +435,8 @@ def next_action_line(action):
     return claim_check.NEXT_ACTION_LINE_PREFIX + action
 
 
-MUST_FIX_REPORT = ("VERDICT 1 supported: the tool sets x\n  nn-systems/example/tool.py:1 `x = 1`\n"
+MUST_FIX_CLAIMS = ("the tool sets x", "the program exists")
+MUST_FIX_REPORT = ("VERDICT 1 supported: the tool sets x\n  not checked against the code\n"
                    "VERDICT 2 contradicted must-fix: the program exists\n  FIRST-EVIDENCE-LINE\n"
                    "COUNTS supported=1 contradicted=1 unsupported=0\n")
 
@@ -346,11 +448,12 @@ def proposed_improvements_or_changes_files(fixture):
                   if ".git" not in path.parts)
 
 
-def run_ranked_claim_cases(fixture, blob):
+def run_ranked_claim_cases(fixture):
     def newest_report():
         return claim_check.find_newest_architecture_overview_claim_check_report_path_and_result_for_overview_git_blob(
-            fixture.reports, OVERVIEW, blob)
+            fixture.reports, OVERVIEW, fixture.overview_blob())
 
+    fixture.commit_overview_claims(*MUST_FIX_CLAIMS)
     fixture.answer(claude_stdout=MUST_FIX_REPORT,
                    rechecks={"the program exists": {"stdout": recheck("contradicted must-fix", "the program exists")}})
     result = fixture.run()
@@ -442,6 +545,7 @@ def run_ranked_claim_cases(fixture, blob):
         if report.read_text().count("result: malformed"):
             report.unlink()
 
+    fixture.commit_overview_claims("alpha claim", "beta claim")
     fixture.answer(claude_stdout="VERDICT 1 contradicted must-fix: alpha claim\nVERDICT 2 unsupported must-fix: beta claim\n"
                                  "COUNTS supported=0 contradicted=1 unsupported=1\n",
                    rechecks={"alpha claim": {"stdout": recheck("contradicted must-fix", "alpha claim"),
@@ -472,7 +576,7 @@ def run_ranked_claim_cases(fixture, blob):
 
     for written_file in proposed_improvements_or_changes_files(fixture):
         written_file.unlink()
-    with_pointer = fixture.commit_overview(body=f"# Example overview\n\n{pointer_line}\n\nThe example system.\n")
+    with_pointer = fixture.commit_overview(body=f"# Example overview\n\n{pointer_line}\n\ngamma claim\n\ndelta claim\n")
     fixture.answer(claude_stdout="VERDICT 1 unsupported fix-later: gamma claim\nVERDICT 2 contradicted nit: delta claim\n"
                                  "COUNTS supported=0 contradicted=1 unsupported=1\n")
     result = fixture.run()
@@ -489,6 +593,7 @@ def run_ranked_claim_cases(fixture, blob):
         written_file.unlink()
 
     main_before = fixture.git("rev-parse", "refs/remotes/origin/main")
+    fixture.commit_overview(body=f"# Example overview\n\n{pointer_line}\n\nepsilon claim\n")
     entries_without_claims = ("# Proposed improvements or changes: the example overview\n\n"
                               "## E7 — improvement: an entry an overview writer recorded\n\nState: open")
     fixture.write(PROPOSALS, entries_without_claims)
@@ -508,6 +613,7 @@ def run_ranked_claim_cases(fixture, blob):
                   path=(fixture.repository / PROPOSALS).resolve()))), (appended, result.stdout))
 
     fixture.git("update-ref", "refs/remotes/origin/main", fixture.commit("the file on main, with a claim-check entry"))
+    fixture.commit_overview(body=f"# Example overview\n\n{pointer_line}\n\nzeta claim\n")
     fixture.answer(claude_stdout="VERDICT 1 unsupported fix-later: zeta claim\n"
                                  "COUNTS supported=0 contradicted=0 unsupported=1\n",
                    covering_judge={"stdout": "CLAIM 1 new\n"})
@@ -532,6 +638,7 @@ def run_ranked_claim_cases(fixture, blob):
 def run_covering_judge_cases(fixture):
     """Run after run_ranked_claim_cases, which leaves no proposed-improvements-or-changes-file and origin/main at the
     code commit."""
+    fixture.commit_overview_claims("the tool sets x once", "the tool is fast", "a settled claim")
     fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
     report = ("VERDICT 1 contradicted fix-later: the tool sets x once\n  COVERED-CLAIM-EVIDENCE\n"
               "VERDICT 2 unsupported fix-later: the tool is fast\nVERDICT 3 unsupported fix-later: a settled claim\n"
@@ -557,9 +664,9 @@ def run_covering_judge_cases(fixture):
           and calls[1]["argv"][calls[1]["argv"].index("--tools") + 1] == "" and "--allowedTools" not in calls[1]["argv"],
           calls)
     newest = sorted(fixture.reports_written(), key=lambda path: path.stat().st_mtime)[-1]
-    check("the report holds the covering judge's answer after the claim check's report",
-          newest.read_text().endswith("covers each claim ranked fix later that it did not hold word for word\n\n"
-                                      "CLAIM 1 covered-by E3\nCLAIM 2 new\n"), newest.read_text())
+    check("the report holds the covering judge's answer after the claim check's report, and the claim records last",
+          ("covers each claim ranked fix later that it did not hold word for word\n\nCLAIM 1 covered-by E3\nCLAIM 2 new\n"
+           f"\n\n{claim_check.CLAIM_RECORDS_SECTION_HEADING}\n\n") in newest.read_text(), newest.read_text())
 
     fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
     count = len(fixture.reports_written())
@@ -607,6 +714,98 @@ def run_covering_judge_cases(fixture):
           code == 4 and "could not run" in stderr and len(fixture.reports_written()) == count
           and (fixture.repository / PROPOSALS).read_text() == ENTRIES_WITH_EACH_STATE, stderr)
     (fixture.repository / PROPOSALS).unlink()
+    fixture.commit_overview()
+
+
+def claim_records_in_report(path):
+    return [json.loads(line) for line in path.read_text().rsplit(
+        f"\n{claim_check.CLAIM_RECORDS_SECTION_HEADING}\n", 1)[1].splitlines() if line.strip()]
+
+
+def run_kept_verdict_cases(fixture):
+    """Run after run_covering_judge_cases, in a report directory of its own, so no other case's claim records are
+    read; ends with the default overview committed again."""
+    reports = fixture.root / "kept-verdict-reports"
+    destination = claim_check.overview_write_architecture_overview_claim_check_report_directory_for_overview(reports, OVERVIEW)
+    destination.mkdir(parents=True)
+
+    def newest():
+        return claim_check.find_newest_architecture_overview_claim_check_report_path_and_result_for_overview_git_blob(
+            reports, OVERVIEW, fixture.overview_blob())
+
+    def prompt_of_only_call():
+        calls = fixture.claude_calls()
+        return calls[0]["stdin"] if len(calls) == 1 else f"{len(calls)} calls"
+
+    tool_blob = fixture.git("rev-parse", f"{fixture.code_commit}:nn-systems/example/tool.py")
+    fixture.commit_overview_claims("the tool sets x", "the program exists", "the tool is fast")
+    (destination / f"{fixture.overview_blob()}-2026-01-01T00-00-00-000000Z.md").write_text(
+        "overview: x\nresult: all claims supported\n\nVERDICT 1 supported: a report from before claim records\n")
+    fixture.answer(claude_stdout="VERDICT 1 supported: the tool sets x\n  nn-systems/example/tool.py:1 `x = 1`\n"
+                                 "VERDICT 2 supported: the program exists\n  not checked against the code\n"
+                                 "VERDICT 3 unsupported nit: the tool is fast\n"
+                                 "COUNTS supported=2 contradicted=0 unsupported=1\n")
+    result = fixture.run(report_directory=reports)
+    first = newest()
+    records = claim_records_in_report(first[0]) if first else []
+    check("with only a report holding no claim records, every claim goes to the fresh-agent, numbered from 1",
+          result.returncode == 0 and "\n1. the tool sets x\n2. the program exists\n3. the tool is fast\n" in prompt_of_only_call(),
+          (result, prompt_of_only_call()))
+    check("the report records every claim with its key, verdict, rank, evidence, the files it rests on with their blobs "
+          "at the checked-against commit, and the report it was judged in",
+          [(record["claim"], record["verdict"], record["rank"], record["files"]) for record in records]
+          == [("the tool sets x", "supported", None, {"nn-systems/example/tool.py": tool_blob}),
+              ("the program exists", "supported", None, {}), ("the tool is fast", "unsupported", "nit", {})]
+          and all(record["judged_in"] == str(first[0]) for record in records)
+          and records[0]["key"] == claim_check.overview_claim_key_hashed_from_claim_text("the tool sets x")
+          and records[0]["evidence"] == "  nn-systems/example/tool.py:1 `x = 1`", records)
+
+    fixture.answer(claude_stdout="VERDICT 1 supported: the program exists\n  not checked against the code\n"
+                                 "VERDICT 2 unsupported nit: the tool is fast\n"
+                                 "COUNTS supported=1 contradicted=0 unsupported=1\n")
+    result = fixture.run(report_directory=reports)
+    second = newest()
+    text = second[0].read_text() if second else ""
+    records = claim_records_in_report(second[0]) if second else []
+    check("a supported claim whose file is unchanged keeps its verdict; a claim resting on no file and one not "
+          "supported go to the fresh-agent again, renumbered from 1",
+          result.returncode == 0 and "\n1. the program exists\n2. the tool is fast\n" in prompt_of_only_call()
+          and "the tool sets x" not in prompt_of_only_call().split("The assertions to check:")[1], prompt_of_only_call())
+    check("the report counts the kept claim in its result and ranks, says how many claims it kept, and records the "
+          "report each kept verdict came from",
+          second[1] == claim_check.OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_NO_MUST_FIX_CLAIM_REMAINS
+          and "\nclaims kept from an earlier report: 1 of 3\n" in text
+          and "\nranks after the recheck: 0 must-fix, 0 fix-later, 1 nit\n" in text
+          and records[0]["judged_in"] == str(first[0]) and records[1]["judged_in"] == str(second[0]), (text, records))
+
+    fixture.commit_overview_claims("the tool sets x")
+    fixture.answer(claude_stdout="", claude_exit=1)
+    result = fixture.run(report_directory=reports)
+    check("when every claim keeps its verdict, read from a report on another overview text, no fresh-agent runs and the "
+          "merge check's reader finds the result for the new text",
+          result.returncode == 0 and not fixture.claude_calls() and newest()[1]
+          == claim_check.OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_ALL_CLAIMS_SUPPORTED
+          and last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_BY_EXIT_CODE[0]), result)
+
+    answers = fixture.root / "kept-verdict-writer-answers.md"
+    answers.write_text("I dispute the verdict on: the tool  sets x. nn-systems/example/tool.py:1 `x = 1`\n")
+    fixture.answer(claude_stdout="VERDICT 1 supported: the tool sets x\n  nn-systems/example/tool.py:1 `x = 1`\n"
+                                 "COUNTS supported=1 contradicted=0 unsupported=0\n")
+    result = fixture.run("--writer-answers", str(answers), report_directory=reports)
+    check("a kept claim the writer's answers quote goes to the fresh-agent again",
+          result.returncode == 0 and "\n1. the tool sets x\n" in prompt_of_only_call(), prompt_of_only_call())
+
+    fixture.write("nn-systems/example/tool.py", "x = 2\n")
+    changed_code = fixture.commit("the tool changes")
+    fixture.commit_overview_claims("the tool sets x", checked_against=changed_code)
+    fixture.answer(claude_stdout="VERDICT 1 supported: the tool sets x\n  nn-systems/example/tool.py:1 `x = 2`\n"
+                                 "COUNTS supported=1 contradicted=0 unsupported=0\n")
+    result = fixture.run(report_directory=reports)
+    check("a supported claim whose file has another blob at the checked-against commit goes to the fresh-agent again",
+          result.returncode == 0 and "\n1. the tool sets x\n" in prompt_of_only_call(), prompt_of_only_call())
+    fixture.write("nn-systems/example/tool.py", "x = 1\n")
+    fixture.commit("the tool as the code commit holds it")
+    fixture.commit_overview()
 
 
 def run_program_cases(fixture):
@@ -628,7 +827,7 @@ def run_program_cases(fixture):
           claim_check.find_newest_architecture_overview_claim_check_report_path_and_result_for_overview_git_blob(fixture.reports, OVERVIEW, blob)
           == (reports[0], claim_check.OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_ALL_CLAIMS_SUPPORTED) if reports else False)
     check("the fresh-agent runs once, at the checked-against commit, with the overview's text in place",
-          len(calls) == 1 and "The example system." in calls[0]["overview_there"]
+          len(calls) == 1 and "the program exists" in calls[0]["overview_there"]
           and fixture.code_commit in calls[0]["stdin"] and claim_check.HOW_TO_PAGE in calls[0]["stdin"], calls)
     check("the fresh-agent's whole tool set is Read, Grep and Glob, so it cannot start subagents, and hooks are off",
           len(calls) == 1 and calls[0]["argv"][calls[0]["argv"].index("--tools") + 1] == "Read,Grep,Glob"
@@ -637,8 +836,9 @@ def run_program_cases(fixture):
     check("every claim supported ends with the next action: push",
           last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_BY_EXIT_CODE[0]), result.stdout)
 
-    run_ranked_claim_cases(fixture, blob)
+    run_ranked_claim_cases(fixture)
     run_covering_judge_cases(fixture)
+    run_kept_verdict_cases(fixture)
 
     real_run_git = claim_check.run_git
 
@@ -845,6 +1045,7 @@ def run_program_cases(fixture):
 def main():
     run_unit_cases()
     run_covering_judge_unit_cases()
+    run_claim_split_and_kept_verdict_unit_cases()
     with tempfile.TemporaryDirectory(prefix="overview-claim-check-test-") as temporary:
         run_program_cases(Fixture(Path(temporary)))
     print(f"{len(failures)} failed")
