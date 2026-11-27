@@ -443,18 +443,18 @@ if linux_only_cases_run_here("the report's sandbox lines"):
              "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY, _ = {}, 0\n"
              "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
              "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n",
-             "does not assign "
-             "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY a literal"),
+             "does not bind "
+             "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY once"),
             ("builds a list by a call", "SUITES_RUN_WITHOUT_ANY_SANDBOX = dict(a='b')\n"
              "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {}\n"
              "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
              "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n",
-             "does not assign SUITES_RUN_WITHOUT_ANY_SANDBOX a literal"),
+             "does not bind SUITES_RUN_WITHOUT_ANY_SANDBOX once"),
             ("assigns a list that is not a dict", "SUITES_RUN_WITHOUT_ANY_SANDBOX = ['a-test.py']\n"
              "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {}\n"
              "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
              "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n",
-             "does not assign SUITES_RUN_WITHOUT_ANY_SANDBOX a literal"),
+             "does not bind SUITES_RUN_WITHOUT_ANY_SANDBOX once"),
         )
         for number, (how, source, refusal) in enumerate(lists_unreadable_cases):
             # The space shows that each path in a printed shell command stays one argument.
@@ -546,7 +546,7 @@ if linux_only_cases_run_here("the report's sandbox lines"):
               "this runner's own list for it, so a suite that list names gets a copy-on-write "
               "overlay of the git directory, and runs the suites, exit 0",
               completed.returncode == 0
-              and "does not assign" not in completed.stderr
+              and "does not bind" not in completed.stderr
               and (lacking / "logs" / (overlay_suite.replace("/", "__") + ".log")).exists()
               and len(suite_runs) == 1
               and any(suite_runs[0][index:index + 2] == ["--tmp-overlay", git_directory]

@@ -246,14 +246,18 @@ whose sandbox keeps the machine's network). A fourth dict,
 SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI, names the suites
 --leave-out-suites-that-run-the-real-claude-cli leaves out. The four are read
 from the scripts/run-all-test-suites.py of the checkout whose suites the run
-tests, parsed and never run. A list that file lacks, or assigns the set it
-was before it became a dict, as an older checkout does, is taken from this
-file instead; the report names each file that supplied a list. A run refuses, exit 2, when the last
-top-level assignment to one of the four gives it a value not written out literally, such as a dict
-built by a call, or when the file binds it only by another statement, such as a `for` loop, an
-augmented assignment or an assignment inside an `if` block. Such a statement after a literal
-assignment is not seen, so the literal value is read. A `def`, `class` or `import ... as` of
-the name is not seen either, so the list is taken from this file as if the checkout lacked it.
+tests, parsed and never run. A list is read only when that file binds its
+name once, by a top-level assignment to that name alone, annotated or not,
+of a value `ast.literal_eval` accepts. When that value is a dict, the dict is
+read. When it is a set, which the list was before it became a dict, or when
+the file never binds the name, as an older checkout does, the list is taken
+from this file instead; the report names each file that supplied a list. A
+run refuses, exit 2, in every other case: a value of any other type, such as
+`[]`, or one `ast.literal_eval` rejects, such as `dict()`; or a second binding
+of the name anywhere in the file, by any statement or clause, such as `|=`,
+a `for` loop, `def`, `class`, `import ... as` or `except ... as`; or a single
+binding that is not such an assignment, such as `A = B = {}`. An annotation
+without a value, such as `NAME: dict`, binds nothing.
 A suite bwrap reports as exiting 128+N is reported as killed by signal N;
 sandbox-exec replaces itself with the suite, so a suite's exit passes through.
 
@@ -1639,6 +1643,27 @@ def checkout_top_directory(given):
     return top
 
 
+def names_bound_anywhere_in_parsed_python_file_counted(tree):
+    """Count, for each name, the statements and clauses anywhere in the tree that bind it."""
+    declared_without_value = {id(node.target) for node in ast.walk(tree)
+                              if isinstance(node, ast.AnnAssign) and node.value is None}
+    counts = collections.Counter()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Store) and id(node) not in declared_without_value:
+                counts[node.id] += 1
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            counts[node.name] += 1
+        elif isinstance(node, ast.alias):
+            counts[node.asname or node.name.split(".")[0]] += 1
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+            if node.name:
+                counts[node.name] += 1
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            counts[node.rest] += 1
+    return counts
+
+
 def suite_sandbox_lists_read_from_checkout_under_test(top):
     """Return ({list name: {suite: reason}}, where they came from) for the checkout under test.
 
@@ -1691,6 +1716,7 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"sandbox each suite runs in is unknown.\n"
             f"Correct the syntax error in {source_file}, which belongs to the checkout whose suites "
             f"this run tests, then rerun the command you ran.")
+    bindings = names_bound_anywhere_in_parsed_python_file_counted(tree)
     found = {}
     for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
@@ -1698,20 +1724,19 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
             target, value = node.target, node.value
         else:
-            target = value = None
+            continue
         if (isinstance(target, ast.Name)
                 and target.id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
             try:
                 found[target.id] = ast.literal_eval(value)
             except (ValueError, TypeError, SyntaxError, RecursionError):
                 found[target.id] = None
-            continue
-        # A list bound any other way is the checkout's own but cannot be read, so it is
-        # refused below rather than taken for an older checkout's missing list.
-        for bound in ast.walk(node):
-            if (isinstance(bound, ast.Name) and isinstance(bound.ctx, ast.Store)
-                    and bound.id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
-                found.setdefault(bound.id, None)
+    # A list bound more than once, or bound only some other way, is the checkout's own but
+    # cannot be read, so it is refused below rather than taken for an older checkout's
+    # missing list.
+    for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST:
+        if bindings[name] > 1 or (bindings[name] == 1 and name not in found):
+            found[name] = None
     # A checkout committed before a run read a list from it lacks the list, or assigns it the
     # set it was then, as the nightly mutation pass's checkouts do. It gets this program's own
     # list, with each suite also under the path it had before the project rename, since such a
@@ -1727,11 +1752,12 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
                   if not isinstance(found.get(name), dict)]
     if unreadable:
         raise CouldNotRun(
-            f"{PROGRAM}: not run — {source_file} does not assign "
-            f"{', '.join(unreadable)} a literal dict of suite path to reason at its top "
-            f"level, so which sandbox each suite runs in is unknown.\n"
+            f"{PROGRAM}: not run — {source_file} does not bind "
+            f"{', '.join(unreadable)} once, by a top-level assignment of a literal dict of "
+            f"suite path to reason, so which suites that list names is unknown.\n"
             f"In {source_file}, assign each of {', '.join(unreadable)} once, at the top level, "
-            f"a dict written out literally, then rerun the command you ran.")
+            f"a dict written out literally, bind it nowhere else in the file, then rerun the "
+            f"command you ran.")
     if len(supplied_by_this_program) == len(SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
         return found, (f"{Path(__file__).resolve()}, since {source_file} supplies none of the "
                        f"lists, lacking each or assigning it a set")

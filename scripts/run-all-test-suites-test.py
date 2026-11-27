@@ -5002,6 +5002,59 @@ for how, replacement in (
           f"own list",
           isinstance(refused, module.CouldNotRun) and REAL_CLAUDE in str(refused), refused)
 
+# Every binding of a list's name other than one literal assignment is refused, so a suite
+# added to a list some other way is not dropped, and a name bound to something that is not a
+# list is not taken for an older checkout's missing list.
+LITERAL = 'NAME = {"scripts/a-test.py": "r"}\n'
+binding_forms_refused = (
+    ("assigns it twice", LITERAL + 'NAME = {"scripts/b-test.py": "r"}\n'),
+    ("adds to it with |=", LITERAL + 'NAME |= {"scripts/b-test.py": "r"}\n'),
+    ("rebinds it by unpacking", LITERAL + "NAME, _ = {}, {}\n"),
+    ("rebinds it in a chained assignment", LITERAL + "other = NAME = {}\n"),
+    ("assigns it only in a chained assignment", "other = NAME = {}\n"),
+    ("assigns it inside an if block", LITERAL + "if True:\n    NAME = {}\n"),
+    ("rebinds it as a for target", LITERAL + "for NAME in [{}]:\n    pass\n"),
+    ("rebinds it as an async for target",
+     LITERAL + "async def f():\n    async for NAME in g():\n        pass\n"),
+    ("rebinds it in a with clause", LITERAL + "with open('x') as NAME:\n    pass\n"),
+    ("rebinds it with a walrus", LITERAL + "if (NAME := {}):\n    pass\n"),
+    ("defines a function of that name", LITERAL + "def NAME():\n    pass\n"),
+    ("defines only a function of that name", "def NAME():\n    pass\n"),
+    ("defines only an async function of that name", "async def NAME():\n    pass\n"),
+    ("defines only a class of that name", "class NAME:\n    pass\n"),
+    ("imports a module as that name", "import json as NAME\n"),
+    ("imports that name from a module", "from json import NAME\n"),
+    ("rebinds it in an except clause",
+     LITERAL + "try:\n    pass\nexcept Exception as NAME:\n    pass\n"),
+    ("rebinds it in a match capture",
+     LITERAL + "match 1:\n    case NAME:\n        pass\n"),
+    ("rebinds it in a match star", LITERAL + "match []:\n    case [*NAME]:\n        pass\n"),
+    ("rebinds it in a match mapping rest",
+     LITERAL + "match {}:\n    case {**NAME}:\n        pass\n"),
+    ("assigns it a literal list", "NAME = []\n"),
+    ("assigns it a set, then rebinds it", 'NAME = {"scripts/a-test.py"}\nNAME |= set()\n'),
+)
+for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST:
+    for how, declaration in binding_forms_refused:
+        refused = lists_read_from_checkout_whose_runner_is(
+            checkout_runner_source({name: declaration.replace("NAME", name)}))
+        check(f"a checkout whose scripts/run-all-test-suites.py {how} ({name}) is refused, "
+              f"naming the list",
+              isinstance(refused, module.CouldNotRun) and name in str(refused), refused)
+    declared_then_assigned = lists_read_from_checkout_whose_runner_is(checkout_runner_source(
+        {name: f"{name}: dict\n" + LITERAL.replace("NAME", name)}))
+    check(f"a checkout that annotates {name} without a value, then assigns it a literal dict "
+          f"once, has that dict read, since the annotation binds nothing",
+          isinstance(declared_then_assigned, dict)
+          and declared_then_assigned[name] == {"scripts/a-test.py": "r"}, declared_then_assigned)
+    empty_set = lists_read_from_checkout_whose_runner_is(
+        checkout_runner_source({name: f"{name} = set()\n"}))
+    check(f"a checkout that assigns {name} set() once gets the runner's own list, as an older "
+          f"checkout that assigned it a set does",
+          isinstance(empty_set, dict)
+          and empty_set[name].items() >= module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name].items(),
+          empty_set)
+
 
 
 def case_line(verdict, text):
