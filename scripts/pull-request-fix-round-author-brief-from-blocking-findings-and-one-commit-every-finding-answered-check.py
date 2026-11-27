@@ -233,8 +233,10 @@ ROUND_RECORD_FORMAT = ("Fix-round answered without a commit: frozen-head {frozen
                        "after this comment starts a new fix-round.")
 ROUND_RECORD_PATTERN = re.compile(r"Fix-round answered without a commit: frozen-head ([0-9a-f]+), "
                                   r"reviews (\d+(?: \d+)*)\.")
-# "<n>." starts an entry, which the brief writes as "<n>. (finding <comment ID>) " and the agent writes the answer after.
-ANSWER_START_PATTERN = re.compile(r"^(\d+)\.(?=\s|$)\s*(?:\(finding ([^()\s]+)\)\s*)?(.*)$")
+# Every line opening "<n>." must be an entry, written "<n>. (finding <comment ID>) <answer text>": the brief writes the
+# start and the agent the answer after it. Any other line opening "<n>." is refused rather than guessed at.
+ANSWER_NUMBERED_LINE_PATTERN = re.compile(r"^\d+\.")
+ANSWER_START_PATTERN = re.compile(r"^(\d+)\. \(finding ([^()\s]+)\)(?:\s+(.*))?$")
 ANSWER_FINDING_TAG_FORMAT = "(finding {finding_id})"
 MOVED_TO_PULL_REQUEST_PREFIX = "Moved to pull request "
 MOVED_TO_PULL_REQUEST_PREFIX_PATTERN = re.compile(
@@ -846,45 +848,52 @@ def fix_round_brief_guarded_file_change_carrying_out_user_ruling_paragraph_compo
 
 
 def answers_file_parse(text):
-    """The entries of an answers file's text, in order, each (finding number, finding comment ID or None, the
-    answer's lines as written, its first line without the "<n>. " start and tag), and whether any non-blank line
-    comes before the first entry."""
-    entries, stray = [], False
+    """(the entries of an answers file's text, in order, each (finding comment ID, the answer's lines as written,
+    its first line without the "<n>. (finding <comment ID>)" start); the lines that open "<n>." but are not an
+    entry's start; whether any other non-blank line belongs to no answered entry). The brief, its rerun and the
+    check all read the file through this one parser. Only an entry whose numbered line holds answer text takes the
+    lines under it, so a note under an entry left empty answers nothing."""
+    entries, malformed, stray = [], [], False
+    current = None
     for line in text.splitlines():
-        match = ANSWER_START_PATTERN.match(line)
-        if match:
-            entries.append((int(match.group(1)), match.group(2), [match.group(3)]))
-        elif entries:
-            entries[-1][2].append(line)
+        if ANSWER_NUMBERED_LINE_PATTERN.match(line):
+            match = ANSWER_START_PATTERN.match(line)
+            if match:
+                current = (match.group(1), match.group(2), [match.group(3) or ""])
+                entries.append(current[1:])
+            else:
+                malformed.append(line)
+                current = None
+        elif current is not None and answered(current[2]):
+            current[2].append(line)
         elif line.strip():
             stray = True
-    return entries, stray
+    return entries, malformed, stray
 
 
 def answered(lines):
-    # The answer starts on the entry's numbered line, so a note under an entry left empty answers nothing.
     return bool(lines[0].strip())
 
 
 def answer_entries(text, finding_ids):
     """({finding number: the answer's non-blank lines, stripped}, numbers with more than one answer, tags naming
-    no finding of finding_ids) of an answers file's text. A tagged entry is the answer to the finding its tag
-    names, numbered as finding_ids orders them; an untagged entry is the answer to the finding of its number. An
-    entry with no answer, such as the line the brief writes, is left out."""
+    no finding of finding_ids, the lines that open "<n>." but are not an entry's start) of an answers file's text.
+    An entry is the answer to the finding its tag names, numbered as finding_ids orders them. An entry with no
+    answer, such as the line the brief writes, is left out."""
     numbers = {finding_id: number for number, finding_id in enumerate(finding_ids, 1)}
     entries, repeated, unknown_tags = {}, [], []
-    for number, finding_id, lines in answers_file_parse(text)[0]:
+    parsed, malformed, _stray = answers_file_parse(text)
+    for finding_id, lines in parsed:
         if not answered(lines):
             continue
-        if finding_id is not None:
-            if finding_id not in numbers:
-                unknown_tags.append(finding_id)
-                continue
-            number = numbers[finding_id]
+        if finding_id not in numbers:
+            unknown_tags.append(finding_id)
+            continue
+        number = numbers[finding_id]
         if number in entries:
             repeated.append(number)
         entries[number] = [line.strip() for line in lines if line.strip()]
-    return entries, repeated, unknown_tags
+    return entries, repeated, unknown_tags, malformed
 
 
 def review_submitted_timestamp(review_submitted_at):
@@ -901,13 +910,13 @@ def answers_file_answers_every_finding_of_round(path, finding_ids, review_submit
     try:
         if path.stat().st_mtime < review_submitted_timestamp(review_submitted_at):
             return False
-        entries, _repeated, _unknown_tags = answer_entries(path.read_text(), finding_ids)
+        entries, _repeated, _unknown_tags, malformed = answer_entries(path.read_text(), finding_ids)
     except UnicodeDecodeError:
         # The brief then copies the file's bytes unchanged before it writes a new one.
         return False
     except OSError as error:
         raise StepFailed(f"could not read the answers file {path}: {error}") from None
-    return set(range(1, len(finding_ids) + 1)) <= entries.keys()
+    return not malformed and set(range(1, len(finding_ids) + 1)) <= entries.keys()
 
 
 def pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(worktree, number, round_review_id, common=None):
@@ -942,11 +951,10 @@ def answers_kept_for_findings(data, finding_ids):
         text = data.decode()
     except UnicodeDecodeError:
         return {}, True
-    entries, stray = answers_file_parse(text)
-    kept, other = {}, stray
-    for _number, finding_id, lines in entries:
+    entries, malformed, stray = answers_file_parse(text)
+    kept, other = {}, stray or bool(malformed)
+    for finding_id, lines in entries:
         if not answered(lines):
-            other = other or any(line.strip() for line in lines)
             continue
         if finding_id in finding_ids and finding_id not in kept:
             kept[finding_id] = lines
@@ -1209,6 +1217,7 @@ def print_brief(number, reviewer_login):
         "ID>) \" for each finding above, followed by any answer an earlier run kept for it: after each line's "
         "tag, on the same line, write what you fixed, why the finding does not hold, "
         "or, for a change moved as step 3 says, the new pull request; further lines of an entry may follow. "
+        "Keep each line's start as this program wrote it: the check refuses any other line opening \"<n>.\". "
         "Never commit it: "
         "the branch's .gitignore may not leave it out, and the check in step 6 refuses a commit "
         "that holds it.",
@@ -1252,28 +1261,30 @@ def read_answers(path, finding_ids, blocking_count, nit_count):
         text = Path(path).read_text()
     except (OSError, UnicodeDecodeError) as error:
         raise StepFailed(f"could not read the answers file {path}: {error}") from None
-    answers, repeated, unknown_tags = answer_entries(text, finding_ids)
+    answers, repeated, unknown_tags, malformed = answer_entries(text, finding_ids)
+    if malformed:
+        lines = "\n".join(f"  {line}" for line in malformed)
+        raise Refused(f"The answers file {path} has {len(malformed)} line(s) opening \"<n>.\" that are not an "
+                      f"entry's start, so the check cannot tell which finding each answers:\n{lines}\n"
+                      f"Write each entry as \"<n>. {ANSWER_FINDING_TAG_FORMAT.format(finding_id='<comment ID>')} "
+                      "<answer text>\", keeping the start the brief wrote for it, and run the check again.")
     if repeated:
         raise Refused(f"The answers file {path} has two entries for finding {repeated[0]}.\n"
                       "Merge them into one entry.")
-    finding_count = blocking_count + nit_count
-    expected = set(range(1, finding_count + 1))
-    missing = sorted(expected - answers.keys())
-    extra = sorted(answers.keys() - expected)
-    if missing or extra or unknown_tags:
+    missing = sorted(set(range(1, blocking_count + nit_count + 1)) - answers.keys())
+    if missing or unknown_tags:
         problems = []
         if missing:
             problems.append(f"no entry for finding {', '.join(map(str, missing))}")
-        if extra:
-            problems.append(f"an entry for finding {', '.join(map(str, extra))}, which does not exist")
         if unknown_tags:
             problems.append(f"an entry tagged (finding {', '.join(unknown_tags)}), which names no finding of this "
                             "review")
         nits = f" and {nit_count} nit{'' if nit_count == 1 else 's'}" if nit_count else ""  # pragma: no mutate, nit_count is a len() and the f-string runs only when it is nonzero, so `<=` matches only 1 as `==` does
         raise Refused(f"The answers file {path} has {' and '.join(problems)}; the review has "
                       f"{blocking_count} blocking findings{nits}.\n"
-                      "Give each finding, numbered as the brief numbers it, exactly one entry "
-                      "starting \"<n>. \" on its own line.")
+                      "Give each finding exactly one entry, the line the brief wrote for it, "
+                      f"\"<n>. {ANSWER_FINDING_TAG_FORMAT.format(finding_id='<comment ID>')} \", with the answer "
+                      "after it on the same line.")
     return {number: " ".join(parts) for number, parts in sorted(answers.items())}
 
 
