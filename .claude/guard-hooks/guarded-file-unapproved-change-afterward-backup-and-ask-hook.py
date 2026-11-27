@@ -3,7 +3,9 @@
 every version, and tell the agent to ask him.
 
 Registered under PostToolUse and PostToolUseFailure for every tool. A guarded file is a file
-instruction-file-guard.py protects, plus ~/.claude/CLAUDE.md and ~/.claude/settings.json. At
+instruction-file-guard.py protects, plus ~/.claude/CLAUDE.md, ~/.claude/settings.json and every
+agent-seat's ~/agents/<agent-seat>/CLAUDE.local.md and .claude/settings.local.json, which are
+checked whatever the tool call's working directory. At
 each run the hook compares each checked file's stat data with what it stored at its previous
 run, hashes only a file whose stat data differs, logs each new version in this machine's
 directory of the log-store kind guarded-file-versions-and-approvals/, copies it there unless
@@ -91,6 +93,10 @@ BASE_COMMIT_KEY = "base_commit"
 APPROVED_FILE_NAME = "approved"
 LOG_FILE_NAME = "log"
 DELETED = "deleted"
+SEAT_BRIEF_FILE_NAME = "CLAUDE.local.md"
+# The outside state's key, set once the agent-seat files' versions present when the outside
+# group began to check them were approved, so that only later changes are asked about.
+AGENT_SEAT_FILES_STOCKED_KEY = "agent_seat_files_stocked"
 COPY_MODE = 0o600
 APPROVAL_MARKER_NAME = ".walk-approved"
 # The obvious-fix marker's opening words, as instruction-file-guard.py's refusal gives them.
@@ -711,6 +717,14 @@ def seen_lines(log, key):
             and fields[4] == key]
 
 
+def last_seen_key(log, excluded):
+    """The key of the last version the log records as seen, other than excluded, or None."""
+    for fields in reversed(log):
+        if fields[0] == "seen" and len(fields) >= 7 and fields[4] != excluded:
+            return fields[4]
+    return None
+
+
 def first_seen_time(log, key):
     lines = seen_lines(log, key)
     return int(lines[0][1]) if lines else None
@@ -788,9 +802,22 @@ def home_directory():
     return Path(os.environ.get("HOME") or Path.home())
 
 
-def outside_files():
+def agent_seat_files():
+    """Every agent-seat's seat-brief and .claude/settings.local.json. They are checked from any
+    directory, since an agent-seat can change another agent-seat's file, which that agent-seat's
+    own checkout sees only at its next agent-session."""
+    agents = Path(os.environ.get(AGENTS_DIRECTORY_VARIABLE) or home_directory() / "agents")
+    if not agents.is_dir():
+        return []
+    return sorted(str(path) for seat in agents.iterdir()
+                  for path in (seat / SEAT_BRIEF_FILE_NAME, seat / ".claude" / "settings.local.json")
+                  if path.is_file())
+
+
+def outside_files(seat_files=None):
     claude = home_directory() / ".claude"
-    return [str(claude / "CLAUDE.md"), str(claude / "settings.json")]
+    return ([str(claude / "CLAUDE.md"), str(claude / "settings.json")]
+            + (agent_seat_files() if seat_files is None else seat_files))
 
 
 def is_settings_file(path: str):
@@ -1041,8 +1068,14 @@ def store_phase(store, session, owner, checks, unsettled_unchanged, approvals, q
         log = store.log(check.path)
         approved = store.approved(check.path)
         reason = ""
-        if check.how == HOW_EDIT and check.previous not in (None, DELETED) \
-                and check.previous not in approved:
+        previous = check.previous
+        if check.how == HOW_EDIT and previous is None:
+            # A state that lost the file's entry, such as one an older hook's run rewrote, says
+            # nothing of the version the Edit was made on; the log's last one other than the
+            # Edit's result stands in for it.
+            previous = last_seen_key(log, check.key)
+        if check.how == HOW_EDIT and previous not in (None, DELETED) \
+                and previous not in approved:
             # The guard approved the Edit's change, not the unapproved text it was made on.
             check.how = ""
             reason = EDIT_ON_UNAPPROVED_VERSION
@@ -1234,7 +1267,11 @@ def run_hook(payload):
     outside_state = read_state(outside_path)
     outside_stocking = outside_state is None
     outside_state = outside_state or {"files": {}}
-    groups.append(("outside", outside_path, outside_state, outside_files(), None, outside_stocking))
+    stock_agent_seat_files = not outside_state.get(AGENT_SEAT_FILES_STOCKED_KEY)
+    outside_state[AGENT_SEAT_FILES_STOCKED_KEY] = True
+    seat_files = agent_seat_files()
+    outside = outside_files(seat_files)
+    groups.append(("outside", outside_path, outside_state, outside, None, outside_stocking))
 
     checkout = guard().enclosing_repository_root(cwd) if cwd.is_dir() else None
     if checkout is not None:
@@ -1270,7 +1307,9 @@ def run_hook(payload):
                 == blob}
         decisions = checkout_state.setdefault("guarded", {})
         decisions_before = dict(decisions)
-        groups.append(("checkout", checkout_path, checkout_state, checkout_files(checkout, decisions),
+        # A file the outside group checks is left out here, so one change is not asked about twice.
+        groups.append(("checkout", checkout_path, checkout_state,
+                       sorted(set(checkout_files(checkout, decisions)) - set(outside)),
                        (checkout, git_directory), checkout_stocking))
 
     owner_cache = []
@@ -1338,13 +1377,13 @@ def run_hook(payload):
                       held, main_blobs,
                       repository, at_base, base_versions])
 
-    stocking_machine = outside_stocking
     nothing_to_do = all(not plan[4] and not plan[5] and not plan[6] and not plan[9]
                         for plan in plans)
     if nothing_to_do:
         for plan in plans:
             moved = plan[8] is not None and plan[2].get("reflog") != plan[8]
-            if moved or plan[10] or (plan[0] == "checkout"
+            if moved or plan[10] or (plan[0] == "outside" and stock_agent_seat_files) or (
+                    plan[0] == "checkout"
                                      and (migrated or plan[2].get("guarded") != decisions_before)):
                 if moved:
                     plan[2]["reflog"] = plan[8]
@@ -1353,14 +1392,6 @@ def run_hook(payload):
 
     def work(store):
         results = []
-        if stocking_machine:
-            for path in seat_briefs():
-                if not store.approved(path):
-                    data = read_file(path)
-                    key = blob_hash(data)
-                    store.copy(path, key, data)
-                    store.approve(path, key)
-                    log_seen(store, path, session, owner(), key, key, HOW_STOCK)
         for plan in plans:
             (kind, state_path, state, files, changed, unsettled, approvals, quiet, _, stocking, _,
              held, main_blobs, repository, at_base, base_versions) = plan
@@ -1397,9 +1428,13 @@ def run_hook(payload):
                         continue
                     os.close(directory)
                 how = ""
+                # The agent-seat files' first check stocks the version this run's scan read, so a
+                # write after the scan is not approved in its place.
+                seat_stocking = (kind == "outside" and stock_agent_seat_files
+                                 and path in seat_files and not store.approved(path))
                 if main_blobs.get(path) == key:
                     how = HOW_ORIGIN_MAIN
-                elif stocking:
+                elif stocking or seat_stocking:
                     log = store.log(path)
                     if not (key not in store.approved(path) and seen_lines(log, key)):
                         how = HOW_STOCK
@@ -1463,16 +1498,6 @@ def run_hook(payload):
         reminders += plan_reminders
     return [FIRST_RUN_VERSION_LOST.format(path=path, blob=blob, program=HOOK_PATH)
             for path, blob in lost] + messages(asks, reminders)
-
-
-def seat_briefs():
-    """The seat-briefs, found as the transcript mirror finds them."""
-    agents = Path(os.environ.get(AGENTS_DIRECTORY_VARIABLE) or home_directory() / "agents")
-    if not agents.is_dir():
-        return []
-    mirror = loaded("transcript_mirror_to_log_store",
-                    CLONE_ROOT / "scripts" / "transcript-mirror-to-log-store.py")
-    return [str(agents / relative) for relative in mirror.seat_briefs_in(agents)]
 
 
 def renames(store, changed, state_files, approved_first):
@@ -1546,7 +1571,10 @@ def current_version(path: str):
     if stat_data(path) is None:
         return DELETED, DELETED, b""
     data = read_file(path)
-    checkout = guard().enclosing_repository_root(Path(path).parent)
+    # A file the outside group checks is keyed by its bytes there, so it is here too: git's
+    # filters, such as core.autocrlf, would give a hash the hook never printed.
+    checkout = (None if path in outside_files()
+                else guard().enclosing_repository_root(Path(path).parent))
     copy_hash = (hashes_in_checkout(checkout, [path]).get(path) if checkout is not None
                  else None) or blob_hash(data)
     key = settings_approval_key(data) if is_settings_file(path) else copy_hash

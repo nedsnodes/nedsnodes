@@ -19,10 +19,19 @@ worktrees directory's pr<n>-merged, and gh reads from GitHub as the merge
 account. Among the facts are the merged pull requests whose not-fixed line, in
 either form, links to an issue the pull request closes, as GitHub lists them,
 or to the pull request itself: the reviewer judges whether this pull request
-makes useless a point fix or workaround they kept. The facts end with the pull
-request's description, which the brief quotes as the author's claims. The
-reviewer runs with no GitHub login, so the brief is where it reads the
-description. The brief is written to
+makes useless a point fix or workaround they kept. For each pull request a
+"#follow_up_request pull request <number>" in the description names, anywhere
+in it, the facts give merge-lane-2's follow-up request block for that pull
+request as --review-tools-worktree-at-main's FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME
+prints it, so the reviewer can check the answers against the findings' own
+text, or, when that program refuses to print it, its refusal and the block
+merge-lane-2 wrote by hand instead, as the author's follow-up request hook saved
+it in the git common directory of --review-tools-worktree-at-main, where that
+program keeps its saved blocks; an author on the Mac saves it on the Mac, so the
+brief then says no block is saved. A saved block that cannot be read is a
+failed step. The facts end with the pull request's description, which the brief
+quotes as the author's claims. The reviewer runs with no GitHub login, so the
+brief is where it reads the description and the follow-up request blocks. The brief is written to
 briefs/brief-<tag>-mac-claude.md under the worktrees and outputs directory, and
 rv<tag>/ is made under --merge-lane-pull-request-reviewer-scratch-directories-parent-directory as the reviewer's
 scratch directory. That parent is outside the log-store, because the standing
@@ -81,6 +90,13 @@ GITHUB_ISSUE_OR_PULL_REQUEST_LINK = re.compile(
     r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/(?:issues|pull)/([0-9]+)")
 # Far above the merged count, so gh lists them all.
 MERGED_PULL_REQUESTS_LIMIT = "100000"
+FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME = "pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py"
+FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER = re.compile(r"#follow_up_request#? pull request ([0-9]+)\b")
+_follow_up_request_program_spec = importlib.util.spec_from_file_location(
+    "pull_request_follow_up_request_after_merge_finding_answers_and_next_step",
+    Path(__file__).resolve().with_name(FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME))
+follow_up_request_program = importlib.util.module_from_spec(_follow_up_request_program_spec)
+_follow_up_request_program_spec.loader.exec_module(follow_up_request_program)
 
 
 def parse_arguments(argv):
@@ -108,12 +124,18 @@ def parse_arguments(argv):
     return common.resolve_path_options(parser.parse_args(argv))
 
 
-def run(command, gh_token=None):
+class Refused(Exception):
+    """A program run refused, exiting 1 with standard error opening `REFUSED: `; the text is that error."""
+
+
+def run(command, gh_token=None, refusal_allowed=False):
     environment = run_all_test_suites.environment_without_git_redirecting_variables()
     if gh_token is not None:
         environment["GH_TOKEN"] = gh_token
     completed = subprocess.run(
         command, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=environment)
+    if refusal_allowed and completed.returncode == 1 and completed.stderr.startswith("REFUSED: "):
+        raise Refused(completed.stderr.strip())
     if completed.returncode != 0:
         raise StepFailed(f"{' '.join(command)} exited {completed.returncode}: "
                          f"{completed.stderr.strip()}")
@@ -191,6 +213,50 @@ def follow_up_pull_requests_text(number, closing_issues, merged_pull_requests):
             "closes, or to this pull request: " + ("; ".join(found) or "none") + ".")
 
 
+def hand_written_follow_up_request_block_text(review_tools_worktree, followed_up):
+    """The brief's sentence giving the block merge-lane-2 wrote by hand for pull request `followed_up`, as the
+    author's follow-up request hook saved it, or saying none is saved."""
+    try:
+        saved = follow_up_request_program.state_file(
+            follow_up_request_program.state_directory(
+                review_tools_worktree, run_all_test_suites.environment_without_git_redirecting_variables()),
+            follow_up_request_program.SAVED_FINDINGS_FILE_NAME_FORMAT, followed_up)
+        block = follow_up_request_program.read_text_if_present(saved)
+    except follow_up_request_program.StepFailed as failure:
+        raise StepFailed(f"the saved follow-up request block for pull request {followed_up}: {failure}") from None
+    if block is None or not block.strip():
+        return (f"No block merge-lane-2 wrote by hand is saved at `{saved}`, where the author's follow-up request "
+                "hook saves the block merge-lane-2 sends it; an author on the Mac saves it on the Mac.\n")
+    return (f"The block merge-lane-2 wrote by hand and sent the author instead, as the author's follow-up request "
+            f"hook saved it at `{saved}`:\n\n" + quoted(block.strip()) + "\n")
+
+
+def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
+    """The brief's facts giving merge-lane-2's follow-up request block for each pull request the description names
+    in a "#follow_up_request pull request <number>", lowest number first."""
+    texts = []
+    for followed_up in sorted({int(number) for number in FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER.findall(description)}):
+        program = f"`scripts/{FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME} {followed_up} " \
+                  "print-follow-up-request-block-from-merge-lane-2-reviews`"
+        fact = f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description names"
+        try:
+            block = run([sys.executable, str(review_tools_worktree / "scripts" / FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME),
+                         str(followed_up), "print-follow-up-request-block-from-merge-lane-2-reviews"], gh_token,
+                        refusal_allowed=True).strip()
+        except Refused as refusal:
+            # A refused block is one merge-lane-2 writes by hand, so the brief is still composed, with the refusal
+            # and the hand-written block in the printed block's place.
+            texts.append(f"{fact}: {program} refused to print it from merge-lane-2's reviews, saying:\n\n"
+                         + quoted(str(refusal)) + "\n\n"
+                         + hand_written_follow_up_request_block_text(review_tools_worktree, followed_up))
+            continue
+        texts.append(f"{fact}, as {program} prints it from merge-lane-2's reviews"
+                     + (":\n\n" + quoted(block) + "\n" if block else
+                        ": it printed no finding, so merge-lane-2's reviews of that pull request hold no "
+                        "non-blocking finding."))
+    return texts
+
+
 def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pull_requests):
     tag, number = spec["tag"], spec["number"]
     head, main = spec["head"], spec["main"]
@@ -232,6 +298,7 @@ def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pu
     closing_issues, description = pull_request_closing_issues_and_description(
         number, merged_pull_requests.gh_token)
     facts.append(follow_up_pull_requests_text(number, closing_issues, merged_pull_requests))
+    facts.extend(follow_up_request_blocks_text(description, review_tools_worktree, merged_pull_requests.gh_token))
     facts.append(f"- Hazards: {spec['hazards']}")
     facts.append("- The author's description of the pull request, quoted below. It is what "
                  "the author claims; check each claim against the repository yourself, "

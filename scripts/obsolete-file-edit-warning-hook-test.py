@@ -111,6 +111,27 @@ def emitted_object(result):
     return parsed if isinstance(parsed, dict) else None
 
 
+def overlap_verdict_text(warning: str) -> str:
+    """A detached-HEAD warning's overlap verdict, which can run to several lines:
+    everything after the opening line and the detached-HEAD line."""
+    return "\n".join(warning.split("\n")[2:])
+
+
+def undo_only_this_edit_lines(path: str) -> str:
+    """The lines every verdict that sends an edit away from its path carries."""
+    return (
+        f"Undo only the change you just made to {path}, by editing the file back to the "
+        f"text it had before that change. Do not run `git checkout -- {path}` or `git "
+        f"restore {path}` for this: either one throws away every uncommitted change to the "
+        f"file, not only the one this warning is about.\n"
+        f"If `git diff -- {path}` still prints changes after that, the file holds uncommitted "
+        f"work from before your change, which cannot stay at {path} either, and git refuses "
+        f"to switch branch or rebase while it is there: save it with `git diff --binary -- {path} > "
+        f"<a file outside this checkout>`, and only then run `git checkout -- {path}`. "
+        f"Carry the saved changes along with your own in the step below, and tell the user "
+        f"about any you did not make.")
+
+
 def agent_text(result) -> str:
     """What the AGENT was told. Plain stdout on a PostToolUse hook reaches
     the debug log and nobody else — the hooks reference names
@@ -876,7 +897,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     latin1_file.write_bytes(b"".join(latin1_edited))
     result = run_hook(hook_payload(detached, latin1_file))
     check("detached: a file that is not UTF-8 gets the overlap verdict, exit 0",
-          result.returncode == 0 and agent_text(result).split("\n")[-1] == (
+          result.returncode == 0 and overlap_verdict_text(agent_text(result)) == (
               "main's changes to lib/latin1.txt do not overlap this checkout's copy; a "
               "rebase merges them cleanly."), result.stdout + result.stderr)
 
@@ -889,7 +910,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     warning = detached_warning(shared_file)
     check("detached: an edit of the lines main changed is told they overlap, "
           "though the file was warned about before",
-          warning.split("\n")[-1] == (
+          overlap_verdict_text(warning) == (
               "main's changes to lib/shared.py overlap this checkout's copy: after you "
               "make the branch and commit your edit, run git rebase origin/main, which "
               "will stop on this file, and resolve the conflict there."), warning)
@@ -901,14 +922,15 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     warning = detached_warning(gone_file)
     check("detached: an edit of a file main deleted is told which commit deleted it and "
           "what to do",
-          warning.split("\n")[-1] == (
-              f"main deleted lib/gone.py in commit {deleting_commit}, so your edit has no "
-              "file to land in. Read why with `git log -1 --stat origin/main -- "
-              "lib/gone.py`. If your fix is still needed, drop this edit with `git "
-              "checkout -- lib/gone.py`, start a topic branch with `git switch -c "
+          overlap_verdict_text(warning) == (
+              f"main deleted lib/gone.py in commit {deleting_commit}, so your edit has "
+              "nowhere to go. Read why with `git log -1 --stat origin/main -- "
+              "lib/gone.py`.\n"
+              + undo_only_this_edit_lines("lib/gone.py") + "\n"
+              "Then, if your fix is still needed, start a topic branch with `git switch -c "
               "<a-branch-name> origin/main`, and make the same fix in the file that does "
-              "that job on main now. If no file on main does that job, drop the edit and "
-              "do not make the fix."), warning)
+              "that job on main now. If no file on main does that job, do not make the "
+              "fix."), warning)
     # A git log that prints a line and then fails, by exit code or by a signal,
     # has not named the commit that removed the path, so the hook cannot tell a
     # move from a deletion: the could-not-tell line, said again at the next edit.
@@ -925,7 +947,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                                       path_prefix=shim_directory))
         check(f"detached: when the git log that names the removing commit {case_name}, "
               "the line says git could not tell moved from deleted, with its exit code",
-              warning.split("\n")[-1].startswith(
+              overlap_verdict_text(warning).startswith(
                   "main no longer has a file at lib/gone.py, and git could not tell "
                   "whether main moved or deleted it " + fallback + ". ")
               and "abc1234" not in warning, warning)
@@ -962,7 +984,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                                   path_prefix=show_failing_directory))
     check("detached: when git cannot show the removing commit's own renames, the line "
           "says it could not tell moved from deleted, with git's text",
-          warning.split("\n")[-1].startswith(
+          overlap_verdict_text(warning).startswith(
               "main no longer has a file at lib/gone.py, and git could not tell whether "
               "main moved or deleted it (fatal: shimmed show). "), warning)
     repeated = agent_text(run_hook(hook_payload(detached, gone_file),
@@ -987,12 +1009,13 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     warning = detached_warning(drifted_file)
     check("detached, unpushed: a file main moved and then rewrote past rename detection "
           "is told its new path and to carry the edit there by hand",
-          warning.split("\n")[-1] == (
+          overlap_verdict_text(warning) == (
               "main moved lib/drifted.py to lib/drifted-to.py and then changed it so much "
               "that git no longer pairs the two paths, so neither a rebase nor a merge "
               "carries your edit there: both stop on a modify/delete conflict at "
-              "lib/drifted.py. Drop the edit with `git checkout -- lib/drifted.py`. After "
-              "you make the branch, run `git rebase origin/main`, then make the same "
+              "lib/drifted.py.\n"
+              + undo_only_this_edit_lines("lib/drifted.py") + "\n"
+              "Then make the branch, run `git rebase origin/main`, and make the same "
               "change by hand in lib/drifted-to.py."), warning)
     git(["checkout", "-q", "--", "lib/drifted.py"], detached)
 
@@ -1013,10 +1036,32 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           old_rebase.returncode != 0 and "DU lib/drifted.py" in old_status,
           old_rebase.stdout + old_rebase.stderr + old_status)
     subprocess.run(["git", "rebase", "--abort"], cwd=old_advice, capture_output=True)
+    # The line's steps, followed in a file that already held uncommitted work
+    # before the warned edit: that work must survive them.
     followed = tmp / "drifted-followed-advice-worktree"
     git(["worktree", "add", "-q", "--detach", str(followed), "HEAD"], detached)
     configure_identity(followed)
-    (followed / "lib" / "drifted.py").write_text("the agent's edit\n", encoding="utf-8")
+    followed_file = followed / "lib" / "drifted.py"
+    before_warned_edit = followed_file.read_text(encoding="utf-8") + "earlier work\n"
+    followed_file.write_text(before_warned_edit, encoding="utf-8")
+    followed_file.write_text(before_warned_edit + "the agent's edit\n", encoding="utf-8")
+    followed_warning = agent_text(run_hook(hook_payload(followed, followed_file)))
+    check("detached, unpushed: the moved-and-rewritten line says to undo only the "
+          "change, and never to discard the file with git checkout or git restore first",
+          undo_only_this_edit_lines("lib/drifted.py") in followed_warning,
+          followed_warning)
+    followed_file.write_text(before_warned_edit, encoding="utf-8")
+    refused_switch = subprocess.run(
+        ["git", "switch", "-q", "-c", "drifted-refused-switch", "origin/main"],
+        cwd=followed, capture_output=True, text=True)
+    check("detached, unpushed: with earlier work still in the file after the undo, "
+          "git refuses to switch branch, as the line says",
+          refused_switch.returncode != 0
+          and "earlier work" in git(["diff", "--", "lib/drifted.py"], followed).stdout,
+          refused_switch.stdout + refused_switch.stderr)
+    saved_changes = tmp / "drifted-followed-advice-saved.patch"
+    saved_changes.write_text(git(["diff", "--binary", "--", "lib/drifted.py"],
+                                 followed).stdout, encoding="utf-8")
     git(["checkout", "-q", "--", "lib/drifted.py"], followed)
     git(["switch", "-q", "-c", "drifted-followed-advice"], followed)
     followed_rebase = subprocess.run(["git", "rebase", "origin/main"], cwd=followed,
@@ -1024,25 +1069,53 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     new_copy = followed / "lib" / "drifted-to.py"
     carried = followed_rebase.returncode == 0 and new_copy.exists()
     if carried:
-        new_copy.write_text(new_copy.read_text(encoding="utf-8") + "the agent's edit\n",
-                            encoding="utf-8")
-        git(["commit", "-q", "-am", "the edit, carried by hand"], followed)
-    check("detached, unpushed: the line's steps rebase cleanly and put the edit in "
-          "lib/drifted-to.py, with no file left at lib/drifted.py",
-          carried and not (followed / "lib" / "drifted.py").exists()
+        new_copy.write_text(new_copy.read_text(encoding="utf-8") + "earlier work\n"
+                            + "the agent's edit\n", encoding="utf-8")
+        git(["commit", "-q", "-am", "the edit and the saved work, carried by hand"],
+            followed)
+    check("detached, unpushed: the line's steps keep the earlier work in the saved "
+          "changes, rebase cleanly and put both in lib/drifted-to.py, with no file left "
+          "at lib/drifted.py",
+          any(line.startswith("+") and "earlier work" in line
+              for line in saved_changes.read_text(encoding="utf-8").splitlines())
+          and carried and not followed_file.exists()
           and git(["status", "--porcelain"], followed).stdout == "",
           followed_rebase.stdout + followed_rebase.stderr)
     for worktree, branch in ((old_advice, "drifted-old-advice"),
                              (followed, "drifted-followed-advice")):
         git(["worktree", "remove", "--force", str(worktree)], detached)
         git(["branch", "-q", "-D", branch], detached)
+    # The same save, of a file git treats as binary: the saved changes must be
+    # enough to bring the earlier work back after the checkout the line names.
+    binary_repository = tmp / "binary-earlier-work"
+    binary_repository.mkdir()
+    git(["init", "-q"], binary_repository)
+    configure_identity(binary_repository)
+    binary_file = binary_repository / "data.bin"
+    binary_file.write_bytes(b"committed\x00\n")
+    git(["add", "data.bin"], binary_repository)
+    git(["commit", "-q", "-m", "a binary file"], binary_repository)
+    binary_file.write_bytes(b"committed\x00\nearlier work\x00\n")
+    binary_saved = tmp / "binary-earlier-work-saved.patch"
+    binary_saved.write_bytes(subprocess.run(
+        ["git", "diff", "--binary", "--", "data.bin"], cwd=binary_repository,
+        capture_output=True, check=True).stdout)
+    git(["checkout", "-q", "--", "data.bin"], binary_repository)
+    applied = subprocess.run(["git", "apply", str(binary_saved)], cwd=binary_repository,
+                             capture_output=True, text=True)
+    check("the line saves earlier work with git diff --binary, and for a binary file "
+          "git apply of the saved changes brings that work back after the checkout",
+          "`git diff --binary -- data.bin > " in undo_only_this_edit_lines("data.bin")
+          and applied.returncode == 0
+          and binary_file.read_bytes() == b"committed\x00\nearlier work\x00\n",
+          applied.stdout + applied.stderr)
 
     moved_file = detached / "lib/moved.py"
     moved_file.write_text("".join(edited_far_away), encoding="utf-8")
     warning = detached_warning(moved_file)
     check("detached, unpushed: an edit of a file main moved is told the new path and to "
           "rebase, which carries the edit there",
-          warning.split("\n")[-1] == (
+          overlap_verdict_text(warning) == (
               "main moved lib/moved.py to lib/renamed.py. After you make the branch and "
               "commit your edit at lib/moved.py, run `git rebase origin/main`: git follows "
               "the move and applies your edit to lib/renamed.py. If the rebase stops on "
@@ -1053,7 +1126,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     # cached by now, so only the rename listing reaches the failing diff.
     result = run_hook(hook_payload(detached, moved_file),
                       path_prefix=diff_failing_git_directory)
-    last_line = agent_text(result).split("\n")[-1]
+    last_line = overlap_verdict_text(agent_text(result))
     check("detached: when git cannot list main's renames, the line says it could not "
           "tell moved from deleted, with git's text, and claims neither",
           last_line.startswith("main no longer has a file at lib/moved.py, and git could "
@@ -1064,7 +1137,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           agent_text(result))
     check("detached: the could-not-tell line names a show command whose R line gives "
           "the new path",
-          "`git show --name-status -M --format= <that commit>`. If a line there starts "
+          "`git show --name-status -M --format= <that commit>`.\nIf a line there starts "
           "with R and names lib/moved.py, main moved the file, and your edit belongs at "
           "the second path on that line." in last_line, last_line)
     removing_commit = git(["log", "-1", "--format=%h", "origin/main", "--",
@@ -1089,7 +1162,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
              "kill -KILL $$", "(git diff exited -9)")):
         result = run_hook(hook_payload(detached, moved_file),
                           path_prefix=git_shimmed_when(shim_name, rename_listing, action))
-        last_line = agent_text(result).split("\n")[-1]
+        last_line = overlap_verdict_text(agent_text(result))
         check(f"detached: when the rename listing {case_name}, the could-not-tell line "
               "names git's exit code",
               result.returncode == 0
@@ -1132,7 +1205,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         check("detached: main's copy still unreadable at the next edit is reported again, "
               "never held back as a repeat",
               repeated_warning == warning, repeated_warning)
-        last_line = warning.split("\n")[-1]
+        last_line = overlap_verdict_text(warning)
         check("detached: main's copy that git cannot read is reported with git's text, "
               "not as a deleted file",
               last_line.startswith("git could not read lib/shared.py on origin/main (")
@@ -1170,7 +1243,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
              '[ "$1" = "merge-file" ]', 255, "git merge-file -p -q ")):
         shim_directory = git_failing_when(shim_name, condition, exit_code)
         result = run_hook(hook_payload(detached, shared_file), path_prefix=shim_directory)
-        last_line = agent_text(result).split("\n")[-1]
+        last_line = overlap_verdict_text(agent_text(result))
         check(f"detached: {case_name} is said in the warning, with git's error, exit 0",
               result.returncode == 0
               and last_line.startswith("git could not tell whether main's changes to "
@@ -1181,7 +1254,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                                      "or commit."), result.stdout + result.stderr)
         repeated = run_hook(hook_payload(detached, shared_file), path_prefix=shim_directory)
         check(f"detached: {case_name} is said again at the next edit",
-              agent_text(repeated).split("\n")[-1].startswith(
+              overlap_verdict_text(agent_text(repeated)).startswith(
                   "git could not tell whether main's changes to lib/shared.py overlap"),
               agent_text(repeated))
 
@@ -1230,7 +1303,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     shared_file.write_text("".join(edited_same_line), encoding="utf-8")
     warning = detached_warning(shared_file)
     check("detached at a pushed head: an overlap is sent to scripts/branch-conflict-check.py, never a rebase",
-          warning.split("\n")[-1] == (
+          overlap_verdict_text(warning) == (
               "main's changes to lib/shared.py overlap this checkout's copy, so the pull "
               "request will conflict with main on this file. Commit your edit on top "
               "first, and do not rebase; then do what `python3 "
@@ -1239,7 +1312,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     moved_file.write_text("".join(edited_far_away), encoding="utf-8")
     warning = detached_warning(moved_file)
     check("detached at a pushed head: a moved file is committed on top, not rebased",
-          warning.split("\n")[-1] == (
+          overlap_verdict_text(warning) == (
               "main moved lib/moved.py to lib/renamed.py. Commit your edit on top at "
               "lib/moved.py, and do not rebase: when the pull request merges, git follows "
               "the move and carries your edit to lib/renamed.py. If `python3 "
@@ -1250,14 +1323,14 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     warning = detached_warning(drifted_file)
     check("detached at a pushed head: a file main moved and then rewrote is not "
           "committed on top, but carried by hand on a topic branch from origin/main",
-          warning.split("\n")[-1] == (
+          overlap_verdict_text(warning) == (
               "main moved lib/drifted.py to lib/drifted-to.py and then changed it so much "
               "that git no longer pairs the two paths, so when the pull request merges, "
               "git does not carry your edit there: the merge stops on a modify/delete "
-              "conflict at lib/drifted.py. Do not commit the edit: drop it with `git "
-              "checkout -- lib/drifted.py`, start a topic branch with `git switch -c "
-              "<a-branch-name> origin/main`, and make the same change by hand in "
-              "lib/drifted-to.py there."), warning)
+              "conflict at lib/drifted.py. Do not commit the edit.\n"
+              + undo_only_this_edit_lines("lib/drifted.py") + "\n"
+              "Then start a topic branch with `git switch -c <a-branch-name> origin/main`, "
+              "and make the same change by hand in lib/drifted-to.py there."), warning)
     git(["checkout", "-q", "--", "lib/drifted.py"], detached)
     pushed_advice = tmp / "drifted-pushed-advice-worktree"
     git(["worktree", "add", "-q", "-b", "drifted-pushed-advice", str(pushed_advice),

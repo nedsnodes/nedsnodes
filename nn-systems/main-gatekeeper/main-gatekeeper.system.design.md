@@ -1,4 +1,5 @@
 ---
+issue: "[main-gatekeeper — the single check-in gate (design: nn-systems/main-gatekeeper/main-gatekeeper-design.md)](https://github.com/nedsnodes/nedsnodes/issues/3)"
 status: specification
 design-as-of: 2026-08-12
 ---

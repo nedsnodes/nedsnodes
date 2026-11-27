@@ -56,9 +56,14 @@ def check(name, condition, detail=""):
             print("      " + str(detail).replace("\n", "\n      "))
 
 
+def full_digest(seat):
+    """The digest whose start is the ref of the agent-session Case records for the agent-seat."""
+    return hashlib.sha256(f"session:/run/user/1000/cc-socks/{seat}.sock".encode()).hexdigest()
+
+
 def listed_ref(seat):
     """The [ref] ListAgents gives the agent-session Case records for the agent-seat."""
-    return hashlib.sha256(f"session:/run/user/1000/cc-socks/{seat}.sock".encode()).hexdigest()[:6]
+    return full_digest(seat)[:6]
 
 
 def pull_request(number, draft=False, reviews=(), author="mac-claude"):
@@ -198,7 +203,7 @@ def cases(root):
           len(case.prompts) == 1
           and prompt.startswith(program.idle_sweep.SENDER_PROMPT.split("{seat}")[0])
           and program.idle_sweep.FIND_THE_ENTRY.format(
-              seat="reboot-test", ref=listed_ref("reboot-test")) in prompt
+              seat="reboot-test", ref=full_digest("reboot-test")) in prompt
           and "You may now open your pull requests that only add tests for surviving mutants: "
               "one per source file, with at most 5 open at a time." in prompt
           and program.idle_sweep.DO_NOT_REPLY_SENTENCE in prompt
@@ -252,9 +257,6 @@ def cases(root):
     for name, breaks in (
             ("no-running-session",
              lambda case: (case.home / ".claude" / "sessions" / "reboot-test.json").unlink()),
-            ("state-not-json", lambda case: case.supervisor_state("reboot-test").write_text("{x")),
-            ("state-not-object", lambda case: case.supervisor_state("reboot-test").write_text("[]")),
-            ("no-state", lambda case: case.supervisor_state("reboot-test").unlink()),
             # A record with no sessionId must not match a state that names no agent-session.
             ("state-names-none", lambda case: (
                 case.supervisor_state("reboot-test").write_text("{}"),
@@ -268,6 +270,23 @@ def cases(root):
               f"sender is started, nothing is recorded, exit 2",
               code == 2 and case.prompts == [] and case.released() == []
               and "no running agent-session of reboot-test" in output, f"exit {code}\n{output}")
+
+    for name, breaks, error in (
+            ("state-not-json", lambda case: case.supervisor_state("reboot-test").write_text("{x"),
+             "JSONDecodeError"),
+            ("state-not-object", lambda case: case.supervisor_state("reboot-test").write_text("[]"),
+             "does not hold a JSON object"),
+            ("no-state", lambda case: case.supervisor_state("reboot-test").unlink(),
+             "FileNotFoundError")):
+        case = Case(root, name)
+        case.gh_answer(pages(ten_counted))
+        breaks(case)
+        code, output = case.run()
+        check(f"{name}: the supervisor state cannot be read, so no sender is started, nothing is "
+              f"recorded, exit 2, and the output names the file and the error",
+              code == 2 and case.prompts == [] and case.released() == []
+              and f"could not read {case.supervisor_state('reboot-test')}" in output
+              and error in output, f"exit {code}\n{output}")
 
     case = Case(root, "eleven")
     case.gh_answer(pages([pull_request(number) for number in range(1, 12)]))
