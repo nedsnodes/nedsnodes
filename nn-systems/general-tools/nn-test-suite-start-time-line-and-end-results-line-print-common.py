@@ -194,6 +194,9 @@ def nn_test_suite_start_time_line_print_now_and_end_results_line_print_at_normal
 def main(arguments):
     usage = ("usage: nn-test-suite-start-time-line-and-end-results-line-print-common.py "
              "start | end <passed> <failed> <exit code>")
+    if arguments in (["-h"], ["--help"]):
+        print(usage + "\n\nPrint a shell nn-test-suite's START line, or its END line and exit with the verdict's code.")
+        return 0
     if arguments == ["start"]:
         print(f"{START_LINE_WORD} {utc_time_now_text()}")
         return 0

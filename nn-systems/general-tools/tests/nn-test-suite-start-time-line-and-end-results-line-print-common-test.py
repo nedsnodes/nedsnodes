@@ -165,6 +165,9 @@ try:
     completed = subprocess.run([sys.executable, str(MODULE), "start"], capture_output=True, text=True, timeout=60)
     check("run as a program with start, the module prints the START line",
           completed.returncode == 0 and bool(START.match(completed.stdout.strip())), completed.stdout)
+    completed = subprocess.run([sys.executable, str(MODULE), "--help"], capture_output=True, text=True, timeout=60)
+    check("run as a program with --help, the module prints its usage on standard output and exits 0",
+          completed.returncode == 0 and completed.stdout.startswith("usage:"), completed)
     completed = subprocess.run([sys.executable, str(MODULE), "end", "x"], capture_output=True, text=True, timeout=60)
     check("run as a program with arguments it cannot read, the module prints its usage and exits 2",
           completed.returncode == 2 and "usage:" in completed.stderr and not completed.stdout, completed)
