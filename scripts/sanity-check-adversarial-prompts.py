@@ -140,6 +140,13 @@ Running a sanity-check, and reading its output:
   under WHEN A RUN IS STOPPED, whether or not its record arrived. A run in which every launched agent failed
   still ships its record, which then holds the run's log and no report, and
   prints the `record:` line and the record's path.
+- Every run whose record reached the log-store, a stopped run included,
+  ends with that record's citation line,
+  `sanity-check-record: nedlern@ned-box:/home/nedlern/nedsnodes-logs/sanity-check-records/<name>`.
+  Paste each run's line into the pull request description unchanged. A run
+  whose record did not arrive prints none: ship that record with
+  `scripts/sanity-check-record-ship.py <record directory>`, and cite the place
+  its `shipped:` line names.
 - An agent that saves no report is launched once more by the runner, with the
   same prompt, in the same copy, unless the cause is one only the user can
   clear or the launch timed out. The cause classes: `logged-out` and
@@ -1839,6 +1846,30 @@ def ship_record(record_dir: pathlib.Path) -> str:
         f"the record stays on disk.")
 
 
+# The line step 8 of the /sanity-check skill tells the agent to paste into the
+# pull request description, one per record.
+RECORD_CITATION_LINE_PREFIX = "sanity-check-record: "
+
+
+def record_citation_line(record_dir: pathlib.Path) -> str:
+    """The record's place in the log-store, as the pull request cites it:
+    `sanity-check-record: nedlern@ned-box:/home/nedlern/nedsnodes-logs/sanity-check-records/<name>`.
+    The host is the citation's, not the copy's, so the line is the same on
+    either machine."""
+    _, records_path = record_ship.destination_for_this_machine()
+    host = record_ship.shipper.citation_host_for_this_machine()
+    place = records_path / record_dir.name
+    return RECORD_CITATION_LINE_PREFIX + (f"{host}:{place}" if host else str(place))
+
+
+def print_record_citation_line_if_shipped(record_dir: pathlib.Path, record_line: str):
+    """Print the citation line as the run's last output when the record
+    reached the log-store; a record that did not arrive has no place there
+    to cite, and its `record:` line already says why."""
+    if record_line.startswith(RECORD_SHIPPED_LINE_PREFIX):
+        print(record_citation_line(record_dir), flush=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1972,7 +2003,9 @@ def main() -> int:
             # be left.
             run_log.detach()
             if run_log.record_directory is not None:
-                print(f"record: {ship_record(run_log.record_directory)}", flush=True)
+                record_line = ship_record(run_log.record_directory)
+                print(f"record: {record_line}", flush=True)
+                print_record_citation_line_if_shipped(run_log.record_directory, record_line)
     finally:
         run_log.detach()
         sys.stdout = run_log.stream
@@ -2172,6 +2205,7 @@ def print_completion_of_run_that_saved_no_report(out_dir: pathlib.Path, ship=Non
           "skipped; there is nothing to triage. Do what the lines under each "
           f"FAILED: line above say; this run's log, which keeps them, is in {out_dir}.",
           flush=True)
+    print_record_citation_line_if_shipped(out_dir, record_line)
 
 
 def print_run_completion(out_dir: pathlib.Path, ship=None) -> bool:
@@ -2202,6 +2236,7 @@ def print_run_completion(out_dir: pathlib.Path, ship=None) -> bool:
             "ship a dispositions file once it is finished.",
         flush=True,
     )
+    print_record_citation_line_if_shipped(out_dir, record_line)
     return record_line.startswith(RECORD_SHIPPED_LINE_PREFIX)
 
 
