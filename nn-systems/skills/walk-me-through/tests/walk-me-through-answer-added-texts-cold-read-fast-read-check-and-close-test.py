@@ -1581,6 +1581,25 @@ def test_the_waiting_item_read_step_keeps_the_text_read_before_the_item_was_spli
           again.returncode == 0 and document.read_text().count("Withdrawn version") == 1, described(again))
 
 
+def test_the_waiting_item_read_step_carries_a_waits_on_line_to_the_waiting_items_rewritten_heading():
+    later = ("## Nothing reports a renamed constant\n\n#approval_walk_item_in_category_fix_next\n\n"
+             "#approval_walk_item_waits_on The opening sentence\n\n#case_against none.\n\nRecommendation: approve.\n")
+    case = Case(document=marks_document(words_of_body(20)) + "\n" + later)
+    first = case.run(WAITING_ITEM_READ_STEP_NAME)
+    document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+    document.write_text(document.read_text().replace(
+        "## Item 3 of 9: the opening sentence", "## Item 3 of 9: Keep the closing sentence"))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change")
+    text = document.read_text()
+    check("after item 3's heading is rewritten, the read step rewrites the unshown item's waits-on line to the new "
+          "title instead of refusing it as naming no heading, and says so",
+          first.returncode == 0 and result.returncode == 0
+          and "#approval_walk_item_waits_on Keep the closing sentence" in text
+          and "#approval_walk_item_waits_on The opening sentence" not in text
+          and "changed from `the opening sentence` to `Keep the closing sentence`" in result.stdout,
+          described(first) + described(result) + text)
+
+
 def test_the_waiting_item_read_step_reads_an_item_of_500_words_leaving_out_its_approval_walk_item_lines():
     body = ("#approval_walk_item_first_entered 2026-11-12\n- #approval_walk_item_waits_on the opening paragraph\n\n"
             + words_of_body(500 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY))
