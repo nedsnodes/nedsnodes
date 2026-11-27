@@ -1529,7 +1529,8 @@ GH_PROGRAM = "gh"
 GH_TIMEOUT_SECONDS = 60  # pragma: no mutate, a limit a second longer or shorter behaves the same
 HELD_PULL_REQUESTS_LIST = ("pr", "list", "--state", "open", "--limit", "1000", "--json", "number,reviews")
 # Reads a review line as pull_requests_held_on does. `gh --jq` runs gojq, whose regular expressions lack some of
-# jq's, such as lookahead.
+# jq's, such as lookahead, and whose `\s` is only these characters, which pull_requests_held_on trims too.
+HELD_LINE_TRIMMED_WHITESPACE = " \t\n\r\f"
 HELD_PULL_REQUESTS_BY_HAND_JQ = ('.[] | select(any(.reviews[].body | split("\\n")[] | gsub("^\\\\s+|\\\\s+$"; ""); '
                                  '. == {line} or . == {closed_form_line})) | .number')
 RULING_GIVEN_POSTED = "The ruling on item {number} is posted as `{ruling}` on pull request {pull_request}, held on it."
@@ -2710,8 +2711,9 @@ def marker_reader_pattern(marker):
 def glossary_term_or_marker_problems(found, touched, top, item):
     """Return why a kind 6 item, a glossary term put in or a hashtag marker added to Markdown prose, cannot settle.
 
-    Not handled: an item that adds a hashtag no page uses yet. The hashtag glossary test then needs the hashtag
-    glossary to list it, and naming that glossary in `#not_asked_touches` is refused here, so such an item is asked."""
+    Not handled: an item that adds a hashtag no page uses yet to a file the hashtag glossary test searches, which
+    leaves out docs/issues/ among others. That test then needs the hashtag glossary to list it, and naming that
+    glossary in `#not_asked_touches` is refused here, so such an item is asked."""
     problems = []
     terms = [name for value in found[GLOSSARY_TERM] for name in rename_names(value)]
     markers = [HASHTAG_MARKER_CLOSING_HASH.sub(r"\1", value) for value in words(found[ADDED_HASHTAG_MARKER])]
@@ -4806,7 +4808,8 @@ def pull_requests_held_on(lines, top, gh_program, timeout):
         held = {line: [] for line in lines}
         closed_form = pull_request_review_held_on_ruling_hashtag_line_rewritten_with_closing_hash_after_the_hashtag
         for pull_request in pull_requests:
-            found = {line.strip() for review in pull_request["reviews"] for line in (review["body"] or "").split("\n")}
+            found = {line.strip(HELD_LINE_TRIMMED_WHITESPACE) for review in pull_request["reviews"]
+                     for line in (review["body"] or "").split("\n")}
             for line in lines:
                 if line in found or closed_form(line) in found:
                     held[line].append(pull_request["number"])

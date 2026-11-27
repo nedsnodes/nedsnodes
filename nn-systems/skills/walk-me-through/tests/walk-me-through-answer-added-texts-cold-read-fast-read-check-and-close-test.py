@@ -7525,7 +7525,7 @@ def gh_jq_run_on(jq, response):
             return subprocess.run(["gh", "api", "pulls", "--jq", jq], capture_output=True, text=True, timeout=60,
                                   env=dict(os.environ, HTTP_PROXY=proxy, http_proxy=proxy, NO_PROXY="", no_proxy="",
                                            GH_HOST="github.localhost", GH_TOKEN="stand-in",
-                                           GH_CONFIG_DIR=configuration))
+                                           GH_CONFIG_DIR=configuration, GH_TELEMETRY="false"))
     finally:
         server.shutdown()
         server.server_close()
@@ -7546,7 +7546,9 @@ def test_close_posts_the_ruling_on_each_open_pull_request_held_on_the_answered_i
         (103, [f"#held_on_ruling {WALK_NAME} item 44"]),
         (104, ["#held_on_ruling another-walk-2026-10-30 item 4"]),
         (105, [f"Merge-lane-2 writes `{HELD_ON_ITEM_4}` in its review."]),
-        (106, []))
+        (106, []),
+        # The by-hand --jq filter trims only gojq's `\s`, so close trims no more, such as a no-break space.
+        (107, [HELD_ON_ITEM_4 + " "]))
     for flags, word in (((), "approved"), (("--option", "2"), "approved"), (("--disapproved",), "disapproved"),
                         (("--deferred",), "deferred"), (("--moved-on-no-decision",), "moved_on"),
                         (("--part-answer", "1=A", "--part-answer", "2=D"), "part_answers"),
@@ -7651,9 +7653,10 @@ def test_the_by_hand_lookup_command_lists_exactly_the_pull_requests_held_on_the_
     listed = gh_jq_run_on(jq, held_pull_requests(
         (101, [f"x\n  {HELD_ON_ITEM_4} \ny"]), (103, [f"#held_on_ruling {WALK_NAME} item 44"]), (106, []),
         (108, [HELD_ON_ITEM_4.replace("#held_on_ruling ", "#held_on_ruling# ")]),
-        (109, [f"#held_on_ruling# {WALK_NAME} item 44"])))
+        (109, [f"#held_on_ruling# {WALK_NAME} item 44"]), (110, [HELD_ON_ITEM_4 + " "])))
     check("the --jq filter the lookup failure prints picks the pull requests whose review holds item 4's line, "
-          "with or without the hashtag's closing #, and not one held on item 44",
+          "with or without the hashtag's closing #, and not one held on item 44 nor one whose line ends in a "
+          "no-break space, which close does not trim either",
           listed.returncode == 0 and listed.stdout.split() == ["101", "108"], described(listed) + jq)
 
 
