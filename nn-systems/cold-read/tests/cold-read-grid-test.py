@@ -173,6 +173,10 @@ _git_environment_fixture_spec = importlib.util.spec_from_file_location(
 _git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_spec)
 _git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
 _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
+# A developer's diff.renames, merge settings or external diff would change what the
+# scratch repositories' git commands, and the commands the grid prints, show.
+os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+os.environ["GIT_CONFIG_SYSTEM"] = os.devnull
 
 # The scratch repository every cold-read suite builds, defined once.
 _scratch_repository_fixture_spec = importlib.util.spec_from_file_location(
@@ -2097,9 +2101,7 @@ try:
         def run(*arguments):
             return subprocess.run(["git", "-C", str(repository), "-c", "user.name=grid test",
                                    "-c", "user.email=grid-test@example.invalid", *arguments],
-                                  capture_output=True, text=True,
-                                  # A developer's merge.default or merge.renames would change the conflicts built here.
-                                  env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull})
+                                  capture_output=True, text=True)
         run("init", "--quiet", "--initial-branch=main")
         (repository / "tracked.md").write_text("Committed.\n", encoding="utf-8")
         run("add", "tracked.md")
