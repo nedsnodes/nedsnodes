@@ -76,13 +76,20 @@ and the hook's next run there copies only the version then on disk.
 
 SCHEDULE. Once a day at 07:00, after the worktree cleanup at 06:30, on each machine.
 Installed by nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py from the table
-beside it, scheduled-jobs-on-each-machine.json, where a change to the schedule is made; its
---print shows this machine's job. On both machines the job appends stdout and stderr to
-~/.claude/<this file's name without .py>.log. The Mac's job is launchd's, so a run missed while
-the Mac sleeps starts at the next wake.
+beside it, scheduled-jobs-on-each-machine.json, where a change to the schedule is made. On both
+machines the job appends stdout and stderr to ~/.claude/<this file's name without .py>.log.
+
+  ned-box: one cron line.
+
+    0 7 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/general-tools/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py >> /home/nedlern/.claude/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.log 2>&1
+
+  the Mac: a launchd job at the same time; a run missed while the Mac sleeps starts at the next
+  wake.
 
 Exit status: 0 when done; 1 when any failure is reported, or the run stops part way, at the
-Mac's deadline or on a failure outside one path, such as a store that cannot be reached; the
+Mac's deadline of 600 seconds, set because its store is ned-box's disk over SMB and a mount
+that hangs must not hang the job, or on a failure outside one path, such as a store that
+cannot be reached; the
 lines on stderr say what failed. A failure in one path keeps that path's copies and the run goes
 on to the others.
 """
@@ -359,8 +366,10 @@ def main(arguments=None):
     if not result["failures"]:
         return EXIT_DONE
     sys.stdout.flush()
-    print(f"Each path a failure names kept its copies. When a failure's cause is fixed, such as a "
-          f"volume mounted again, the next daily run prunes that path, or run python3 "
+    print(f"Each path a failure names kept its guarded-file copies, so nothing was lost.\n"
+          f"Fix a cause you can fix; tell the user of one only he can, such as a volume to mount; a subagent tells "
+          f"the agent that dispatched it instead.\n"
+          f"Once a cause is fixed, the next daily run prunes that path, or run python3 "
           f"{Path(__file__).resolve()} to prune it now.", file=sys.stderr)
     return EXIT_FAILED
 
