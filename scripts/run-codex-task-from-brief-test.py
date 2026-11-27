@@ -5,8 +5,13 @@ A fake `gh` on PATH stands in for the commands --prefetch-github runs: it
 logs its arguments and the folder it ran in and, by FAKE_GH_MODE, prints data,
 fails, or sleeps.
 
-The fake records its arguments and, by the FAKE_CODEX_MODE environment
-variable, writes a report, writes a report file of its own with or without a final
+The fake records its arguments and, by FAKE_CODEX_WORKTREE_WRITES, changes a
+file in the -C checkout, writes commit-message.txt there, or both. A fake
+scripts/run-all-test-suites.py in each test worktree stands in for the
+worktree's own test-suite runner: it records its arguments and folder and, by
+FAKE_TEST_SUITE_RUNNER_MODE, passes, names failing suites, or exits 2 with a
+suite not run. By the
+FAKE_CODEX_MODE environment variable, writes a report, writes a report file of its own with or without a final
 message, fails with or without a report, writes nothing,
 sleeps past the deadline with a child that may ignore SIGTERM, writes a
 final message and then sleeps past the deadline, or blocks
@@ -19,6 +24,7 @@ Run: python3 scripts/run-codex-task-from-brief-test.py
 Prints one line per case and exits non-zero if any case fails.
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -30,6 +36,13 @@ import threading
 import time
 from pathlib import Path
 
+_git_environment_fixture_spec = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    Path(__file__).resolve().with_name("git-redirecting-environment-removal-test-fixture.py"))
+_git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_spec)
+_git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
+_git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
+
 PROGRAM = Path(__file__).with_name("run-codex-task-from-brief.py")
 
 FAKE_CODEX = r'''#!/usr/bin/env python3
@@ -39,8 +52,21 @@ if "FAKE_CODEX_PID_FILE" in os.environ:
     open(os.environ["FAKE_CODEX_PID_FILE"], "w").write(str(os.getpid()))
 with open(os.environ["FAKE_CODEX_ARGUMENTS_FILE"], "w") as record:
     json.dump(arguments, record)
+with open(os.environ["FAKE_CODEX_ARGUMENTS_FILE"] + ".environment", "w") as record:
+    json.dump({name: os.environ.get(name) for name in (
+        "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+        "GH_CONFIG_DIR")}, record)
 report = arguments[arguments.index("-o") + 1]
 mode = os.environ.get("FAKE_CODEX_MODE", "report")
+checkout = arguments[arguments.index("-C") + 1]
+writes = os.environ.get("FAKE_CODEX_WORKTREE_WRITES", "")
+if "change" in writes.split(","):
+    open(os.path.join(checkout, "changed.txt"), "w").write("Codex's change\n")
+if "message" in writes.split(","):
+    open(os.path.join(checkout, "commit-message.txt"), "w").write(
+        "Codex's subject\n\nCodex's body.\n")
+if "empty-message" in writes.split(","):
+    open(os.path.join(checkout, "commit-message.txt"), "w").write("  \n")
 print("fake codex trace line")
 sys.stdout.flush()
 if mode == "report":
@@ -48,6 +74,9 @@ if mode == "report":
 elif mode == "fail":
     print("fake codex: model refused", file=sys.stderr)
     sys.exit(3)
+elif mode == "report-after-gh-refused":
+    print('HTTP 401: Bad credentials (https://api.github.com/graphql)')
+    open(report, "w").write("the report\n")
 elif mode == "report-file-then-final-message":
     # As Codex does when a brief names the -o path as the file to write its report to.
     open(os.environ["FAKE_CODEX_REPORT_FILE"], "w").write("the full report Codex wrote\n")
@@ -75,6 +104,30 @@ elif mode == "final-message-then-sleep":
 elif mode == "read-stdin":
     data = sys.stdin.read()
     open(report, "w").write(f"stdin held {len(data)} characters\n")
+'''
+
+FAKE_TEST_SUITE_RUNNER = r'''#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ["FAKE_TEST_SUITE_RUNNER_CALLS"], "w") as record:
+    json.dump([os.getcwd(), sys.argv[1:]], record)
+mode = os.environ.get("FAKE_TEST_SUITE_RUNNER_MODE", "pass")
+if mode == "pass":
+    print("PASS scripts/a-test.py (1.0s)")
+    print("SUMMARY: 1 passed, 0 failed")
+elif mode == "fail":
+    print("FAIL scripts/a-test.py exit 1 (1.0s)")
+    print("PASS scripts/b-test.py (1.0s)")
+    print("FAIL scripts/c-test.py exit 2 (1.0s)")
+    print("")
+    print("2 failed:")
+    print("FAIL scripts/a-test.py exit 1 — log /logs/a-test.py.log")
+    print("FAIL scripts/c-test.py exit 2 — log /logs/c-test.py.log")
+    print("SUMMARY: 1 passed, 2 failed")
+    sys.exit(1)
+elif mode == "no-verdict":
+    print("NOT RUN scripts/a-test.py did not start: bwrap failed")
+    print("SUMMARY: 0 passed, 0 failed, 1 not run")
+    sys.exit(2)
 '''
 
 FAKE_GH = r'''#!/usr/bin/env python3
@@ -130,8 +183,11 @@ try:
     scratch_home.mkdir()
 
     def run(mode, *extra, stdin=None, timeout=60,
-            start_line_timeout=600, gh_mode="data", extra_environment=None):
+            start_line_timeout=600, gh_mode="data", extra_environment=None,
+            checkout_folder=checkout, with_dash_o=True):
         """Run the program; return (completed, report, seconds since it said it is running Codex).
+
+        Without with_dash_o, the program gets no -o, and report is None.
 
         timeout counts from that stderr line, which the program prints after building
         Codex's command line, so preparing the command line counts against no limit.
@@ -147,10 +203,10 @@ try:
                            FAKE_CODEX_PID_FILE=str(codex_pid_file),
                            FAKE_GH_MODE=gh_mode, FAKE_GH_LOG=str(gh_log),
                            **(extra_environment or {}))
-        report = scratch / f"report-{mode}.md"
+        report = scratch / f"report-{mode}.md" if with_dash_o else None
         codex_pid_file.unlink(missing_ok=True)
-        command = [sys.executable, str(PROGRAM), "-C", str(checkout), "--brief", str(brief),
-                   "-o", str(report), *extra]
+        command = [sys.executable, str(PROGRAM), "-C", str(checkout_folder), "--brief",
+                   str(brief), *(["-o", str(report)] if with_dash_o else []), *extra]
         process = subprocess.Popen(command, env=environment, stdin=stdin, cwd=elsewhere,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    start_new_session=True)
@@ -227,38 +283,52 @@ try:
 
     completed, report, _ = run("report")
     arguments = json.loads(arguments_file.read_text())
-    check("without the widening options Codex gets no network, extra folder, git skip or web search",
-          not any("network" in argument or "web_search" in argument for argument in arguments)
-          and "--add-dir" not in arguments and "--skip-git-repo-check" not in arguments,
-          repr(arguments))
+    check("by default Codex gets the network and live web search, after exec, and no extra "
+          "folder or git skip",
+          "permissions.codex-task-no-credentials.network.enabled=true" in arguments
+          and ["-c", 'web_search="live"'] == arguments[arguments.index('web_search="live"') - 1:
+                                                       arguments.index('web_search="live"') + 1]
+          and "--add-dir" not in arguments and "--skip-git-repo-check" not in arguments
+          if 'web_search="live"' in arguments else False, repr(arguments))
+
+    completed, report, _ = run("report-after-gh-refused")
+    check("a gh HTTP 401 in Codex's output is reported as the read-only token refused, and the "
+          "run still exits 0",
+          completed.returncode == 0 and completed.stdout.strip() == f"report: {report}"
+          and "run-codex-task-from-brief: read-only GitHub token refused" in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+    completed, report, _ = run("report")
+    check("a run without a gh HTTP 401 reports no refused token",
+          "read-only GitHub token refused" not in completed.stderr, completed.stderr)
+
+    completed, report, _ = run("report", "--no-network")
+    arguments = json.loads(arguments_file.read_text())
+    check("--no-network takes away the network and turns web search off, cached search included",
+          completed.returncode == 0
+          and not any("network" in argument for argument in arguments)
+          and [argument for argument in arguments if "web_search" in argument]
+          == ['web_search="disabled"']
+          and arguments[arguments.index('web_search="disabled"') - 1] == "-c", repr(arguments))
 
     extra_root_one = scratch / "extra one"
     extra_root_two = scratch / "extra-two"
-    completed, report, _ = run("report", "--sandbox", "workspace-write", "--network",
+    completed, report, _ = run("report", "--sandbox", "workspace-write",
                                "--writable-root", str(extra_root_one),
                                "--writable-root", str(extra_root_two),
-                               "--outside-git-checkout", "--web-search")
+                               "--outside-git-checkout")
     arguments = json.loads(arguments_file.read_text())
     added_folders = [arguments[index + 1] for index, argument in enumerate(arguments)
                      if argument == "--add-dir"]
-    check("--network turns on the permission profile's network",
-          completed.returncode == 0
-          and "permissions.codex-task-no-credentials.network.enabled=true" in arguments,
-          f"exit {completed.returncode}, {arguments!r}, stderr {completed.stderr!r}")
     check("each --writable-root reaches Codex as its own --add-dir, path whole",
           added_folders == [str(extra_root_one), str(extra_root_two)], repr(added_folders))
     check("--outside-git-checkout passes --skip-git-repo-check",
           "--skip-git-repo-check" in arguments, repr(arguments))
-    check("--web-search sets web_search to live, after exec",
-          ["-c", 'web_search="live"'] == arguments[arguments.index('web_search="live"') - 1:
-                                                     arguments.index('web_search="live"') + 1]
-          if 'web_search="live"' in arguments else False, repr(arguments))
     check("the brief is still the last argument with every option on",
           arguments[-1] == brief.read_text(), repr(arguments[-1]))
 
     session_id = "019abcde-1234-7000-8000-123456789abc"
-    for options in ((), ("--sandbox", "workspace-write", "--network",
-                         "--outside-git-checkout", "--web-search",
+    for options in ((), ("--sandbox", "workspace-write", "--no-network",
+                         "--outside-git-checkout",
                          "-m", "model-x", "--effort", "high")):
         completed, report, _ = run("report", *options)
         fresh_arguments = json.loads(arguments_file.read_text())
@@ -289,11 +359,22 @@ try:
           and report.read_text() == "an existing report\n",
           f"exit {completed.returncode}, stderr {completed.stderr!r}")
 
+    for options in ((), ("--sandbox", "read-only")):
+        completed, report, _ = run("report", "--writable-root", str(extra_root_one),
+                                   "--prefetch-github", "pr view 1", *options)
+        check(f"--writable-root without --sandbox workspace-write is refused before Codex, "
+              f"prefetch or report removal {options!r}",
+              completed.returncode == 2
+              and "--writable-root requires --sandbox workspace-write" in completed.stderr
+              and not arguments_file.exists() and not gh_log.exists()
+              and report.read_text() == "an existing report\n",
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
     help_text = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True,
                                text=True, check=False).stdout
     check("the usage line names every option",
-          all(option in help_text for option in ("--network", "--writable-root <folder>",
-                                                 "--outside-git-checkout", "--web-search",
+          all(option in help_text for option in ("--no-network", "--writable-root <folder>",
+                                                 "--outside-git-checkout",
                                                  "--resume <session-id>")),
           help_text)
 
@@ -499,8 +580,7 @@ try:
           bool(arguments) and arguments[-1].startswith(brief.read_text().rstrip())
           and all(str(path) in arguments[-1] for path in saved)
           and "`gh pr list --state merged --limit 5`" in arguments[-1]
-          and "permission profile keeps you from the folder holding gh's login"
-          in arguments[-1],
+          and "fetched for you before you started" in arguments[-1],
           repr(arguments[-1:]))
 
     fresh_prefetch_case()
@@ -590,6 +670,11 @@ try:
     spec = importlib.util.spec_from_file_location("runner_under_test", PROGRAM)
     runner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runner)
+    # In this process HOME is the real one; the cases below must not write in its log-store.
+    runner.CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER = (
+        scratch_home / "nedsnodes-logs" / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
+    runner.common.SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE = (
+        scratch_home / "no-read-only-github-token-here")
 
     # The two deadline-sharing cases run main in this process on a stand-in clock, with
     # stand-ins for gh and Codex: on a real clock a loaded machine can spend the whole
@@ -826,6 +911,429 @@ try:
           "\"could not start Codex\"",
           main_error is not None and "could not start Codex" not in captured.getvalue(),
           f"error {main_error!r}, exit {main_exit}, stderr {captured.getvalue()!r}")
+
+    environment_file = Path(str(arguments_file) + ".environment")
+    agent_seat_tokens = {"GH_TOKEN": "agent-seat-token", "GITHUB_TOKEN": "agent-seat-token",
+                         "GH_ENTERPRISE_TOKEN": "agent-seat-token",
+                         "GITHUB_ENTERPRISE_TOKEN": "agent-seat-token"}
+    token_folder = scratch_home / ".config" / "nedsnodes-sandboxed-models"
+    token_folder.mkdir(parents=True)
+    token_file = token_folder / "github-public-repositories-read-only-token"
+    token_file.write_text("read-only-token\n")
+    completed, report, _ = run("report", extra_environment=agent_seat_tokens)
+    environment_seen = json.loads(environment_file.read_text())
+    run_log = report.with_name(report.name + ".run.log")
+    check("Codex gets the read-only token as GH_TOKEN, gh's config folder beside it, and "
+          "none of the agent-seat's tokens",
+          completed.returncode == 0 and environment_seen == {
+              "GH_TOKEN": "read-only-token", "GITHUB_TOKEN": None,
+              "GH_ENTERPRISE_TOKEN": None, "GITHUB_ENTERPRISE_TOKEN": None,
+              "GH_CONFIG_DIR": str(token_folder)}
+          and "GitHub token" not in run_log.read_text(),
+          f"exit {completed.returncode}, {environment_seen!r}, log {run_log.read_text()!r}")
+
+    token_file.write_text(" \n")
+    completed, report, _ = run("report", extra_environment=agent_seat_tokens)
+    environment_seen = json.loads(environment_file.read_text())
+    check("an empty read-only token file: Codex runs with no GitHub token, and the run log's "
+          "first line says the file is empty",
+          completed.returncode == 0 and set(environment_seen.values()) == {None}
+          and run_log.read_text().splitlines()[0].startswith(
+              "run-codex-task-from-brief: the read-only GitHub token file ")
+          and "is empty" in run_log.read_text().splitlines()[0],
+          f"exit {completed.returncode}, {environment_seen!r}, log {run_log.read_text()!r}")
+
+    token_file.chmod(0)
+    completed, report, _ = run("report", extra_environment=agent_seat_tokens)
+    environment_seen = json.loads(environment_file.read_text())
+    token_file.chmod(0o600)
+    check("an unreadable read-only token file: Codex runs with no GitHub token, and the run "
+          "log's first line says why",
+          completed.returncode == 0 and set(environment_seen.values()) == {None}
+          and "no read-only GitHub token (" in run_log.read_text().splitlines()[0]
+          and "Permission denied" in run_log.read_text().splitlines()[0],
+          f"exit {completed.returncode}, {environment_seen!r}, log {run_log.read_text()!r}")
+
+    token_file.unlink()
+    completed, report, _ = run("report", extra_environment=agent_seat_tokens)
+    environment_seen = json.loads(environment_file.read_text())
+    check("a missing read-only token file: Codex runs with no GitHub token, and the run log's "
+          "first line says so",
+          completed.returncode == 0 and set(environment_seen.values()) == {None}
+          and "no read-only GitHub token (" in run_log.read_text().splitlines()[0]
+          and "unauthenticated" in run_log.read_text().splitlines()[0],
+          f"exit {completed.returncode}, {environment_seen!r}, log {run_log.read_text()!r}")
+
+    completed, report, _ = run("report")
+    arguments = json.loads(arguments_file.read_text())
+    check("without a log-store on the machine, Codex gets no shared folder",
+          completed.returncode == 0
+          and not any("shared-writable-folder" in argument for argument in arguments),
+          repr(arguments))
+
+    reports_folder = scratch_home / ".claude" / "codex-or-gemini-task-run-reports"
+    shutil.rmtree(reports_folder, ignore_errors=True)
+    seat_environment = {"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"}
+    copies = []
+    for number in ("1", "2"):
+        completed, report, _ = run("report", extra_environment=seat_environment)
+        copies.append(reports_folder / "test-seat" / "brief" / number / "report.md")
+        check(f"without a log-store on the machine, run {number} also saves a copy of its report "
+              f"in test-seat/brief/{number}/ of the folder the transcript mirror copies, and "
+              f"prints its path",
+              completed.returncode == 0 and completed.stdout == f"report: {report}\n"
+              and copies[-1].is_file() and copies[-1].read_text() == report.read_text()
+              and f"a copy of the report, which goes to the log-store, is at {copies[-1]}\n"
+              in completed.stderr,
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+    shutil.rmtree(reports_folder)
+    reports_folder.write_text("a file where the folder should be\n")
+    completed, report, _ = run("report", extra_environment=seat_environment)
+    check("a report copy that cannot be saved exits 1, says so, and leaves the report at -o",
+          completed.returncode == 1 and completed.stdout == ""
+          and "could not save the copy of the report that goes to the log-store" in completed.stderr
+          and f"The report is at {report}." in completed.stderr and report.is_file(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+    reports_folder.unlink()
+
+    for name, run_log_path in (("the brief", brief), ("the report", scratch / "report-report.md")):
+        arguments_file.unlink(missing_ok=True)
+        completed, _, _ = run("report", "--run-log", str(run_log_path))
+        check(f"a --run-log naming {name} exits 2 before Codex starts, and the brief is intact",
+              completed.returncode == 2 and "must name different files" in completed.stderr
+              and not arguments_file.exists() and brief.read_text() == "Do the task.\nSecond line.\n",
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    arguments_file.unlink(missing_ok=True)
+    completed, _, _ = run("report", with_dash_o=False)
+    check("without a log-store on the machine, a run without -o exits 2, says -o is required, "
+          "and Codex is not started",
+          completed.returncode == 2 and "-o is required on this machine" in completed.stderr
+          and not arguments_file.exists(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    log_store = scratch_home / "nedsnodes-logs"
+    log_store.mkdir()
+    completed, report, _ = run("report", extra_environment=seat_environment)
+    check("with the log-store on the machine, a run saves no copy of its report for the mirror",
+          completed.returncode == 0 and not reports_folder.exists()
+          and "a copy of the report" not in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+    shutil.rmtree(log_store / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
+    shared_folder = log_store / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder"
+    for seat_environment, seat_folder in (
+            ({"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"}, "test-seat"),
+            ({"CLAUDE_CODE_TASK_LIST_ID": ""}, "no-agent-seat-name")):
+        for number in ("1", "2"):
+            completed, report, _ = run("report", extra_environment=seat_environment)
+            arguments = json.loads(arguments_file.read_text())
+            run_folder = shared_folder / seat_folder / "brief" / number
+            profile = next((argument for argument in arguments if argument.startswith(
+                "permissions.codex-task-no-credentials.filesystem=")), "")
+            check(f"with the log-store present, the brief's run number {number} gets the folder "
+                  f"{seat_folder}/brief/{number}, created, printed, writable in the read-only "
+                  f"profile, and named at the end of the brief",
+                  completed.returncode == 0 and run_folder.is_dir()
+                  and f"this run's folder is {run_folder}\n" in completed.stderr
+                  and f'{json.dumps(str(run_folder))}="write"' in profile
+                  and not any(json.dumps(str(run_folder.parent)) + "=" in argument
+                              for argument in arguments)
+                  and arguments[-1].startswith(brief.read_text().rstrip())
+                  and arguments[-1].rstrip().endswith(str(run_folder)),
+                  f"exit {completed.returncode}, {arguments!r}")
+
+    brief_folder = shared_folder / "test-seat" / "brief"
+    shutil.rmtree(brief_folder)
+    seat_environment = {"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"}
+    first, _, _ = run("report", extra_environment=seat_environment, with_dash_o=False)
+    second, _, _ = run("report-file-then-final-message", with_dash_o=False,
+                       extra_environment={**seat_environment, "FAKE_CODEX_REPORT_FILE": str(
+                           brief_folder / "2" / "report.md")})
+    reports = [brief_folder / number / "report.md" for number in ("1", "2")]
+    check("two runs of one brief without -o keep both reports, each in its own numbered "
+          "folder with its run log beside it, and a report Codex wrote there itself is kept",
+          first.returncode == 0 and second.returncode == 0
+          and first.stdout == f"report: {reports[0]}\n"
+          and second.stdout == f"report: {reports[1]}\n"
+          and reports[0].read_text() == "the report\n"
+          and reports[1].read_text() == "the full report Codex wrote\n"
+          and reports[1].with_name("report.md.last-message").read_text()
+          == "a short final message\n"
+          and all(report.with_name("report.md.run.log").is_file() for report in reports),
+          f"exits {first.returncode} and {second.returncode}, stdout {first.stdout!r} and "
+          f"{second.stdout!r}, stderr {second.stderr!r}")
+    shutil.rmtree(brief_folder, ignore_errors=True)
+    (brief_folder / "1").mkdir(parents=True)
+    (brief_folder / "notes").mkdir()
+    completed, report, _ = run(
+        "report", extra_environment={"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"})
+    check("a 1/ already in the brief's folder makes the run take 2/",
+          completed.returncode == 0 and (brief_folder / "2").is_dir()
+          and f"this run's folder is {brief_folder / '2'}\n" in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    # Another run creating a folder between this run's listing and its mkdir cannot be
+    # timed from a test, so a wrapped os.mkdir creates the folder first, as that run would.
+    real_mkdir = runner.os.mkdir
+    runner_seat_environment = os.environ.get("CLAUDE_CODE_TASK_LIST_ID")
+    os.environ["CLAUDE_CODE_TASK_LIST_ID"] = "nedsnodes-test-seat-tasks"
+    shutil.rmtree(brief_folder)
+    taken_first = []
+
+    def mkdir_beaten_once_by_another_run(path, *rest, **options):
+        if Path(path).parent == brief_folder and not taken_first:
+            real_mkdir(path, *rest, **options)
+            taken_first.append(Path(path).name)
+        return real_mkdir(path, *rest, **options)
+
+    def mkdir_always_beaten_by_another_run(path, *rest, **options):
+        if Path(path).parent == brief_folder:
+            raise FileExistsError(path)
+        return real_mkdir(path, *rest, **options)
+
+    try:
+        runner.os.mkdir = mkdir_beaten_once_by_another_run
+        run_folder = runner.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(
+            brief)
+        check("a run whose number another run takes first creates the next number instead",
+              taken_first == ["1"] and run_folder == brief_folder / "2" and run_folder.is_dir(),
+              f"{taken_first!r}, {run_folder}")
+        runner.os.mkdir = mkdir_always_beaten_by_another_run
+        try:
+            runner.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief)
+            bounded = "no error"
+        except OSError as error:
+            bounded = str(error)
+        check("when every attempted number is taken, the attempts stop and the error says so",
+              bounded.startswith(
+                  f"every numbered folder from 3 to "
+                  f"{2 + runner.CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_CREATE_ATTEMPTS} "
+                  f"in {brief_folder}"),
+              bounded)
+    finally:
+        runner.os.mkdir = real_mkdir
+        if runner_seat_environment is None:
+            os.environ.pop("CLAUDE_CODE_TASK_LIST_ID", None)
+        else:
+            os.environ["CLAUDE_CODE_TASK_LIST_ID"] = runner_seat_environment
+
+    shutil.rmtree(shared_folder)
+    shared_folder.write_text("a file where the shared folder belongs\n")
+    arguments_file.unlink()
+    completed, report, _ = run("report")
+    check("when the run's folder cannot be created, the run exits 1, says so, and Codex is "
+          "not started",
+          completed.returncode == 1 and "could not create the run's folder in" in completed.stderr
+          and not arguments_file.exists(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+    shared_folder.unlink()
+    log_store.rmdir()
+
+    # A git worktree, so the launcher's commit step runs.
+    git_identity = dict(GIT_AUTHOR_NAME="test-seat",
+                        GIT_AUTHOR_EMAIL="test-seat@nedschorus.invalid",
+                        GIT_COMMITTER_NAME="test-seat",
+                        GIT_COMMITTER_EMAIL="test-seat@nedschorus.invalid")
+    git_environment = dict(os.environ, HOME=str(scratch_home), **git_identity)
+    worktree = scratch / "worktree"
+
+    def git(*words):
+        return subprocess.run(["git", "-C", str(worktree), *words], env=git_environment,
+                              capture_output=True, text=True, check=True).stdout
+
+    test_suite_runner_calls = scratch / "test-suite-runner-calls.json"
+
+    def fresh_worktree(with_test_suite_runner=True, with_commit=True):
+        shutil.rmtree(worktree, ignore_errors=True)
+        test_suite_runner_calls.unlink(missing_ok=True)
+        worktree.mkdir()
+        git("init", "--quiet")
+        (worktree / "existing.txt").write_text("before the run\n")
+        git("add", "existing.txt")
+        if with_test_suite_runner:
+            fake_runner = worktree / "scripts" / "run-all-test-suites.py"
+            fake_runner.parent.mkdir()
+            fake_runner.write_text(FAKE_TEST_SUITE_RUNNER)
+            fake_runner.chmod(0o755)
+            git("add", "scripts")
+        if not with_commit:
+            return None
+        git("commit", "--quiet", "-m", "start")
+        return git("rev-parse", "HEAD").strip()
+
+    def run_in_worktree(writes, *extra, mode="report", test_suite_runner_mode="pass"):
+        completed, report, _ = run(mode, *extra, checkout_folder=worktree,
+                                   extra_environment={
+                                       **git_identity, "FAKE_CODEX_WORKTREE_WRITES": writes,
+                                       "FAKE_TEST_SUITE_RUNNER_MODE": test_suite_runner_mode,
+                                       "FAKE_TEST_SUITE_RUNNER_CALLS": str(test_suite_runner_calls)})
+        return completed, report
+
+    message_file = worktree / "commit-message.txt"
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+    arguments = json.loads(arguments_file.read_text())
+    check("a workspace-write run in a worktree is told where to write its commit message",
+          f"commit message for your changes in the file {message_file}:" in arguments[-1],
+          repr(arguments[-1]))
+    check("a workspace-write run that changes the worktree and writes a message is committed "
+          "with that message under the caller's git identity, and the message file deleted",
+          completed.returncode == 0 and completed.stdout.strip() == f"report: {report}"
+          and git("rev-parse", "HEAD~1").strip() == start
+          and git("log", "-1", "--format=%an|%B").strip()
+          == "test-seat|Codex's subject\n\nCodex's body."
+          and git("show", "--name-only", "--format=", "HEAD").split() == ["changed.txt"]
+          and not message_file.exists() and git("status", "--porcelain") == ""
+          and f"as {git('rev-parse', 'HEAD').strip()}" in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}, log "
+          f"{git('log', '--format=%h %an %s')!r}")
+    check("after the commit, the worktree's own test-suite runner runs in the worktree on the "
+          "suites whose recorded inputs changed since the run's start, leaving its records "
+          "unchanged, and its output is copied to stderr",
+          test_suite_runner_calls.exists()
+          and json.loads(test_suite_runner_calls.read_text()) == [
+              str(worktree), ["--only-suites-whose-recorded-inputs-changed-since", start,
+                              "--leave-recorded-inputs-and-failure-history-unchanged"]]
+          and "PASS scripts/a-test.py (1.0s)" in completed.stderr,
+          f"calls {test_suite_runner_calls.read_text() if test_suite_runner_calls.exists() else None!r}")
+
+    # The log-store is gone by here; a file stands where the reports folder should be.
+    check("the worktree cases run without the log-store", not log_store.exists())
+    shutil.rmtree(reports_folder, ignore_errors=True)
+    reports_folder.write_text("a file where the folder should be\n")
+    try:
+        start = fresh_worktree()
+        completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+        start_for_failing_suites = fresh_worktree()
+        failing_suites_completed, _ = run_in_worktree("change,message", "--sandbox", "workspace-write",
+                                                      test_suite_runner_mode="fail")
+    finally:
+        reports_folder.unlink()
+    check("a report copy that failed is reported also when the nn-test-suites fail after the commit",
+          failing_suites_completed.returncode == 1
+          and "failed after its commit" in failing_suites_completed.stderr
+          and "could not save the copy of the report that goes to the log-store"
+          in failing_suites_completed.stderr,
+          f"stderr {failing_suites_completed.stderr!r}")
+    check("a write run whose report copy cannot be saved still commits its changes, then exits 1 "
+          "saying so",
+          completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
+          and git("status", "--porcelain") == ""
+          and "could not save the copy of the report that goes to the log-store" in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write",
+                                        test_suite_runner_mode="fail")
+    check("when nn-test-suites fail after the commit, the run exits 1 naming each failing "
+          "suite once, keeps the commit and prints no report line",
+          completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
+          and "failed after its commit: scripts/a-test.py, scripts/c-test.py." in completed.stderr
+          and "The run's commit is kept" in completed.stderr
+          and "scripts/b-test.py," not in completed.stderr
+          and f"The report is at {report}." in completed.stderr
+          and "report:" not in completed.stdout,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write",
+                                        test_suite_runner_mode="no-verdict")
+    check("when the test-suite runner ends without judging every suite, the run exits 1 "
+          "saying so, quoting its NOT RUN line, and keeps the commit",
+          completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
+          and "ended with exit 2 without naming a failing suite" in completed.stderr
+          and "  NOT RUN scripts/a-test.py did not start: bwrap failed" in completed.stderr
+          and "report:" not in completed.stdout,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    start = fresh_worktree(with_test_suite_runner=False)
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+    check("when the worktree's test-suite runner cannot be started, the run exits 1 saying no "
+          "suite was run, and keeps the commit",
+          completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
+          and "could not start `scripts/run-all-test-suites.py" in completed.stderr
+          and "no nn-test-suite was run on the commit" in completed.stderr
+          and "report:" not in completed.stdout,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    fresh_worktree(with_commit=False)
+    arguments_file.unlink(missing_ok=True)
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+    check("a workspace-write run in a worktree whose HEAD names no commit exits 1 before Codex "
+          "starts",
+          completed.returncode == 1 and "could not read the commit HEAD is at" in completed.stderr
+          and not arguments_file.exists(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    for writes in ("change", "change,empty-message"):
+        start = fresh_worktree()
+        completed, report = run_in_worktree(writes, "--sandbox", "workspace-write")
+        check(f"a workspace-write run with {writes!r} commits nothing, lists the change and "
+              f"exits 1",
+              completed.returncode == 1 and git("rev-parse", "HEAD").strip() == start
+              and "missing or empty" in completed.stderr
+              and "?? changed.txt" in completed.stderr
+              and "report:" not in completed.stdout,
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    start = fresh_worktree()
+    message_file.write_text("A stale subject from an earlier run\n")
+    completed, report = run_in_worktree("change", "--sandbox", "workspace-write")
+    check("a commit-message.txt left by an earlier run is deleted before the run, so a run "
+          "that writes changes but no message commits nothing and exits 1",
+          completed.returncode == 1 and git("rev-parse", "HEAD").strip() == start
+          and "missing or empty" in completed.stderr and not message_file.exists(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    for writes in ("", "message"):
+        start = fresh_worktree()
+        completed, report = run_in_worktree(writes, "--sandbox", "workspace-write")
+        check(f"a workspace-write run that changes nothing ({writes!r}) commits nothing, "
+              f"leaves no message file, runs no nn-test-suite and exits 0",
+              completed.returncode == 0 and git("rev-parse", "HEAD").strip() == start
+              and not message_file.exists() and git("status", "--porcelain") == ""
+              and not test_suite_runner_calls.exists(),
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message")
+    arguments = json.loads(arguments_file.read_text())
+    check("a read-only run in a worktree is not told to write a commit message, and nothing "
+          "is committed",
+          completed.returncode == 0 and "commit-message.txt" not in arguments[-1]
+          and git("rev-parse", "HEAD").strip() == start and message_file.exists(),
+          f"exit {completed.returncode}, {arguments[-1]!r}")
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write",
+                                        mode="fail")
+    check("a run that fails commits nothing",
+          completed.returncode == 1 and git("rev-parse", "HEAD").strip() == start
+          and message_file.exists(), f"exit {completed.returncode}")
+
+    start = fresh_worktree()
+    hook = worktree / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'pre-commit: refused for the test' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+    check("when git refuses the commit, the run exits 1 with git's words, and the changes and "
+          "the message file are kept",
+          completed.returncode == 1 and git("rev-parse", "HEAD").strip() == start
+          and "could not commit the run's changes" in completed.stderr
+          and "pre-commit: refused for the test" in completed.stderr
+          and message_file.exists() and (worktree / "changed.txt").exists(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    subfolder = worktree / "subfolder"
+    start = fresh_worktree()
+    subfolder.mkdir()
+    completed, report, _ = run("report", "--sandbox", "workspace-write",
+                               checkout_folder=subfolder, extra_environment=git_identity)
+    arguments = json.loads(arguments_file.read_text())
+    check("a -C below a worktree's top folder is not committed in",
+          completed.returncode == 0 and "commit-message.txt" not in arguments[-1],
+          repr(arguments[-1]))
 
     empty_brief = scratch / "empty.md"
     empty_brief.write_text("  \n")

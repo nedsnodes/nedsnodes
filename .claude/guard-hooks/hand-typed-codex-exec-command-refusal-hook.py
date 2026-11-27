@@ -66,10 +66,10 @@ CODEX_EXEC_VALUE_OPTIONS = {
 CODEX_EXEC_MANY_VALUE_OPTIONS = {"-i", "--image"}
 
 USAGE_LINE = (
-    f"python3 {RUNNER_PATH} -C <checkout> --brief <file> -o <report> "
+    f"python3 {RUNNER_PATH} -C <checkout> --brief <file> [-o <report>] "
     "[--sandbox read-only|workspace-write] [-m <model>] [--effort <effort>] "
-    "[--network] [--writable-root <folder>]... [--outside-git-checkout] "
-    "[--web-search] [--deadline-minutes <minutes>] [--run-log <file>] "
+    "[--no-network] [--writable-root <folder>]... [--outside-git-checkout] "
+    "[--deadline-minutes <minutes>] [--run-log <file>] "
     "[--prefetch-github '<gh arguments>']... [--resume <session-id>]")
 
 CODEX_EXEC_REFUSAL = (
@@ -79,11 +79,12 @@ CODEX_EXEC_REFUSAL = (
     "Write the prompt to a file and run the task with:\n"
     f"  {USAGE_LINE}\n"
     "In place of Codex's own options: -s or --sandbox becomes --sandbox; "
-    "-c sandbox_workspace_write.network_access=true becomes --network; "
     "--add-dir <folder> or -c sandbox_workspace_write.writable_roots=[...] becomes "
     "--writable-root <folder>, once per folder; --skip-git-repo-check becomes "
-    "--outside-git-checkout; --search or -c web_search=... becomes --web-search; "
-    "-c model_reasoning_effort=<effort> becomes --effort <effort>; -m stays -m.\n"
+    "--outside-git-checkout; -c model_reasoning_effort=<effort> becomes "
+    "--effort <effort>; -m stays -m. The program gives Codex the network and live "
+    "web search unless given --no-network, so -c sandbox_workspace_write.network_access, "
+    "--search and -c web_search need no replacement.\n"
     "To follow up on a finished Codex session, use --resume <session-id>; "
     "--writable-root cannot be used with --resume.\n"
     "That program closes stdin, logs Codex's output, stops Codex at the "

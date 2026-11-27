@@ -114,12 +114,13 @@ AGY USES THE USER'S GOOGLE LOGIN, NOT A GEMINI API KEY. A key is billed per
 call; the login draws on the user's subscription. agy's login lives under
 ~/.gemini/, which the sandbox leaves readable. This program removes
 GEMINI_API_KEY from agy's environment, so that a key the caller holds cannot
-move agy's calls onto per-call billing. It also removes GH_TOKEN and
-GITHUB_TOKEN, which an agent-seat's supervisor sets to the agent-seat's own
-GitHub token; it leaves GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN, which
-gh also reads, in place. How gh behaves inside the Mac sandbox is said once,
-beside CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py.
-When agy finds no login, it prints
+move agy's calls onto per-call billing. It also removes every name in
+AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES of cold-read-cell-common.py,
+GH_TOKEN and GITHUB_TOKEN among them, which an agent-seat's supervisor sets to
+the agent-seat's own GitHub token, and, unlike the Gemini task program, puts no
+read-only token in their place. How gh behaves
+inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py. When agy finds no login, it prints
 a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
 minute for a login that cannot come headless, and exits 1; the cell's cause
 line is then logged-out, saying how to log agy in.
@@ -202,8 +203,7 @@ def agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_respon
     return exit_code, str(result.get("response") or "")
 
 
-AGY_ENVIRONMENT_REMOVED_VARIABLES = (
-    "GEMINI_API_KEY", *common.COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES)
+AGY_ENVIRONMENT_REMOVED_VARIABLES = ("GEMINI_API_KEY", *common.AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES)
 
 
 def agy_environment_copy_without_gemini_api_key_or_github_token(environment) -> dict:
@@ -240,8 +240,8 @@ def sandbox_exec_profile() -> str:
 
 
 def credential_sandbox_prefix(platform: str = sys.platform, *,
-                              writable_paths=None, network: bool = True) -> list:
-    """Return the sandbox argv prefix, optionally restricting writes and network.
+                              writable_paths=None) -> list:
+    """Return the sandbox argv prefix, optionally restricting writes.
 
     writable_paths contains (path, is_directory) pairs; None preserves the
     cold-read-cell's write access. Credential denials override write grants.
@@ -253,8 +253,6 @@ def credential_sandbox_prefix(platform: str = sys.platform, *,
                 f'(require-not ({"subpath" if directory else "literal"} '
                 f'{json.dumps(str(path))}))' for path, directory in writable_paths)
             profile += f"(deny file-write* (require-all {exceptions}))"
-        if not network:
-            profile += "(deny network*)"
         return ["sandbox-exec", "-p", profile]
     prefix = ["bwrap", "--dev-bind" if writable_paths is None else "--ro-bind", "/", "/"]
     if writable_paths is not None:
@@ -262,8 +260,6 @@ def credential_sandbox_prefix(platform: str = sys.platform, *,
         prefix += ["--dev", "/dev"]
         for path, _directory in writable_paths:
             prefix += ["--bind", str(path), str(path)]
-    if not network:
-        prefix += ["--unshare-net"]
     for path in common.ned_box_credential_and_login_files_present(except_program="agy"):
         prefix += ["--ro-bind", "/dev/null", path]
     return prefix

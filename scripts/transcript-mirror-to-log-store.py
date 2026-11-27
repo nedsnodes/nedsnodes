@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Mirror this machine's Claude Code transcripts, handoffs, task lists, seat-briefs,
-global CLAUDE.md and, on the Mac, the Remote Control reconnect watcher's log
-into the log-store on ned-box.
+global CLAUDE.md and, on the Mac, the Remote Control reconnect watcher's log and
+the Codex and Gemini task run reports into the log-store on ned-box.
 
 Usage:
   scripts/transcript-mirror-to-log-store.py                   # one pass, one line per source
   scripts/transcript-mirror-to-log-store.py --failures-only   # one pass, only FAILED lines (cron)
 
 WHAT IT MIRRORS AND WHERE (user-ruled 2026-09-07, "I think we should backup
-our transcripts to the nedbox"; recorded on nedschorus#7). Seven sources under
+our transcripts to the nedbox"; recorded on nedschorus#7). Eight sources under
 the home, the SOURCES table: `~/.claude/projects/`, which holds every
 session's transcript (`<project-key>/<session-id>.jsonl`) and beside them the
 memory store (`<project-key>/memory/`); `~/.claude/handoffs/`;
@@ -20,7 +20,11 @@ as a worktree; `~/.claude/CLAUDE.md`, the machine's global instructions;
 captures, which nn-systems/handoff/agent-seat-terminal-captures-common.py
 places there on the Mac only: on ned-box the handoff-supervisor writes them
 straight into the store's ned-box/agent-seat-terminal-captures/, so on
-ned-box this source is absent and has nothing to mirror; and
+ned-box this source is absent and has nothing to mirror;
+`~/.claude/codex-or-gemini-task-run-reports/`, where, on the Mac only,
+scripts/run-codex-task-from-brief.py and scripts/run-gemini-task-from-brief.py
+save a copy of each run's report in the run's numbered folder, so on ned-box
+this source too is absent; and
 the Remote Control reconnect watcher's log directory on the Mac,
 `~/.local/state/claude/<REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM>/`, its
 <REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM>-decisions.jsonl and notices, which ned-box has nowhere else. ned-box has no
@@ -40,6 +44,7 @@ subagent definitions:
   /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/CLAUDE.md
   /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/<REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM>/<REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM>-decisions.jsonl
   /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/agent-seat-terminal-captures/<seat>/<file>
+  /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/codex-or-gemini-task-run-reports/<agent-seat>/<brief>/<number>/report.md
   /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/ned-box/projects/...
 
 `mac` and `ned-box` are the names CLAUDE.md uses for the two machines; this
@@ -188,6 +193,12 @@ GLOBAL_INSTRUCTIONS_FILE_NAME = "CLAUDE.md"
 # ~/.local/state/claude/<this>/, which only this mirror carries to ned-box.
 REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM = (
     "handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher")
+# scripts/run-codex-task-from-brief.py and scripts/run-gemini-task-from-brief.py save a copy of
+# each run's report here, where this machine has no log-store; on ned-box a run without -o
+# writes its report into the store itself.
+CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_NAME = "codex-or-gemini-task-run-reports"
+CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_UNDER_HOME_ON_A_MACHINE_WITHOUT_THE_LOG_STORE = (
+    pathlib.Path(".claude") / CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_NAME)
 
 
 def seat_briefs_in(agents: pathlib.Path) -> list:
@@ -215,6 +226,9 @@ SOURCES = (
     (agent_seat_terminal_captures.AGENT_SEAT_TERMINAL_CAPTURES_DIRECTORY_NAME,
      agent_seat_terminal_captures.AGENT_SEAT_TERMINAL_CAPTURES_DIRECTORY_UNDER_HOME_ON_A_MACHINE_WITHOUT_THE_LOG_STORE,
      agent_seat_terminal_captures.AGENT_SEAT_TERMINAL_CAPTURES_DIRECTORY_NAME, None),
+    (CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_NAME,
+     CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_UNDER_HOME_ON_A_MACHINE_WITHOUT_THE_LOG_STORE,
+     CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_NAME, None),
 )
 # mirror_one's outcome for a source that is absent or has no files to take.
 NOTHING_TO_MIRROR = "nothing to mirror"

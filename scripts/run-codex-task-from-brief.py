@@ -2,11 +2,22 @@
 """Run one Codex task from a brief file and wait for its report.
 
 Usage:
-  scripts/run-codex-task-from-brief.py -C <checkout> --brief <file> -o <report>
+  scripts/run-codex-task-from-brief.py -C <checkout> --brief <file> [-o <report>]
       [--sandbox read-only|workspace-write] [-m <model>] [--effort <effort>]
-      [--network] [--writable-root <folder>]... [--outside-git-checkout]
-      [--web-search] [--deadline-minutes <minutes>] [--run-log <file>]
+      [--no-network] [--writable-root <folder>]... [--outside-git-checkout]
+      [--deadline-minutes <minutes>] [--run-log <file>]
       [--prefetch-github '<gh arguments>']... [--resume <session-id>]
+
+-o may be left out only where the log-store is on this machine, as on ned-box:
+the report and its companion files then go in the run's own numbered folder,
+described below, as <that folder>/report.md, where no later run writes.
+Elsewhere, as on the Mac, -o is required, and a run without it is refused;
+there a run that writes its report also saves a copy of it as report.md in
+its own numbered folder <agent-seat>/<brief file name without its
+extension>/<number> of ~/.claude/codex-or-gemini-task-run-reports/, which
+scripts/transcript-mirror-to-log-store.py copies to the log-store, and
+prints the copy's path on stderr. When that copy cannot be saved, the run
+exits 1, and the report stays at -o.
 
 The program an agent uses to hand Codex a task. It always:
   - reads the prompt from the brief file, never from the command line;
@@ -21,14 +32,31 @@ The program an agent uses to hand Codex a task. It always:
   - stops Codex, and every process Codex started, when the deadline passes;
   - runs Codex under a permission profile that denies credential files,
     extending `:read-only`, or `:workspace` with `--sandbox workspace-write`,
-    and with Codex's memory store off.
+    and with Codex's memory store off;
+  - lets Codex's commands reach the network and gives Codex its live web
+    search tool, unless given --no-network, which takes both away;
+  - removes the agent-seat's GitHub tokens from Codex's environment, which
+    can push and merge, and sets GH_TOKEN to the read-only token in
+    ~/.config/nedsnodes-sandboxed-models/, so that Codex's `gh` reads public
+    GitHub. When that token cannot be read, Codex runs without one, and the
+    run log's first line says why;
+  - when the log-store is on this machine, creates the run's own numbered
+    folder <agent-seat>/<brief file name without its extension>/<number> of
+    ~/nedsnodes-logs/codex-and-gemini-sandboxed-task-runs-shared-writable-folder/,
+    1 for the brief's first run and one more than the highest number there
+    after that, lets Codex write in it, prints its path on stderr, and names
+    it in the brief;
+  - with --sandbox workspace-write and -C naming the top folder of a git
+    worktree, tells Codex to write its commit message in the file
+    commit-message.txt there, and, when Codex ends without error or timeout,
+    commits the run's changes and runs the nn-test-suites they touch; see
+    "Commit" below.
 
 Options that widen what Codex may do, each off by default:
-  --network               let Codex's commands reach the network;
   --writable-root <folder>  let Codex write in this folder as well as the
-                          checkout, with --sandbox workspace-write; repeatable;
-  --outside-git-checkout  let -C name a folder that is not a git checkout;
-  --web-search            give Codex its live web search tool.
+                          checkout; refused without --sandbox workspace-write;
+                          repeatable;
+  --outside-git-checkout  let -C name a folder that is not a git checkout.
 
   --prefetch-github '<gh arguments>'  run `gh <gh arguments>` in the -C
                           checkout before Codex starts, and give Codex its
@@ -47,15 +75,15 @@ Options that widen what Codex may do, each off by default:
                           --paginate and --slurp; `api` has no -R. Any other
                           `api` option is refused. The endpoint `graphql` is
                           accepted, but it cannot send a query, because a
-                          query needs -f, -F or --input. Codex
-                          cannot run `gh` itself, because its permission
-                          profile denies the folder holding
-                          gh's login. The files go in
+                          query needs -f, -F or --input. The commands
+                          run with the agent-seat's own login, so they
+                          also work when the read-only token is missing
+                          or the run has --no-network. The files go in
                           `<report>.github-data/`, and the brief Codex gets
                           ends with a list of them.
 
---deadline-minutes bounds the whole run: the --prefetch-github commands and
-Codex together.
+--deadline-minutes bounds the --prefetch-github commands and Codex together;
+the nn-test-suites run after the commit are outside it.
 
 --resume <session-id> sends the brief as a follow-up to that Codex session.
 The id is on the `session id:` line near the top of the earlier run's run
@@ -63,10 +91,28 @@ log. Every other option applies as in a first run, -C included: Codex works
 in the -C folder, not the one the session started in. --writable-root is
 refused with --resume because `codex exec resume` does not accept --add-dir.
 
+Commit: the program, which runs outside Codex's sandbox, stages every change
+in the worktree and commits it with commit-message.txt as the message, using
+the git identity the worktree gives the agent-seat, then deletes that file.
+A commit-message.txt already there when the run starts is deleted first.
+When the file is missing or empty, it commits nothing and lists the
+uncommitted changes. A run that changes nothing commits nothing, and an
+unneeded commit-message.txt is deleted. After a commit, the program runs the
+worktree's own `scripts/run-all-test-suites.py
+--only-suites-whose-recorded-inputs-changed-since <the commit HEAD was at when
+the run started> --leave-recorded-inputs-and-failure-history-unchanged` in the
+worktree, copying its output to stderr. A worktree whose HEAD names no commit
+is refused before Codex starts. Give -o outside the worktree, or the report and
+run log are committed with the change. The agent-seat reviews the commit and
+pushes it.
+
 On success it prints `report: <path>` and exits 0. It exits 1, saying what
 failed, when a --prefetch-github command fails, or when Codex cannot be
 started, exits nonzero, writes no report, or when the run passes its
-deadline. It exits 2 on bad arguments. It needs no terminal, so
+deadline, or when the run's changes cannot be committed: no commit message,
+or git refused the commit; and, after a commit, when the test-suite runner
+cannot be started, names failing nn-test-suites, which the message lists, or
+ends without judging every suite. It exits 2 on bad arguments. It needs no terminal, so
 it can run as a background task.
 """
 
@@ -116,6 +162,32 @@ PREFETCH_API_ACCEPTED_OPTIONS_TEXT = (
     "its value as the next word or after =, and --include/-i, --paginate and --slurp")
 # Keeps a saved file's name well under the 255-byte limit of most file systems.
 PREFETCH_FILE_NAME_WORDS_MAX_CHARACTERS = 80
+# Its parent is the log-store, present only on ned-box.
+CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER = (
+    pathlib.Path.home() / "nedsnodes-logs"
+    / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
+NO_AGENT_SEAT_NAME = "no-agent-seat-name"
+CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME = "commit-message.txt"
+# A run's folder in the brief's folder: 1, 2, 3 and so on.
+CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_NAME_PATTERN = re.compile(r"[1-9][0-9]*")
+# Each attempt fails only when another run took that number in the same instant.
+CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_CREATE_ATTEMPTS = 100
+CODEX_OR_GEMINI_TASK_REPORT_FILE_NAME_IN_RUN_NUMBERED_FOLDER = "report.md"
+_seat_shared_file_ship_spec = importlib.util.spec_from_file_location(
+    "seat_shared_file_ship",
+    pathlib.Path(__file__).resolve().parent / "seat-shared-file-ship.py")
+seat_shared_file_ship = importlib.util.module_from_spec(_seat_shared_file_ship_spec)
+_seat_shared_file_ship_spec.loader.exec_module(seat_shared_file_ship)
+_test_suite_runner_spec = importlib.util.spec_from_file_location(
+    "run_all_test_suites", pathlib.Path(__file__).resolve().parent / "run-all-test-suites.py")
+test_suite_runner = importlib.util.module_from_spec(_test_suite_runner_spec)
+_test_suite_runner_spec.loader.exec_module(test_suite_runner)
+CODEX_OR_GEMINI_TEST_SUITE_RUNNER_IN_WORKTREE = pathlib.Path("scripts") / "run-all-test-suites.py"
+_transcript_mirror_spec = importlib.util.spec_from_file_location(
+    "transcript_mirror_to_log_store",
+    pathlib.Path(__file__).resolve().parent / "transcript-mirror-to-log-store.py")
+transcript_mirror = importlib.util.module_from_spec(_transcript_mirror_spec)
+_transcript_mirror_spec.loader.exec_module(transcript_mirror)
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -126,23 +198,25 @@ def build_argument_parser() -> argparse.ArgumentParser:
                         help="the checkout Codex works in")
     parser.add_argument("--brief", required=True,
                         help="file holding the whole prompt")
-    parser.add_argument("-o", dest="report", required=True,
+    parser.add_argument("-o", dest="report",
                         help="file the report ends up in: Codex's final message, or a file Codex "
-                             "itself wrote at this path, which is then kept")
+                             "itself wrote at this path, which is then kept; required unless the "
+                             "log-store is on this machine, where the default is report.md in "
+                             "the run's numbered folder")
     parser.add_argument("--resume", metavar="SESSION_ID",
                         help="send the brief as a follow-up to this Codex session")
     parser.add_argument("--sandbox", choices=tuple(SANDBOX_TO_PROFILE_BASE),
                         default="read-only")
     parser.add_argument("-m", dest="model", help="Codex model id")
     parser.add_argument("--effort", help="reasoning effort, such as medium or xhigh")
-    parser.add_argument("--network", action="store_true",
-                        help="let Codex's commands reach the network")
+    parser.add_argument("--no-network", action="store_true",
+                        help="keep Codex's commands off the network and take away its "
+                             "web search tool")
     parser.add_argument("--writable-root", action="append", default=[], metavar="FOLDER",
-                        help="a folder Codex may write in besides the checkout; repeatable")
+                        help="a folder Codex may write in besides the checkout; refused without "
+                             "--sandbox workspace-write; repeatable")
     parser.add_argument("--outside-git-checkout", action="store_true",
                         help="let -C name a folder that is not a git checkout")
-    parser.add_argument("--web-search", action="store_true",
-                        help="give Codex its live web search tool")
     parser.add_argument("--deadline-minutes", type=float,
                         default=DEFAULT_DEADLINE_MINUTES,
                         help="stop the run, the --prefetch-github commands and Codex "
@@ -245,23 +319,228 @@ def prefetch_github_data(commands, data_folder: pathlib.Path, checkout: pathlib.
 def brief_with_prefetched_files(prompt: str, files) -> str:
     listing = "\n".join(f"- {path}: the output of `gh {arguments}`" for path, arguments in files)
     return (f"{prompt.rstrip()}\n\n"
-            f"You cannot run `gh` yourself: your permission profile keeps you from the "
-            f"folder holding gh's login. So the GitHub data below was fetched for you "
-            f"before you started, one file per command. Read these files instead:\n"
+            f"The GitHub data below was fetched for you before you started, one file "
+            f"per command:\n"
             f"{listing}\n")
 
 
+def codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief: pathlib.Path):
+    """Create and return this run's numbered folder inside the brief's folder of the shared
+    writable folder, or None when the log-store is not on this machine."""
+    if not CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER.parent.is_dir():
+        return None
+    return codex_or_gemini_task_run_numbered_folder_create(CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER, brief)
+
+
+def codex_or_gemini_task_run_numbered_folder_create(base: pathlib.Path, brief: pathlib.Path):
+    """Create and return this run's numbered folder in base/<agent-seat>/<brief stem>/."""
+    seat = seat_shared_file_ship.seat_name_from_environment() or NO_AGENT_SEAT_NAME
+    brief_folder = base / seat / brief.stem
+    brief_folder.mkdir(parents=True, exist_ok=True)
+    attempts = CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_CREATE_ATTEMPTS
+    number = 1 + max((int(entry.name) for entry in brief_folder.iterdir()
+                      if CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_NAME_PATTERN.fullmatch(
+                          entry.name)), default=0)
+    # os.mkdir fails on an existing folder, so two runs started together never share one.
+    for candidate in range(number, number + attempts):
+        try:
+            os.mkdir(brief_folder / str(candidate))
+        except FileExistsError:
+            continue
+        return brief_folder / str(candidate)
+    raise OSError(
+        f"every numbered folder from {number} to {number + attempts - 1} "
+        f"in {brief_folder} was taken by another run as this one tried to create it.\n"
+        f"Start the run again; if this happens again, look in {brief_folder} for what "
+        f"is creating folders there.")
+
+
+def codex_or_gemini_task_report_path_in_run_numbered_folder_when_dash_o_omitted(
+        parser: argparse.ArgumentParser, shared_subfolder):
+    """Return the report's path in the run's numbered folder; with no numbered folder, refuse
+    the run through parser.error, which exits 2."""
+    if shared_subfolder is None:
+        parser.error(
+            f"-o is required on this machine: the log-store "
+            f"{CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER.parent} is not here, so the run has no "
+            f"numbered folder there to write its report in.\n"
+            f"Give -o with the file the report is to be written to.")
+    return shared_subfolder / CODEX_OR_GEMINI_TASK_REPORT_FILE_NAME_IN_RUN_NUMBERED_FOLDER
+
+
+def codex_or_gemini_task_report_copy_into_run_numbered_folder_on_a_machine_without_the_log_store(
+        brief: pathlib.Path, report: pathlib.Path):
+    """Where the log-store is not on this machine, copy report as report.md into this run's
+    numbered folder under the folder transcript-mirror-to-log-store.py copies to the
+    log-store, and return the copy's path; return None where the log-store is here."""
+    if CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER.parent.is_dir():
+        return None
+    folder = codex_or_gemini_task_run_numbered_folder_create(
+        pathlib.Path.home()
+        / transcript_mirror.CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_UNDER_HOME_ON_A_MACHINE_WITHOUT_THE_LOG_STORE,
+        brief)
+    copy = folder / CODEX_OR_GEMINI_TASK_REPORT_FILE_NAME_IN_RUN_NUMBERED_FOLDER
+    shutil.copyfile(report, copy)
+    return copy
+
+
+def brief_with_shared_writable_subfolder(prompt: str, subfolder: pathlib.Path) -> str:
+    return (f"{prompt.rstrip()}\n\n"
+            f"Write any notes or outputs of this task, other than the report and the "
+            f"code you are asked to change, in this folder: {subfolder}\n")
+
+
+def codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(
+        checkout: pathlib.Path, sandbox: str):
+    """Return the checkout when the launcher commits the run's changes in it, which is when
+    the run may write and the checkout is the top folder of a git worktree; else None."""
+    if sandbox != "workspace-write":
+        return None
+    # Equality, not "inside a work tree": a stray .git above a plain folder, such as the
+    # /tmp/.git a Codex sandbox with /tmp writable creates, would otherwise count.
+    result = subprocess.run(["git", "-C", str(checkout), "rev-parse", "--show-toplevel"],
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    if result.returncode != 0 or pathlib.Path(result.stdout.strip()).resolve() != checkout:
+        return None
+    return checkout
+
+
+def brief_with_commit_message_file_instruction(prompt: str, worktree: pathlib.Path) -> str:
+    message_file = worktree / CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME
+    return (f"{prompt.rstrip()}\n\n"
+            f"When you have changed files in {worktree}, write the commit message for your "
+            f"changes in the file {message_file}: a subject line, a blank line, and a body "
+            f"saying what changed and why. Do not run git add or git commit: when you finish, "
+            f"the program that started you stages every change in {worktree}, commits it with "
+            f"that message, and deletes the file. Without the file, your changes are not "
+            f"committed.\n")
+
+
+def codex_or_gemini_finished_workspace_write_run_changes_commit(worktree: pathlib.Path):
+    """Commit every change in the worktree with the message in its commit-message.txt, and
+    delete that file; return (what was done, or None when nothing was to commit; the
+    failure, or None)."""
+    message_file = worktree / CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME
+    every_change_but_the_message_file = [
+        "--", ".", f":(exclude){CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME}"]
+    step = "list the run's changes"
+    try:
+        changes = subprocess.run(
+            ["git", "status", "--short", "--untracked-files=all",
+             *every_change_but_the_message_file], cwd=worktree, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, check=True).stdout
+        if not changes.strip():
+            message_file.unlink(missing_ok=True)
+            return None, None
+        if not message_file.is_file() or not message_file.read_text(encoding="utf-8").strip():
+            return None, (
+                f"the run ended without error but left {message_file} missing or empty, so "
+                f"its changes in {worktree} were not committed:\n{changes.rstrip()}\n"
+                f"Review the changes; to keep them, commit them yourself with a message that "
+                f"says what they do.")
+        step = "stage the run's changes"
+        subprocess.run(["git", "add", "--all", *every_change_but_the_message_file],
+                       cwd=worktree, stdin=subprocess.DEVNULL, capture_output=True,
+                       text=True, check=True)
+        step = "commit the run's changes"
+        subprocess.run(["git", "commit", "--quiet", "--file", str(message_file)],
+                       cwd=worktree, stdin=subprocess.DEVNULL, capture_output=True,
+                       text=True, check=True)
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=worktree,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                check=True).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        said = (error.stderr or "").strip() or (error.stdout or "").strip() or "(nothing)"
+        return None, (
+            f"could not {step} in {worktree}: `{' '.join(error.cmd)}` exited "
+            f"{error.returncode} and said: {said}\n"
+            f"The run's changes are left in the worktree, and {message_file} is kept.\n"
+            f"Fix what git reported, then commit the changes yourself, with that file as "
+            f"the message, and delete the file.")
+    message_file.unlink()
+    return f"committed the run's changes in {worktree} as {commit}.", None
+
+
+def codex_or_gemini_workspace_write_run_start_commit(worktree: pathlib.Path):
+    """Return (the commit HEAD is at in the worktree, None), or (None, the failure)."""
+    result = subprocess.run(["git", "rev-parse", "--verify", "HEAD"], cwd=worktree,
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    if result.returncode != 0:
+        said = result.stderr.strip() or result.stdout.strip() or "(nothing)"
+        return None, (
+            f"could not read the commit HEAD is at in {worktree}: `git rev-parse --verify "
+            f"HEAD` exited {result.returncode} and said: {said}\n"
+            f"The model was not started: after committing a run's changes, the program runs "
+            f"the nn-test-suites whose recorded inputs changed since that commit.\n"
+            f"Give -C a topic-worktree whose branch has a commit.")
+    return result.stdout.strip(), None
+
+
+def codex_or_gemini_committed_run_test_suites_whose_recorded_inputs_changed_run(
+        worktree: pathlib.Path, start_commit: str):
+    """Run the worktree's own test-suite runner on the suites whose recorded inputs changed
+    since start_commit, copying its output to stderr; return None when every suite passed,
+    else the failure."""
+    arguments = [str(CODEX_OR_GEMINI_TEST_SUITE_RUNNER_IN_WORKTREE),
+                 "--only-suites-whose-recorded-inputs-changed-since", start_commit,
+                 "--leave-recorded-inputs-and-failure-history-unchanged"]
+    shown = shlex.join(arguments)
+    kept = f"The run's commit is kept in {worktree}, and nothing was pushed."
+    push_when_passing = f"Push the commit only once `{shown}`, run in {worktree}, passes."
+    failing, unfinished = [], []
+    print(f"{PROGRAM}: running the nn-test-suites the run's change touches: {shown}",
+          file=sys.stderr, flush=True)
+    try:
+        # Started by its own path, so a worktree without the runner fails to start it.
+        with subprocess.Popen([str(worktree / CODEX_OR_GEMINI_TEST_SUITE_RUNNER_IN_WORKTREE),
+                               *arguments[1:]], cwd=worktree, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                              errors="replace") as runner:
+            for line in runner.stdout:
+                sys.stderr.write(line)
+                sys.stderr.flush()
+                if line.startswith(test_suite_runner.FAILED_SUITE_LINE_PREFIX):
+                    suite = line[len(test_suite_runner.FAILED_SUITE_LINE_PREFIX):].split(" ", 1)[0]
+                    if suite not in failing:
+                        failing.append(suite)
+                elif line.startswith((
+                        test_suite_runner.NOT_RUN_SUITE_LINE_PREFIX,
+                        *test_suite_runner.TEST_RUNNER_WHOLE_RUN_NOT_RUN_TO_THE_END_LINE_PREFIXES_FILE_PATH_AND_BARE_NAME_FORMS)):
+                    unfinished.append(line.strip())
+    except OSError as error:
+        return (f"could not start `{shown}` in {worktree} after committing the run's changes: "
+                f"{error}, so no nn-test-suite was run on the commit. {kept}\n"
+                f"{push_when_passing}")
+    status = runner.returncode
+    if status == test_suite_runner.EXIT_ALL_PASSED:
+        return None
+    if status == test_suite_runner.EXIT_SOME_FAILED and failing:
+        return (f"nn-test-suites the run's change touches failed after its commit: "
+                f"{', '.join(failing)}. Each one's FAIL line above names its log. {kept}\n"
+                f"Read each failing suite's log, fix the cause, and commit the fix in "
+                f"{worktree}, yourself or with another run whose brief names the failing "
+                f"suites and their logs.\n{push_when_passing}")
+    printed = "".join(f"  {line}\n" for line in unfinished)
+    return (f"`{shown}`, run in {worktree} after committing the run's changes, ended with "
+            f"{test_suite_runner.describe_exit(status)} without naming a failing suite, so "
+            f"not every suite the change touches was judged"
+            + (f"; it printed\n{printed}" if printed else ".\n")
+            + f"Its whole output is above. {kept}\n"
+            f"Do what its output says.\n{push_when_passing}")
+
+
 def codex_command(checkout: pathlib.Path, last_message: pathlib.Path, sandbox: str,
-                  model, effort, prompt: str, network: bool = False,
+                  model, effort, prompt: str, network: bool = True,
                   writable_roots=(), outside_git_checkout: bool = False,
-                  web_search: bool = False, resume=None) -> list:
+                  resume=None, shared_subfolder=None) -> list:
     # Resume accepts no -C; exec's working directory applies to its subcommand.
     command = ["codex", "exec", "-C", str(checkout)]
     if resume is not None:
         command.append("resume")
     command += [
         *common.codex_credential_denying_permission_profile_arguments(
-            PERMISSION_PROFILE_NAME, SANDBOX_TO_PROFILE_BASE[sandbox], network=network),
+            PERMISSION_PROFILE_NAME, SANDBOX_TO_PROFILE_BASE[sandbox], network=network,
+            writable_paths=[shared_subfolder] if shared_subfolder else []),
         "--disable", "memories",
         "-o", str(last_message),
     ]
@@ -269,9 +548,9 @@ def codex_command(checkout: pathlib.Path, last_message: pathlib.Path, sandbox: s
         command += ["--add-dir", str(root)]
     if outside_git_checkout:
         command.append("--skip-git-repo-check")
-    if web_search:
-        # `codex exec` does not accept --search; this config key is what that flag sets.
-        command += ["-c", 'web_search="live"']
+    # `codex exec` does not accept --search; this config key is what that flag sets. Left
+    # unset, Codex still searches from its cache (codex-cli 0.169.1 takes "disabled").
+    command += ["-c", 'web_search="live"' if network else 'web_search="disabled"']
     if model:
         command += ["-m", model]
     if effort:
@@ -335,6 +614,8 @@ def main(argv=None) -> int:
             "accept --add-dir.\n"
             "To resume without extra writable folders, omit --writable-root.\n"
             "To start a new task with extra writable folders, omit --resume.")
+    if args.writable_root and args.sandbox != "workspace-write":
+        parser.error("--writable-root requires --sandbox workspace-write")
     for gh_arguments in args.prefetch_github:
         quoting_error = prefetch_quoting_error(gh_arguments)
         if quoting_error:
@@ -356,9 +637,6 @@ def main(argv=None) -> int:
                 f"these options: {PREFETCH_API_ACCEPTED_OPTIONS_TEXT}.")
     checkout = pathlib.Path(args.checkout).resolve()
     brief = pathlib.Path(args.brief).resolve()
-    report = pathlib.Path(args.report).resolve()
-    run_log = pathlib.Path(args.run_log).resolve() if args.run_log else report.with_name(
-        report.name + ".run.log")
     if not checkout.is_dir():
         return fail(f"the checkout {checkout} is not a directory.")
     try:
@@ -367,6 +645,18 @@ def main(argv=None) -> int:
         return fail(f"could not read the brief {brief}: {error}")
     if not prompt.strip():
         return fail(f"the brief {brief} is empty.")
+    try:
+        shared_subfolder = codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief)
+    except OSError as error:
+        return fail(f"could not create the run's folder in "
+                    f"{CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER}: {error}")
+    report = (pathlib.Path(args.report).resolve() if args.report is not None
+              else codex_or_gemini_task_report_path_in_run_numbered_folder_when_dash_o_omitted(
+                  parser, shared_subfolder))
+    run_log = pathlib.Path(args.run_log).resolve() if args.run_log else report.with_name(
+        report.name + ".run.log")
+    if len({brief, report, run_log}) != 3:
+        parser.error("--brief, -o and --run-log must name different files")
     # A report left by an earlier run must not pass for this run's.
     report.unlink(missing_ok=True)
     last_message = report.with_name(report.name + ".last-message")
@@ -388,25 +678,47 @@ def main(argv=None) -> int:
                         f"The deadline covers every --prefetch-github command and Codex "
                         f"together. If the run needs longer, run it again with a larger "
                         f"--deadline-minutes.")
+    if shared_subfolder:
+        print(f"{PROGRAM}: this run's folder is {shared_subfolder}", file=sys.stderr)
+        prompt = brief_with_shared_writable_subfolder(prompt, shared_subfolder)
+    worktree_to_commit = codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(
+        checkout, args.sandbox)
+    if worktree_to_commit:
+        start_commit, error = codex_or_gemini_workspace_write_run_start_commit(worktree_to_commit)
+        if error:
+            return fail(error)
+        # A message left by an earlier run must not pass for this run's.
+        (worktree_to_commit / CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME).unlink(missing_ok=True)
+        prompt = brief_with_commit_message_file_instruction(prompt, worktree_to_commit)
     command = codex_command(
         checkout, last_message, args.sandbox, args.model, args.effort, prompt,
-        network=args.network,
+        network=not args.no_network,
         writable_roots=[pathlib.Path(root).resolve() for root in args.writable_root],
-        outside_git_checkout=args.outside_git_checkout, web_search=args.web_search,
-        resume=args.resume)
+        outside_git_checkout=args.outside_git_checkout, resume=args.resume,
+        shared_subfolder=shared_subfolder)
+    environment, token_note = (
+        common.process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token(
+            os.environ))
     print(f"{PROGRAM}: running Codex in {checkout}; log {run_log}", file=sys.stderr)
     try:
         with open(run_log, "w", encoding="utf-8") as log:
+            if token_note:
+                log.write(f"{PROGRAM}: {token_note}\n")
+                log.flush()
             # Its own process group, so the deadline stops every process Codex started.
             process = subprocess.Popen(
                 command, stdin=subprocess.DEVNULL, stdout=log,
-                stderr=subprocess.STDOUT, start_new_session=True)
+                stderr=subprocess.STDOUT, start_new_session=True, env=environment)
     except OSError as error:
         return fail(f"could not start Codex: {error}")
     try:
         exit_code = process.wait(timeout=seconds_left)
     except subprocess.TimeoutExpired:
         stop_process_group(process)
+        exit_code = None
+    common.sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(
+        PROGRAM, run_log.read_text(encoding="utf-8", errors="replace"))
+    if exit_code is None:
         place_final_message(report, last_message)
         shared = ("The deadline covers every --prefetch-github command and Codex "
                   "together. " if args.prefetch_github else "")
@@ -424,6 +736,33 @@ def main(argv=None) -> int:
     if last_message.exists():
         print(f"{PROGRAM}: Codex wrote the report at {report} itself, so it is kept; "
               f"Codex's final message is in {last_message}.", file=sys.stderr)
+    # A copy that fails does not stop the commit: the run's changes are kept either way.
+    report_copy_error = None
+    try:
+        report_copy = (
+            codex_or_gemini_task_report_copy_into_run_numbered_folder_on_a_machine_without_the_log_store(
+                brief, report))
+    except OSError as error:
+        report_copy, report_copy_error = None, (
+            f"could not save the copy of the report that goes to the log-store: "
+            f"{error}\nThe report is at {report}.")
+    if report_copy:
+        print(f"{PROGRAM}: a copy of the report, which goes to the log-store, is at "
+              f"{report_copy}", file=sys.stderr)
+    report_copy_note = f"\n{report_copy_error}" if report_copy_error else ""
+    if worktree_to_commit:
+        done, error = codex_or_gemini_finished_workspace_write_run_changes_commit(
+            worktree_to_commit)
+        if error:
+            return fail(f"{error}\nThe report is at {report}.{report_copy_note}")
+        if done:
+            print(f"{PROGRAM}: {done}", file=sys.stderr)
+            error = codex_or_gemini_committed_run_test_suites_whose_recorded_inputs_changed_run(
+                worktree_to_commit, start_commit)
+            if error:
+                return fail(f"{error}\nThe report is at {report}.{report_copy_note}")
+    if report_copy_error:
+        return fail(report_copy_error)
     print(f"report: {report}")
     return 0
 

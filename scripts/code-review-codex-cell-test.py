@@ -241,11 +241,13 @@ sys.exit(0)
 # call. It dumps to <output>.argv.json rather than to a fixed path so the
 # recording belongs to the run that made it.
 STUB_CODEX_RECORDS_ARGV = """#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 argv = sys.argv
 target = argv[argv.index("--output-last-message") + 1]
 with open(target + ".argv.json", "w", encoding="utf-8") as handle:
     json.dump(argv, handle)
+with open(target + ".environment.json", "w", encoding="utf-8") as handle:
+    json.dump({name: os.environ.get(name) for name in ("GH_TOKEN", "GITHUB_TOKEN")}, handle)
 with open(target, "w", encoding="utf-8") as handle:
     handle.write("STUB CODEX REPORT: argv recorded\\n")
 sys.exit(0)
@@ -354,6 +356,19 @@ with tempfile.TemporaryDirectory() as scratch:
           result.returncode == 64, f"exit {result.returncode}; stderr={result.stderr!r}")
     check("--commit that does not resolve says so on stderr",
           "does not resolve to a commit" in result.stderr, repr(result.stderr))
+
+    # A review whose gh was refused the read-only token still produces its report.
+    result = run_cell(stubs, STUB_CODEX_WRITES_REPORT.replace(
+                          "sys.exit(0)\n",
+                          "sys.stderr.write('HTTP 401: Bad credentials "
+                          "(https://api.github.com/graphql)\\n')\nsys.exit(0)\n"),
+                      "--commit", head_sha, "--repo", str(checkout),
+                      "--output", str(scratch / "report-gh-refused.md"))
+    check("a gh HTTP 401 in Codex's stderr is reported as the read-only token refused, and the "
+          "cell still exits 0",
+          result.returncode == 0
+          and "code-review-codex-cell: read-only GitHub token refused" in result.stderr,
+          f"exit {result.returncode}; stderr={result.stderr!r}")
 
     # --- The third bad invocation: --output is not a regular file ----------
     # Before the 2026-08-23 fix this reached output_path.unlink() and died on
@@ -641,9 +656,21 @@ with tempfile.TemporaryDirectory() as scratch:
     login_canary.parent.mkdir(parents=True, exist_ok=True)
     for canary in (login_canary, listed_canary):
         canary.write_text("CANARY-NOT-A-SECRET-code-review-codex-cell-test\n", encoding="utf-8")
-    result = run_cell(stubs, STUB_CODEX_RECORDS_ARGV,
-                      "--commit", head_sha, "--repo", str(checkout),
-                      "--output", str(argv_report))
+    os.environ.update(GH_TOKEN="agent-seat-token", GITHUB_TOKEN="agent-seat-token")
+    try:
+        result = run_cell(stubs, STUB_CODEX_RECORDS_ARGV,
+                          "--commit", head_sha, "--repo", str(checkout),
+                          "--output", str(argv_report))
+    finally:
+        os.environ.pop("GH_TOKEN")
+        os.environ.pop("GITHUB_TOKEN")
+    environment_recording = Path(f"{argv_report}.environment.json")
+    check("codex gets none of the agent-seat's GitHub tokens, and stderr says it has no read-only one",
+          environment_recording.is_file()
+          and json.loads(environment_recording.read_text(encoding="utf-8"))
+          == {"GH_TOKEN": None, "GITHUB_TOKEN": None}
+          and "code-review-codex-cell: no read-only GitHub token (" in result.stderr,
+          f"stderr={result.stderr!r}")
     check("the argv-recording run succeeded",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     argv_recording = Path(f"{argv_report}.argv.json")
@@ -687,6 +714,9 @@ with tempfile.TemporaryDirectory() as scratch:
           'default_permissions="code-review-no-credentials"' in overrides_after_review
           and 'permissions.code-review-no-credentials.extends=":read-only"' in overrides_after_review,
           repr(overrides_after_review))
+    check("the review reaches the network and searches the web live, both after `review`",
+          "permissions.code-review-no-credentials.network.enabled=true" in overrides_after_review
+          and 'web_search="live"' in overrides_after_review, repr(overrides_after_review))
     check("no permission override sits before `review`, where the review's commands drop it",
           not [override for override in overrides_before_review
                if override.startswith(("default_permissions=", "permissions."))],

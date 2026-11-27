@@ -2305,6 +2305,66 @@ with tempfile.TemporaryDirectory() as instrument_scratch:
               f"{'is' if built else 'is not'} taken as instrument-built",
               _instrument_common.instrument_built_record_directory(directory) is built)
 
+# A sandboxed model gets a read-only GitHub token in place of the agent-seat's.
+swap = _instrument_common.process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token
+agent_seat_environment = {"PATH": "/usr/bin", "GH_TOKEN": "seat", "GITHUB_TOKEN": "seat",
+                          "GH_ENTERPRISE_TOKEN": "seat", "GITHUB_ENTERPRISE_TOKEN": "seat"}
+with tempfile.TemporaryDirectory() as token_scratch:
+    token_file = Path(token_scratch) / "github-public-repositories-read-only-token"
+    token_file.write_text("read-only\n", encoding="utf-8")
+    environment, note = swap(agent_seat_environment, token_file)
+    check("a readable token replaces every agent-seat GitHub token, with gh's config folder beside it",
+          environment == {"PATH": "/usr/bin", "GH_TOKEN": "read-only",
+                          "GH_CONFIG_DIR": token_scratch} and note is None
+          and agent_seat_environment["GH_TOKEN"] == "seat", repr((environment, note)))
+    real_default = _instrument_common.SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE
+    _instrument_common.SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE = token_file
+    try:
+        check("without a token_file argument the module's token file is read",
+              swap({})[0].get("GH_TOKEN") == "read-only")
+    finally:
+        _instrument_common.SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE = real_default
+    token_file.write_text("  \n", encoding="utf-8")
+    environment, note = swap(agent_seat_environment, token_file)
+    check("an empty token file leaves no GitHub token and a note naming the empty file",
+          environment == {"PATH": "/usr/bin"} and note is not None
+          and f"{token_file} is empty" in note and "unauthenticated" in note, repr((environment, note)))
+    token_file.write_bytes(b"\xff")
+    environment, note = swap(agent_seat_environment, token_file)
+    check("a token file that is not UTF-8 leaves no GitHub token and a note saying why",
+          environment == {"PATH": "/usr/bin"} and note is not None
+          and note.startswith("no read-only GitHub token (") and "utf-8" in note, repr(note))
+    token_file.unlink()
+    environment, note = swap(agent_seat_environment, token_file)
+    check("a missing token file leaves no GitHub token and a note saying why",
+          environment == {"PATH": "/usr/bin"} and note is not None
+          and note.startswith("no read-only GitHub token (") and "No such file" in note, repr(note))
+
+# What gh 2.102.0 printed on ned-box for a refused token: `gh pr view` and `gh api user`.
+refusal_report = _instrument_common.sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report
+for case_name, outputs, refused in (
+        ("gh pr view's 401", ("trace\nHTTP 401: Bad credentials (https://api.github.com/graphql)\n",),
+         True),
+        ("gh api's 401, in the second output", ("", '  "status": "401"\n}gh: Bad credentials (HTTP 401)\n'),
+         True),
+        ("no 401", ("HTTP 404: Not Found\n", None), False),
+        ("Codex's own logged-out 401", ("ERROR codex_api::endpoint::responses_websocket: failed to "
+                                        "connect to websocket: HTTP error: 401 Unauthorized\n",),
+         False),
+        ("the two words on different lines", ("HTTP 401\nBad credentials\n",), False)):
+    captured_stderr = io.StringIO()
+    with contextlib.redirect_stderr(captured_stderr):
+        found = refusal_report("probe-launcher", *outputs)
+    printed = captured_stderr.getvalue()
+    check(f"the 401 report for {case_name} {'prints' if refused else 'prints nothing'}",
+          found is refused and (("probe-launcher: read-only GitHub token refused" in printed
+                                 and "gh said: " in printed) if refused else printed == ""),
+          repr(printed))
+
+profile = _instrument_common.codex_credential_denying_permission_profile_arguments(
+    "probe", ":read-only", "darwin", writable_paths=[Path("/shared/run")])[-1]
+check("a writable path is a write entry in the profile's filesystem table",
+      '"/shared/run"="write"' in profile, profile)
 # Each launcher's --effort help states the efforts its own tier map pins, so
 # the help cannot name a launcher's effort the map no longer holds.
 # The agy cell refuses before argparse runs when no sandbox program is on PATH,

@@ -12,9 +12,11 @@ sandbox program, and passes agy's stdout and stderr through. Its exit code is
 listed under "Exit codes" below. Whenever the sandbox program exits nonzero,
 this program adds one line of its own to stderr, after the messages of agy or
 the sandbox program. GEMINI_API_KEY is removed from agy's environment, because
-a key is billed per call and agy's own Google login, in ~/.gemini, is not.
-GH_TOKEN and GITHUB_TOKEN are removed too; GH_ENTERPRISE_TOKEN and
-GITHUB_ENTERPRISE_TOKEN are left in place. How gh behaves inside the macOS
+a key is billed per call and agy's own Google login, in ~/.gemini, is not. The
+agent-seat's GitHub tokens, which can push and merge, are removed too: every
+name in AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES of
+nn-systems/cold-read/cold-read-cell-common.py, GH_TOKEN and GITHUB_TOKEN among
+them. No read-only token takes their place. How gh behaves inside the macOS
 sandbox is said beside CREDENTIAL_DIRECTORIES in
 nn-systems/cold-read/cold-read-cell-common.py.
 

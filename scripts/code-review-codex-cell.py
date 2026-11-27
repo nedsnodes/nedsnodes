@@ -11,7 +11,8 @@ must not drift are pinned:
     nn-systems/cold-read/cold-read-codex-cell.py: `deep` = gpt-6.2-sol at xhigh);
   - the service tier, Fast, which `codex debug models` lists for gpt-6.2-sol
     as service tier id "priority" -- see THE SERVICE TIER below;
-  - the sandbox, read-only and denying every credential file, placed AFTER
+  - the sandbox, read-only with the network and live web search on, and
+    denying every credential file, placed AFTER
     `review`, because the review's commands drop a profile placed before it
     -- see WHERE THE PERMISSION PROFILE GOES below, which also says how to
     re-check it after a Codex upgrade. It is a permission profile extending
@@ -469,6 +470,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import shlex
@@ -773,7 +775,9 @@ def main(argv=None) -> int:
         # commands run in a child thread that drops a profile placed before
         # it. See WHERE THE PERMISSION PROFILE GOES in the docstring.
         *common.codex_credential_denying_permission_profile_arguments(
-            CREDENTIAL_DENYING_PERMISSION_PROFILE, ":read-only"),
+            CREDENTIAL_DENYING_PERMISSION_PROFILE, ":read-only", network=True),
+        # `codex exec` does not accept --search; this config key is what that flag sets.
+        "-c", 'web_search="live"',
         # The instructions and the description, AFTER `review` too: placed
         # before `exec` or between `exec` and `review` they did not reach the
         # review. See THE PULL REQUEST'S DESCRIPTION in the docstring.
@@ -784,11 +788,14 @@ def main(argv=None) -> int:
         "-c", f'service_tier="{SERVICE_TIER}"',
         "--output-last-message", str(output_path),
     ]
+    environment, token_note = common.process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token(os.environ)
+    if token_note:
+        print(f"code-review-codex-cell: {token_note}", file=sys.stderr)
     try:
         # stderr is captured, not discarded: on failure its tail is the only
         # explanation anyone gets. On success it stays unprinted.
         completed = subprocess.run(
-            command, cwd=repo, stdin=subprocess.DEVNULL,
+            command, cwd=repo, stdin=subprocess.DEVNULL, env=environment,
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
             timeout=REVIEW_TIMEOUT_SECONDS, check=False,
         )
@@ -800,6 +807,9 @@ def main(argv=None) -> int:
         print(f"code-review-codex-cell: codex could not run: {type(error).__name__}: {error}",
               file=sys.stderr)
         return 1
+
+    common.sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(
+        "code-review-codex-cell", completed.stderr)
 
     def stderr_tail():
         lines = (completed.stderr or "").strip().splitlines()

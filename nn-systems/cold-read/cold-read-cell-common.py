@@ -108,9 +108,68 @@ REVIEWER_PROGRAM_LOGIN_FILES = {
             pathlib.Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"),
 }
 
-# The Codex and agy launchers remove these from the reviewer's environment; the Claude cold-read-cell
-# runs without Bash, so it cannot run gh.
-COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
+
+# Outside ~/.config/nedsnodes, which the Mac denies: a denied directory hides only its own
+# subtree, not siblings sharing its name as a prefix (measured with Codex's profile and bwrap).
+SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE = (
+    pathlib.Path.home() / ".config" / "nedsnodes-sandboxed-models"
+    / "github-public-repositories-read-only-token")
+# The agent-seats' tokens can push and merge; gh and git read any of these.
+AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES = (
+    "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+
+
+def process_environment_copy_without_agent_seat_github_tokens(environment) -> dict:
+    """Return a copy of environment without AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES,
+    with no GitHub token in their place."""
+    return {name: value for name, value in environment.items()
+            if name not in AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES}
+
+
+def process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token(
+        environment, token_file: pathlib.Path = None) -> tuple:
+    """Return (environment copy for a sandboxed model, note or None).
+
+    The copy has no agent-seat GitHub token. When token_file holds a token, the
+    copy's GH_TOKEN is that token and GH_CONFIG_DIR is the token's folder, which
+    holds no gh config: gh stops when it cannot read ~/.config/gh/hosts.yml, which
+    ned-box's sandboxes mask and the Mac's deny with ~/.config/gh. Otherwise the
+    note says why the model reads GitHub unauthenticated.
+    """
+    token_file = token_file or SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE
+    copy = process_environment_copy_without_agent_seat_github_tokens(environment)
+    try:
+        token = token_file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as error:
+        return copy, (f"no read-only GitHub token ({error}); the model reads GitHub "
+                      f"unauthenticated, and gh does not run.")
+    if not token:
+        return copy, (f"the read-only GitHub token file {token_file} is empty; the model "
+                      f"reads GitHub unauthenticated, and gh does not run.")
+    copy["GH_TOKEN"] = token
+    copy["GH_CONFIG_DIR"] = str(token_file.parent)
+    return copy, None
+
+
+# Both are on the line gh prints when GitHub refuses its token: "HTTP 401: Bad credentials
+# (<url>)" from most commands, "gh: Bad credentials (HTTP 401)" from `gh api` (gh 2.102.0).
+GH_REFUSED_TOKEN_LINE_WORDS = ("HTTP 401", "Bad credentials")
+
+
+def sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(program: str, *outputs) -> bool:
+    """Print "read-only GitHub token refused" on stderr when a line of the run's outputs is
+    gh's HTTP 401; return whether one was. The caller's exit status does not change."""
+    for output in outputs:
+        for line in (output or "").splitlines():
+            if all(word in line for word in GH_REFUSED_TOKEN_LINE_WORDS):
+                print(f"{program}: read-only GitHub token refused: gh inside the run got "
+                      f"HTTP 401, so the model could not read GitHub through gh. gh said: "
+                      f"{line.strip()}\n"
+                      f"{program}: tell the user that GitHub refuses the token in "
+                      f"{SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE}, so it needs replacing.",
+                      file=sys.stderr)
+                return True
+    return False
 
 
 def reviewer_program_login_files(except_program: str = None,
@@ -135,11 +194,16 @@ def credential_directories_present() -> list:
 
 def codex_credential_denying_permission_profile_arguments(
         profile_name: str, extends: str, platform: str = sys.platform,
-        network: bool = False) -> list:
-    """Return Codex permission-profile overrides denying credential paths."""
+        network: bool = False, writable_paths=()) -> list:
+    """Return Codex permission-profile overrides denying credential paths.
+
+    writable_paths are folders Codex may write in, whatever profile is extended;
+    a credential path inside one stays denied.
+    """
     # JSON string escaping also works for TOML basic strings used as path keys.
     entries = ({":slash_tmp": "read", ":tmpdir": "read"}
                if platform.startswith("linux") and extends == ":workspace" else {})
+    entries.update((str(path), "write") for path in writable_paths)
     if platform.startswith("linux"):
         denied = ned_box_credential_and_login_files_present()
     else:

@@ -364,6 +364,7 @@ ALLOWLIST = [
     ("*", r"nedschorus\.invalid",
      "the git user.email each checkout's config pins, and test identities; the project rename left the config as it was"),
     ("*", r"nedschorus-git-gatekeeper-github-token", "a keychain item on the Mac, which the project rename left as it was"),
+    ("*", r"nc-sandboxed-models-public-read-only", "a GitHub fine-grained token's name, set in GitHub's settings, which the project rename left as it was"),
     ("*", r"(?:(?<=in )|(?<=for ))nedschorus\b|(?<=org )`nedschorus`", "the project's name in prose, for the later pull request"),
     ("*", r"(?i:nedschorus)/(?:ghi-api-probes|side-work|topic-)", "another repository or a branch of the old owner, in prose or test data"),
     ("*", r"from (?i:nedschorus)/", "a merge commit subject in test data"),
