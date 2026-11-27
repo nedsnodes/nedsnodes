@@ -294,6 +294,11 @@ GIT_WORDINGS = (
      "fatal: gitfile does not point to a valid repository: /Volumes/nedhome/a-worktree/.git",
      "unusable"),
     ("another fatal error", "fatal: detected dubious ownership in repository at '/x'", "other"),
+    ("another fatal error quoting the no-repository words",
+     "fatal: bad boolean config value 'not a git repository' for 'core.bare'", "other"),
+    ("no repository after a GIT_TRACE line",
+     "12:00:00.000000 git.c:463 trace: built-in: git rev-parse --show-toplevel\n"
+     "fatal: not a git repository (or any of the parent directories): .git", "outside"),
 )
 
 

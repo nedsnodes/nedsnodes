@@ -5,10 +5,13 @@ and scripts/git-client-side-hooks/post-merge, which runs it.
 Each case fast-forwards a temporary repository and runs the program in it, with
 a fake `systemctl` on PATH that records its arguments and succeeds or fails on
 request: a merge that changes the service restarts the unit, one that does not
-leaves it, a failed restart prints systemctl's error and exits 1, a checkout
-that is not the reference-checkout is left alone, and git failing to list the
-merge's changes is reported. One case checks that the trigger files name the
-service file and exist. A last case merges through the real post-merge hook in
+leaves it, a failed restart prints systemctl's error and exits 1, and a
+checkout that is not the reference-checkout is left alone. When git fails to
+list the merge's changes, or to find the checkout for a reason other than
+being outside one, the program exits 1 and, in the reference-checkout only,
+restarts the unit anyway; each such message is checked word for word, with
+the restart succeeding and failing. One case checks that the trigger files
+name the service file and exist. A last case merges through the real post-merge hook in
 a checkout that is not ned-box's reference-checkout, with nothing on stderr.
 
 Run: python3 nn-systems/nn-shared-database/tests/nn-shared-database-service-restart-after-merge-test.py
@@ -92,37 +95,69 @@ with tempfile.TemporaryDirectory() as scratch:
         git("commit", "-q", "-m", f"change {path}")
         git("checkout", "-q", "main")
 
-    def run(reference=None, fail=False):
+    def run(reference=None, fail=False, directory=None, environment=None):
         if systemctl_log.exists():
             systemctl_log.unlink()
         os.environ["FAKE_SYSTEMCTL_FAIL"] = "1" if fail else ""
+        os.environ.update(environment or {})
         printed, errors = io.StringIO(), io.StringIO()
         before = os.getcwd()
-        os.chdir(repository)
+        os.chdir(directory or repository)
         try:
             with redirect_stdout(printed), redirect_stderr(errors):
                 code = restarter.main(["--reference-checkout", str(reference or repository)])
         finally:
             os.chdir(before)
+            for name in environment or {}:
+                del os.environ[name]
         calls = systemctl_log.read_text().splitlines() if systemctl_log.exists() else []
         return code, calls, printed.getvalue(), errors.getvalue()
 
     subprocess.run(["git", "init", "-q", "-b", "main", str(repository)], check=True)
     git("commit", "-q", "--allow-empty", "-m", "start")
 
+    program = restarter.PROGRAM
+    restart_call = ["--user restart nn-shared-database-service.service"]
+    after_a_git_failure = (
+        "Put right what git names, such as a GIT_DIR that names a missing directory.\n"
+        "If you are a subagent, give this whole message to the agent that dispatched you.\n"
+        "If you cannot put it right, tell the user, quoting this whole message.\n")
+    restarted_either_way = (f"{program}: restarted nn-shared-database-service.service, which is "
+                            f"safe whether or not the merge changed it\n")
+    restart_failure_rest = (
+        "`systemctl --user restart nn-shared-database-service.service` exited 5, so the service "
+        "may still run the code from before the merge, or not run at all. systemctl said: "
+        "Failed to restart nn-shared-database-service.service: Unit "
+        "nn-shared-database-service.service not found.\n"
+        "If systemctl said the unit was not found, the unit's install step has not run on "
+        "ned-box yet; it is the user's, so do nothing.\n"
+        "Otherwise run `journalctl --user -u nn-shared-database-service.service -n 50` on ned-box "
+        "and tell the user that the nn-shared-database service failed to restart after a merge, ")
+    restart_failed_after_a_git_failure = f"{program}: FAILED — {restart_failure_rest}"
+
+    # The report line's end is the shared report wording, which the wording-copy scan keeps out
+    # of tests; ending in its last words shows the restart's outcome printed last.
+    def starts_with_and_ends_with_the_report_line(errors, expected_start):
+        return errors.startswith(expected_start) and errors.endswith(", with the same quotes.\n")
+
+    git_diff_failed = (
+        f"{program}: FAILED — `git diff --name-only ORIG_HEAD HEAD` in {repository} exited 128, "
+        f"so this merge's changes to the nn-shared-database service are unknown, and this "
+        f"program restarts the service below, which is safe either way: fatal: bad revision "
+        f"'ORIG_HEAD'\n"
+        f"{after_a_git_failure}")
     code, calls, printed, errors = run()
-    check("git failing to list the merge's changes (no ORIG_HEAD): exit 1, naming the command, "
-          "and nothing restarted",
-          code == 1 and calls == [] and "git diff --name-only ORIG_HEAD HEAD" in errors
-          and f"Restart the service: `XDG_RUNTIME_DIR=/run/user/{os.getuid()} systemctl --user "
-              "restart nn-shared-database-service.service`." in errors
-          and f"`XDG_RUNTIME_DIR=/run/user/{os.getuid()} journalctl --user" in errors
-          and "$(id -u)" not in errors
-          and "If the restart succeeds, you are done; report nothing." in errors
-          and "Unit nn-shared-database-service.service not found." in errors
-          and "If the merge changed" not in errors
-          and "service was not restarted: fatal:" in errors,
-          (code, errors))
+    check("git failing to list the merge's changes (no ORIG_HEAD): exit 1, the FAILED message "
+          "word for word, then the restart, and its success line",
+          code == 1 and calls == restart_call and errors == git_diff_failed
+          and printed == restarted_either_way, (code, calls, printed, errors))
+    code, calls, printed, errors = run(fail=True)
+    check("git failing to list the merge's changes, and the restart failing: exit 1, the FAILED "
+          "message, then the restart failure that does not say the merge changed the service",
+          code == 1 and calls == restart_call
+          and starts_with_and_ends_with_the_report_line(errors, git_diff_failed + restart_failed_after_a_git_failure)
+          and printed == "",
+          (code, calls, printed, errors))
 
     commit_on_branch("docs", "README.md", "words")
     git("merge", "-q", "--ff-only", "docs")
@@ -163,10 +198,11 @@ with tempfile.TemporaryDirectory() as scratch:
           code == 0 and runtime_log.read_text().splitlines()[-1] == str(scratch / "runtime"),
           (code, errors))
     code, calls, printed, errors = run(fail=True)
-    check("a failed restart prints systemctl's error and exits 1",
-          code == 1 and "systemctl said: Failed to restart nn-shared-database-service."
-          "service: Unit nn-shared-database-service.service not found" in errors
-          and "exited 5" in errors, (code, errors))
+    check("after a merge that changed the service, a failed restart exits 1 with the message "
+          "that says the merge changed it",
+          code == 1 and starts_with_and_ends_with_the_report_line(errors, f"{program}: FAILED — the merge changed the "
+                                                f"nn-shared-database service, and "
+                                                f"{restart_failure_rest}"), (code, errors))
 
     outside = scratch / "not-a-repository"
     outside.mkdir()
@@ -177,6 +213,69 @@ with tempfile.TemporaryDirectory() as scratch:
     finally:
         os.chdir(before)
     check("outside any git checkout nothing is done", code == 0, code)
+
+    stale_git_directory = scratch / "stale-git-directory"
+    stale = {"GIT_DIR": str(stale_git_directory)}
+    rev_parse_failed = ("`git rev-parse --show-toplevel` exited 128 for a reason other than the "
+                        "current directory being outside any Git checkout")
+    in_reference = (f"{program}: FAILED — {rev_parse_failed}, so this program could not tell "
+                    f"whether this merge changed the nn-shared-database service, and restarts "
+                    f"the service below, which is safe either way. git said: fatal: not a git "
+                    f"repository: '{stale_git_directory}'\n{after_a_git_failure}")
+    code, calls, printed, errors = run(environment=stale)
+    check("a stale GIT_DIR in the reference-checkout: exit 1, the FAILED message word for word, "
+          "then the restart, and its success line",
+          code == 1 and calls == restart_call and errors == in_reference
+          and printed == restarted_either_way, (code, calls, printed, errors))
+    code, calls, printed, errors = run(environment=stale, fail=True)
+    check("a stale GIT_DIR in the reference-checkout, and the restart failing: exit 1, the "
+          "FAILED message, then the restart failure that does not say the merge changed the "
+          "service",
+          code == 1 and calls == restart_call
+          and starts_with_and_ends_with_the_report_line(errors, in_reference + restart_failed_after_a_git_failure)
+          and printed == "",
+          (code, calls, printed, errors))
+
+    def not_reference(git_error):
+        return (f"{program}: FAILED — {rev_parse_failed}; this is not ned-box's "
+                f"reference-checkout, so the nn-shared-database service needs no restart. git "
+                f"said: {git_error}\n{after_a_git_failure}")
+    code, calls, printed, errors = run(reference=scratch / "elsewhere", environment=stale)
+    check("a stale GIT_DIR in a checkout that is not the reference-checkout: exit 1, the "
+          "FAILED message word for word, and nothing restarted",
+          code == 1 and calls == [] and printed == ""
+          and errors == not_reference(f"fatal: not a git repository: '{stale_git_directory}'"),
+          (code, calls, printed, errors))
+
+    removed = scratch / "removed"
+    removed.mkdir()
+    before = os.getcwd()
+    os.chdir(removed)
+    removed.rmdir()
+    if systemctl_log.exists():
+        systemctl_log.unlink()
+    errors = io.StringIO()
+    try:
+        with redirect_stderr(errors):
+            code = restarter.main(["--reference-checkout", str(removed)])
+    finally:
+        os.chdir(before)
+    errors = errors.getvalue()
+    check("a removed current directory counts as not the reference-checkout, even when "
+          "--reference-checkout names it: exit 1, and nothing restarted",
+          code == 1 and not systemctl_log.exists()
+          and errors == not_reference("fatal: Unable to read current working directory: No "
+                                      "such file or directory"), (code, errors))
+
+    code, calls, printed, errors = run(
+        reference=scratch / "elsewhere",
+        environment={"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.bare",
+                     "GIT_CONFIG_VALUE_0": "not a git repository"})
+    check("a git error that quotes the words \"not a git repository\", such as a bad config "
+          "value, is FAILED with exit 1, not taken for being outside a checkout",
+          code == 1 and calls == []
+          and "git said: fatal: bad boolean config value 'not a git repository'" in errors,
+          (code, errors))
 
     check("the reference-checkout by default is ned-box's",
           restarter.NED_BOX_REFERENCE_CHECKOUT == "/home/nedlern/Projects/nedsnodes")

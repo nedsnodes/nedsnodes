@@ -877,7 +877,7 @@ check("... and it points at the surfaces that do answer a bare filename",
 check("... and no snapshot was mounted to answer it",
       not any(c.startswith("mount_apfs") for c in local_fragment.calls), str(local_fragment.calls))
 
-local_no_repo = FakeRunner([LISTS_SNAPSHOTS, ("rev-parse --show-toplevel", (128, "", "not a git repository"))])
+local_no_repo = FakeRunner([LISTS_SNAPSHOTS, ("rev-parse --show-toplevel", (128, "", "fatal: not a git repository (or any of the parent directories): .git"))])
 report = finder.search_local_snapshots("docs/a/b.md", "/not-a-repo", local_no_repo)
 check("a relative path with no repository to resolve it against is UNAVAILABLE, not NOT FOUND",
       report.status == UNAVAILABLE and any("no top level to resolve it against" in l for l in report.lines),
@@ -886,7 +886,7 @@ check("a relative path with no repository to resolve it against is UNAVAILABLE, 
 # git translates "not a git repository" for a user whose locale is not English, so the run sets LC_ALL=C.
 with tempfile.TemporaryDirectory() as stand_in_bin:
     with open(os.path.join(stand_in_bin, "git"), "w") as stand_in:
-        stand_in.write('#!/bin/sh\nif [ "$LC_ALL" = C ]; then echo "fatal: not a git repository" >&2; '
+        stand_in.write('#!/bin/sh\nif [ "$LC_ALL" = C ]; then echo "fatal: not a git repository (or any of the parent directories): .git" >&2; '
                        'else echo "fatal: kein Git-Repository" >&2; fi\nexit 128\n')
     os.chmod(os.path.join(stand_in_bin, "git"), 0o755)
     path_before, locale_before = os.environ["PATH"], os.environ.get("LC_ALL")
@@ -1047,7 +1047,7 @@ newest_transcript_write_before_the_order_cases = getattr(finder, "_newest_transc
 if newest_transcript_write_before_the_order_cases is not None:
     finder._newest_transcript_write = lambda copy_dir: mac_transcripts_copies_walked.append(str(copy_dir))
 
-skip_local = FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository"))])
+skip_local = FakeRunner([("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git"))])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "",
                               "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
                               skip={"localsnapshots", "box", "timemachine"}, runner=skip_local, on_ned_box=False,
@@ -1059,7 +1059,7 @@ check("--skip localsnapshots drops the surface and lists no snapshots",
       "%s %s" % ([r.surface for r in reports], skip_local.calls))
 
 order_probe = FakeRunner([LISTS_SNAPSHOTS, MOUNTS_FINE, RELEASES_FINE, ("test -e", (1, "", "")),
-                          ("rev-parse --git-dir", (128, "", "not a git repository"))])
+                          ("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git"))])
 reports = finder.build_report("/private/tmp/x/b.md", "/not-a-repo", "/nonexistent-transcripts", "",
                               "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
                               skip={"box", "timemachine"}, runner=order_probe, on_ned_box=False,
@@ -1151,7 +1151,7 @@ git_absent = FakeRunner([
 report = finder.search_git("nowhere.md", "/repo", git_absent)
 check("git reports NOT FOUND when no ref ever had the path", report.status == NOT_FOUND)
 
-git_missing = FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository"))])
+git_missing = FakeRunner([("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git"))])
 report = finder.search_git("x.md", "/tmp", git_missing)
 check("a non-repo is UNAVAILABLE, not NOT FOUND", report.status == UNAVAILABLE)
 
@@ -1484,7 +1484,7 @@ report = finder.search_git_reflog("a/b.md", "/repo", reflog_git_fails)
 check("a reflog search whose git log fails is UNAVAILABLE with git's words, not NOT FOUND",
       report.status == UNAVAILABLE and any("bad object" in l for l in report.lines),
       "%s %s" % (report.status, report.lines))
-report = finder.search_git_reflog("x.md", "/tmp", FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository"))]))
+report = finder.search_git_reflog("x.md", "/tmp", FakeRunner([("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git"))]))
 check("the reflog surface on a non-repo is UNAVAILABLE, not NOT FOUND",
       report.status == UNAVAILABLE and report.surface == "git reflog", "%s %s" % (report.status, report.lines))
 
@@ -1689,7 +1689,7 @@ finder.running_on_ned_box = lambda: False
 # --skip box exists because the box is asleep; the first version still sent
 # the transcripts grep over ssh (only the Timeshift call honoured the skip),
 # so the flag bought nothing but a ConnectTimeout wait.
-skip_box = FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository"))])
+skip_box = FakeRunner([("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git"))])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
                               "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
                               skip={"box", "timemachine"}, runner=skip_box,
@@ -1704,7 +1704,7 @@ check("--skip box drops the log-store when it is not on this machine",
       not any(r.surface == "log-store" for r in reports), str([r.surface for r in reports]))
 
 skip_timeshift = FakeRunner([
-    ("rev-parse --git-dir", (128, "", "not a git repository")),
+    ("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git")),
     ("ssh", (1, "", "")),
 ])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
@@ -2197,7 +2197,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     store, _ = log_store_fixture(tmp)
-    here_skip_box = RunsLocallyRefusesSsh([("rev-parse --git-dir", (128, "", "not a git repository"))])
+    here_skip_box = RunsLocallyRefusesSsh([("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git"))])
     reports = finder.build_report("docs/drafts/pr-main-process-design.md", "/not-a-repo", "/nonexistent-transcripts",
                                   "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
                                   finder.DEFAULT_BOX_SEARCH_ROOTS, skip={"localsnapshots", "box", "timemachine"},
@@ -2207,7 +2207,7 @@ with tempfile.TemporaryDirectory() as tmp:
           and not any(c.startswith("ssh") for c in here_skip_box.calls),
           "%s %s" % ([(r.surface, r.status) for r in reports], here_skip_box.calls))
 
-skip_log_store = FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository")), ("ssh", (1, "", ""))])
+skip_log_store = FakeRunner([("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git")), ("ssh", (1, "", ""))])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
                               "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
                               skip={"localsnapshots", "logstore", "reflog", "timemachine"}, runner=skip_log_store,
@@ -2217,7 +2217,7 @@ check("--skip logstore and --skip reflog drop those two surfaces and nothing els
       and not any("python3 -c" in c for c in skip_log_store.calls),
       "%s %s" % ([r.surface for r in reports], skip_log_store.calls))
 
-order_everything = FakeRunner([("rev-parse --git-dir", (128, "", "not a git repository")), ("ssh", (1, "", ""))])
+order_everything = FakeRunner([("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git")), ("ssh", (1, "", ""))])
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
                               "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
                               skip={"localsnapshots", "timemachine"}, runner=order_everything,
@@ -2944,7 +2944,7 @@ def run_main(argv, runner):
     return code, out.getvalue()
 
 
-NOT_A_REPO = ("rev-parse --git-dir", (128, "", "fatal: not a git repository"))
+NOT_A_REPO = ("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git"))
 code, text = run_main(["a/b.md", "--repo", "/nonexistent-not-a-repo", "--transcripts-dir", "/nonexistent",
                        "--box-ssh-host", "", "--skip", "timemachine", "--skip", "localsnapshots"],
                       FakeRunner([NOT_A_REPO]))
@@ -3079,7 +3079,7 @@ class RecordsWhatWasAnnouncedAtEachCall(FakeRunner):
 
 
 announced = []
-recording = RecordsWhatWasAnnouncedAtEachCall([("rev-parse --git-dir", (128, "", "not a git repository")),
+recording = RecordsWhatWasAnnouncedAtEachCall([("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git")),
                                                ("ssh", (1, "", ""))], announced)
 reports = finder.build_report("a/b.md", "/not-a-repo", "/nonexistent-transcripts", "nedlern@ned-box",
                               "/mnt/backup/timeshift/snapshots", finder.DEFAULT_BOX_SEARCH_ROOTS,
@@ -4322,7 +4322,7 @@ with tempfile.TemporaryDirectory() as tmp:
     outside.mkdir()
     code, out, errors, calls = run_restore(["g.md", "--repo", str(outside), "--restore", str(copy)],
                                            table=[("rev-parse --show-toplevel",
-                                                   (128, "", "fatal: not a git repository"))])
+                                                   (128, "", "fatal: not a git repository (or any of the parent directories): .git"))])
     check("--restore places a relative path under --repo itself when --repo is in no repository",
           code == 0 and (outside / "g.md").read_bytes() == content, "exit=%s\n%s\n%s" % (code, out, errors))
 
@@ -4393,7 +4393,7 @@ with tempfile.TemporaryDirectory() as tmp:
     link.symlink_to(led_to)
     code, out, errors, calls = run_restore(["s.md", "--repo", str(link) + "/..", "--restore", str(copy)],
                                            table=[("rev-parse --show-toplevel",
-                                                   (128, "", "fatal: not a git repository"))])
+                                                   (128, "", "fatal: not a git repository (or any of the parent directories): .git"))])
     check("--restore with a --repo in no repository whose path holds a symlink and then .. places the file in "
           "the directory the system reaches, not where .. collapsed lexically would",
           code == 0 and (tmp / "real" / "s.md").is_file() and (tmp / "real" / "s.md").read_bytes() == content
