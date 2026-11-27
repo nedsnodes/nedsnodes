@@ -152,4 +152,4 @@ Unless named otherwise, files are in `~/.claude/handoffs/` on the agent-seat's m
 - GHI [The agent-crash-watcher puts a handoff-supervisor back on an unsupervised agent-seat whose session-handoff is waiting](https://github.com/nedsnodes/nedsnodes/issues/2541)
 - GHI [The handoff-supervisor writes the memory review's started mark when it puts the memory-review reminder into the initial-agent-instructions](https://github.com/nedsnodes/nedsnodes/issues/2545)
 
-**Checked against:** commit [e7edd94f5843954efff3a7152e777e463d5e0d67](https://github.com/nedsnodes/nedsnodes/commit/e7edd94f5843954efff3a7152e777e463d5e0d67)
+**Checked against:** commit [278538e9fde67e19ba038ef6e978855cb6d0787d](https://github.com/nedsnodes/nedsnodes/commit/278538e9fde67e19ba038ef6e978855cb6d0787d)
