@@ -1394,6 +1394,205 @@ def test_the_waiting_item_read_step_names_and_reads_the_first_undecided_numbered
           and "item 2 of 2: its cold-read-fast-read" in result.stdout, described(result))
 
 
+UNNUMBERED_SUB_STEPS_WITH_PARTS_DOCUMENT = """# A walk
+
+## Item 1 of 2: one
+
+#case_against none.
+
+Recommendation: approve.
+
+## Item 2 of 2: Five changes to the design
+
+### How recordings are ordered
+
+Part 1. Old: none.
+
+#new "Sub-step one, part one."
+
+Part 2. Old: "the old order."
+
+#new "Sub-step one, part two."
+
+#case_against weak: a longer time limit.
+
+The alternative: keep the old sentences.
+
+Recommendation: approve Parts 1 and 2 as written.
+
+### What saving does with other files
+
+Part 1. Old: "removes the old file."
+
+#new "Sub-step two, part one."
+
+Part 2. Old: none.
+
+#new "Sub-step two, part two."
+
+Part 3. Old: "a failed removal is reported."
+
+#new "Sub-step two, part three."
+
+#case_against weak: old files stay.
+
+The alternative: keep the old sentences.
+
+Recommendation: approve Parts 1 to 3 as written.
+
+#### Withdrawn version 1 of item 2
+
+### How recordings are ordered
+
+#new "An older sub-step one."
+
+### What saving does with other files
+
+#new "An older sub-step two."
+"""
+
+
+def test_an_answer_to_the_first_of_two_unnumbered_sub_steps_with_parts_decides_only_that_sub_step():
+    case = Case(next_to_present="item 2 of 2", document=UNNUMBERED_SUB_STEPS_WITH_PARTS_DOCUMENT)
+    case.minutes.write_text("# Minutes\n\n" + approved_line("item 1 of 2") + "#next_to_present item 2 of 2\n")
+    read = case.run(WAITING_ITEM_READ_STEP_NAME)
+    document = walk_document(case)
+    check("the read step numbers the item's unnumbered `###` sub-steps, leaves its Withdrawn version's as they are, "
+          "and names sub-step 2.1",
+          read.returncode == 0 and marker(case) == "#next_to_present item 2.1 of 2"
+          and "\n### Item 2.1 of 2: How recordings are ordered\n" in document
+          and "\n### Item 2.2 of 2: What saving does with other files\n" in document
+          and document.count("\n### How recordings are ordered\n") == 1
+          and document.count("\n### What saving does with other files\n") == 1, described(read) + document)
+    again = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a second read step numbers nothing again", again.returncode == 0 and walk_document(case) == document
+          and marker(case) == "#next_to_present item 2.1 of 2", described(again))
+    checked = case.run("check", "--part-answer", "1=A", "--part-answer", "2=A", reply="A should this be cpc")
+    check("check on the answer to sub-step 2.1 adds only 2.1's two texts",
+          checked.returncode == 0 and "\n`#new` text 1, \"`Sub-step one, part one.`\"" in "\n" + checked.stdout
+          and "\n`#new` text 2, \"`Sub-step one, part two.`\"" in checked.stdout
+          and "`#new` text 3" not in checked.stdout and "Sub-step two" not in checked.stdout
+          and "Sub-step two" not in case.minutes.read_text(), described(checked) + case.minutes.read_text())
+    closed = case.run("close")
+    minutes = case.minutes.read_text()
+    check("close records sub-step 2.1, not item 2, and names sub-step 2.2 next",
+          closed.returncode == 0 and "\nitem 2.1 of 2: part 1 approved <accepted>, part 2 approved <accepted>" in minutes
+          and "\nitem 2 of 2:" not in minutes and marker(case) == "#next_to_present item 2.2 of 2",
+          described(closed) + minutes)
+
+
+def test_a_sub_step_its_new_running_count_takes_over_the_word_limit_is_refused_with_its_heading_numbered():
+    # 500 words unnumbered: `first` and 499 body words; `Item 2.1 of 2:` adds four.
+    document = ("# A walk\n\n## Item 1 of 2: one\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "## Item 2 of 2: two\n\n### first\n\n" + words_of_body(499)
+                + "\n### second\n\n#case_against none.\n\nRecommendation: approve.\n")
+    case = Case(next_to_present="item 2 of 2", document=document)
+    case.minutes.write_text("# Minutes\n\n" + approved_line("item 1 of 2") + "#next_to_present item 2 of 2\n")
+    minutes = case.minutes.read_text()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a sub-step of 500 words that its new running count takes to 504 is refused, its heading numbered and the "
+          "walk-minutes as they were",
+          result.returncode == 1 and "has 504 words, over the limit of 500 words" in result.stderr
+          and "\n### Item 2.1 of 2: first\n" in walk_document(case) and case.minutes.read_text() == minutes
+          and case.calls.read_text() == "", described(result) + walk_document(case))
+
+
+def test_an_unnumbered_sub_step_beside_numbered_ones_is_refused_with_nothing_written():
+    # As after a running-count refusal: the agent splits sub-step 2.1 and adds an unnumbered sibling.
+    document = ("# A walk\n\n## Item 1 of 2: one\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "## Item 2 of 2: two\n\n### Item 2.1 of 2: first\n\n#new \"First text.\"\n\n"
+                "### middle\n\n#new \"Middle text.\"\n\n"
+                "### Item 2.2 of 2: second\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                # An item with no first-entered line yet, which the read step's other steps would stamp.
+                + unshown_item("later", f"{CATEGORY_TAG}fix_next"))
+    case = Case(next_to_present="item 2 of 2", document=document)
+    case.minutes.write_text("# Minutes\n\n" + approved_line("item 1 of 2") + "#next_to_present item 2 of 2\n")
+    minutes = case.minutes.read_text()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("the read step refuses an unnumbered `###` sub-step beside numbered ones, naming each heading, and writes "
+          "nothing, not even another item's first-entered line",
+          result.returncode == 1 and "has numbered `###` sub-steps and also an unnumbered one" in result.stderr
+          and "### middle" in result.stderr and "### Item 2.1 of 2: first" in result.stderr
+          and "### Item 2.2 of 2: second" in result.stderr
+          and walk_document(case) == document and case.minutes.read_text() == minutes
+          and case.calls.read_text() == "", described(result) + walk_document(case))
+
+
+def test_a_sub_step_count_a_heading_above_the_item_holds_is_refused_with_nothing_written():
+    document = ("# A walk\n\n### Item 2.1 of 2: an older first\n\nOld.\n\n"
+                "## Item 1 of 2: one\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "## Item 2 of 2: two\n\n### first\n\n#case_against none.\n\nRecommendation: approve.\n")
+    case = Case(next_to_present="item 2 of 2", document=document)
+    case.minutes.write_text("# Minutes\n\n" + approved_line("item 1 of 2") + "#next_to_present item 2 of 2\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("the read step refuses to write a sub-step count a heading above the waiting item already holds, naming "
+          "both headings, and writes nothing",
+          result.returncode == 1 and "already has a heading with that count" in result.stderr
+          and "\"### first\"" in result.stderr and "### Item 2.1 of 2: an older first" in result.stderr
+          and walk_document(case) == document, described(result) + walk_document(case))
+
+
+def test_an_unnumbered_heading_above_the_first_numbered_sub_step_is_refused_as_beside_numbered_ones():
+    document = ("# A walk\n\n## Item 1 of 2: one\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "## Item 2 of 2: two\n\n### above\n\n#new \"Above text.\"\n\n"
+                "### Item 2.1 of 2: first\n\n#new \"First text.\"\n\n"
+                "### Item 2.2 of 2: second\n\n#case_against none.\n\nRecommendation: approve.\n")
+    case = Case(next_to_present="item 2 of 2", document=document)
+    case.minutes.write_text("# Minutes\n\n" + approved_line("item 1 of 2") + "#next_to_present item 2 of 2\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("the read step refuses an unnumbered `###` heading above the item's first numbered sub-step as one beside "
+          "numbered ones, not as a count another heading holds, and writes nothing",
+          result.returncode == 1 and "has numbered `###` sub-steps and also an unnumbered one" in result.stderr
+          and "### above" in result.stderr and "already has a heading with that count" not in result.stderr
+          and walk_document(case) == document, described(result) + walk_document(case))
+
+
+def test_a_withdrawn_heading_or_another_item_s_heading_between_numbered_sub_steps_is_not_read_as_unnumbered():
+    document = ("# A walk\n\n## Item 1 of 2: one\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "## Item 2 of 2: two\n\n### Item 2.1 of 2: first\n\n#case_against none.\n\n"
+                "Recommendation: approve.\n\n"
+                "### Withdrawn: Item 2.1 of 2: an older first\n\nOld.\n\n"
+                + unshown_item("urgent", f"{CATEGORY_TAG}must_fix_now", "### its detail\n\nDetail.")
+                + "### Item 2.2 of 2: second\n\n#case_against none.\n\nRecommendation: approve.\n")
+    case = Case(next_to_present="item 2 of 2", document=document)
+    case.minutes.write_text("# Minutes\n\n" + approved_line("item 1 of 2") + "#next_to_present item 2 of 2\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a Withdrawn `###` heading and another item's `###` heading between item 2's numbered sub-steps are not "
+          "the item's own, so the read step names sub-step 2.1",
+          result.returncode == 0 and marker(case) == "#next_to_present item 2.1 of 2", described(result))
+
+
+def test_a_sub_step_heading_with_no_title_is_refused_by_line_with_nothing_written():
+    document = ("# A walk\n\n## Item 1 of 2: one\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "## Item 2 of 2: two\n\n###\n\n#case_against none.\n\nRecommendation: approve.\n")
+    case = Case(next_to_present="item 2 of 2", document=document)
+    case.minutes.write_text("# Minutes\n\n" + approved_line("item 1 of 2") + "#next_to_present item 2 of 2\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("the read step refuses a bare `###` heading in the waiting item, naming its line, instead of crashing",
+          result.returncode == 1 and "line 11 of the walk-document is a `###` heading with no title" in result.stderr
+          and "Traceback" not in result.stderr and walk_document(case) == document, described(result))
+
+
+def test_a_sub_step_count_another_heading_already_holds_is_refused_with_nothing_written():
+    # A revised item 2 whose earlier version's numbered sub-step heading is still in the walk-document, below it,
+    # where the walk finder takes it for item 2's own numbered sub-step.
+    document = ("# A walk\n\n## Item 1 of 2: one\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "## Item 2 of 2 revised: two, revised\n\n### first\n\n#case_against none.\n\n"
+                "Recommendation: approve.\n\n"
+                "#### Withdrawn version 1 of item 2\n\n### Item 2.1 of 2: an older first\n\n#new \"Old.\"\n")
+    case = Case(next_to_present="item 2 of 2", document=document)
+    case.minutes.write_text("# Minutes\n\n" + approved_line("item 1 of 2") + "#next_to_present item 2 of 2\n")
+    minutes = case.minutes.read_text()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("the read step refuses to write a sub-step count another heading already holds, naming both headings and "
+          "the Withdrawn remedy, and writes nothing",
+          result.returncode == 1 and "has numbered `###` sub-steps and also an unnumbered one" in result.stderr
+          and "put `Withdrawn: ` just before `Item`" in result.stderr
+          and "line 11: ### first" in result.stderr and "### Item 2.1 of 2: an older first" in result.stderr
+          and walk_document(case) == document and case.minutes.read_text() == minutes
+          and case.calls.read_text() == "", described(result) + walk_document(case))
+
+
 def test_the_waiting_item_read_step_leaves_the_walk_minutes_as_they_were_when_the_sub_step_it_moves_to_is_refused():
     case = Case(document=marks_document(words_of_body(500)))
     case.run(WAITING_ITEM_READ_STEP_NAME)
