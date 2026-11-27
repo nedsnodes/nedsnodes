@@ -1491,7 +1491,7 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
     # From the Mac the compare command fetches over ssh. A stub `ssh` that runs
     # its remote command here stands in for a reachable ned-box, and one that
     # fails as an unreachable host does for the outage the command must show.
-    remote_compare = racing.triage_compare_command(
+    remote_compare = racing.cold_read_triage_file_local_copy_against_log_store_copy_diff_shell_command(
         "ned-box", newer_record / "cold-read-triage.md", newer_stored_triage)
     compare_stubs = {}
     for stub_name, stub_body in (("reachable", 'shift\nexec "$@"\n'),

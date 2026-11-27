@@ -636,7 +636,7 @@ def utc_text_of_epoch_seconds(seconds: int) -> str:
         "%Y-%m-%d %H:%M:%SZ")
 
 
-def triage_compare_command(host, local_triage_path, stored_triage_path) -> str:
+def cold_read_triage_file_local_copy_against_log_store_copy_diff_shell_command(host, local_triage_path, stored_triage_path) -> str:
     """The `diff` of a checkout's triage file with the log-store's, for the rule 4 refusal.
 
     From the Mac the log-store's copy is fetched into a temporary file first,
@@ -1564,7 +1564,7 @@ def ship_one(host, records_path: pathlib.PurePosixPath, record_dir: pathlib.Path
         store_seconds, local_seconds = outcome["triage_newer_in_store"]
         stored_triage_path = store_dir / triage_name
         local_triage_path = record_dir / triage_name
-        compare = triage_compare_command(host, local_triage_path, stored_triage_path)
+        compare = cold_read_triage_file_local_copy_against_log_store_copy_diff_shell_command(host, local_triage_path, stored_triage_path)
         fetch = shlex.join((["scp", f"{host}:{stored_triage_path}"] if host
                             else ["cp", str(stored_triage_path)]) + [str(local_triage_path)])
         ship_again = shlex.join([sys.argv[0], str(record_dir)])
