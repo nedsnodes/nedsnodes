@@ -2,15 +2,17 @@
 """Run one judge cold-read-cell over one restater's restatements.
 
 One invocation = one judge run. A restater is a model that read a rough
-draft and said, in its own words, what each sentence of it means; the judge
-reads that restatement beside the draft it came from, the perfect version of
-that document and the scrubbed defect list between them, and reports which
-listed defects the restatement caught and where the restatement was stupid.
+draft and said, in its own words, what each sentence of it means; a restater
+class is one model at one effort, named like gemini-3.8-flash-low. The judge
+reads a restatement beside the draft it came from, the perfect version of
+that document (the draft with every defect corrected) and the defect list
+between them, which the scrub, the review that built the defect lists, has
+checked; it reports which listed defects the restatement caught and where the
+restatement was stupid.
 Two runs of this cold-read-cell make one restater's score; the program that
 launches both and scores them is nn-systems/cold-read/cold-read-restater-judge-runner.py.
 
-THE RULED DESIGN THIS IMPLEMENTS (user-ruled 2026-09-05, "Opus max is the
-backup to Fable. y"). One fresh Claude Fable 5.2 instance at effort xhigh per
+THE RULED DESIGN THIS IMPLEMENTS. One fresh Claude Fable 5.2 instance at effort xhigh per
 restater class, given the three rough drafts, the three perfect versions, the
 three defect lists and that restater's three restatements. It counts the
 problems the restatements caught, BY DEFECT NUMBER from the list, and the
@@ -19,10 +21,7 @@ unchanged that the restatement misread. Two judge runs per restater. When
 Fable is unavailable -- the account limit, or a safeguard refusal that
 returned no report -- Claude Opus 5.5 at max judges instead, and the record says
 so. Problems a restatement caught that are not on the defect list go back to
-the scrub rather than being scored. The walk that carries the ruling is
-docs/walk/fast-cold-read-perfect-test-cases.md at the cold-read-research seat
-(item 5, "Scoring, as ruled"; the critics are item 4), uncommitted there,
-which is why the ruling is written out here.
+the scrub rather than being scored.
 
 Usage:
   nn-systems/cold-read/cold-read-restater-judge-cell.py --restater gemini-3.8-flash-low \\
@@ -37,12 +36,13 @@ stderr and nothing to stdout.
 
 Exit codes: 0 a model produced a report; 1 every model in the chain failed to
 produce one; 64 this program refused the invocation and never launched a
-model, naming its own fix -- a --prompt-file naming no file, or naming an
-empty one, is refused that way like any other bad invocation. 64 rather than the conventional 2 for the reason
+model, with a message that says how to fix the invocation -- a --prompt-file
+naming no file, or naming an empty one, is refused that way like any other
+bad invocation. 64 rather than the conventional 2 for the reason
 written beside EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py, which
 every cold-read-cell shares.
 
-WHAT THIS LEG SHARES WITH THE OTHER COLD-READ-CELLS, AND WHERE IT PARTS FROM THEM.
+WHAT THIS COLD-READ-CELL SHARES WITH THE OTHER COLD-READ-CELLS, AND WHERE IT PARTS FROM THEM.
 Everything after the prompt is composed is the shared module's: the model
 chain and its fallback, the report-exists-iff-the-run-succeeded invariant, the
 near-miss recovery, the stray-write detection, the provenance stamp, the exit
@@ -71,18 +71,15 @@ both because the ruled design asks for something their shape cannot express:
 WHERE THE JUDGE'S INSTRUCTIONS COME FROM: --prompt-file, and nowhere else.
 This program holds no prompt of its own, and the flag is REQUIRED rather than
 an override, which is the one thing about this cold-read-cell that is
-not like the others. The judge's instructions are operative prose, and
-this project reads operative prose BEFORE a pull request, by cold read
-and by the user, because the pull-request process is the wrong instrument
-for prose. Carrying the text inside this program would have landed it
-through that wrong door. So the text travels separately, through the
-user's walk, and this cold-read-cell refuses to run until a file holds
-it -- which is the correct refusal: nothing should judge anything until
-the user has read what the judge is told to do. The file's home once
-he has walked it is .claude/skills/cold-read/prompts/restater-judge.md,
-beside every other cold-read-cell's prompt, and .claude/ changes only
-through that walk (.claude/guard-hooks/instruction-file-guard.py, user-walked
-2026-08-07, nedschorus#45). This is not the cold-read-fast-read's ruling
+not like the others. The judge's instructions are prose a model acts on,
+which this project has read by cold read and by the user before it lands,
+not reviewed as code in a pull request. So the text travels separately,
+through the user's approval-walk, and this cold-read-cell refuses to run
+until a file holds it: nothing should judge anything until the user has read
+what the judge is told to do. The file's home once he has approved it is
+.claude/skills/cold-read/prompts/restater-judge.md, beside every other
+cold-read-cell's prompt; .claude/guard-hooks/instruction-file-guard.py lets
+files under .claude/ change only with his approval. This is not the cold-read-fast-read's ruling
 (nn-systems/cold-read/cold-read-fast-read.py holds its prompt in the file because the user
 ruled that for the fast cold-read-cell).
 
@@ -90,12 +87,12 @@ WHY THIS COLD-READ-CELL HAS NO --tier. The other launchers take one because
 they pin several measured cold-read-tiers and the flag chooses among them.
 The judge has one configuration, the ruled one, so there is nothing to choose:
 `tier=judge` is stamped as a constant. --model and --effort still override,
-the way they do on every leg, for a caller who must name a model; a --model
+the way they do on every cold-read-cell, for a caller who must name a model; a --model
 this file pins no effort for is refused unless --effort names one, rather than
 run at a level nobody chose.
 
 WHY THIS COLD-READ-CELL'S STAMP CARRIES NO `tokens=` FIELD: the same reason
-the Claude leg's does not -- the Claude CLI prints no "tokens used" line,
+nn-systems/cold-read/cold-read-claude-cell.py's does not -- the Claude CLI prints no "tokens used" line,
 so the field is omitted rather than filled with a zero. If the CLI starts
 printing one, the shared parser in nn-systems/cold-read/cold-read-cell-common.py picks
 it up with no change here.
