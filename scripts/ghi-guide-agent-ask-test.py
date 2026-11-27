@@ -1853,29 +1853,31 @@ import subprocess as _remote_subprocess
 _REPOSITORY_ROOT = SCRIPT_PATH.resolve().parent.parent
 
 
-def _files_the_ask_script_loads():
-    """The ask script and every repository .py file it loads, followed through
-    the files those load in turn, so each fixture copies these and not the
-    whole tree, which run-all-test-suites.py would record as this suite's inputs."""
-    by_name = {}
-    for directory in ("scripts", "nn-systems"):
-        for walked, subdirectories, names in os.walk(_REPOSITORY_ROOT / directory):
-            subdirectories[:] = [name for name in subdirectories if name != "__pycache__"]
-            for name in names:
-                if name.endswith(".py") and not name.endswith("-test.py"):
-                    by_name.setdefault(name, []).append(Path(walked) / name)
-    loaded, waiting = set(), [SCRIPT_PATH.resolve()]
-    while waiting:
-        path = waiting.pop()
-        if path in loaded:
-            continue
-        loaded.add(path)
-        for name in re.findall(r"[\"']([\w.-]+\.py)[\"']", path.read_text(encoding="utf-8")):
-            waiting.extend(by_name.get(name, []))
-    return sorted(path.relative_to(_REPOSITORY_ROOT) for path in loaded)
-
-
-_ASK_SCRIPT_AND_WHAT_IT_LOADS = _files_the_ask_script_loads()
+# The ask script and the repository files it loads, named here rather than found
+# by walking scripts/ and nn-systems/: run-all-test-suites.py records every
+# directory a suite lists as its input, so a walk would make any file added
+# there select this suite. When the ask starts loading another file, add it:
+# until then the cases below fail, because the seat's copy cannot load it.
+_ASK_SCRIPT_AND_WHAT_IT_LOADS = [Path(relative) for relative in (
+    "nn-systems/general-tools/claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py",
+    "nn-systems/general-tools/claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py",
+    "nn-systems/general-tools/failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py",
+    "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py",
+    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py",
+    "nn-systems/general-tools/pull-request-conflict-with-main-rebase-or-replace-answer-common.py",
+    "nn-systems/general-tools/stop-signal-sigterm-or-sighup-raises-system-exit-so-cleanup-runs-common.py",
+    "nn-systems/handoff/handoff-deferred-marker-and-refused-commands-files-common.py",
+    "scripts/branch-conflict-check.py",
+    "scripts/branch-reverts-a-file-to-an-older-main-version-check.py",
+    "scripts/claude-code-session-transcript-lookup-and-text-search-common.py",
+    "scripts/claude-code-session-transcript-records-read-backward-common.py",
+    "scripts/claude-code-subagent-task-notification-interim-recognizer-common.py",
+    "scripts/ghi-guide-agent-ask.py",
+    "scripts/ghi-issue-write.py",
+    "scripts/ghi-mirror-refresh.py",
+    "scripts/git-client-side-hooks-pre-push-conflict-check.py",
+    "scripts/handoff-context-threshold-hook.py",
+)]
 
 
 def _seat_whose_copy_predates_print_answer_json(root):
@@ -1917,9 +1919,13 @@ remote_command_with_new_flag = ghi_ask.build_remote_command("q", False, "x/y", F
 
 with tempfile.TemporaryDirectory() as temporary:
     origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
-    fast_forward_line = ("if python3 -c " + shlex.quote(
-        ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + "; then\n"
+    fast_forward_line = ("python3 -c " + shlex.quote(
+        ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + " </dev/null\n"
+        "fast_forward_exit=$?\n"
+        'if [ "$fast_forward_exit" -eq 0 ]; then\n'
         f"  export {ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1\n"
+        'elif [ "$fast_forward_exit" -eq 4 ]; then\n'
+        "  exit 1\n"
         "fi\n")
     without_fast_forward_line = remote_command_with_new_flag.replace(fast_forward_line, "")
     check("the test removes the fast-forward line from the remote command",
@@ -1983,6 +1989,31 @@ with tempfile.TemporaryDirectory() as temporary:
           and "refreshed the seat checkout 1 commit(s)" in piped.stderr,
           (piped.stdout, piped.stderr))
 
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    recorder = Path(temporary) / "record-stdin"
+    recorder.write_text('#!/bin/sh\ncat\n', encoding="utf-8")
+    recorder.chmod(0o755)
+    # Stands in for a git hook, such as core.fsmonitor, that reads its stdin.
+    reading_bin = Path(temporary) / "stdin-reading-git-bin"
+    reading_bin.mkdir()
+    (reading_bin / "git").write_text(
+        f'#!/bin/sh\ncat > /dev/null\nexec {shlex.quote(_shutil.which("git"))} "$@"\n',
+        encoding="utf-8")
+    (reading_bin / "git").chmod(0o755)
+    reading_environment = {**environment,
+                           "PATH": f"{reading_bin}{os.pathsep}{environment['PATH']}"}
+    stdin_command = ghi_ask.build_remote_command("q", False, "x/y", True).replace(
+        "python3 scripts/ghi-guide-agent-ask.py --question-file", str(recorder))
+    piped = _remote_subprocess.run(["/bin/sh", "-c", stdin_command], input="the whole question\n",
+                                   capture_output=True, text=True, env=reading_environment,
+                                   check=False, timeout=300)
+    check("a question sent on stdin reaches the ask whole even when a git command the "
+          "fast-forward line runs reads its stdin",
+          piped.stdout == "the whole question\n"
+          and "refreshed the seat checkout 1 commit(s)" in piped.stderr,
+          (piped.stdout, piped.stderr))
+
 
 def _environment_whose_git_logs_each_fetch(root, environment):
     real_git = _shutil.which("git")
@@ -2013,13 +2044,17 @@ with tempfile.TemporaryDirectory() as temporary:
     _git(["merge", "-q", "--ff-only", "origin/main"], seat)
     _git(["checkout", "-q", "--detach"], seat)
     log, logging_environment = _environment_whose_git_logs_each_fetch(Path(temporary), environment)
-    failing_line = ghi_ask.build_remote_command("q", False, "x/y").replace(
+    normal_line = ghi_ask.build_remote_command("q", False, "x/y")
+    failing_line = normal_line.replace(
         "ask.fast_forward_seat_checkout(seat)", "ask.name_no_copy_has(seat)")
+    check("the test makes the fast-forward line call a name no copy has",
+          failing_line != normal_line, normal_line)
     fell_through = _run_remote_command(failing_line, logging_environment)
     fetches = log.read_text(encoding="utf-8").count("fetch") if log.exists() else 0
     check("when the fast-forward line fails before fetching, the ask fetches the seat "
           "checkout itself",
-          fetches == 1 and "ghi-guide-agent-ask: mirror refresh" in fell_through.stderr,
+          "name_no_copy_has" in fell_through.stderr
+          and fetches == 1 and "ghi-guide-agent-ask: mirror refresh" in fell_through.stderr,
           (fetches, fell_through.stderr))
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -2046,6 +2081,19 @@ with tempfile.TemporaryDirectory() as temporary:
           unusable.stderr.count("is not usable") == 1 and "Traceback" not in unusable.stderr
           and unusable.returncode != 0,
           (unusable.returncode, unusable.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    (seat / ghi_ask.LOCK_FILE_NAME).mkdir()
+    stale_and_unusable = _run_remote_command(remote_command_with_new_flag, environment)
+    check("when the agent-home's state lock cannot be opened and its copy predates a flag "
+          "the caller sends, the remote command reports the unusable agent-home once, "
+          "not the unknown flag, and exits nonzero",
+          stale_and_unusable.stderr.count("is not usable") == 1
+          and "unrecognized arguments" not in stale_and_unusable.stderr
+          and "Traceback" not in stale_and_unusable.stderr
+          and stale_and_unusable.returncode != 0,
+          (stale_and_unusable.returncode, stale_and_unusable.stderr))
 
 
 # --- the seat directory, state file and state key, unpatched ----------------

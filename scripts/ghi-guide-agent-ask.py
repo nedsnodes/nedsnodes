@@ -1076,8 +1076,12 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
 #
 # It exits 0 only when it ran the fast-forward, so the shell then tells the
 # ask, through an environment variable a stale copy ignores rather than a flag
-# it would reject, not to fetch a second time. An unusable seat directory exits
-# quietly: the ask reports it in its own one line.
+# it would reject, not to fetch a second time. An unusable seat directory is
+# reported here, in the ask's own one-line form, and the shell stops with the
+# ask's exit 1: the ask could only fail on it too, and a copy older than a flag
+# the caller sends would fail at that flag first and never say why. It reads
+# /dev/null, not ssh's stdin, which holds the question the ask reads next, so
+# that no git hook its git commands run, such as core.fsmonitor, can take it.
 GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE = "GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED"
 GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE = "\n".join([
     "import importlib.util, sys",
@@ -1089,8 +1093,9 @@ GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE = "\n".join([
     "try:",
     "    with ask.state_lock(seat / ask.LOCK_FILE_NAME) as locked:",
     "        line = ask.fast_forward_seat_checkout(seat) if locked else None",
-    "except ask.SeatDirectoryUnusable:",
-    "    line = None",
+    "except ask.SeatDirectoryUnusable as error:",
+    "    print(f'ghi-guide-agent-ask: {error}', file=sys.stderr)",
+    "    sys.exit(4)",
     "if line:",
     "    print(line, file=sys.stderr)",
     "sys.exit(0 if line is not None else 3)",
@@ -1145,8 +1150,12 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
         '}',
         # Not `&&`: a failed fast-forward prints its line and the ask runs on, as
         # fast_forward_seat_checkout's docstring requires.
-        "if python3 -c " + shlex.quote(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + "; then",
+        "python3 -c " + shlex.quote(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + " </dev/null",
+        "fast_forward_exit=$?",
+        'if [ "$fast_forward_exit" -eq 0 ]; then',
         f"  export {GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1",
+        'elif [ "$fast_forward_exit" -eq 4 ]; then',
+        "  exit 1",
         "fi",
         invocation,
     ])
