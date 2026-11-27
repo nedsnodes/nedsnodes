@@ -2856,21 +2856,43 @@ def store_answer_deadline_and_long_run_cases(scratch):
           hook.run_with_deadline(lambda: [hook.write_backup_store_operation_done_mark_to_parent_pipe() for _ in range(3)] and 7, 3.0) == 7)
 
     world = fresh(scratch, "store-read-answers")
+    path = str(world.repo / "CLAUDE.md")
     read_end, write_end = os.pipe()
     saved_environment = dict(os.environ)
+    marks = []
     try:
         os.environ.update(world.environment())
         hook.answer_pipe = write_end
-        hook.Store(world.machine).read(str(world.repo / "CLAUDE.md"), "approved")
+        store = hook.Store(world.machine)
+        store.path_directory(path, create=False)
+        marks.append(os.read(read_end, 1024))
+        store.read(path, "approved")
+        marks.append(os.read(read_end, 1024))
     finally:
         hook.answer_pipe = None
         os.environ.clear()
         os.environ.update(saved_environment)
         os.close(write_end)
-    marks = os.read(read_end, 1024)
-    os.close(read_end)
-    check("a Store read marks an answer for the parent, and nothing else",
-          marks and set(marks) == set(b"."), marks)
+        os.close(read_end)
+    # read opens the directory through path_directory, so it marks once for each.
+    check("a Store directory open marks one answer for the parent, and a Store read one more",
+          marks == [b".", b".."], marks)
+
+    world = mac_world(scratch, "mac-child-answers")
+    (world.repo / "CLAUDE.md").write_text("project v2, its store work answered from a child\n")
+    hook = load_hook_in_this_process()
+    original_wait = hook.wait_for_backup_store_child_process_answers_until_silent_or_run_limit
+    received = []
+
+    def wait_and_keep(*arguments, **keywords):
+        received.append(original_wait(*arguments, **keywords))
+        return received[-1]
+
+    hook.wait_for_backup_store_child_process_answers_until_silent_or_run_limit = wait_and_keep
+    run_hook_in_this_process(world, hook, "session-a", "owner-a")
+    check("on the Mac the hook's child sends the parent an answer mark for each store operation, "
+          "before its result",
+          len(received) == 1 and received[0].partition(b"=")[0].count(b".") >= 3, received)
 
     world = mac_world(scratch, "mac-run-limit")
     claude = world.repo / "CLAUDE.md"
