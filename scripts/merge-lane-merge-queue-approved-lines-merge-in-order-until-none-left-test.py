@@ -1016,6 +1016,33 @@ def starting_cases(scratch):
     check("resume makes no check outside merge-batch.lock that a batch could take the lock in",
           healthy_batch == [], output)
 
+    for subcommand in ("merge-batch-resume", "merge-batch-start"):
+        case = Case(scratch, f"{subcommand}-hands-the-lock-to-the-batch", [approved(10, A)],
+                    {"10": pr(A)})
+        if subcommand == "merge-batch-resume":
+            (case.outputs / STOP_FILE_NAME).write_text("stopped\n")
+        real_popen = program.subprocess.Popen
+        launches = []
+
+        def a_cron_start_arrives_as_the_batch_is_launched(command, **keywords):
+            launches.append((command, keywords))
+            if len(launches) == 1:
+                launches.append(case.run("merge-batch-start"))
+        program.subprocess.Popen = a_cron_start_arrives_as_the_batch_is_launched
+        try:
+            exit_code, output = case.run(subcommand)
+        finally:
+            program.subprocess.Popen = real_popen
+        command, keywords = launches[0] if launches else ([], {})
+        lock_fd = (int(command[command.index("--merge-batch-lock-fd") + 1])
+                   if "--merge-batch-lock-fd" in command else None)
+        check(f"{subcommand} launches its merge batch while still holding merge-batch.lock and "
+              f"hands that descriptor to it, so a start arriving then says ALREADY RUNNING and "
+              f"launches no second batch",
+              exit_code == 0 and output.startswith("STARTED: ") and len(launches) == 2
+              and launches[1][1].startswith("ALREADY RUNNING")
+              and keywords.get("pass_fds") == (lock_fd,), f"{output}\n{launches}")
+
     case = Case(scratch, "loop-retakes-the-lock-after-another-batch-died", [approved(10, A)],
                 {"10": pr(A), "11": pr(B)})
     real_flock = program.fcntl.flock
