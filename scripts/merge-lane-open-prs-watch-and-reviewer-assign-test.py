@@ -1997,6 +1997,12 @@ def run_poll_once_cases(scratch_root, token_file):
         scratch.mkdir()
         return PollOnceMachine(scratch, token_file)
 
+    def open_generic_task(machine):
+        # As an earlier run's append failure leaves it, open until merge-lane-2 reads it.
+        watcher_module.agent_seat_task_list.agent_seat_task_list_new_pending_task_write(
+            machine.tasks, watcher_module.FAILURE_TASK_SUBJECT_PREFIX
+            + "it could not record or deliver events", "an earlier append failed")
+
     machine = machine_for("missing-state")
     machine.poll = [poll_once_pull_request(1)]
     code = machine.run()
@@ -2130,17 +2136,32 @@ def run_poll_once_cases(scratch_root, token_file):
           and "could not record" in machine.tasks_read()[0]["subject"] + machine.errors,
           f"{code} {machine.errors}")
 
+    real_path_open = watcher_module.Path.open
+
+    @contextlib.contextmanager
+    def event_file_append_open_fails(machine):
+        # The cut-back reads the event file first, so only the append's open fails.
+        def open_fails(path, mode="r", *args, **kwargs):
+            if path == machine.events_path and mode == "ab":
+                raise OSError("injected: the event file cannot be opened to append")
+            return real_path_open(path, mode, *args, **kwargs)
+
+        watcher_module.Path.open = open_fails
+        try:
+            yield
+        finally:
+            watcher_module.Path.open = real_path_open
+
     machine = machine_for("append-fails-two-runs-after-assigning")
     machine.assignments.write_text("", encoding="utf-8")
     machine.poll = []
     machine.run("--poll-once-write-baseline")
-    machine.events_path.mkdir()
-    machine.poll = [poll_once_pull_request(1)]
-    first = machine.run()
-    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
-    second = machine.run()
+    with event_file_append_open_fails(machine):
+        machine.poll = [poll_once_pull_request(1)]
+        first = machine.run()
+        machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+        second = machine.run()
     kept_while_failing = machine.assignments.read_text(encoding="utf-8")
-    machine.events_path.rmdir()
     third = machine.run()
     assigned = [line for line in machine.event_lines() if " REVIEW-ASSIGNED " in line]
     check("when two runs in a row cannot append after dealing reviews, the assignment file is put "
@@ -2315,7 +2336,8 @@ def run_poll_once_cases(scratch_root, token_file):
           f"{third} {lines} {machine.errors}")
     check("the cut-failure task, still open after a later run recorded lines, names no byte offset "
           "and no cut to make, so following it deletes none of those lines",
-          str(whole_end) not in cut_description and "bytes" not in cut_description
+          str(whole_end) not in cut_description.replace(str(machine.events_path), "")
+          and "bytes" not in cut_description
           and "cut the file" not in cut_description and "by hand" in cut_description,
           cut_description)
 
@@ -2325,37 +2347,38 @@ def run_poll_once_cases(scratch_root, token_file):
     machine.run("--poll-once-write-baseline")
     machine.poll = [poll_once_pull_request(1)]
     real_fsync = watcher_module.os.fsync
-    real_held = watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset
+    real_held = watcher_module.open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole
 
     def fsync_fails(descriptor):
         raise OSError("injected: fsync failed")
 
     watcher_module.os.fsync = fsync_fails
-    watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset = lambda *arguments: None
+    watcher_module.open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole = lambda *arguments: None
+    open_generic_task(machine)
     try:
         code = machine.run()
     finally:
         watcher_module.os.fsync = real_fsync
-        watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset = real_held
-    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+        watcher_module.open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole = real_held
+    kept_tasks = [task for task in machine.tasks_read() if "#1" in task["subject"]]
+    description = kept_tasks[0]["description"] if kept_tasks else ""
     check("when the failed append's event file cannot be read back, the run keeps the deal, so "
-          "no later poll deals it again, and the failure task names it as a line the event file "
-          "may hold",
-          code == 1
+          "no later poll deals it again, and a task of its own, which an open append-failure task "
+          "does not swallow, names it as a line the event file may hold",
+          code == 1 and len(kept_tasks) == 1 and len(machine.tasks_read()) == 2
           and [line.split()[0] for line in
                machine.assignments.read_text(encoding="utf-8").splitlines()] == ["1"]
           and "could not be read back" in description and "may hold after the failed append" in description
           and "PR #1 REVIEW-ASSIGNED" in description,
           f"{code} {description!r} {machine.errors}")
     check("an event file that cannot be read back gives no count of the lines it holds",
-          watcher_module.event_file_count_of_appended_lines_found_whole_from_append_offset(
+          watcher_module.open_prs_watch_event_file_read_back_from_append_offset_counting_appended_lines_held_whole(
               machine.directory / "absent.log", 0, [b"x\n"]) is None)
 
     machine = machine_for("append-and-put-back-fail")
     machine.assignments.write_text("", encoding="utf-8")
     machine.poll = []
     machine.run("--poll-once-write-baseline")
-    machine.events_path.mkdir()
     machine.poll = [poll_once_pull_request(1)]
     real_write = watcher_module.merge_lane_pull_request_review_assignments_file_write
     writes = []
@@ -2367,16 +2390,83 @@ def run_poll_once_cases(scratch_root, token_file):
         real_write(path, text)
 
     watcher_module.merge_lane_pull_request_review_assignments_file_write = write_then_fail
+    open_generic_task(machine)
+    try:
+        with event_file_append_open_fails(machine):
+            code = machine.run()
+    finally:
+        watcher_module.merge_lane_pull_request_review_assignments_file_write = real_write
+    kept_tasks = [task for task in machine.tasks_read() if "#1" in task["subject"]]
+    description = kept_tasks[0]["description"] if kept_tasks else ""
+    check("when the append fails and the assignment file cannot be put back, while an "
+          "append-failure task is open, a task of its own, whose subject names the pull request, "
+          "says the file keeps it with no REVIEW-ASSIGNED line recorded",
+          code == 1 and len(kept_tasks) == 1 and "could not be put back" in description
+          and "PR #1 REVIEW-ASSIGNED" in description,
+          f"{code} {machine.tasks_read()} {machine.errors}")
+
+    machine = machine_for("cut-fails-before-dealing")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    with machine.events_path.open("ab") as events:
+        events.write(b"2026-11-26T00:00:00Z PR #9 REVIEW-ASS")
+    machine.poll = [poll_once_pull_request(1)]
+    real_truncate = watcher_module.os.truncate
+    watcher_module.os.truncate = truncate_fails
     try:
         code = machine.run()
     finally:
-        watcher_module.merge_lane_pull_request_review_assignments_file_write = real_write
-    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
-    check("when the append fails and the assignment file cannot be put back, the failure task "
-          "names the pull request the file keeps with no REVIEW-ASSIGNED line recorded",
-          code == 1 and "could not be put back" in description
-          and "PR #1 REVIEW-ASSIGNED" in description,
-          f"{code} {description} {machine.errors}")
+        watcher_module.os.truncate = real_truncate
+    subjects = [task["subject"] for task in machine.tasks_read()]
+    check("when the event file ends inside a line that cannot be cut, the run deals no pull "
+          "request, so a failed rollback cannot leave one assigned with no REVIEW-ASSIGNED line, "
+          "and opens the cut-back task",
+          code == 1 and machine.assignments.read_text(encoding="utf-8") == ""
+          and len(subjects) == 1 and "cut back" in subjects[0],
+          f"{code} {subjects} {machine.errors}")
+
+    machine = machine_for("cut-scan-read-fails")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    with machine.events_path.open("ab") as events:
+        events.write(b"2026-11-26T00:00:00Z WATCH: whole\n2026-11-26T00:00:01Z PR #9 REVIEW-ASS")
+    open_generic_task(machine)
+
+    class ScanReadFails:
+        def __init__(self, handle):
+            self.handle, self.reads = handle, 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.handle.close()
+            return False
+
+        def seek(self, *arguments):
+            return self.handle.seek(*arguments)
+
+        def read(self, size):
+            self.reads += 1
+            if self.reads > 1:
+                raise OSError("injected: I/O error reading back through the event file")
+            return self.handle.read(size)
+
+    def open_scan_fails(path, mode="r", *args, **kwargs):
+        handle = real_path_open(path, mode, *args, **kwargs)
+        return ScanReadFails(handle) if path == machine.events_path and mode == "rb" else handle
+
+    watcher_module.Path.open = open_scan_fails
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.Path.open = real_path_open
+    subjects = [task["subject"] for task in machine.tasks_read()]
+    check("when reading back through an event file that ends inside a line fails, the run opens "
+          "the cut-back task beside an open append-failure task",
+          code == 1 and len(subjects) == 2 and any("cut back" in subject for subject in subjects),
+          f"{code} {subjects} {machine.errors}")
 
     machine = machine_for("another-repository-default-directory")
     # Should these cases regress into a poll, it must not touch merge-lane-2's real state or tasks.
