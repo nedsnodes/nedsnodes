@@ -1658,6 +1658,10 @@ with tempfile.TemporaryDirectory() as scratch:
           passed_settings.startswith("{")
           and json.loads(passed_settings).get("disableAllHooks") is True,
           repr(claude_argv))
+    check("the Claude cell turns Claude Code's auto-memory off by --settings",
+          passed_settings.startswith("{")
+          and json.loads(passed_settings).get("autoMemoryEnabled") is False,
+          repr(claude_argv))
     # A cell knows only CLAUDE.md, the glossaries and the text: user,project
     # leaves out the local source, which carries the launching agent-seat's
     # CLAUDE.local.md, and still loads CLAUDE.md.
