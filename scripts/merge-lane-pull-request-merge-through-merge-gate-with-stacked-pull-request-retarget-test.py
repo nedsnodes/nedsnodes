@@ -635,7 +635,7 @@ def suite_selection_main_commit_of(directory):
     return path.read_text().strip() if path.is_file() else None
 
 
-def suite_selection_main_commit_written(text):
+def suite_selection_main_commit_record_write(text):
     """A before_the_program_runs that writes text to the file, makes a directory there when
     text is None, and writes nothing when text is "". In text, "PARENT" becomes the merge
     commit's parent, origin's first commit, and "UNRELATED" a commit with no parent in the
@@ -666,7 +666,7 @@ def suite_selection_main_commit_cases(scratch):
         exit_code, output, _, _, _ = run_case(
             scratch, name, [(GATE_PASSED, 0)], routes, merge_commit_new_to_the_clone=True,
             before_the_program_runs=(before_the_program_runs
-                                     or suite_selection_main_commit_written(written)),
+                                     or suite_selection_main_commit_record_write(written)),
             **options)
         directory = scratch / name
         return (exit_code, output, runner_calls(scratch, name),
@@ -942,7 +942,7 @@ def suite_selection_main_commit_cases(scratch):
     into_another_branch["pr merge"] = {"origin_main_to": "MERGE_COMMIT", "origin": "ORIGIN"}
     into_another_branch["view-state"] = {
         "stdout": '{"state":"MERGED","mc":"MERGE_COMMIT","base":"stacked-topic-branch"}\n'}
-    write_the_newest_main_commit = suite_selection_main_commit_written("PARENT\n")
+    write_the_newest_main_commit = suite_selection_main_commit_record_write("PARENT\n")
 
     failed_suites_as_written = []
 
@@ -2199,7 +2199,7 @@ def failed_suites_kept_in_view_cases(scratch):
                     with open(path.with_name(path.name + ".lock"), "a") as lock:
                         fcntl.flock(lock, fcntl.LOCK_EX)
                         writer = threading.Thread(
-                            target=program.after_merge_test_run_suite_selection_main_commit_written,
+                            target=program.after_merge_test_run_suite_selection_main_commit_record_move_forward_to,
                             args=(merge_commit, git))
                         writer.start()
                         time.sleep(hold_the_lock_for)
@@ -2207,7 +2207,7 @@ def failed_suites_kept_in_view_cases(scratch):
                     writer.join()
                     written = True
                 else:
-                    written = program.after_merge_test_run_suite_selection_main_commit_written(
+                    written = program.after_merge_test_run_suite_selection_main_commit_record_move_forward_to(
                         merge_commit, git)
             return written, path.read_text().strip(), printed.getvalue(), waited
         finally:

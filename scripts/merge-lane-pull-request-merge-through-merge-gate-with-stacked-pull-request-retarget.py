@@ -1228,7 +1228,7 @@ AFTER_MERGE_TEST_RUN_SUITE_SELECTION_MAIN_COMMIT_FORMER_FILE_NAME = (
     "newest-main-commit-whose-after-merge-test-run-left-no-test-failing.txt")
 
 
-def after_merge_test_run_suite_selection_main_commit_former_file_renamed():
+def after_merge_test_run_suite_selection_main_commit_record_file_migrate_from_former_path():
     """Rename the record's file from its former name when only that file is there; print what
     was done or what failed."""
     path = after_merge_test_run_suite_selection_main_commit_file()
@@ -1245,7 +1245,7 @@ def after_merge_test_run_suite_selection_main_commit_former_file_renamed():
     print(f"renamed {former} to {path}")
 
 
-def after_merge_test_run_suite_selection_main_commit_read(git, merge_commit):
+def after_merge_test_run_suite_selection_main_commit_record_read(git, merge_commit):
     """Return (the recorded commit, None) when it is an ancestor of merge_commit, or (None, why
     it is not used)."""
     path = after_merge_test_run_suite_selection_main_commit_file()
@@ -1268,7 +1268,7 @@ def after_merge_test_run_suite_selection_main_commit_read(git, merge_commit):
     return commit, None
 
 
-def after_merge_test_run_suite_selection_main_commit_file_contents_described(path):
+def after_merge_test_run_suite_selection_main_commit_record_file_contents_describe(path):
     """Say what the record at path holds after a failed write, and which commit the next
     after-merge test run compares with because of it."""
     no_record = ("so the next after-merge test run compares with its pull request's head commit, "
@@ -1288,7 +1288,7 @@ def after_merge_test_run_suite_selection_main_commit_file_contents_described(pat
             f"there.")
 
 
-def after_merge_test_run_suite_selection_main_commit_written(merge_commit, git):
+def after_merge_test_run_suite_selection_main_commit_record_move_forward_to(merge_commit, git):
     """Record merge_commit as the suite selection main commit, unless the record already names
     merge_commit or a commit descending from it; print what happened and return False when it
     could not be written."""
@@ -1338,7 +1338,7 @@ def after_merge_test_run_suite_selection_main_commit_written(merge_commit, git):
         print(f"STOP: merged, and nothing in main's test run stops the program exiting 0, but {merge_commit[:12]} "
               f"was not recorded in {path}: {error}\n"
               f"{left_behind}"
-              f"{after_merge_test_run_suite_selection_main_commit_file_contents_described(path)} "
+              f"{after_merge_test_run_suite_selection_main_commit_record_file_contents_describe(path)} "
               f"Nothing else waits on this record: the program exits 3.\n"
               f"If the error names a cause you can fix, such as a permission on a directory, fix "
               f"that cause only: do not write {path} by hand, and nothing needs to be run again, "
@@ -1397,7 +1397,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch, steps_before_the_
     return an exit code. steps_before_the_test_run_done says whether the steps after the merge
     that ran before it exited 0, since the merge commit is recorded only when the program
     exits 0."""
-    after_merge_test_run_suite_selection_main_commit_former_file_renamed()
+    after_merge_test_run_suite_selection_main_commit_record_file_migrate_from_former_path()
     checkout = arguments.review_tools_worktree_at_main
     head_tested, why_no_head_test_run = head_test_run_passed_merged_commit(arguments)
     by_hand = after_merge_test_run_by_hand_command(head_tested, arguments.head_commit,
@@ -1449,7 +1449,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch, steps_before_the_
                                     f"test run passed on, in {checkout}: {git_error(readable)}")
             head_tested = None
     suite_selection_main_commit, why_no_suite_selection_main_commit = (
-        after_merge_test_run_suite_selection_main_commit_read(git, merge_commit))
+        after_merge_test_run_suite_selection_main_commit_record_read(git, merge_commit))
     compared_with = after_merge_test_run_suite_selection_commits_choose(
         suite_selection_main_commit, head_tested, arguments.head_commit)
     if suite_selection_main_commit is None:
@@ -1588,7 +1588,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch, steps_before_the_
                   f"main, and that file names only main's commits. Nothing to do: the next "
                   f"merge into main that the program exits 0 after writes its own merge "
                   f"commit there.")
-        elif not after_merge_test_run_suite_selection_main_commit_written(merge_commit, git):
+        elif not after_merge_test_run_suite_selection_main_commit_record_move_forward_to(merge_commit, git):
             # Its STOP is the closing message: every other step worked, so the closing message
             # would say to go on.
             return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
