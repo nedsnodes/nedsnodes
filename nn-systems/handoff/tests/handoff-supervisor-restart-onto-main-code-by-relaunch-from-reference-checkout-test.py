@@ -718,11 +718,18 @@ def second_half_cases():
     stop_fake(supervisor_id)
 
 
+# Popen returns while the kernel is still part way through the child's exec, so a command line
+# read at once can be empty, which ps shows as "[sleep]". The fixtures record the command they
+# started instead of reading it back.
+SLEEP_600 = ["sleep", "600"]
+SLEEP_600_COMMAND_LINE = " ".join(SLEEP_600)
+
+
 def start_leftover_in_agent_home():
     """Start a process working in the agent-home that step 4 does not end; return (its ID, its command)."""
-    leftover = subprocess.Popen(["sleep", "600"], cwd=str(AGENT_HOME))
+    leftover = subprocess.Popen(SLEEP_600, cwd=str(AGENT_HOME))
     started_process_ids.append(leftover.pid)
-    return leftover.pid, program.process_command_line(leftover.pid)
+    return leftover.pid, SLEEP_600_COMMAND_LINE
 
 
 def state_with_leftover():
@@ -784,13 +791,16 @@ def step_4_and_leftover_cases():
     control("resupervise-exit-codes", "1 0")
     control("recover-exit-codes", "0")
     control("successor-reply", "replied")
-    supervisor_id, claude_id, leftover_id, state_path = state_with_leftover()
+    # The read a just-started process can give, before its exec has set its command line.
+    with replaced(program, "process_command_line", lambda process_id: "[sleep]"):
+        supervisor_id, claude_id, leftover_id, state_path = state_with_leftover()
     write_session_handoff()
     status, half, output = second_half(state_path)
     time.sleep(0.2)
     result = (state_path.parent / program.HANDOFF_SUPERVISOR_RESTART_RESULT_FILE_NAME).read_text()
     ended_line = f"step 5: process {leftover_id} (sleep 600) ended"
-    check("step 5: a failed resupervise-seat.py ends step 2's leftovers before it is run once more",
+    check("step 5: a failed resupervise-seat.py ends step 2's leftovers before it is run once more, "
+          "even when ps reads the leftover before its exec has finished",
           status == 0 and not running(leftover_id) and ended_line in result
           and result.index(ended_line) < result.index("step 5, run once more"), result)
 
@@ -830,18 +840,22 @@ def step_5_cases():
     time.sleep(0.2)
     check("step 5: a process left from step 2's list is ended", not running(claude_id))
 
-    for listed_now, case in (({os.getpid(): "python3 a process step 2 did not list"},
-                              "a process step 2 did not list"),
-                             ({supervisor_id: "tmux new-session -s other"},
-                              "a tmux server, even at a listed process ID"),
-                             ({supervisor_id: "sleep 1 a different command"},
-                              "a listed process ID now running another command")):
+    supervisor_command = half.state["supervisor_command"]
+    for listed_now, case, reason in (
+            ({os.getpid(): "python3 a process step 2 did not list"}, "a process step 2 did not list",
+             f"{os.getpid()}: python3 a process step 2 did not list (step 2 did not list it)"),
+            ({supervisor_id: "tmux new-session -s other"}, "a tmux server, even at a listed process ID",
+             f"{supervisor_id}: tmux new-session -s other (step 2 listed it as {supervisor_command})"),
+            ({supervisor_id: "sleep 1 a different command"},
+             "a listed process ID now running another command",
+             f"{supervisor_id}: sleep 1 a different command (step 2 listed it as {supervisor_command})")):
         try:
             half.end_leftovers_from_step_2(listed_now)
-            check(f"step 5: {case} stops the program", False, "no failure")
+            check(f"step 5: {case} stops the program, saying why", False, "no failure")
         except program.RestartFailure as error:
-            check(f"step 5: {case} stops the program",
-                  "processes other than those left from the old agent-session" in str(error), str(error))
+            check(f"step 5: {case} stops the program, saying why",
+                  "processes other than those left from the old agent-session" in str(error)
+                  and reason in str(error), str(error))
 
     tmux_command = "tmux new-session -d -s restart-test-seat"
     half.state["agent_home_processes"][str(os.getpid())] = tmux_command
@@ -851,7 +865,8 @@ def step_5_cases():
               "no failure")
     except program.RestartFailure as error:
         check("step 5: a tmux server listed with the same command in step 2 stops the program",
-              "processes other than those left from the old agent-session" in str(error), str(error))
+              "processes other than those left from the old agent-session" in str(error)
+              and f"{os.getpid()}: {tmux_command} (a tmux server)" in str(error), str(error))
     stop_fake(supervisor_id)
 
 
@@ -867,9 +882,9 @@ def process_cases():
         done = program.end_process(stubborn.pid, command, sleep=lambda s: (stubborn.poll(), time.sleep(s)))
     check("a process that ignores SIGTERM is ended with SIGKILL", "ended on SIGKILL" in done, done)
 
-    polite = subprocess.Popen(["sleep", "600"])
+    polite = subprocess.Popen(SLEEP_600)
     started_process_ids.append(polite.pid)
-    command = program.process_command_line(polite.pid)
+    command = SLEEP_600_COMMAND_LINE
     done = program.end_process(polite.pid, command, sleep=lambda s: (polite.poll(), time.sleep(0.05)))
     check("a process that takes SIGTERM is ended with it", "ended on SIGTERM" in done, done)
     done = program.end_process(polite.pid, command)
