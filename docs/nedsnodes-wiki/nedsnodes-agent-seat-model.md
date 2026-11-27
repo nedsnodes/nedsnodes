@@ -44,7 +44,7 @@ From the **Mac**, using the Mac's own clone of this repository:
 
 ```
 ~/Projects/nedsnodes/scripts/launch-claude-ubuntu <seat> \
-    --first-prompt-file /home/nedlern/Projects/nedsnodes/docs/agents/seat-first-prompt.md
+    --first-prompt-file /home/nedlern/Projects/nedsnodes/docs/agents/seat-first.prompt.md
 ```
 
 The script runs on the Mac and reaches the box over SSH. The `--first-prompt-file` path is a **box-side** path, because the handoff-supervisor reads that file on the box. One generic file serves every agent-seat: the agent learns its own name from its working directory, so nothing needs substituting.
@@ -53,7 +53,7 @@ The script runs on the Mac and reaches the box over SSH. The `--first-prompt-fil
 
 ```
 ls ~/Projects/nedsnodes/scripts/launch-claude-ubuntu                        # on the Mac
-ssh nedlern@ned-box 'ls /home/nedlern/Projects/nedsnodes/docs/agents/seat-first-prompt.md'
+ssh nedlern@ned-box 'ls /home/nedlern/Projects/nedsnodes/docs/agents/seat-first.prompt.md'
 ```
 
 If the box's copy is missing, `ssh nedlern@ned-box 'git -C ~/Projects/nedsnodes pull'` and try again.
@@ -72,6 +72,6 @@ An agent-seat's agent-home holds no branch: it rests on a detached HEAD at `orig
 
 It protects nothing outside git. `~/.claude/handoffs/` and the tmux socket (`tmux -L <seat>`, one server per agent-seat since 2026-08-21, so one server crash takes down one agent-seat) are per-machine state keyed by the agent-seat's name. Two agent-seats using the same name would collide in that directory and in cross-session addressing, which is why one name means one agent-seat across both machines.
 
-One class of file is guarded outside git: the agent-instructions, the files that tell agents how to behave. `CLAUDE.md`, an agent-seat's `CLAUDE.local.md`, the repository's `.claude/`, and the harness memory under `~/.claude/projects/` change only when approved-by-walk, enforced by `.claude/guard-hooks/instruction-file-guard.py`. An agent-seat's brief and the first-prompt file, `docs/agents/seat-first-prompt.md`, are in the guarded set too, as reusable prompts, and so is every other file the file-naming page lists under "Files the user reviews".
+One class of file is guarded outside git: the agent-instructions, the files that tell agents how to behave. `CLAUDE.md`, an agent-seat's `CLAUDE.local.md`, the repository's `.claude/`, and the harness memory under `~/.claude/projects/` change only when approved-by-walk, enforced by `.claude/guard-hooks/instruction-file-guard.py`. An agent-seat's brief and the first-prompt file, `docs/agents/seat-first.prompt.md`, are in the guarded set too, as reusable prompts, and so is every other file the file-naming page lists under "Files the user reviews".
 
 **Nothing that matters is left only in a session.** Work belongs in commits and pushes; decisions belong in the wiki, the designs and the issues. The handoff is the one durable thing that is never pushed: it lives on the agent-seat's machine only, and an agent-seat exited without one keeps its committed work and loses its thread.

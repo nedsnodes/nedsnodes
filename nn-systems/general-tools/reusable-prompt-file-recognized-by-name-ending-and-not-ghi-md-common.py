@@ -2,12 +2,12 @@
 """Say whether a repository-relative path is a reusable-prompt file, as the
 glossary defines one, by its name.
 
-A GHI-MD named for its issue has its issue's title as a slug in its name, so
-an issue titled "... agent instructions" gives a name ending in
--instructions.md, and the name ending alone would take it for a
-reusable-prompt. has_reusable_prompt_file_name_and_is_not_ghi_md leaves out
-every path that scripts/ghi-issue-write.py's edit operation accepts as a
-GHI-MD named for its issue, by asking that program's own rule.
+A reusable-prompt's name ends .prompt.md or .instructions.md.
+has_reusable_prompt_file_name_and_is_not_ghi_md also leaves out every path
+that scripts/ghi-issue-write.py's edit operation accepts as a GHI-MD named for
+its issue, by asking that program's own rule: such a name can be written by
+hand to end .prompt.md, though the slug create builds from an issue's title
+holds no dot.
 
 It has no side effects on load, so a guard hook can load it.
 has_reusable_prompt_file_name_and_is_not_ghi_md loads
@@ -23,7 +23,7 @@ of its file name:
 import importlib.util
 from pathlib import Path
 
-REUSABLE_PROMPT_SUFFIXES = ("-prompt.md", "-instructions.md")
+REUSABLE_PROMPT_SUFFIXES = (".prompt.md", ".instructions.md")
 
 GHI_ISSUE_WRITE_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "ghi-issue-write.py"
 

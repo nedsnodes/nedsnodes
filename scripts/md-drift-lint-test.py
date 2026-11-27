@@ -127,7 +127,7 @@ with tempfile.TemporaryDirectory() as workspace:
 
     # --- A link target that is only a <placeholder> (added 2026-10-01) -----
     # The two lines are the project's own text, lines 13 and 42 of
-    # explain-how-to-write-an-identifier-instructions.md, the explain skill's
+    # explain-how-to-write-an-identifier.instructions.md, the explain skill's
     # identifier file: templates the reader fills in, written inside a
     # backtick span. Before the skip each `(<URL>)` was reported "link target
     # does not exist: <URL>".

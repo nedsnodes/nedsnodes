@@ -20,7 +20,7 @@ Times and dates in this section are UTC.
 What is on main:
 
 - `.claude/skills/explain/SKILL.md`, the skill. Its check 13 has one fresh-reader read the agent's draft reply, a cold-read-fast-read, before the reply is sent; this document calls that read the fresh read. `/explain fast` skips the fresh read.
-- `nn-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md`, the skill's supporting file: the identifier table ruled on 2026-09-16, as the skill's reviews revised the table. Check 7 of the skill names the file.
+- `nn-systems/skills/explain/explain-how-to-write-an-identifier.instructions.md`, the skill's supporting file: the identifier table ruled on 2026-09-16, as the skill's reviews revised the table. Check 7 of the skill names the file.
 - `nn-systems/skills/explain/explain-reply-cold-read-fast-read.py`, the script that runs the fresh read, with its test under `nn-systems/skills/explain/tests/`.
 - The project glossary's line for /explain.
 
@@ -187,7 +187,7 @@ case". It has not been overruled.
 
 ## The identifier table — ruled 2026-09-16, now folded in
 
-The table is now the skill's supporting file, `nn-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md`. The user ruled on its five rows that needed a judgement at walk items 13.1 through 13.3 on 2026-09-16, dropping the first and approving the other four; the remaining rows were not ruled one by one. The draft above predates the table by a day and does not contain it. Reproduced in substance, condensed, because on 2026-09-21 its only copy was untracked. Where this table and the installed file differ, the installed file is in force: the reviews of the skill changed several rows, for example a GitHub issue is written `GHI` with its title and link, not `issue #386`.
+The table is now the skill's supporting file, `nn-systems/skills/explain/explain-how-to-write-an-identifier.instructions.md`. The user ruled on its five rows that needed a judgement at walk items 13.1 through 13.3 on 2026-09-16, dropping the first and approving the other four; the remaining rows were not ruled one by one. The draft above predates the table by a day and does not contain it. Reproduced in substance, condensed, because on 2026-09-21 its only copy was untracked. Where this table and the installed file differ, the installed file is in force: the reviews of the skill changed several rows, for example a GitHub issue is written `GHI` with its title and link, not `issue #386`.
 
 His requirement, in his own words:
 

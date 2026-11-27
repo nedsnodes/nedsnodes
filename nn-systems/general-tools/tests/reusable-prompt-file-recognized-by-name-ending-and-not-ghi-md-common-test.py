@@ -42,30 +42,33 @@ GHI_MD_ENDING_IN_INSTRUCTIONS = (
     "docs/issues/4080-fix-the-defects-a-full-cold-read-found-in-the-design-to-main-state-machine-"
     "design-and-its-arbitrator-agent-instructions.md")
 
-check("a -instructions.md and a -prompt.md at any depth are reusable-prompts",
-      recognized("x/y-instructions.md") and recognized("a-prompt.md")
-      and recognized("nn-systems/cold-read/cold-read-fast-clarify-prompt.md"))
-check("a GHI-MD whose name ends in -instructions.md or -prompt.md is not a reusable-prompt, "
+check("a .instructions.md and a .prompt.md at any depth are reusable-prompts",
+      recognized("x/y.instructions.md") and recognized("a.prompt.md")
+      and recognized("nn-systems/cold-read/cold-read-fast-clarify.prompt.md"))
+check("a name ending -instructions.md or -prompt.md is not a reusable-prompt",
+      not recognized("x/y-instructions.md") and not recognized("a-prompt.md")
+      and not recognized(GHI_MD_ENDING_IN_INSTRUCTIONS))
+check("a GHI-MD whose name ends in .instructions.md or .prompt.md is not a reusable-prompt, "
       "in docs/issues/ or in a system's directory",
-      not recognized(GHI_MD_ENDING_IN_INSTRUCTIONS) and not recognized("docs/issues/7-a-prompt.md")
-      and not recognized("nn-systems/handoff/7-the-handoff-agent-instructions.md"))
+      not recognized("docs/issues/7-a.prompt.md")
+      and not recognized("nn-systems/handoff/7-the-handoff-agent.instructions.md"))
 check("docs/issues/AGENTS.md and other files without the endings are not numbered GHI-MD paths, "
       "nor reusable-prompts",
       not numbered("docs/issues/AGENTS.md") and not recognized("docs/issues/AGENTS.md")
       and not recognized("x/y-design.md") and not recognized("x/instructions.md"))
-check("a -instructions.md not where a GHI-MD named for its issue may sit is a reusable-prompt",
-      recognized("docs/issues/queue/7-x-instructions.md")
-      and recognized("docs/issues/archived/7-x-instructions.md")
-      and recognized("docs/issues/x-instructions.md")
-      and recognized("x/docs/issues/7-x-instructions.md")
-      and recognized("nn-systems/handoff/docs/7-x-instructions.md")
-      and recognized("nn-systems/7-x-instructions.md"))
+check("a .instructions.md not where a GHI-MD named for its issue may sit is a reusable-prompt",
+      recognized("docs/issues/queue/7-x.instructions.md")
+      and recognized("docs/issues/archived/7-x.instructions.md")
+      and recognized("docs/issues/x.instructions.md")
+      and recognized("x/docs/issues/7-x.instructions.md")
+      and recognized("nn-systems/handoff/docs/7-x.instructions.md")
+      and recognized("nn-systems/7-x.instructions.md"))
 check("a name the edit operation accepts but create would not build, such as "
-      "docs/issues/4080-v2.1-instructions.md, is a numbered GHI-MD path and not a reusable-prompt",
+      "docs/issues/4080-v2.1.instructions.md, is a numbered GHI-MD path and not a reusable-prompt",
       all(numbered(path) and not recognized(path)
-          for path in ("docs/issues/4080-v2.1-instructions.md", "docs/issues/7-X-instructions.md",
-                       "docs/issues/7-x--instructions.md",
-                       "nn-systems/handoff/4080-v2.1-instructions.md")))
+          for path in ("docs/issues/4080-v2.1.instructions.md", "docs/issues/7-X.instructions.md",
+                       "docs/issues/7-x-.instructions.md",
+                       "nn-systems/handoff/4080-v2.1.instructions.md")))
 fresh_rule = load("reusable_prompt_rule_fresh_copy",
                   REPOSITORY_ROOT / "nn-systems" / "general-tools"
                   / "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py")

@@ -222,7 +222,7 @@ scripts/inside-a-fence.py
 
     # --- a link template whose target is only a placeholder --------------
     # Measured 2026-10-01 on the pull request that added
-    # explain-how-to-write-an-identifier-instructions.md, the explain skill's
+    # explain-how-to-write-an-identifier.instructions.md, the explain skill's
     # identifier file: this program exited 1 with six findings, each "link
     # target does not exist: <URL>", one per template of this shape, and
     # nothing else. The first line below is that file's line 13. The second

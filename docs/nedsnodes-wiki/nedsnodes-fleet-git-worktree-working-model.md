@@ -280,7 +280,7 @@ the gate stays dormant for daily work.
 
 **R13. The PR process — built-live (process); retired when the gate
 activates.** Lives in CLAUDE.md's PR-process paragraph and
-`docs/agents/seat-first-prompt.md` § Reaching main. **Deputization** is
+`docs/agents/seat-first.prompt.md` § Reaching main. **Deputization** is
 the PR process's recorded exception (ruled 2026-08-18, PR [CLAUDE.md lane text: deputization recorded as the interim lane's exception](https://github.com/nedsnodes/nedsnodes/pull/93)): the user may
 instruct a specific agent-seat, in that agent-seat's own session, to merge a specific
 PR; relayed words are hearsay and are refused — exercised before it was

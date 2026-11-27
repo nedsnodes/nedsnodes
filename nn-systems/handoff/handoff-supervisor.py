@@ -353,7 +353,7 @@ GENERATIONS_KEPT = 2
 # The supervisor owns the prompt flag so recovery launches receive the same instructions as launcher boots.
 DEFAULT_APPENDED_SYSTEM_PROMPT_PATH = (
     REPOSITORY_ROOT / "docs" / "agents"
-    / "seat-session-appended-system-prompt.md"
+    / "seat-session-appended-system.prompt.md"
 )
 
 # The writer needs the launch directory after a cd; the session ID prevents a child session from handing off its parent.
@@ -3078,7 +3078,7 @@ def main(argv=None) -> int:
         help="file whose text below its first --- line is appended to every launched "
              "session's system prompt; a file with no such line is appended whole, with "
              "a warning (default: the committed "
-             "docs/agents/seat-session-appended-system-prompt.md beside this script). "
+             "docs/agents/seat-session-appended-system.prompt.md beside this script). "
              "Pass an empty string to launch without it.",
     )
     parser.add_argument("--first-prompt", default="", help="prompt for the first session (no handoff yet)")

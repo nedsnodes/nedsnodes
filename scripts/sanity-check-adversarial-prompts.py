@@ -25,7 +25,7 @@ fresh context:
   is reviewed and ruled on
   by the user, one item at a time.
 
-Prompts: `docs/agents/sanity-checker-<audit>-adversarial-prompt.md`. Each file is
+Prompts: `docs/agents/sanity-checker-<audit>-adversarial.prompt.md`. Each file is
 split at its `<!-- SANITY-CHECK-PROMPT-BODY -->` line: above it a header for
 maintainers that the runner never sends to a review agent, below it the
 prompt itself. The
@@ -535,9 +535,9 @@ ADVERSARIAL_PROMPTS = ("cut", "mechanization", "fresh-eyes")
 RUNTIMES = ("claude", "codex")
 
 ADVERSARIAL_PROMPT_FILES = {
-    "cut": REPO_ROOT / "docs/agents/sanity-checker-cut-adversarial-prompt.md",
-    "mechanization": REPO_ROOT / "docs/agents/sanity-checker-mechanization-adversarial-prompt.md",
-    "fresh-eyes": REPO_ROOT / "docs/agents/sanity-checker-fresh-eyes-adversarial-prompt.md",
+    "cut": REPO_ROOT / "docs/agents/sanity-checker-cut-adversarial.prompt.md",
+    "mechanization": REPO_ROOT / "docs/agents/sanity-checker-mechanization-adversarial.prompt.md",
+    "fresh-eyes": REPO_ROOT / "docs/agents/sanity-checker-fresh-eyes-adversarial.prompt.md",
 }
 
 # What every genuine report of an adversarial prompt contains, matched case-insensitively

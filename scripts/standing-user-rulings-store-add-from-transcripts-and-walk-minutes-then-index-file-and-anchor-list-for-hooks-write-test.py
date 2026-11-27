@@ -762,7 +762,7 @@ with tempfile.TemporaryDirectory() as directory:
 with tempfile.TemporaryDirectory() as directory:
     case = Case(directory)
     founding_prompt = recover.supervisor.first_prompt_from_launch_command_marked_not_typed_by_the_user(
-        "You are the git-infra seat. Read docs/agents/seat-first-prompt.md and ask what to work on.")
+        "You are the git-infra seat. Read docs/agents/seat-first.prompt.md and ask what to work on.")
     case.transcript("ned-box", [human(founding_prompt, "2026-10-27T00:00:00Z", promptSource="typed"),
                                 agent("What shall I work on?", "2026-10-27T00:00:30Z"),
                                 human("the GHI 2118 store", "2026-10-27T00:01:00Z")])

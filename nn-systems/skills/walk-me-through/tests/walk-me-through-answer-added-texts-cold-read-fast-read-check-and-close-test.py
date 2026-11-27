@@ -4611,7 +4611,7 @@ def test_an_item_of_no_kind_is_refused_when_rated_above_weak_or_rated_none_and_t
               *refused_as_rated_none(rated_none_case(touches=f"#not_asked_touches {word}\n\n"),
                                      f"`#not_asked_touches` names {word}, which is not in the checkout"))
     for path in ("CLAUDE.md", ".claude/skills/poems/SKILL.md", "docs/nedsnodes-wiki/poems.md",
-                 "docs/poems-instructions.md"):
+                 "docs/poems.instructions.md"):
         check(f"an item of no kind that touches {path}, which the instruction-file guard protects, is refused",
               *refused_as_rated_none(rated_none_case(touches=f"#not_asked_touches tools/counter.py {path}\n\n"),
                                      f"`#not_asked_touches` names {path}, which the instruction-file guard protects"))
@@ -4661,7 +4661,7 @@ def test_an_item_of_no_kind_rated_weak_settles_when_it_touches_guarded_code_but_
               *refused_as_rated_none(case, f"`#not_asked_touches` names {path}, which the instruction-file guard "
                                      "protects"))
     for path in ("CLAUDE.md", ".claude/skills/poems/SKILL.md", "docs/nedsnodes-wiki/poems.md",
-                 "docs/poems-instructions.md"):
+                 "docs/poems.instructions.md"):
         case = rated_none_case(touches=f"#not_asked_touches tools/counter.py {path}\n\n", rating=WEAK_COST_ONLY,
                                files=(path,))
         before = case.minutes.read_text()
