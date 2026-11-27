@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""An nc-test-suite run directly, with a variable that redirects git set, leaves
+"""An nn-test-suite run directly, with a variable that redirects git set, leaves
 the repository that variable names alone.
 
 WHAT WENT WRONG. A suite that needs a git repository builds one with
@@ -88,6 +88,8 @@ FIXTURE_PATH = "scripts/git-redirecting-environment-removal-test-fixture.py"
 REMOVAL_MODULE_PATH = "nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py"
 # The runner reads the attendance variable names from this module.
 ATTENDANCE_CHECK_MODULE_PATH = "nn-systems/general-tools/agent-session-unattended-by-user-check-common.py"
+# The runner reads the suites' paths from before the project rename from this module.
+PROJECT_RENAME_PATH_NAMES_MODULE_PATH = "scripts/project-rename-path-names-before-and-after-common.py"
 REMOVAL_CALL = "remove_git_redirecting_environment_variables_from_this_process()"
 
 # A git `init` argument as the suites write it, in a list or as a helper's
@@ -129,7 +131,8 @@ SUITES_RUN_WITH_GIT_DIR = {
         "scripts/branch-leaves-no-citations-of-removed-paths-test.py",
         "scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py",
         "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py",
-        "nn-systems/general-tools/failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py"),
+        "nn-systems/general-tools/failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py",
+        "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py"),
 }
 SUITE_RUN_WITH_EVERY_VARIABLE = "scripts/code-review-codex-cell-test.py"
 FILES_THE_SUITE_RUN_WITH_EVERY_VARIABLE_READS = (
@@ -268,6 +271,7 @@ runs += [(SUITE_RUN_WITH_EVERY_VARIABLE, variable)
 files_to_copy = [RUNNER_PATH,
                  str(runner.ONE_SUITE_CHILD_SUBREAPER_LAUNCHER_PATH.relative_to(REPO_ROOT)),
                  FIXTURE_PATH, REMOVAL_MODULE_PATH, ATTENDANCE_CHECK_MODULE_PATH,
+                 PROJECT_RENAME_PATH_NAMES_MODULE_PATH,
                  SUITE_RUN_WITH_EVERY_VARIABLE,
                  *FILES_THE_SUITE_RUN_WITH_EVERY_VARIABLE_READS]
 for suite, files_it_reads in SUITES_RUN_WITH_GIT_DIR.items():

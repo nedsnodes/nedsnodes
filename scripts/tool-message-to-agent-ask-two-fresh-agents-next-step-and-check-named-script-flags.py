@@ -135,7 +135,7 @@ def run_follower(tier: str, target: pathlib.Path, prompt_file: pathlib.Path,
             f"{CLAUDE_CELL_LAUNCHER} exited {completed.returncode}.",
             "The launcher's output is below. Its last line beginning `cold-read-claude-cell: cause:` "
             "names the cause.",
-            "If that line names logged-out, account-limit or model-limit: tell the user what the line "
+            "If that line names logged-out: tell the user what the line "
             "says; a subagent tells the agent that dispatched it.",
             f"Otherwise, or when there is no such line: rerun {PROGRAM_PATH} once with the same "
             "--message-file and --situation-file; if a fresh-agent fails again, tell the user the "

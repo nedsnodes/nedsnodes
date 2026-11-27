@@ -2,7 +2,7 @@
 """Tests for work-snapshots: the hook, the shared module, the cleaner's step,
 and the handoff-supervisor's first-prompt list.
 
-Design: nn-systems/handoff/handoff-uncommitted-work-snapshots-across-crashes-design.md;
+Design: nn-systems/handoff/handoff-uncommitted-work-snapshots-across-crashes.tool.design.md;
 each section below is one bullet of its "How it will be tested".
 
 Every case works in a scratch clone with the programs copied into it, so the
@@ -48,6 +48,8 @@ MODULE_RELATIVE = Path("nn-systems/handoff/uncommitted-work-snapshots.py")
 HOOK_RELATIVE = Path("scripts/uncommitted-work-snapshot-hook.py")
 POST_CHECKOUT_HOOK_RELATIVE = Path("scripts/git-client-side-hooks/post-checkout")
 OWNER_FILE_MODULE_RELATIVE = Path("scripts/worktree-owner-file-read-and-write.py")
+AGENT_SEAT_NAME_MODULE_RELATIVE = Path(
+    "nn-systems/general-tools/agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py")
 CLEANER_RELATIVE = Path("scripts/clean-worktrees.py")
 GIT_OUTPUT_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
@@ -62,14 +64,19 @@ LOG_STORE_WRITER_MODULE_RELATIVE = Path(
 NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 # The cleaner reads the review checkouts directory from the merge-lane helpers' common module,
-# which loads the test runner, which loads the git-redirecting variables module and the attendance check.
+# which loads the repository-name module and the test runner, which loads the git-redirecting
+# variables module, the attendance check and the project-rename path names.
 MERGE_LANE_COMMON_MODULE_RELATIVE = Path(
     "scripts/merge-lane-pull-request-helpers-common-options-paths-and-token.py")
+REPOSITORY_NAME_MODULE_RELATIVE = Path(
+    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 TEST_RUNNER_RELATIVE = Path("scripts/run-all-test-suites.py")
 GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
 ATTENDANCE_CHECK_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/agent-session-unattended-by-user-check-common.py")
+PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE = Path(
+    "scripts/project-rename-path-names-before-and-after-common.py")
 
 # The cleaner's --remove run below would otherwise append to the real log-store's log of removals.
 _removals_log_directory = tempfile.mkdtemp(prefix="uncommitted-work-snapshots-test-removals-log-")
@@ -159,11 +166,13 @@ def new_clone():
     main = base / "main"
     git(SCRATCH, "clone", "-q", str(origin), str(main))
     for relative in (MODULE_RELATIVE, HOOK_RELATIVE, CLEANER_RELATIVE, OWNER_FILE_MODULE_RELATIVE,
+                     AGENT_SEAT_NAME_MODULE_RELATIVE,
                      GIT_OUTPUT_MODULE_RELATIVE, TASK_WRITE_MODULE_RELATIVE, TASK_FILE_REWRITE_MODULE_RELATIVE,
                      NEXT_STEP_LINES_MODULE_RELATIVE,
                      LOG_STORE_WRITER_MODULE_RELATIVE, NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE,
-                     MERGE_LANE_COMMON_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
-                     GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE, ATTENDANCE_CHECK_MODULE_RELATIVE):
+                     MERGE_LANE_COMMON_MODULE_RELATIVE, REPOSITORY_NAME_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
+                     GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE, ATTENDANCE_CHECK_MODULE_RELATIVE,
+                     PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE):
         (main / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPOSITORY_ROOT / relative, main / relative)
     (main / "tracked.txt").write_text("one\n")
@@ -609,7 +618,6 @@ def test_other_repository_is_untouched():
 
 
 def test_names_read_from_git_are_the_files_as_stored():
-    name = "changed files and repository discovery read git's output as stored, in any locale"
     main = new_clone()
     (main / "café notes.md").write_text("new\n")
     git(main, "add", "-A")
@@ -1039,7 +1047,7 @@ def test_restore_a_subset():
               and ref in task.get("description", "") and str(target) in task.get("description", ""),
               f"restore opens the restored branch's task, naming its restore commit, {where}", task)
         holding = first_prompt_list.tasks_holding("seat-five", restore_task_list())
-        check(holding.holders(branch) and holding.holders(target)
+        check(holding.holds(branch) and holding.holds(target)
               and not holding.unreadable,
               f"the first prompt's list reads the task restore opens as holding its branch and "
               f"worktree, so it does not list them, {where}", task)
@@ -1298,7 +1306,7 @@ def test_restore_step_failures():
     failing_case("whose git worktree add wrote another agent-seat's owner file, saying the hook "
                  "that ran is the clone's own copy",
                  worktree_add_writes_another_seats_owner_file,
-                 f", which is the same as ")
+                 ", which is the same as ")
 
     def an_older_clone_copy_of_the_hook(main):
         undo = worktree_add_writes_another_seats_owner_file(main)
@@ -1308,7 +1316,7 @@ def test_restore_step_failures():
     failing_case("whose git worktree add wrote another agent-seat's owner file through a hook that "
                  "is not the clone's own copy, saying so",
                  an_older_clone_copy_of_the_hook,
-                 f", which is not the same as ")
+                 ", which is not the same as ")
 
     real_run_git = snapshots.run_git
 
@@ -2239,12 +2247,6 @@ def test_list_exits_nonzero_after_a_comparison_failure():
 # ---------------------------------------------------------------- replay
 
 
-def claude_code_subagent_lock(main, worktree, process_id):
-    """Lock the worktree as Claude Code locks a subagent's worktree while the subagent runs."""
-    git(main, "worktree", "lock", "--reason",
-        f"claude agent agent-a0123456789abcdef (pid {process_id} start 1)", str(worktree))
-
-
 def owner_file_of(worktree):
     return Path(git(worktree, "rev-parse", "--absolute-git-dir")) / "worktree-owner.json"
 
@@ -2259,77 +2261,6 @@ def fake_gh_listing_no_pull_requests():
     return directory
 
 
-def test_hook_writes_the_owner_file_of_a_subagent_worktree():
-    main = new_clone()
-    claude = FakeProcessTreeClaude(main, {"GIT_AUTHOR_NAME": "seat-eight"})
-    mine = add_worktree(main, main / ".claude" / "worktrees" / "agent-mine", "agent-mine-branch")
-    claude_code_subagent_lock(main, mine, claude.helper.pid)
-    others = add_worktree(main, main / ".claude" / "worktrees" / "agent-other", "agent-other-branch")
-    claude_code_subagent_lock(main, others, dead_process_id())
-    unlocked = add_worktree(main, main / ".claude" / "worktrees" / "by-hand", "by-hand-branch")
-    for worktree in (mine, others, unlocked):
-        message = claude.run_hook(bash(worktree))
-        check(message is None, f"the hook says nothing after a Bash call in {worktree.name}", message)
-    written = json.loads(owner_file_of(mine).read_text()) if owner_file_of(mine).exists() else None
-    check(written == {"owner_kind": "agent-session", "agent_seat": "seat-eight",
-                      "owner_key": claude.owner_key},
-          "the hook names its own agent-session as the owner of the subagent worktree Claude "
-          "Code's lock names its process in", written)
-    check(not owner_file_of(others).exists() and not owner_file_of(unlocked).exists(),
-          "it writes no owner file where the lock names another process, or where there is no lock")
-    check(git(mine, "status", "--porcelain", "--untracked-files=all") == "",
-          "the owner file is not in the worktree's files, so git status lists nothing")
-    owner_file_of(mine).write_text('{"owner_kind": "agent-seat", "agent_seat": "kept"}\n')
-    claude.run_hook(bash(mine))
-    check("kept" in owner_file_of(mine).read_text(), "it never replaces an owner file")
-    # Another hook run of the same agent-session writes the file between this run's read and write.
-    real_loader = claude.hook.load_worktree_owner_file_read_and_write_module
-
-    def loader_that_reads_no_owner_file():
-        module = real_loader()
-        module.worktree_owner_file_read = lambda worktree: None
-        return module
-
-    claude.hook.load_worktree_owner_file_read_and_write_module = loader_that_reads_no_owner_file
-    message = claude.run_hook(bash(mine))
-    check(message is None and "kept" in owner_file_of(mine).read_text(),
-          "an owner file another hook run wrote first is left as it is, and the hook says nothing",
-          message)
-    claude.end()
-
-
-def test_hook_reports_an_owner_file_it_cannot_write():
-    main = new_clone()
-    claude = FakeProcessTreeClaude(main, {"GIT_AUTHOR_NAME": "seat-ten"})
-    worktree = add_worktree(main, main / ".claude" / "worktrees" / "agent-x", "agent-x-branch")
-    claude_code_subagent_lock(main, worktree, claude.helper.pid)
-    # The worktree's git directory cannot take a new file.
-    git_directory = owner_file_of(worktree).parent
-    git_directory.chmod(0o500)
-    try:
-        message = claude.run_hook(bash(worktree))
-    finally:
-        git_directory.chmod(0o755)
-    check(message is not None and "owner file of your worktree" in message
-          and "could not be written" in message and claude.last_exit == 0,
-          "an owner file the hook cannot write is reported to the agent, and the hook exits 0",
-          message)
-    claude.end()
-    unnamed_main = new_clone()
-    # No GIT_AUTHOR_NAME, as in a claude started by hand rather than by a launcher.
-    unnamed = FakeProcessTreeClaude(unnamed_main)
-    unnamed_worktree = add_worktree(unnamed_main, unnamed_main / ".claude" / "worktrees" / "agent-y",
-                                    "agent-y-branch")
-    claude_code_subagent_lock(unnamed_main, unnamed_worktree, unnamed.helper.pid)
-    message = unnamed.run_hook(bash(unnamed_worktree))
-    written = (json.loads(owner_file_of(unnamed_worktree).read_text())
-               if owner_file_of(unnamed_worktree).exists() else None)
-    check(message is None and written is not None and written["agent_seat"] == "unknown",
-          "with no agent-seat named, the hook still names the agent-session, under the agent-seat "
-          "unknown, as the work-snapshot does", (message, written))
-    unnamed.end()
-
-
 def test_the_2026_10_05_loss_replayed():
     empty_restore_task_list()
     name = "the 2026-10-05 loss replayed: the restore brings both files back as a commit"
@@ -2339,11 +2270,13 @@ def test_the_2026_10_05_loss_replayed():
     (worktree / "tracked.txt").write_text("edited by the fork\n")
     (worktree / "new-test.py").write_text("print('a new test')\n")
     claude = FakeProcessTreeClaude(main, {"GIT_AUTHOR_NAME": "seat-seven"})
-    claude_code_subagent_lock(main, worktree, claude.helper.pid)
+    # The owner file Claude Code's WorktreeCreate hook writes for a subagent's worktree.
+    owner_file_of(worktree).write_text(json.dumps({
+        "owner_kind": "agent-session", "agent_seat": "seat-seven",
+        "owner_key": claude.owner_key}) + "\n")
     claude.run_hook(edit(worktree / "tracked.txt"))
     claude.run_hook(edit(worktree / "new-test.py"))
-    # Claude Code unlocks the worktree when the subagent finishes; the crash ends its claude process.
-    git(main, "worktree", "unlock", str(worktree))
+    # The crash ends the fork's claude process.
     claude.end()
     environment = dict(os.environ, PATH=f"{fake_gh_listing_no_pull_requests()}:{os.environ['PATH']}")
     cleaner = subprocess.run([sys.executable, str(main / CLEANER_RELATIVE), "--remove"],
@@ -2438,8 +2371,6 @@ def main():
                      test_empty_leftover_directory_is_not_the_worktree,
                      test_in_place_leftover_is_not_expired,
                      test_list_exits_nonzero_after_a_comparison_failure,
-                     test_hook_writes_the_owner_file_of_a_subagent_worktree,
-                     test_hook_reports_an_owner_file_it_cannot_write,
                      test_the_2026_10_05_loss_replayed,
                      test_cleaner_writes_a_work_snapshot_the_hook_never_wrote):
             try:

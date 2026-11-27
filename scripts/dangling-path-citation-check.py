@@ -44,8 +44,6 @@ CITING_FILES_THAT_KEEP_REMOVED_PATHS_ON_PURPOSE = (
     "nn-systems/skills/explain/tests/explain-reply-cold-read-fast-read-fixtures/*",
     "scripts/handoff-context-threshold-hook-recorded-handoff-deferrals-replay-test-fixtures/*",
     "scripts/unvalidated-negative-result-check-fixtures/*",
-    "scripts/project-rename-machine-state-move-hack.py",
-    "scripts/project-rename-machine-state-move-hack-test.py",
     "scripts/project-rename-repository-contents-rewrite-hack.py",
     "scripts/project-rename-repository-contents-rewrite-hack-test.py",
 )
@@ -234,7 +232,6 @@ def is_project_test_file(path: pathlib.Path, repository_root: pathlib.Path, lint
 
 def findings_for_file(path: pathlib.Path, changed: set, lint, root_directories: tuple):
     """Yield (line number, problem) for changed lines."""
-    relative = path.relative_to(REPOSITORY_ROOT)
     if lint.in_frozen_measured_data(path, REPOSITORY_ROOT):
         return
     # Skip test fixtures only forward; backward checks must still catch stale module citations.

@@ -2,7 +2,7 @@
 """Write the handoff file for a retiring session, and report who is watching.
 
 The handoff system's writer (specification:
-nn-systems/handoff/handoff-design.md). The retiring agent writes one
+nn-systems/handoff/handoff.system.design.md). The retiring agent writes one
 thing — the prompt telling its successor what to do first — and this script
 does everything else a machine can do: it stamps the timestamp, derives the
 restart counter, derives the roster of subagents still working and the list of
@@ -34,7 +34,7 @@ quotes, and newlines survive: a shell mangles all three inside an inline
 argument.
 
 A multi-line next step is written TWICE, and this is deliberate (R20; format
-specified in nn-systems/handoff/handoff-design.md). `next-step:` is
+specified in nn-systems/handoff/handoff.system.design.md). `next-step:` is
 always the whitespace-collapsed single line, because that is what every
 reader already handles — including a supervisor process that started before
 this format existed and is still running. When the text spans lines, a
@@ -115,6 +115,13 @@ _threshold_hook_spec = importlib.util.spec_from_file_location(
 threshold_hook = importlib.util.module_from_spec(_threshold_hook_spec)
 _threshold_hook_spec.loader.exec_module(threshold_hook)
 deferred_marker_files = threshold_hook.handoff_deferred_marker_and_refused_commands_files_common
+
+_agent_seat_task_list_spec = importlib.util.spec_from_file_location(
+    "agent_seat_task_list_new_pending_task_write_common",
+    REPOSITORY_ROOT / "nn-systems" / "general-tools" / "agent-seat-task-list-new-pending-task-write-common.py"
+)
+agent_seat_task_list = importlib.util.module_from_spec(_agent_seat_task_list_spec)
+_agent_seat_task_list_spec.loader.exec_module(agent_seat_task_list)
 
 
 HANDOFF_WRITTEN_AND_HANDOFF_SUPERVISOR_IS_WATCHING_VERDICT_LINE = "VERDICT: handoff written; a supervisor is watching"
@@ -743,13 +750,7 @@ def raise_task_high_water_mark(list_directory: Path, highest_id: int) -> None:
             current = 0
     if current >= highest_id:
         return
-    partial = list_directory / (TASK_HIGH_WATER_MARK_FILE_NAME + ".partial")
-    try:
-        partial.write_text(str(highest_id), encoding="utf-8")
-        os.replace(partial, mark_path)
-    except OSError:
-        partial.unlink(missing_ok=True)
-        raise
+    agent_seat_task_list.agent_seat_task_list_high_water_mark_write(list_directory, highest_id)
 
 
 def prune_completed_tasks(next_step_text: str) -> str:

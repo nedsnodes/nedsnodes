@@ -52,6 +52,7 @@ GIT_OUTPUT_MODULE = (SCRIPTS.parent / "nn-systems" / "general-tools"
                      / "git-machine-readable-output-runner-and-parser-common.py")
 NEXT_STEP_LINES_MODULE = GIT_OUTPUT_MODULE.with_name(
     "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+REPOSITORY_NAMES_MODULE = GIT_OUTPUT_MODULE.with_name("github-repository-name-and-name-before-project-rename-common.py")
 
 failures = []
 
@@ -89,7 +90,7 @@ def new_repository(workspace: str) -> Path:
     shutil.copy(LINT, root / "scripts" / LINT.name)
     shutil.copy(LINT_OVERVIEW_PATH_MODULE, root / "scripts" / LINT_OVERVIEW_PATH_MODULE.name)
     (root / "nn-systems" / "general-tools").mkdir(parents=True)
-    for module in (GIT_OUTPUT_MODULE, NEXT_STEP_LINES_MODULE):
+    for module in (GIT_OUTPUT_MODULE, NEXT_STEP_LINES_MODULE, REPOSITORY_NAMES_MODULE):
         shutil.copy(module, root / "nn-systems" / "general-tools" / module.name)
     git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
@@ -475,7 +476,7 @@ with tempfile.TemporaryDirectory() as workspace:
 
     # A NEGATED BUILT WORD IS NOT A CLAIM THAT THE CODE IS BUILT. The status
     # values here are the ones docs/design-to-main/design-to-main-state-machine-
-    # design.md and nn-systems/main-gatekeeper/main-gatekeeper-design.md carry
+    # design.md and nn-systems/main-gatekeeper/main-gatekeeper.system.design.md carry
     # on main, which a substring test read as built -- so the rider was silent
     # on the clearest unbuilt claim a status can make.
     write_document(root, "docs/not-built.md", document(

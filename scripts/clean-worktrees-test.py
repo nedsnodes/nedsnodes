@@ -85,6 +85,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import select
 import shlex
 import shutil
@@ -1023,13 +1024,7 @@ with tempfile.TemporaryDirectory() as scratch:
             str(unreadable_owner_wt), "origin/main")
         owner_file_path(unreadable_owner_wt).write_text("{not json\n", encoding="utf-8")
         locked_owned_wt = give_stopped_owner(owned_worktree("locked-owned-wt", running_session_owner))
-        # The lock names the running stand-in with its real start, so Claude Code's lock exception,
-        # which unlocks a lock whose process has ended, leaves it locked.
-        running_session_start = (snapshots_module.linux_start_ticks(running_session.pid)
-                                 if sys.platform.startswith("linux") else "1")
-        git(checkout, "worktree", "lock", "--reason",
-            f"claude agent agent-a1 (pid {running_session.pid} start {running_session_start})",
-            str(locked_owned_wt))
+        git(checkout, "worktree", "lock", "--reason", "kept by hand", str(locked_owned_wt))
 
         pull_requests = [
             {"number": 1, "state": "MERGED", "headRefName": "merged-wt-branch",
@@ -1176,7 +1171,7 @@ with tempfile.TemporaryDirectory() as scratch:
               and "is not JSON" in line_of(report, "unreadable-owner-wt"), report)
         check("a locked worktree is kept though its owner file says its owner stopped",
               line_of(report, "locked-owned-wt").startswith(
-                  "locked-owned-wt: kept — locked with git worktree lock (claude agent agent-a1"),
+                  "locked-owned-wt: kept — locked with git worktree lock (kept by hand)"),
               report)
         check("the count line gives the kept worktrees by reason, the worktrees with no owner file, "
               "the branches with no pull request and the work-snapshots present",
@@ -2090,36 +2085,6 @@ with tempfile.TemporaryDirectory() as scratch:
           "fully on origin/main, so the cleaner keeps it",
           module.fully_on_origin_main(no_origin, "main") is False)
 
-    # The cleaner fed a real Mac lock reason, as Claude Code writes it, on macOS.
-    mac_locked = scratch / "mac-locked"
-    git(no_origin, "worktree", "add", "-b", "mac-locked", str(mac_locked))
-    owner_module = module.owner_file
-    real_running_state = owner_module.claude_code_subagent_worktree_lock_dispatching_process_running_state
-    real_owner_key = owner_module.claude_code_subagent_worktree_lock_ended_agent_session_owner_key
-    real_seats = owner_module.agent_seats_whose_claude_code_transcripts_name_subagent
-    owner_module.claude_code_subagent_worktree_lock_dispatching_process_running_state = (
-        lambda lock: real_running_state(lock, platform="darwin", macos_start_seconds=lambda pid: None))
-    owner_module.claude_code_subagent_worktree_lock_ended_agent_session_owner_key = (
-        lambda lock: real_owner_key(lock, platform="darwin"))
-    owner_module.agent_seats_whose_claude_code_transcripts_name_subagent = lambda agent_id: ["seat-x"]
-    try:
-        mac_verdict, mac_ended = module.claude_code_subagent_lock_verdict_or_ended_lock(
-            mac_locked, types.SimpleNamespace(locked_reason=(
-                "claude agent agent-a9e3e2fe0e79f0a2c (pid 29741 start Tue Nov  3 21:24:32 2026)")))
-    finally:
-        owner_module.claude_code_subagent_worktree_lock_dispatching_process_running_state = real_running_state
-        owner_module.claude_code_subagent_worktree_lock_ended_agent_session_owner_key = real_owner_key
-        owner_module.agent_seats_whose_claude_code_transcripts_name_subagent = real_seats
-    mac_start_seconds = str(int(time.mktime(time.strptime("Tue Nov 3 21:24:32 2026",
-                                                          "%a %b %d %H:%M:%S %Y"))))
-    check("on macOS the cleaner unlocks a worktree whose real-form Claude Code lock names an ended "
-          "claude process, writing an owner file with the macOS owner key",
-          mac_verdict is None and mac_ended is not None
-          and mac_ended.owner_to_write == {"owner_kind": owner_module.OWNER_AGENT_SESSION,
-                                           "agent_seat": "seat-x",
-                                           "owner_key": f"29741-{mac_start_seconds}"},
-          (mac_verdict, mac_ended))
-
 # --- One named worktree or branch ---
 
 REMOVE_WORKTREE_FLAG = "--remove-worktree-and-force-delete-its-branch"
@@ -2339,11 +2304,11 @@ with tempfile.TemporaryDirectory() as scratch:
           and "owner file could not be read" in unreadable.stdout, unreadable.stdout)
 
     locked_wt = named_worktree("locked-wt")
-    git(checkout, "worktree", "lock", "--reason", "claude agent test", str(locked_wt))
+    git(checkout, "worktree", "lock", "--reason", "kept by hand", str(locked_wt))
     locked = run_one_named(REMOVE_WORKTREE_FLAG, str(locked_wt))
     check(f"{REMOVE_WORKTREE_FLAG} keeps a locked worktree and fails",
           kept_and_failed(locked, "locked-wt") and locked_wt.exists()
-          and "locked with git worktree lock (claude agent test)" in locked.stdout, locked.stdout)
+          and "locked with git worktree lock (kept by hand)" in locked.stdout, locked.stdout)
     git(checkout, "worktree", "unlock", str(locked_wt))
 
     prunable_wt = named_worktree("prunable-wt")
@@ -2950,204 +2915,6 @@ with tempfile.TemporaryDirectory() as scratch:
         review_occupant.kill()
         review_occupant.wait()
 
-# --- Claude Code's lock exception: a lock whose claude process has ended is unlocked ---
-# Linux only: the case reads its ended process's start and the boot id from /proc.
-if sys.platform.startswith("linux"):
-    with tempfile.TemporaryDirectory() as scratch:
-        scratch = Path(scratch).resolve()
-        checkout = scratch / "checkout"
-        origin = scratch / "origin.git"
-        checkout.mkdir()
-        git(checkout, "init", "-b", "main")
-        git(checkout, "config", "user.email", "test@test.invalid")
-        git(checkout, "config", "user.name", "clean-worktrees test")
-        (checkout / "README.md").write_text("# scratch\n", encoding="utf-8")
-        git(checkout, "add", "-A")
-        git(checkout, "commit", "-m", "seed")
-        subprocess.run(["git", "init", "--bare", str(origin)], capture_output=True, check=True)
-        git(checkout, "remote", "add", "origin", str(origin))
-        git(checkout, "push", "-u", "origin", "main")
-        managed = checkout / ".claude" / "worktrees"
-        managed.mkdir(parents=True)
-        lock_home = scratch / "home"
-        (lock_home / ".claude" / "handoffs").mkdir(parents=True)
-        for seat in ("seat-one", "seat-two"):
-            (lock_home / "agents" / seat).mkdir(parents=True)
-            (lock_home / ".claude" / "handoffs" / f"{seat}-handoff.md").write_text(
-                "handoff\n", encoding="utf-8")
-
-        def transcript_names_subagent(seat, agent_id):
-            project = lock_home / ".claude" / "projects" / ("-" + "-".join(
-                (lock_home / "agents" / seat).parts[1:]).replace(".", "-").replace("_", "-"))
-            directory = project / "session-1" / "subagents"
-            directory.mkdir(parents=True, exist_ok=True)
-            (directory / f"agent-{agent_id}.jsonl").write_text("{}\n", encoding="utf-8")
-
-        snapshots_module_spec = importlib.util.spec_from_file_location(
-            "uncommitted_work_snapshots_for_lock_cases",
-            CLEAN_SCRIPT.resolve().parent.parent / "nn-systems" / "handoff"
-            / "uncommitted-work-snapshots.py")
-        snapshots_module = importlib.util.module_from_spec(snapshots_module_spec)
-        snapshots_module_spec.loader.exec_module(snapshots_module)
-        ended = subprocess.Popen([sys.executable, "-c", "pass"])
-        ended_start = snapshots_module.linux_start_ticks(ended.pid)
-        ended.wait()
-        ended_owner_key = f"{snapshots_module.linux_boot_id()}-{ended.pid}-{ended_start}"
-
-        def locked_worktree(name, agent_id, owner=None):
-            path = managed / name
-            git(checkout, "worktree", "add", "-b", f"{name}-branch", str(path), "origin/main")
-            if owner is not None:
-                give_owner(path, owner)
-            git(checkout, "worktree", "lock", "--reason",
-                f"claude agent agent-{agent_id} (pid {ended.pid} start {ended_start})", str(path))
-            return path
-
-        def is_locked(path):
-            return (owner_file_path(path).parent / "locked").exists()
-
-        owned = locked_worktree("ended-lock-owned-wt", "aowned", {
-            "owner_kind": "agent-session", "agent_seat": "seat-one", "owner_key": ended_owner_key})
-        (owned / "unsaved.txt").write_text("only here\n", encoding="utf-8")
-        named = locked_worktree("ended-lock-named-wt", "anamed")
-        transcript_names_subagent("seat-one", "anamed")
-        open_named = locked_worktree("ended-lock-open-pull-request-wt", "aopen")
-        transcript_names_subagent("seat-two", "aopen")
-        unnamed = locked_worktree("ended-lock-unnamed-wt", "aunnamed")
-        twice = locked_worktree("ended-lock-two-seats-wt", "atwice")
-        transcript_names_subagent("seat-one", "atwice")
-        transcript_names_subagent("seat-two", "atwice")
-        open_pull_requests = json.dumps([{
-            "number": 31, "state": "OPEN", "headRefName": "ended-lock-open-pull-request-wt-branch",
-            "headRefOid": git(open_named, "rev-parse", "HEAD").strip(), "closedAt": None}])
-
-        def run_with_lock_home(*flags, path_prefix=None):
-            environment = dict(os.environ, HOME=str(lock_home),
-                               FAKE_GH_PULL_REQUESTS=open_pull_requests)
-            if path_prefix is not None:
-                environment["PATH"] = f"{path_prefix}{os.pathsep}{environment['PATH']}"
-            return subprocess.run([sys.executable, str(CLEAN_SCRIPT), "--repo", str(checkout),
-                                   *flags], capture_output=True, text=True, check=False,
-                                  env=environment)
-
-        def lock_line(output, name):
-            return next((line for line in output.splitlines()
-                         if line.startswith(f"{name}: kept") or line.startswith(f"{name}: done")),
-                        "")
-
-        report = run_with_lock_home().stdout
-        check("the report says --remove unlocks a worktree whose Claude Code lock names an ended "
-              "process, then judges it by its owner file",
-              lock_line(report, "ended-lock-owned-wt").startswith(
-                  f"ended-lock-owned-wt: done — Claude Code's lock names claude process {ended.pid}")
-              and "has ended, so --remove unlocks it, then judges it: its owner, an agent-session "
-                  "of seat-one" in lock_line(report, "ended-lock-owned-wt"), report)
-        check("the report says --remove first writes the owner file naming the ended agent-session "
-              "and the agent-seat whose transcripts name the subagent",
-              f"so --remove unlocks it, writing first its owner file naming an agent-session of "
-              f"seat-one (claude process {ended_owner_key}), then judges it: its owner"
-              in lock_line(report, "ended-lock-named-wt")
-              and lock_line(report, "ended-lock-named-wt").startswith("ended-lock-named-wt: done"),
-              report)
-        check("the report changes nothing: every lock stays and no owner file is written",
-              all(is_locked(path) for path in (owned, named, open_named, unnamed, twice))
-              and not owner_file_path(named).exists(), report)
-        for path, why in ((unnamed, "no agent-seat's Claude Code transcripts name subagent "
-                                    "agent-aunnamed"),
-                          (twice, "the Claude Code transcripts of 2 agent-seats, seat-one, "
-                                  "seat-two, name subagent agent-atwice")):
-            check(f"a worktree with no owner file is kept, locked, for the user when {why}",
-                  why in lock_line(report, path.name)
-                  and lock_line(report, path.name).startswith(f"{path.name}: kept")
-                  and "the user keeps or deletes it" in lock_line(report, path.name), report)
-        check("the count lines name the worktrees for the user to keep or delete",
-              "worktrees for the user to keep or delete, locked by Claude Code for a subagent whose "
-              f"claude process has ended and which no one agent-seat's Claude Code transcripts "
-              f"name: {twice}, {unnamed}" in report, report)
-
-        failing_git = scratch / "failing-git"
-        failing_git.mkdir()
-        (failing_git / "git").write_text(
-            "#!/bin/sh\n"
-            'case " $* " in *" worktree unlock "*) printf "unlock refused%0200d" 0 >&2; kill -9 $$ ;; esac\n'
-            f'exec {shutil.which("git")} "$@"\n', encoding="utf-8")
-        (failing_git / "git").chmod(0o755)
-        refused = run_with_lock_home("--remove", path_prefix=failing_git)
-        check("an unlock that fails keeps the worktree locked, says FAILED and exits 1, after the "
-              "owner file is written",
-              refused.returncode == 1 and is_locked(named) and owner_file_path(named).exists()
-              and "ended-lock-named-wt: unlock FAILED, worktree kept — git worktree unlock exited "
-                  "-9: unlock refused" + "0" * 146 + "\n" in refused.stdout
-              and "ended-lock-named-wt: removal" not in refused.stdout,
-              refused.stdout + refused.stderr)
-
-        garbled = locked_worktree("ended-lock-unreadable-owner-wt", "agarbled")
-        owner_file_path(garbled).write_text("{not json", encoding="utf-8")
-        garbled_line = lock_line(run_with_lock_home().stdout, "ended-lock-unreadable-owner-wt")
-        check("an owner file that cannot be read keeps a worktree whose lock's process has ended",
-              garbled_line.startswith("ended-lock-unreadable-owner-wt: kept — locked with git "
-                                      "worktree lock")
-              and "whose claude process has ended, and its owner file could not be read"
-              in garbled_line, garbled_line)
-        exiting_git = scratch / "exiting-git"
-        exiting_git.mkdir()
-        (exiting_git / "git").write_text(
-            "#!/bin/sh\n"
-            'case " $* " in *" worktree unlock "*) echo "unlock refused" >&2; exit 1 ;; esac\n'
-            f'exec {shutil.which("git")} "$@"\n', encoding="utf-8")
-        (exiting_git / "git").chmod(0o755)
-        refused_again = run_with_lock_home("--remove", path_prefix=exiting_git)
-        check("an unlock that exits nonzero keeps the worktree locked and says FAILED",
-              refused_again.returncode == 1 and is_locked(named)
-              and "ended-lock-named-wt: unlock FAILED, worktree kept — git worktree unlock exited "
-                  "1: unlock refused" in refused_again.stdout,
-              refused_again.stdout + refused_again.stderr)
-        unwritable = locked_worktree("ended-lock-unwritable-owner-wt", "aunwritable")
-        transcript_names_subagent("seat-one", "aunwritable")
-        owner_file_path(unwritable).parent.chmod(0o500)
-        try:
-            removal = run_with_lock_home("--remove")
-        finally:
-            owner_file_path(unwritable).parent.chmod(0o755)
-        check("an owner file that cannot be written keeps the worktree locked, says FAILED and "
-              "exits 1",
-              removal.returncode == 1 and is_locked(unwritable)
-              and not owner_file_path(unwritable).exists()
-              and "ended-lock-unwritable-owner-wt: owner file FAILED, worktree kept locked"
-              in removal.stdout, removal.stdout + removal.stderr)
-        check("--remove unlocks a worktree whose owner has stopped and removes it, its files in a "
-              "work-snapshot",
-              not owned.exists() and "ended-lock-owned-wt: unlocked, since Claude Code's lock names "
-              f"claude process {ended.pid}" in removal.stdout
-              and "ended-lock-owned-wt: its uncommitted and untracked files are kept in the "
-                  "work-snapshot" in removal.stdout, removal.stdout + removal.stderr)
-        check("--remove removes the worktree it unlocked whose owner file it had written",
-              not named.exists() and "ended-lock-named-wt: removed" in removal.stdout,
-              removal.stdout)
-        owner_written = json.loads(text_or_none(owner_file_path(open_named)) or "null")
-        check("--remove writes the owner file naming the ended agent-session and the agent-seat "
-              "whose transcripts name the subagent, unlocks it, and an open pull request keeps it",
-              open_named.exists() and not is_locked(open_named)
-              and owner_written == {"owner_kind": "agent-session", "agent_seat": "seat-two",
-                                    "owner_key": ended_owner_key}
-              and "pull request #31 (open)" in lock_line(removal.stdout,
-                                                          "ended-lock-open-pull-request-wt"),
-              f"{owner_written} {removal.stdout}")
-        check("--remove leaves locked, with no owner file, the worktrees for the user",
-              all(path.exists() and is_locked(path) and not owner_file_path(path).exists()
-                  for path in (unnamed, twice)), removal.stdout)
-
-        (lock_home / "agents").chmod(0o000)
-        try:
-            unreadable = run_with_lock_home()
-        finally:
-            (lock_home / "agents").chmod(0o755)
-        check("an agent-seat lookup that fails keeps the worktree, as one that could not be checked",
-              "ended-lock-unnamed-wt: kept — locked with git worktree lock" in unreadable.stdout
-              and "could not be read: PermissionError" in lock_line(unreadable.stdout,
-                                                                     "ended-lock-unnamed-wt"),
-              unreadable.stdout + unreadable.stderr)
-
 # --- A removal stopped partway ---
 # A real kill cannot be timed to land inside `git worktree remove`, so a stub git does what git
 # does first, deleting the worktree's .git file and some files, then kills the cleaner that ran it.
@@ -3592,9 +3359,15 @@ with tempfile.TemporaryDirectory() as scratch:
     def idle_git_directory(worktree):
         return Path(git(worktree, "rev-parse", "--absolute-git-dir").strip())
 
-    def age(worktree):
+    def age(worktree, reflog_entries_too=True):
         """Set the mtime of every file and directory in the worktree and its own git directory to
-        three days ago."""
+        three days ago, and, with reflog_entries_too, the time of every entry of its reflogs."""
+        if reflog_entries_too:
+            for reflog in (idle_git_directory(worktree) / "logs").rglob("*"):
+                if reflog.is_file():
+                    reflog.write_bytes(re.sub(rb"> \d+ ([-+]\d{4})",
+                                              rb"> %d \1" % int(three_days_ago),
+                                              reflog.read_bytes()))
         for root in (worktree, idle_git_directory(worktree)):
             for directory, directory_names, file_names in os.walk(root, topdown=False):
                 for name in directory_names + file_names:
@@ -3687,6 +3460,18 @@ with tempfile.TemporaryDirectory() as scratch:
     # index would rewrite it, and the worktree would look changed today to the next run.
     stale_index_worktree = age(idle_candidate("stale-index-wt"))
     os.utime(stale_index_worktree / "README.md", (three_days_ago - 3600, three_days_ago - 3600))
+    reflog_today_worktree = age(idle_candidate("reflog-today-wt"))
+    git(reflog_today_worktree, "update-ref", "-m", "worked on today", "HEAD", "HEAD")
+    age(reflog_today_worktree, reflog_entries_too=False)
+    emptied_reflog_worktree = age(idle_candidate("emptied-reflog-wt"))
+    git(emptied_reflog_worktree, "reflog", "expire", "--expire=now", "--expire-unreachable=now", "HEAD")
+    # Last, as gc rewrites the reflogs of every worktree aged above, as it does on ned-box.
+    gc_rewritten_worktree = age(idle_candidate("gc-rewritten-wt"))
+    git(checkout, "gc", "--quiet")
+    gc_rewritten_reflog_mtime = os.stat(idle_git_directory(gc_rewritten_worktree) / "logs" / "HEAD").st_mtime
+    garbled_reflog_worktree = age(idle_candidate("garbled-reflog-wt"))
+    with open(idle_git_directory(garbled_reflog_worktree) / "logs" / "HEAD", "a", encoding="utf-8") as reflog:
+        reflog.write("not a reflog entry\n")
 
     open_pull_request = {"number": 30, "state": "OPEN", "headRefName": "open-pr-wt",
                          "headRefOid": "a" * 40, "closedAt": None}
@@ -3723,9 +3508,20 @@ with tempfile.TemporaryDirectory() as scratch:
           removal.stdout + removal.stderr)
     check("an idle worktree's branch keeps its commits on origin",
           "idle-wt" in git(origin, "branch", "--list", "idle-wt"), removal.stdout)
+    check("an idle worktree whose reflog git gc rewrote today, adding no entry, is removed",
+          gc_rewritten_reflog_mtime > three_days_ago
+          and idle_line(removal.stdout, "gc-rewritten-wt").startswith("gc-rewritten-wt: removed")
+          and not gc_rewritten_worktree.exists(),
+          f"{gc_rewritten_reflog_mtime} {three_days_ago}\n{removal.stdout}")
+    check("an idle worktree whose reflog holds no entry is removed",
+          idle_line(removal.stdout, "emptied-reflog-wt").startswith("emptied-reflog-wt: removed"),
+          removal.stdout)
     for worktree, why in ((fresh_worktree, "it was made today"),
                           (touched_worktree, "one of its files changed today"),
                           (git_touched_worktree, "a file in its own git directory changed today"),
+                          (reflog_today_worktree, "its reflog got an entry today"),
+                          (garbled_reflog_worktree,
+                           "its reflog's newest line, unreadable as an entry, was written today"),
                           (untracked_worktree, "it holds an untracked file"),
                           (modified_worktree, "it holds an uncommitted change"),
                           (unpushed_worktree, "it holds a commit GitHub lacks"),

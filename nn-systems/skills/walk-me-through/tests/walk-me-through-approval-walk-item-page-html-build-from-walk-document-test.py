@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Cases for the program that builds an approval-walk item's HTML page from its walk-document.
 
-Each case runs the program as a subprocess on a scratch walk-document, except the missing-parser case, which loads
-the program and makes its parser module raise. Prints one line per case and exits non-zero if any case fails.
+Each case runs the program as a subprocess on a scratch walk-document, except three that load modules: the
+missing-parser case, which makes the program's parser module raise, the `#item_page` reader case, and the
+whole_item_links case. Prints one line per case and exits non-zero if any case fails.
 """
 import importlib.util
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -129,6 +131,34 @@ def run_unit_cases(scratch):
     check("a sub-step's page holds the sub-step alone, its ### heading as the <h1>",
           result.returncode == 0 and "<h1>Item 4.1 of 9: the filter's default</h1>" in page
           and "Off by default." in page and "A filter would hide" not in page, page)
+    setext_sub_step = ("# A walk\n\n# Item 4 of 9: a filter\n\nA filter would hide old rows.\n\n"
+                       "Item 4.1 of 9: Recommendation: keep rows\n---\n\nOff by default.\n")
+    result, page = built(scratch, "4", document=setext_sub_step)
+    check("an item's page keeps a setext sub-step's heading a heading, not a paragraph a hook reads as a decision line",
+          result.returncode == 0 and "<h2>Item 4.1 of 9: Recommendation: keep rows</h2>" in page
+          and "Off by default." in page, page)
+    shared_setext_sub_step = ("# A walk\n\n# Item 4 of 9: a filter\n\nA filter would hide old rows.\n\n"
+                              "# Item 5 of 9: a sort\n\nSorting by date.\n\n"
+                              "Items 4.1 and 5.1 of 9: Recommendation: keep rows\nand dates\n---\n\n"
+                              "Item 4.1: Off by default.\n\nItem 5.1: Newest first.\n")
+    result, page = built(scratch, "4", document=shared_setext_sub_step)
+    check("an item's page keeps a setext sub-step heading it shares with another item's sub-step a heading, its "
+          "further line included, and carries only its own sub-step's lines",
+          result.returncode == 0 and "<h2>Items 4.1 and 5.1 of 9: Recommendation: keep rows<br />\nand dates</h2>" in page
+          and "Off by default." in page and "Newest first." not in page, page)
+    shared_setext_item = ("# A walk\n\nItems 5 and 6 of 9: two small corrections\nto one file\n===\n\n"
+                          "Item 5: fixes a path.\n\nItem 6: drops a sentence.\n")
+    result, page = built(scratch, "6", document=shared_setext_item)
+    check("an item under a setext heading it shares keeps the heading's further line, which the hook must see",
+          result.returncode == 0 and "to one file" in page and "drops a sentence" in page
+          and "fixes a path" not in page, page)
+    indented_further_line_above_indented_code = ("# A walk\n\nItems 5 and 6 of 9: two small corrections\n"
+                                                 "    further line\n===\n    code line\n\n"
+                                                 "Item 6: drops a sentence.\n")
+    result, page = built(scratch, "5", document=indented_further_line_above_indented_code)
+    check("an item's page keeps two blank lines, the underline's and the one that opens each run of lines, between a "
+          "shared setext heading's indented further line and the indented code right below the underline",
+          result.returncode == 0 and "further line\n\n\ncode line" in page, page)
     result, page = built(scratch, "6")
     check("an item that shares a heading keeps its own lines under that heading",
           result.returncode == 0 and "<h1>Items 5 and 6 of 9: two small corrections</h1>" in page
@@ -470,6 +500,132 @@ def run_parser_missing_case(scratch):
               str(refusal))
 
 
+def page_links(page):
+    """The `<nav>` of Previous and Next links on page, or "" when it has none."""
+    start = page.find('<nav class="pages">')
+    return page[start:page.find("</nav>", start) + len("</nav>")] if start >= 0 else ""
+
+
+def run_page_link_cases(scratch):
+    minutes = scratch / f"{WALK}-minutes.md"
+    minutes.unlink(missing_ok=True)
+    result, page = built(scratch, "4")
+    check("with no walk-minutes, the page has no links and the program says why",
+          result.returncode == 0 and page_links(page) == "" and "The page has no Previous link: the walk-minutes "
+          in result.stdout and "-minutes.md do not exist" in result.stdout, result)
+    minutes.write_text(
+        "#next_to_present item 6 of 9\n"
+        "#item_page item 3 of 9 https://claude.ai/artifact/Item3\n"
+        "#item_page item 4 of 9 https://claude.ai/artifact/Item4Old\n"
+        "#item_page item 4.1 of 9 https://claude.ai/artifact/Item4\n"
+        "#item_page item 4 of 9 https://claude.ai/artifact/Item4 (version 2: revised)\n"
+        "#item_page item 4.1 of 9 https://claude.ai/artifact/Item4\n"
+        "#item_page item 5 of 9 publish failed: the Artifact tool timed out\n", encoding="utf-8")
+    result, page = built(scratch, "6")
+    check("a first page gets a Previous link to the newest page of the whole item before, past a failed publish's line",
+          result.returncode == 0 and page_links(page)
+          == '<nav class="pages"><a href="https://claude.ai/artifact/Item4">Previous: item 4</a></nav>', page_links(page))
+    check("the Previous link sits above the item's heading", page.find("<nav") < page.find("<h1>"), page)
+    command = next((line for line in result.stdout.split("\n") if line.startswith("python3 ")), "")
+    check("a first page's printout gives the command that builds the item before again as its next version, "
+          "counting its two whole-item lines and not its sub-step's, and the link to publish it to",
+          f" 4 {scratch / 'item-4-version-3.html'} --version 3" in command
+          and "Item 4's page, https://claude.ai/artifact/Item4, has no Next link" in result.stdout
+          and "to https://claude.ai/artifact/Item4, so that item 4's page links to this one" in result.stdout, result.stdout)
+    with minutes.open("a", encoding="utf-8") as appended:
+        appended.write("#item_page item 6 of 9 https://claude.ai/artifact/Item6\n")
+    rebuilt = subprocess.run(shlex.split(command), capture_output=True, text=True)
+    page = (scratch / "item-4-version-3.html").read_text(encoding="utf-8") if rebuilt.returncode == 0 else ""
+    check("the printed command, run once this item's line is recorded, writes the item before's page as version 3 "
+          "with its own Previous link and a Next link to this item, and says to publish it to its own link",
+          page.startswith(f"<title>Version 3, Item 4 of 9: {WALK}</title>") and page_links(page)
+          == '<nav class="pages"><a href="https://claude.ai/artifact/Item3">Previous: item 3</a> '
+             '<a href="https://claude.ai/artifact/Item6">Next: item 6</a></nav>'
+          and "publish it with the Artifact tool to https://claude.ai/artifact/Item4, the page's newest" in rebuilt.stdout
+          and "python3 " not in rebuilt.stdout, (rebuilt, page_links(page)))
+    result, page = built(scratch, "3")
+    check("the first item with a page gets no Previous link, and the printout says no item before has one",
+          result.returncode == 0 and page_links(page) == '<nav class="pages"><a href="https://claude.ai/artifact/Item4">'
+          'Next: item 4</a></nav>' and "The page has no Previous link: no whole item numbered below 3 has an "
+          "`#item_page` line with a link" in result.stdout and "python3 " not in result.stdout, result)
+    minutes.write_text("#item_page item 3 of 9 https://claude.ai/artifact/Item3\n", encoding="utf-8")
+    result, page = built(scratch, "5")
+    check("one line that states no version is version 1, so the next version is 2",
+          f"{scratch / 'item-3-version-2.html'} --version 2" in result.stdout, result.stdout)
+    minutes.write_text("#item_page item 3 of 9 https://claude.ai/artifact/Item3\n"
+                       "#item_page item 3 of 9 https://claude.ai/artifact/Item3 (version 4, count 9)\n"
+                       "#item_page item 4.1 of 9 https://claude.ai/artifact/SubStep41\n", encoding="utf-8")
+    result, page = built(scratch, "5")
+    check("a sub-step's line is not its item's page: item 5's Previous link skips 4.1 and opens item 3's page",
+          '<a href="https://claude.ai/artifact/Item3">Previous: item 3</a>' in page_links(page)
+          and "SubStep41" not in page, page_links(page))
+    check("a version a line states counts when it is higher than the lines recorded: two lines, the second version 4, "
+          "make the next version 5", f"{scratch / 'item-3-version-5.html'} --version 5" in result.stdout, result.stdout)
+    with minutes.open("a", encoding="utf-8") as appended:
+        appended.write("#item_page item 3 of 9 https://claude.ai/artifact/Item3\n")
+    result, page = built(scratch, "5")
+    check("a line that states no version, after one stating version 4, is version 5, so the next version is 6, "
+          "though the lines number three", f"{scratch / 'item-3-version-6.html'} --version 6" in result.stdout,
+          result.stdout)
+    with minutes.open("a", encoding="utf-8") as appended:
+        appended.write("#item_page item 3 of 9 https://claude.ai/artifact/Item3 (fixes the typo version 1 had)\n"
+                       "#item_page item 3 of 9 https://claude.ai/artifact/Item3\n")
+    result, page = built(scratch, "5")
+    check("a line stating a version lower than the count so far does not count down: after version 5 it is 6, a bare "
+          "line then 7, so the next version is 8", f"{scratch / 'item-3-version-8.html'} --version 8" in result.stdout,
+          result.stdout)
+    result, page = built(scratch, "4.1")
+    check("a sub-step's own page links to the item before its item",
+          '<a href="https://claude.ai/artifact/Item3">Previous: item 3</a>' in page_links(page), page_links(page))
+    check("a sub-step's first page prints no command to rebuild the item before, whose Next link opens whole items only",
+          "has no Next link" not in result.stdout and "python3 " not in result.stdout, result.stdout)
+    result, page = built(scratch, "x")
+    check("an item number no heading can name is refused with exit 1 when walk-minutes exist, not a crash",
+          result.returncode == 1 and "has no heading for item x" in result.stderr and page == "", result)
+    minutes.unlink()
+
+
+def run_item_page_line_reader_cases():
+    finder_file = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+    specification = importlib.util.spec_from_file_location("walk_finder", finder_file)
+    walk_finder = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(walk_finder)
+    specification = importlib.util.spec_from_file_location("markdown_parser", walk_finder.MARKDOWN_PARSER_MODULE_FILE)
+    parser_module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(parser_module)
+    lines = walk_finder.approval_walk_item_page_link_lines_oldest_first_from_walk_minutes(
+        "#item_page item 19 of 25 https://claude.ai/artifact/A\n"
+        "#item_page item 19 of 25 version 2 https://claude.ai/artifact/A (republished 2026-11-06)\n"
+        "#item_page item 19 of 25 https://claude.ai/artifact/B (the old page no longer opens)\n"
+        "#item_page item 62.1 of 81 https://claude.ai/artifact/C (version 3, count 81)\n"
+        "#item_page item 63 of 81 publish failed: the Artifact tool timed out\n"
+        "#item_page item 64 of 81 https://claude.ai/artifact/D trailing words\n", parser_module.markdown_parser())
+    check("the `#item_page` reader reads a version before the link, a note after it, a sub-step and a failed publish, "
+          "and not a line with words after its link that are not a note in parentheses",
+          lines == [("19", "https://claude.ai/artifact/A", None), ("19", "https://claude.ai/artifact/A", 2),
+                    ("19", "https://claude.ai/artifact/B", None), ("62.1", "https://claude.ai/artifact/C", 3),
+                    ("63", walk_finder.ITEM_PAGE_PUBLISH_FAILED, None)], lines)
+
+
+def run_whole_item_links_case():
+    specification = importlib.util.spec_from_file_location("item_page_builder", PROGRAM)
+    builder = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(builder)
+    walk_finder, parser_module = builder.walk_finder_and_parser_module()
+    # The reader takes any run of non-space characters as a link, so links sort both below and above
+    # ITEM_PAGE_PUBLISH_FAILED; only an inequality test keeps the ones above it.
+    lines = walk_finder.approval_walk_item_page_link_lines_oldest_first_from_walk_minutes(
+        "#item_page item 2 of 9 https://claude.ai/artifact/Item2\n"
+        "#item_page item 3 of 9 publish failed: the Artifact tool timed out\n"
+        "#item_page item 5 of 9 www.example.com/item5\n"
+        "#item_page item 5.1 of 9 https://claude.ai/artifact/SubStep51\n"
+        "#item_page item 7 of 9 publish failed: the Artifact tool timed out\n", parser_module.markdown_parser())
+    links = builder.whole_item_links(lines, walk_finder)
+    check("whole_item_links keeps every whole item's link, one sorting above `publish failed` included, "
+          "and drops failed publishes and sub-steps",
+          links == {2: "https://claude.ai/artifact/Item2", 5: "www.example.com/item5"}, links)
+
+
 with tempfile.TemporaryDirectory() as temporary_directory:
     scratch = Path(temporary_directory)
     run_page_cases(scratch)
@@ -478,6 +634,9 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     run_sub_step_selection_cases(scratch)
     run_refusal_cases(scratch)
     run_parser_missing_case(scratch)
+    run_page_link_cases(scratch)
+    run_item_page_line_reader_cases()
+    run_whole_item_links_case()
 
 if failures:
     print(f"\n{len(failures)} case(s) failed")

@@ -1099,6 +1099,10 @@ SHARED_MODULE_NAME = "edited-file-path-within-checkout-root-and-git-check-ignore
 hook_without_shared_module = SCRATCH / "hook-without-its-git-helpers" / "scripts" / HOOK_PATH.name
 hook_without_shared_module.parent.mkdir(parents=True)
 shutil.copy(str(HOOK_PATH), str(hook_without_shared_module))
+REPOSITORY_NAMES_MODULE_NAME = "github-repository-name-and-name-before-project-rename-common.py"
+(hook_without_shared_module.parents[1] / "nn-systems" / "general-tools").mkdir(parents=True)
+shutil.copy(str(HOOK_PATH.parents[1] / "nn-systems" / "general-tools" / REPOSITORY_NAMES_MODULE_NAME),
+            str(hook_without_shared_module.parents[1] / "nn-systems" / "general-tools" / REPOSITORY_NAMES_MODULE_NAME))
 result = subprocess.run([sys.executable, str(hook_without_shared_module)],
                         input=json.dumps(tool_payload("Write", REPOSITORY / "docs" / "new.md",
                                                       content="Merged in PR 931.\n")),
@@ -1141,7 +1145,7 @@ with tempfile.TemporaryDirectory() as directory:
     check("a note record that is not an object is reported without Python's type name",
           read == ({}, "it holds JSON, but not an object"), read)
 
-old_name_link = hook.REPOSITORY_ITEM_URL_PATTERN.match(f"https://github.com/{hook.OLD_REPOSITORY}/pull/12")
+old_name_link = hook.REPOSITORY_ITEM_URL_PATTERN.match(f"https://github.com/{hook.repository_names.OLD_REPOSITORY}/pull/12")
 check("a link with the repository's old name, which GitHub redirects, is read as this repository's item",
       old_name_link is not None and old_name_link.group("number") == "12", repr(old_name_link))
 

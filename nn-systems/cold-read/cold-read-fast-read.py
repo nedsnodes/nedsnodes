@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Give one document the cold-read-fast-read: one fast-clarify cold-read-cell
-on the fast cold-read-tier and, at the same time, one cold-read-cell on Opus
-for Question 4.
+on the fast cold-read-tier and, at the same time, unless --without-question-4
+is given, one cold-read-cell on Opus for Question 4.
 
 Usage:
   nn-systems/cold-read/cold-read-fast-read.py --target docs/walk/foo-draft.md
+  nn-systems/cold-read/cold-read-fast-read.py --target docs/walk/foo-draft.md --without-question-4
+  nn-systems/cold-read/cold-read-fast-read.py --target <file> --text-intended-reader-category agent-readable
+  nn-systems/cold-read/cold-read-fast-read.py --record-finding-outcomes-in-cold-read-record <record directory> \
+      --finding-outcome 'Q2.1=applied' --finding-outcome 'Q4.1=declined: <reason>' ...
 
 WHAT IT DOES. Picks the report path from the cold-read-target, runs
 ONE fast-clarify cold-read-cell on the fast cold-read-tier through
-nn-systems/cold-read/cold-read-agy-cell.py (user-ruled 2026-09-07 after measurements,
-superseding the earlier ruling for low: Gemini 3.8 Flash at medium, about
-100-110 s per document in single runs on a 658-word skill and a 1,967-word walk
-draft, recall 42% against 19% at low on the ghi-write candidate defect list,
-replacing gpt-5.6-terra at low), and retries once if that cold-read-cell fails.
+nn-systems/cold-read/cold-read-agy-cell.py, on gemini-4-neon-low at effort low
+(user-ruled 2026-11-25, replacing Gemini 3.8 Flash at medium; the
+measurements are in that launcher's docstring), and retries once if that cold-read-cell fails.
 When the Gemini cell has failed for good -- twice, or once with a launcher
 refusal, Gemini's spending cap or the Ultra sign-in's quota, which get no
 retry -- it runs the same cell once on Claude Sonnet at low effort, the claude
@@ -45,7 +47,7 @@ and the numbers are listed on stderr instead, each with its line
 (user-ruled 2026-09-17, item 5 of nedschorus#418: the walk-me-through skill
 forbids bare numbers, and walk files had carried 33 and 35 of them
 unchecked). Bare file names are deliberately not checked, by the same rulings;
-the walk's 300-word item limit is checked by the walk check program,
+the walk's word limit for an item is checked by the walk check program,
 nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py,
 before it reads an item. Every cold-read-cell's own progress -- the
 launcher's stderr, the agent-binary's stderr, the stray-write and recovery lines --
@@ -138,9 +140,19 @@ says where the text came from. The template is the user's own text:
 .claude/skills/cold-read/prompts/fast-clarify-prompt.md as he walked and ruled
 it, landed by PR #274 on 2026-09-07, copied here verbatim. A change to the
 instructions is a one-hunk change to that one constant; outside it, this file
-knows only the two placeholders it fills itself (see THE EDIT). The prompt
-file under the skill is not read by this program, so the two are kept in step
-by hand.
+knows only the three placeholders it fills itself (see THE EDIT and THE
+READER); the launcher fills the other two, {TARGET_PATH} and {REPORT_PATH}. The prompt file under the skill is not read by this program, so the
+two are kept in step by hand.
+
+THE READER. --text-intended-reader-category names the cold-read-target's
+text-intended-reader-category: human-readable, human-and-agent-readable or
+agent-readable, and human-and-agent-readable when the option is not given.
+The template's {TEXT_INTENDED_READER_CATEGORY} placeholder becomes that
+category, so the reviewer judges the text for the reader that the glossary
+entry of the category names, and the report's provenance stamp gets a
+`text_intended_reader_category=` field naming it. A caller that knows what
+kind of text it reads passes the category itself. A read run from the Mac on
+ned-box passes the option on to the read there when it was given.
 
 THE EDIT. The template's placeholders {CHANGED_SENTENCE_IDS} and
 {REMOVED_TEXT} tell the reviewer what the edit changed, so it can label each
@@ -207,6 +219,30 @@ this;` and gives the reset time Gemini named, without its seconds, and the
 line after it tells the agent that ran the read to copy that line into its
 next message to the user, so the user hears that Ultra ran out.
 
+FINDING OUTCOMES. After a read on the records route, once the record has
+shipped, stderr says either that the report has no findings, or lists each
+finding by its id, `Q<question>.<number>` as in `Q2.1`, with the opening of its
+text, and then gives a ready-made command: this program with
+--record-finding-outcomes-in-cold-read-record naming the record directory and one
+--finding-outcome '<id>=<applied, or declined: reason>' for each finding.
+Which lines are findings, and how they are numbered, is
+nn-systems/cold-read/cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py's to say. A
+walk draft's read has no cold-read-record, so it prints no command and its
+findings get no outcomes. After revising, the agent replaces each placeholder
+with `applied` or `declined: <reason>` and runs the command. That invocation
+launches nothing: it refuses, writing nothing, with REFUSED on stdout, its
+problems on stderr and exit 64, when the directory holds no fast read report,
+when the report has no findings, when the record already holds its outcomes
+file, and when a value is malformed, names a finding the report lacks or one
+given before, or when a finding has no value. Otherwise it writes
+cold-read-fast-read-finding-outcomes.json into the record directory, once,
+holding the report's sha256 and each finding's question, number, outcome and
+reason, while it holds the record's being-written lock, then ships the record
+as a read does, prints the shipper's line on stderr as `record:` and the
+file's path on stdout, and exits 0, or 1 when the record did not reach the
+log-store, saying on stderr how to ship it. The file is never rewritten,
+because the log-store keeps a record's files add-only.
+
 QUESTION 4, WHAT SHOULD BE CODE. The fast-clarify cell answers Questions 1
 to 3. A second cell, started just before it, runs beside it, its retry and the
 Sonnet backup, and asks Question 4 of the cold-read-target itself, not the
@@ -215,7 +251,7 @@ the claude launcher on claude-opus-5-5 at high effort, with
 COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_PROMPT_TEMPLATE below, whose reading rules are cut from
 FAST_CLARIFY_PROMPT_TEMPLATE. Its answer, under its own provenance stamp,
 becomes the report's `## Question 4: What should be code` section, placed
-before the sentence coverage section, so the report has four sections. The
+before the new words section and the sentence coverage section. The
 two cells can run at once because neither writes in the checkout while the
 other runs: each writes its report into this program's temporary directory,
 and the claude launcher reports as a stray write any file in the checkout
@@ -230,6 +266,29 @@ it is still running, its answer is dropped, and a line on stderr says
 Question 4 was abandoned. A SIGTERM or SIGHUP sent to the read ends it that
 way too, with exit 128 plus the signal's number: the cell is in a session of
 its own, so a signal to the read's process group does not reach it.
+
+WITHOUT QUESTION 4. With --without-question-4 no Question 4 cell is
+started, and the report's `## Question 4: What should be code` section holds
+one line saying Question 4 was not asked because of that option. The walk
+check program,
+nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py,
+passes it on every fast read it runs. A read run from the Mac on ned-box
+passes the option on to the read there.
+
+NEW WORDS. The fast-clarify cell also lists, in a section headed
+`## Words with a meaning of their own`, the words the sentences the edit added or changed use in a meaning of their
+own: none for an edit that only removed text, and, for a document read whole,
+the words the whole document uses so. Once the cell's report has landed, and before the read waits for
+Question 4,
+nn-systems/cold-read/cold-read-fast-read-new-words-fresh-reader-meaning-check.py
+takes that section out of the report, drops each word a glossary or the
+ordinary hyphenated words list has, and checks each other word with two
+calls on the fast cold-read-tier through the launcher that wrote the report:
+one guesses the word's meaning from the word alone, the other answers
+MATCHES or DIFFERS against the meaning the cell gave. The report gains a
+section, before the sentence coverage, saying what became of each word; its
+entries are not findings, and take no finding outcome. A word whose check
+fails is listed there as not checked, and the read's exit is unchanged.
 """
 
 from __future__ import annotations
@@ -276,6 +335,18 @@ _record_shipper_spec = importlib.util.spec_from_file_location(
     "cold_read_record_ship", RECORD_SHIPPER)
 record_shipper = importlib.util.module_from_spec(_record_shipper_spec)
 _record_shipper_spec.loader.exec_module(record_shipper)
+# Finds a report's findings and checks and records the agent's outcome for each.
+_finding_outcomes_spec = importlib.util.spec_from_file_location(
+    "cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common",
+    pathlib.Path(__file__).with_name("cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py"))
+finding_outcomes = importlib.util.module_from_spec(_finding_outcomes_spec)
+_finding_outcomes_spec.loader.exec_module(finding_outcomes)
+# Reads the fast-clarify cell's section of words with a meaning of their own and checks each word against a fresh reader's guess.
+_new_words_spec = importlib.util.spec_from_file_location(
+    "cold_read_fast_read_new_words_fresh_reader_meaning_check",
+    pathlib.Path(__file__).with_name("cold-read-fast-read-new-words-fresh-reader-meaning-check.py"))
+new_words = importlib.util.module_from_spec(_new_words_spec)
+_new_words_spec.loader.exec_module(new_words)
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
     REPO_ROOT / "nn-systems" / "general-tools"
@@ -317,44 +388,53 @@ EMBEDDED_PROMPT_FILE_NAME = "cold-read-fast-read-embedded-fast-clarify-prompt.md
 
 # The user's text (see the docstring): .claude/skills/cold-read/prompts/fast-clarify-prompt.md,
 # verbatim. {TARGET_PATH} and {REPORT_PATH} are substituted by the
-# cold-read-cell launcher; {CHANGED_SENTENCE_IDS} and {REMOVED_TEXT} by
-# fast_clarify_prompt_with_edit_placeholders_filled.
+# cold-read-cell launcher; {CHANGED_SENTENCE_IDS}, {REMOVED_TEXT} and
+# {TEXT_INTENDED_READER_CATEGORY} by
+# fast_clarify_prompt_template_changed_sentence_ids_removed_text_and_text_intended_reader_category_placeholders_fill.
 FAST_CLARIFY_PROMPT_TEMPLATE = """\
-Read {TARGET_PATH} in full, including any YAML frontmatter, and answer three questions about it, in three sections, in the order below. Before the documents, read `CLAUDE.md` at the repository's root and the project glossary at `docs/nedsnodes-wiki/nedsnodes-glossary.md`: every agent that acts on the documents has read both. For a term the project glossary does not list, look in the system glossary it names, as `CLAUDE.md` says. Your context is deliberately minimal — what your runtime already loaded, those files, the document or documents under review, and what the documents reference, which you follow as far as you need to understand them, the way a reader would. A reference is a repository path; a bare file name that matches exactly one file in the repository, which you may search the repository for; or a web page they link to, GitHub issue and pull request pages included. A bare file name that matches no file or several is reported, not guessed at. Nothing else: do not go looking beyond what the documents reference. Report findings only about the document or documents under review, not about what you read along the way. Never open a credential file, even when the document names it: a `.token` file, anything under `~/.config/nedsnodes/` or `~/.ssh/`, a program's login file, a keychain item, or a `.env` file. That limit is the point, because {TARGET_PATH} must be usable by a future agent who has only this info. {TARGET_PATH} is read-only: do not edit it or anything else in the checkout. The one file you create is your report. If {TARGET_PATH} contains multiple documents, treat them like chapters of one book: any one of them can define or explain what the others rely on, and they should be consistent amongst themselves; repetition is fine, gaps or inconsistencies are not. Read all of them, then answer the 3 questions for each document in the report.
+Read {TARGET_PATH} in full, including any YAML frontmatter, and answer three questions about it, in three sections, in the order below, then, in a fourth section, list the words it uses in a meaning of its own. Before the documents, read `CLAUDE.md` at the repository's root and the project glossary at `docs/nedsnodes-wiki/nedsnodes-glossary.md`: everyone who acts on the documents has read both. Your context is deliberately minimal — what your agent-binary already loaded, those files, the document or documents under review, and what the documents reference, which you follow as far as you need to understand them, the way a reader would. A reference is any mention of another file or web page. Follow a reference that is a repository path; a bare file name that matches exactly one file in the repository, which you may search the repository for; or a web page the documents link to, GHI and pull request pages included. A bare file name that matches no file or several is reported, not guessed at. Nothing else: do not go looking beyond what the documents reference. Report findings only about the document or documents under review, not about what you read along the way. Never open a credential file, even when the document names it: a `.token` file, anything under `~/.config/nedsnodes/` or `~/.ssh/`, a program's login file, a keychain item, or a `.env` file. That minimal context is the point, because {TARGET_PATH} must be usable by a future reader who has only this info. {TARGET_PATH} is read-only: do not edit it or anything else in the checkout. The one file you create is your report. If {TARGET_PATH} contains multiple documents, treat them like chapters of one book: any one of them can define or explain what the others rely on, and they should be consistent amongst themselves; repetition is fine, gaps or inconsistencies are not. Read all of them, then answer the 3 questions for each document in the report, and give the words of every document in the one fourth section.
+
+The text-intended-reader-category of {TARGET_PATH} is {TEXT_INTENDED_READER_CATEGORY}: judge the text for the reader that the project glossary's entry for {TEXT_INTENDED_READER_CATEGORY} names, by the cold read that entry describes. A part written for another reader, such as frontmatter, is judged for that part's own reader. The entry for {TEXT_INTENDED_READER_CATEGORY}, the text's own category, can only narrow the limit on your context above: do not open what that entry says its reader does not read, even when the documents reference it.
 
 ## Question 1: What it says
 
-Restate each document or source text as follows. For each sentence, write its id — the bracketed marker `[s12]` that begins it, brackets and all — on a line of its own, then one bullet per point, action, fact, idea, concept or claim in that sentence, in the order they were originally presented. The ids mark where each sentence begins: restate the text under the id it carries, and never merge two ids into one restatement or split one id into two. A heading, a table row or a fenced code block counts as a sentence; a list item is split into its sentences like any paragraph. A sentence may contain many points. Do not merge or omit details. Restate each point in your own plain, succinct words, literally and precisely. If a sentence or point does not make sense to you, your restatement may also not make sense, in which case add ?nonsense? to the end of that line or bullet. If there is a clear gap in the source text, note that gap with a bullet that says ?gap? followed by what is missing. In frontmatter, a data field such as a name, ids or dates gets no bullets; a prose field such as a description is treated like any other sentence. Your bullets, taken together, should be roughly the length of the original. This question exists so the author can check whether you understood what they meant, which is why you should be literal, and not try to guess a coherent meaning if there is none. Your rewrite helps the author determine if other agents correctly parse their text.
+Restate each document as follows. For each sentence, write its id — the bracketed `[s12]` that begins it, brackets and all — on a line of its own, then one bullet per point, action, fact, idea, concept or claim in that sentence, in the order they were originally presented. The ids mark where each sentence begins: restate the text under the id it carries, and never merge two ids into one restatement or split one id into two. A heading, a table row or a fenced code block counts as a sentence; a list item is split into its sentences like any paragraph. A sentence may contain many points. Do not merge or omit details. Restate each point in your own plain, succinct words, literally and precisely. If a sentence or point does not make sense to you, your restatement may also not make sense, in which case add ?nonsense? to the end of that line or bullet. If there is a clear gap in the document, note that gap with a bullet that says ?gap? followed by what is missing. In frontmatter, a data field such as a name, an identifier or a date gets no bullets; a prose field such as a description is treated like any other sentence. Your bullets, taken together, should be roughly the length of the text you restate. This question exists so the author can check whether you understood what they meant, which is why you should be literal, and not try to guess a coherent meaning if there is none. Your restatement helps the author determine whether the reader the text is written for understands it correctly.
 
 ## Question 2: Where you struggled
 
-Note where an agent might waste tokens or come to incorrect conclusions:
+Note where the reader the text is written for might waste effort or come to incorrect conclusions:
 
 * every place in the text that seemed unclear, opaque, incoherent.
-* ambiguities - phrases or sentences that could read two different ways, in which case describe both readings, including the use of pronouns with ambiguous subjects
-* references that do not resolve - the file does not exist at the path stated
-* meanings you resolved only by reading into it your own ideas, because the document is not clear and complete.
+* ambiguities - phrases or sentences that could be read two or more ways, in which case describe each reading, including pronouns that could refer to more than one thing
+* meanings you worked out only by reading into it your own ideas, because the document is not clear and complete.
 * undefined terms, or terms the document uses as if they were already defined
-* references you could not follow - a bare file name that matches no file or several, a reference with no path, file name or link, or a linked page that would not load
+* references you could not follow - a path where no file exists, a bare file name that matches no file or several, a reference with no path, file name or link, or a linked page that would not load
 
-BE CONCISE: for each issue, quote the exact phrase and then a sentence naming the defect and why it matters. Focus on issues that would actually misdirect or block a fresh-reader following the document's instructions. Report every real issue you found — conciseness is about the length of each item, never about dropping a genuine problem. Number each item.
+BE CONCISE: for each problem, quote the exact phrase and then a sentence naming the defect and why it matters. Focus on problems that would actually misdirect or block the reader the text is written for. Report every real problem you found — conciseness is about the length of each item, never about dropping a genuine problem. Number each item.
 
 ## Question 3: What it does not cover that it implies it should
 
 The text explains something or tells its reader what to do. Find the gaps within its logic, situations it covers incompletely, likely cases or states that are not covered, or are covered in conflicting ways. Take each rule, instruction, case, or definition the document states, and ask what a reader needs to know that is not explained — a boundary value falling between two cases, a state the document's own machinery could reach but never names, a step with no stopping point, a failure the text neither handles nor rules out. BE CONCISE here too: for each gap, quote the relevant text and describe its gap. Ask this only of what {TARGET_PATH} sets out to cover; a subject it never takes up is not a gap.
 
-Sentences the edit added or changed: {CHANGED_SENTENCE_IDS}. Text the edit removed or replaced, which {TARGET_PATH} no longer holds: {REMOVED_TEXT}. When either of these names something, {TARGET_PATH} is an edit of a document on main. Begin each item in Questions 2 and 3 with one label. `#edit`: the item is about a sentence the edit added or changed, a conflict between such a sentence and the rest of the document, or a gap that the removed or replaced text leaves. `#kept_text`: the item is about sentences the edit did not change, and the edit did not cause it; end the item by saying whether the document already records the problem, citing where, such as "open question 6", or with "not recorded". When both say none, the document is read whole: give no labels.
+Sentences the edit added or changed: {CHANGED_SENTENCE_IDS}. Text the edit removed or replaced, which {TARGET_PATH} no longer holds: {REMOVED_TEXT}. When either of these names something, {TARGET_PATH} is an edit of a document on main. Begin each item in Questions 2 and 3 with one label. `#edit`: the item is about a sentence the edit added or changed, a conflict between such a sentence and the rest of the document, or a gap that the removed or replaced text leaves. `#kept_text`: the item is about sentences the edit did not change, and the edit did not cause it; end the item by saying whether the document already records the problem, citing where, such as "open question 6", or with "not recorded". When both say none, {TARGET_PATH} is not an edit: give no labels.
 
-Number the items in sections 2 and 3 separately, ORDERED MOST IMPORTANT FIRST — the issue most likely to stop a fresh-reader leads its section. If there are no issues, say "No issues".
+Number the items of Questions 2 and 3 separately, ORDERED MOST IMPORTANT FIRST — the problem most likely to stop the reader the text is written for leads its section. If a question has none, say "No issues".
 
-Lay out your report as follows, and do not look for an example report: first the list of the files you were told to examine; then `## Question 1: What it says`, with each sentence id on a line of its own and its bullets under it; then `## Question 2: Where you struggled` and `## Question 3: What it does not cover that it implies it should`, each a numbered list in which every item quotes a phrase and then says in one sentence what is wrong.
+## Words with a meaning of their own
 
-Write your report to {REPORT_PATH}, once, when your analysis is complete. That file is your entire deliverable: what you say in conversation is discarded. Start your report with a list of the files you were told to examine. Note if you were unable to read any of them. {REPORT_PATH} is the only file to create; write nothing anywhere else.
+Which words do these lines use in a meaning of their own that neither the glossaries nor plain English give them? These lines are the sentences the edit added or changed, which the paragraph under Question 3 that begins "Sentences the edit added or changed" names. When that paragraph names neither sentences nor removed text, the document is read whole, and these lines are the whole document; when it names removed text alone, the edit added no sentence, so write `- none`. A standard term of software engineering used in its standard meaning counts as plain English here. A word here may be a phrase of several words. List such a word even when a sentence the edit did not change already gives its meaning. Write one line for each meaning a word is given, however many documents use it: a hyphen and a space, the word in backquotes, a colon and a space, then the meaning the text gives it, in one sentence, or, when the text never says, the meaning you take from how the text uses it. For example, a skill that uses "rider" for the words the user types after the letter with which he answers an approval-walk item gets the line ``- `rider`: the words the user types after the letter with which he answers an approval-walk item``. When there is no such word, write the one line `- none`. When you could not read a document, write no line for it; when you could read none of them, leave this section out, so that the program that reads it reports their words as not checked. Write nothing else in this section: that program reports a line in any other form as unreadable.
+
+Lay out your report as follows, and do not look for an example report: first the list of the files you were told to examine, noting any you were unable to read; then `## Question 1: What it says`, with each sentence id on a line of its own and its bullets under it; then `## Question 2: Where you struggled` and `## Question 3: What it does not cover that it implies it should`, each a numbered list in which every item quotes a phrase and then says in one sentence what is wrong; then `## Words with a meaning of their own`, with the lines that section asks for.
+
+Write your report to {REPORT_PATH}, once, when your analysis is complete. That file is your entire deliverable: what you say in conversation is discarded. {REPORT_PATH} is the only file to create; write nothing anywhere else.
 """
 
-# QUESTION 4, asked of every document by a cell of its own: the user's text,
-# word for word, heading included. The heading is also the report section's.
+# QUESTION 4, asked by a cell of its own: the user's text, word for word,
+# heading included. The heading is also the report section's.
 WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING = "## Question 4: What should be code"
+WITHOUT_QUESTION_4_OPTION = "--without-question-4"
+WITHOUT_QUESTION_4_SECTION_LINE = (
+    f"Question 4 was not asked: this fast read was run with {WITHOUT_QUESTION_4_OPTION}.")
 WHAT_SHOULD_BE_CODE_QUESTION = WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING + """
 What here relies on an LLM following English instructions, or on a human remembering to do something, where code could do the job? The model handles what truly needs interpretation: understanding ambiguous intent, classifying semantically complex material, drafting open-ended content, ranking alternatives no known libraries or algorithms cover. Code handles everything where variability adds nothing: validation, parsing, calculation, state transitions, sequencing, retries, deduplication, filtering, formatting contracts, invariant enforcement, tool routing when the rule is known. Go through every step the text gives to a model or a person, and ask whether code could do it, constrain it to a bounded choice, take over its state or control flow, or check its result. A step that works reliably today, costs little, and fails loudly is not an issue, and neither is one that code already does. BE CONCISE: for each step, quote the exact phrase, then a sentence naming the work and the code that could do or check it. Number each item, most useful first. If there are none, say "No issues"."""
 
@@ -396,14 +476,21 @@ WHAT_SHOULD_BE_CODE_QUESTION_ANSWER_REPORT_SCRATCH_DIRECTORY_NAME = "what-should
 FAST_CLARIFY_CELL_REPORT_SCRATCH_DIRECTORY_NAME = "fast-clarify-cell-report"
 WHAT_SHOULD_BE_CODE_QUESTION_LAUNCHER_OUTPUT_SCRATCH_FILE_NAME = (
     "cold-read-fast-read-what-should-be-code-launcher-output.txt")
-# Opus 5.5 defect-hunt cells at xhigh, a larger task than one question at
-# high, took a median of 14 minutes and at most 44 in the log-store's records.
-COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60
+# A Question 4 cell takes under 3 minutes at p99, so one still running at 10
+# has hung.
+COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 10 * 60
 
 PROGRAM = "cold-read-fast-read"
 CHANGED_SENTENCE_IDS_PLACEHOLDER = "{CHANGED_SENTENCE_IDS}"
 REMOVED_TEXT_PLACEHOLDER = "{REMOVED_TEXT}"
 NOTHING_IN_THE_EDIT = "none"
+TEXT_INTENDED_READER_CATEGORY_PLACEHOLDER = "{TEXT_INTENDED_READER_CATEGORY}"
+TEXT_INTENDED_READER_CATEGORY_OPTION = "--text-intended-reader-category"
+# The three categories a cold-read-fast-read reads for; self-readable text gets
+# no read, and machine-readable text gets a test instead.
+TEXT_INTENDED_READER_CATEGORIES = ("human-readable", "human-and-agent-readable", "agent-readable")
+TEXT_INTENDED_READER_CATEGORY_DEFAULT = "human-and-agent-readable"
+TEXT_INTENDED_READER_CATEGORY_STAMP_FIELD = "text_intended_reader_category"
 WALK_DRAFT_SUFFIX = "-draft.md"
 # Both endings are the walk-me-through skill's to name; this program only
 # follows them, and nn-systems/skills/walk-me-through/tests/walk-file-endings-match-the-skill-test.py fails
@@ -417,25 +504,26 @@ WALK_SUGGESTIONS_SUFFIX = "-cold-read-fast-read.md"
 # record. It is a warning, not a refusal -- the fast read is the full run's
 # first step, so running it here is right; merging on it alone is not.
 # CLAUDE.md is named, not placed: Claude Code loads one from any directory.
-FULL_RUN_NAMES = (("CLAUDE.md", "CLAUDE.md"),)
+# A seat-brief is an agent-seat's CLAUDE.local.md, which sits in the seat's own
+# checkout, so it too is known by its name.
+FULL_RUN_NAMES = (("CLAUDE.md", "CLAUDE.md"), ("CLAUDE.local.md", "a seat-brief"))
 FULL_RUN_DIRECTORIES_RELATIVE = (
     (pathlib.Path(".claude") / "skills", "a skill or a skill's prompt"),
     (pathlib.Path("docs") / "agents", "a file under docs/agents/"),
     (pathlib.Path("docs") / "nedsnodes-wiki", "a wiki file"),
 )
-# Designs, test designs and design-contracts are named, not placed: this
-# project's designs live beside the issues, the cross-project specs and in
-# docs/design-to-main/, and the state-machine design names all three files
-# `<component>-design.md`, `<component>-contract.md` and
-# `<component>-test-design.md` (its section on where artifacts land). Step 2
-# and this program both use the glossary's term, design-contract. No
-# directory is a design class: docs/design-to-main/ also holds that system's
-# glossary, which is not in step 2's list. The suffixes are matched whole, so
-# `-design-notes.md` -- notes about a design, not the design -- is not one.
+# Designs, test designs and design-contracts are named, not placed: the
+# file-naming page names a design `<name>.<kind>.design.md`, its test design
+# `<name>.<kind>.test-design.md` and its design-contract
+# `<name>.<kind>.contract.md`, wherever they sit. Step 2 and this program both
+# use the glossary's term, design-contract. No directory is a design class:
+# docs/design-to-main/ also holds that system's glossary, which is not in step
+# 2's list. The suffixes are matched whole, so `-design-notes.md` -- notes
+# about a design, not the design -- is not one.
 FULL_RUN_NAME_SUFFIXES = (
-    ("-test-design.md", "a test design"),
-    ("-contract.md", "a design-contract"),
-    ("-design.md", "a design"),
+    (".test-design.md", "a test design"),
+    (".contract.md", "a design-contract"),
+    (".design.md", "a design"),
 )
 # Step 2's own exceptions, which beat the classes above: a walk file, a
 # handoff, a pull request description and an issue body take the fast read and
@@ -481,9 +569,10 @@ _cell_common_spec = importlib.util.spec_from_file_location(
     "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py"))
 cell_common = importlib.util.module_from_spec(_cell_common_spec)
 _cell_common_spec.loader.exec_module(cell_common)
-# The claude launcher sets no time limit of its own; the Sonnet backup is
-# allowed as long as one Gemini attempt.
-COLD_READ_FAST_READ_SONNET_BACKUP_RUN_ALLOWANCE_SECONDS = 30 * 60
+# The claude launcher sets no time limit of its own, so this is only the
+# Sonnet backup's share of the ssh time limit below; it takes under 3 minutes
+# at p99.
+COLD_READ_FAST_READ_SONNET_BACKUP_RUN_ALLOWANCE_SECONDS = 10 * 60
 # Each Gemini attempt of the read on ned-box is bounded by the time after
 # which the agy cell kills each model of the cold-read-tier's chain; the five
 # minutes more cover git, the shipper and the connect.
@@ -491,6 +580,7 @@ COLD_READ_FAST_READ_RUN_ON_NED_BOX_OVER_SSH_TIMEOUT_SECONDS = (
     FAST_READ_ATTEMPTS * len(agy_cell.TIER_TO_AGY_MODEL_CHAIN[FAST_READ_TIER])
     * agy_cell.COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS
     + COLD_READ_FAST_READ_SONNET_BACKUP_RUN_ALLOWANCE_SECONDS + 5 * 60
+    + new_words.NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS
     + COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS)
 
 
@@ -523,11 +613,12 @@ def mac_mount_path_of_ned_box_path(ned_box_path: str) -> str:
     return MAC_MOUNT_OF_NED_BOX_HOME + ned_box_path[len(NED_BOX_HOME):]
 
 
-def cold_read_fast_read_script_rerun_shell_command_line_for_mac(ned_box_target: str) -> str:
+def cold_read_fast_read_script_rerun_shell_command_line_for_mac(ned_box_target: str,
+                                                               options: tuple = ()) -> str:
     """The command line, quoted for a shell, that runs this program once
-    more on the Mac on `ned_box_target` in its Mac mount form."""
+    more on the Mac on `ned_box_target` in its Mac mount form, with `options`."""
     return shlex.join(["python3", str(pathlib.Path(__file__).resolve()), "--target",
-                       mac_mount_path_of_ned_box_path(ned_box_target)])
+                       mac_mount_path_of_ned_box_path(ned_box_target), *options])
 
 
 def text_with_ned_box_paths_rewritten_as_mac_mount_paths(text: str) -> str:
@@ -572,10 +663,10 @@ def lines_ending_with_message_for_the_user(message_for_the_user: str,
             f"{one_line}")
 
 
-def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str) -> int:
-    """Run the fast read on ned-box on `ned_box_target`, with the script of
-    the ned-box checkout holding it, relay its output in Mac mount paths, and
-    return its exit code, or 1 when it could not be run."""
+def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str, options: tuple = ()) -> int:
+    """Run the fast read on ned-box on `ned_box_target` with `options`, with
+    the script of the ned-box checkout holding it, relay its output in Mac
+    mount paths, and return its exit code, or 1 when it could not be run."""
     directory = str(pathlib.PurePosixPath(ned_box_target).parent)
     session_id = os.environ.get(record_names.AGENT_SESSION_ID_ENVIRONMENT_VARIABLE)
     session_assignment = (
@@ -586,10 +677,11 @@ def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str) -> int:
         f"cd -- \"$top\" && ")
     fast_read_invocation = (
         f"python3 {shlex.quote(str(pathlib.Path(__file__).resolve().relative_to(REPO_ROOT)))} "
-        f"--target {shlex.quote(ned_box_target)}")
+        f"--target {shlex.quote(ned_box_target)}"
+        + "".join(f" {shlex.quote(option)}" for option in options))
     remote_command = f"{checkout_entry}{session_assignment}exec {fast_read_invocation}"
     command_for_a_person = f"{checkout_entry}{fast_read_invocation}"
-    rerun_command = cold_read_fast_read_script_rerun_shell_command_line_for_mac(ned_box_target)
+    rerun_command = cold_read_fast_read_script_rerun_shell_command_line_for_mac(ned_box_target, options)
     print(f"{PROGRAM}: git on this machine cannot read the ned-box worktree "
           f"holding the target, so the fast read runs on ned-box on "
           f"{ned_box_target}.", file=sys.stderr)
@@ -855,7 +947,7 @@ def record_clock_reading() -> datetime.datetime:
     taken from, so the two cannot disagree across midnight.
 
     COLD_READ_RECORD_CLOCK_OVERRIDE, when set as `YYYY-MM-DDTHH:MM`, is read
-    instead of the clock: it is how the nc-test-suites name a cold-read-record
+    instead of the clock: it is how the nn-test-suites name a cold-read-record
     exactly without depending on the wall clock or flaking across a minute
     boundary.
     The override is a clock value, not a finished name, so the tests still go
@@ -1290,6 +1382,27 @@ def with_line_after_provenance(report_text: str, line: str) -> str:
     return marker + report_text
 
 
+class ColdReadCellReportHasNoProvenanceStamp(Exception):
+    """The cell's report does not open with a provenance stamp, which
+    `stamp_provenance` in nn-systems/cold-read/cold-read-cell-common.py writes
+    on every report a cell finishes, so the launcher is broken."""
+
+
+def with_text_intended_reader_category_in_provenance_stamp(report_text: str, category: str) -> str:
+    """The report with the category as a field of its provenance stamp, put
+    before `target_sha256=`, which every stamp the cell launchers write holds,
+    because the stamp keeps `target=` last. Raises ColdReadCellReportHasNoProvenanceStamp
+    when the report has no stamp."""
+    field = f"{TEXT_INTENDED_READER_CATEGORY_STAMP_FIELD}={category}"
+    first, newline, rest = report_text.partition("\n")
+    if not first.startswith("<!-- provenance:"):
+        raise ColdReadCellReportHasNoProvenanceStamp(
+            f"the cell's report opens with {first[:80]!r}, not a provenance stamp; "
+            "every report a cell finishes is stamped, so the cell launcher is broken")
+    before, found, after = first.partition(" target_sha256=")
+    return f"{before} {field}{found}{after}{newline}{rest}"
+
+
 def freeze_target(target: pathlib.Path, record_dir: pathlib.Path) -> None:
     """Copy the cold-read-target's bytes into the cold-read-record before the
     cold-read-cell reads it, so the cold-read-record says exactly what was
@@ -1367,9 +1480,11 @@ def cold_read_target_compare_with_base_text_returning_added_or_changed_sentence_
     return changed, removed
 
 
-def fast_clarify_prompt_with_edit_placeholders_filled(changed: list, removed: list) -> str:
-    """FAST_CLARIFY_PROMPT_TEMPLATE with the edit's two placeholders filled;
-    the launcher fills {TARGET_PATH} and {REPORT_PATH}. A removed unit that
+def fast_clarify_prompt_template_changed_sentence_ids_removed_text_and_text_intended_reader_category_placeholders_fill(
+        changed: list, removed: list, text_intended_reader_category: str) -> str:
+    """FAST_CLARIFY_PROMPT_TEMPLATE with the edit's two placeholders and the
+    text-intended-reader-category's filled; the launcher fills {TARGET_PATH}
+    and {REPORT_PATH}. A removed unit that
     holds either of those two placeholders has its brace JSON-escaped, so the
     launcher leaves the quoted text as the base held it."""
     def quoted(unit: str) -> str:
@@ -1378,6 +1493,7 @@ def fast_clarify_prompt_with_edit_placeholders_filled(changed: list, removed: li
             text = text.replace(placeholder, "\\u007b" + placeholder[1:])
         return text
     return (FAST_CLARIFY_PROMPT_TEMPLATE
+            .replace(TEXT_INTENDED_READER_CATEGORY_PLACEHOLDER, text_intended_reader_category)
             .replace(CHANGED_SENTENCE_IDS_PLACEHOLDER,
                      ", ".join(f"[{name}]" for name in changed) or NOTHING_IN_THE_EDIT)
             .replace(REMOVED_TEXT_PLACEHOLDER,
@@ -1641,22 +1757,37 @@ def fast_read_report_finish_and_print_path(
     *, report: pathlib.Path, cell_report: pathlib.Path, target: pathlib.Path, sentences: dict,
     marked_copy_kept, full_run_class_name, bare_references, launch_sha256: str,
     on_records_route: bool, backup_line: str,
-    question_4_cell: WhatShouldBeCodeQuestionCell, edit_changed_ids: list,
-    edit_removed_units: list, quota_line: str = "",
+    question_4_cell: typing.Optional[WhatShouldBeCodeQuestionCell], edit_changed_ids: list,
+    edit_removed_units: list, text_intended_reader_category: str, scratch: pathlib.Path,
+    word_check_launcher: pathlib.Path, quota_line: str = "",
 ) -> int:
     """Turn the cell's report, cell_report, into the read's, written once at
-    report: wait for the Question 4 cell and add its section, attach the sentences, the
+    report: wait for the Question 4 cell, if one was started, and add its section, attach the sentences, the
     coverage and the bare numbers, name an edit made during the read and the
-    Sonnet backup, ship the record, print the path. Returns 0, or 1 when
+    Sonnet backup, ship the record, print the path. Before waiting for
+    Question 4, take the cell's section of words with a meaning of their own out of its report and check
+    each word through word_check_launcher, the launcher that wrote the report,
+    and add the section that says what became of each. Returns 0, or 1 when
     the record did not reach the log-store, whether or not Question 4 was
-    answered."""
-    question_4_section = what_should_be_code_section(question_4_cell)
+    answered or the new words were checked."""
+    new_words_answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
+        cell_report.read_text(encoding="utf-8"))
+    new_words_section, new_words_stderr_lines = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
+        new_words_answer, whole_document=not (edit_changed_ids or edit_removed_units),
+        ask=new_words.cold_read_cell_launcher_call_function_factory_with_one_deadline_shared_by_all_calls(word_check_launcher, scratch))
+    for line in new_words_stderr_lines:
+        print(line, file=sys.stderr)
+    question_4_section = (
+        what_should_be_code_section(question_4_cell) if question_4_cell is not None
+        else f"\n{WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING}\n\n{WITHOUT_QUESTION_4_SECTION_LINE}\n")
     # Before anything reads or ships it: put each original sentence under
     # the restatement claiming its id, and say which sentences no
     # restatement claimed.
-    attached = attach_sentences_and_coverage(
-        cell_report.read_text(encoding="utf-8"), sentences, target,
-        marked_copy_kept, full_run_class_name, question_4_section)
+    attached = with_text_intended_reader_category_in_provenance_stamp(
+        attach_sentences_and_coverage(
+            new_words_answer.report_text_without_answer, sentences, target,
+            marked_copy_kept, full_run_class_name, question_4_section + new_words_section),
+        text_intended_reader_category)
     if edit_changed_ids or edit_removed_units:
         attached += (f"- The reviewer was told what the edit did: sentences added or "
                      f"changed, {len(edit_changed_ids)}; text removed or replaced, "
@@ -1688,17 +1819,111 @@ def fast_read_report_finish_and_print_path(
         record_line = ship_record(report.parent)
         print(f"{PROGRAM}: record: {record_line}", file=sys.stderr)
         shipped = record_line.startswith(RECORD_SHIPPED_LINE_PREFIX)
+        print(finding_outcomes_to_record_lines(report.parent), file=sys.stderr)
     print(report)
     return 0 if shipped else 1
+
+
+def finding_outcomes_to_record_lines(record_dir: pathlib.Path) -> str:
+    """What the agent is told after a read on the records route: that the report has no findings, or each
+    finding's id and opening and the command that records what the agent did with each."""
+    findings = finding_outcomes.cold_read_fast_read_record_findings(record_dir)
+    if not findings:
+        return f"{PROGRAM}: the report has no findings, so it needs no finding outcomes."
+    return "\n".join(
+        [f"{PROGRAM}: the report has {len(findings)} finding{'' if len(findings) == 1 else 's'}:"]
+        + finding_outcomes.finding_list_lines(findings)
+        + [f"After you revise, record what you did with each finding: run the command below, with "
+           f"`{finding_outcomes.APPLIED}` or `{finding_outcomes.DECLINED}: <your reason>` in place of each "
+           f"`{finding_outcomes.FINDING_OUTCOME_PLACEHOLDER}`, keeping the single quotes. It refuses a list "
+           f"that leaves out a finding or names one the report does not have. The outcomes are written once, so "
+           f"run it when your revision is done.",
+           finding_outcomes.cold_read_fast_read_finding_outcomes_record_command(
+               pathlib.Path(__file__).resolve(), record_dir, findings)])
+
+
+def finding_outcomes_refused(record_dir, problems, then=()) -> int:
+    """Print the refusal of a --record-finding-outcomes-in-cold-read-record invocation, which wrote nothing."""
+    print(f"{PROGRAM}: no finding outcomes were written for {record_dir}:\n"
+          + "\n".join([f"- {problem}" for problem in problems] + list(then)), file=sys.stderr)
+    print(f"REFUSED (no finding outcomes written for {record_dir})")
+    return EXIT_BAD_INVOCATION
+
+
+def finding_outcomes_record(record_dir: pathlib.Path, values: list) -> int:
+    """Write the outcome of every finding of record_dir's report into the record's outcomes file, once, and
+    ship the record. Returns 0 when the record shipped, 1 when the file was written but the record did not
+    reach the log-store, and EXIT_BAD_INVOCATION when nothing was written."""
+    report = finding_outcomes.cold_read_fast_read_record_report_path(record_dir)
+    outcomes_file = finding_outcomes.finding_outcomes_file_path(record_dir)
+    if not report.is_file():
+        return finding_outcomes_refused(record_dir, [
+            f"{record_dir} holds no cold-read-fast-read report, {report.name}. Give the directory the read "
+            f"printed the report in, the parent of the path it printed on stdout."])
+    findings = finding_outcomes.cold_read_fast_read_record_findings(record_dir)
+    if not findings:
+        return finding_outcomes_refused(record_dir, [
+            f"{report} has no findings, so it needs no finding outcomes. Run nothing more for it."])
+    if outcomes_file.exists():
+        return finding_outcomes_refused(record_dir, [
+            f"{outcomes_file} already holds this record's finding outcomes. It is written once, because the "
+            f"log-store keeps a record's files add-only and would refuse a changed copy.",
+            f"If the record has not reached the log-store since, run `python3 "
+            f"{shlex.quote(str(RECORD_SHIPPER))} {shlex.quote(str(record_dir))}` to ship it."])
+    try:
+        outcomes = finding_outcomes.cold_read_fast_read_finding_outcomes_from_values(values, findings)
+    except finding_outcomes.FindingOutcomesRefused as refusal:
+        return finding_outcomes_refused(
+            record_dir, refusal.args[0],
+            ["Run the command again with one value for each finding below, and no others:"]
+            + finding_outcomes.finding_list_lines(findings))
+    # Held while the file is written, so a shipment started meanwhile copies nothing rather than half a file.
+    record_shipper.record_directory_being_written_lock_take(record_dir)
+    with outcomes_file.open("x", encoding="utf-8") as written:
+        written.write(finding_outcomes.finding_outcomes_file_text(
+            report.read_bytes(), outcomes,
+            datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")))
+    record_line = ship_record(record_dir)
+    print(f"{PROGRAM}: record: {record_line}", file=sys.stderr)
+    print(outcomes_file)
+    if record_line.startswith(RECORD_SHIPPED_LINE_PREFIX):
+        return 0
+    print(f"{PROGRAM}: the finding outcomes are written in {outcomes_file}, but the record did not reach the "
+          f"log-store.\nOnce the cause the record line names is fixed, run `python3 "
+          f"{shlex.quote(str(RECORD_SHIPPER))} {shlex.quote(str(record_dir))}` to ship it. Do not record the "
+          f"outcomes again: they are written.", file=sys.stderr)
+    return 1
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        "--target", required=True,
+        "--target",
         help="document path, relative to the current directory or absolute")
+    parser.add_argument(
+        WITHOUT_QUESTION_4_OPTION, action="store_true",
+        help="ask Questions 1 to 3 only; start no Question 4 cell")
+    parser.add_argument(
+        TEXT_INTENDED_READER_CATEGORY_OPTION, choices=TEXT_INTENDED_READER_CATEGORIES,
+        help="the reader the text is written for; human-and-agent-readable when not given.")
+    parser.add_argument(
+        finding_outcomes.FINDING_OUTCOMES_RECORD_OPTION, metavar="COLD_READ_RECORD", type=pathlib.Path,
+        help="instead of reading a document, record the outcome of every finding of the fast read report "
+             "this cold-read-record directory holds, as the command a read prints says")
+    parser.add_argument(
+        finding_outcomes.FINDING_OUTCOME_OPTION, action="append", default=[], metavar="'QN.M=OUTCOME'",
+        help=f"with {finding_outcomes.FINDING_OUTCOMES_RECORD_OPTION}, once for each finding: "
+             f"'Q2.1={finding_outcomes.APPLIED}' or 'Q4.1={finding_outcomes.DECLINED}: <reason>'")
     args = parser.parse_args()
+    outcomes_record = getattr(args, finding_outcomes.FINDING_OUTCOMES_RECORD_OPTION[2:].replace("-", "_"))
+    if (args.target is None) == (outcomes_record is None):
+        parser.error(f"give --target, or {finding_outcomes.FINDING_OUTCOMES_RECORD_OPTION}, but not both")
+    if outcomes_record is not None:
+        return finding_outcomes_record(outcomes_record.resolve(), args.finding_outcome)
+    if args.finding_outcome:
+        parser.error(f"{finding_outcomes.FINDING_OUTCOME_OPTION} needs "
+                     f"{finding_outcomes.FINDING_OUTCOMES_RECORD_OPTION}")
     # Raising SystemExit runs the finally below that stops the Question 4 cell,
     # and the temporary directory's cleanup; the default action runs neither.
     signal.signal(signal.SIGTERM, cell_common.exit_on_sigterm)
@@ -1733,7 +1958,11 @@ def main() -> int:
               f"edit changed: {error})")
         return 1
     except NedBoxWorktreeUnreadableThroughMacMount as error:
-        return cold_read_fast_read_run_on_ned_box_over_ssh(error.ned_box_target)
+        return cold_read_fast_read_run_on_ned_box_over_ssh(
+            error.ned_box_target,
+            ((WITHOUT_QUESTION_4_OPTION,) if args.without_question_4 else ())
+            + ((TEXT_INTENDED_READER_CATEGORY_OPTION, args.text_intended_reader_category)
+               if args.text_intended_reader_category else ()))
     except CheckoutRootUnreadable as error:
         print(f"{PROGRAM}: no fast read ran and no report was written: could "
               f"not tell which checkout holds the target, so could not tell "
@@ -1758,6 +1987,7 @@ def main() -> int:
     bare_references = (None if on_records_route
                        else bare_references_in(target.read_text(encoding="utf-8")))
 
+    text_intended_reader_category = args.text_intended_reader_category or TEXT_INTENDED_READER_CATEGORY_DEFAULT
     edit_changed_ids, edit_removed_units = (
         ([], []) if base_text is None
         else cold_read_target_compare_with_base_text_returning_added_or_changed_sentence_ids_and_removed_text_units(
@@ -1765,8 +1995,8 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="cold-read-fast-read-") as scratch:
         prompt_file = pathlib.Path(scratch) / EMBEDDED_PROMPT_FILE_NAME
-        prompt_file.write_text(fast_clarify_prompt_with_edit_placeholders_filled(
-            edit_changed_ids, edit_removed_units), encoding="utf-8")
+        prompt_file.write_text(fast_clarify_prompt_template_changed_sentence_ids_removed_text_and_text_intended_reader_category_placeholders_fill(
+            edit_changed_ids, edit_removed_units, text_intended_reader_category), encoding="utf-8")
         # What the reviewer actually reads: the cold-read-target with an id on
         # every sentence. On the records route it is kept beside the report,
         # as the evidence of what was put in front of the reviewer; on the
@@ -1787,21 +2017,25 @@ def main() -> int:
         report.unlink(missing_ok=True)
         # Started after every write this program makes in the checkout before
         # its report, so the claude launcher's stray-write check sees none of them.
-        question_4_cell = what_should_be_code_cell_start(target, pathlib.Path(scratch))
+        question_4_cell = (None if args.without_question_4
+                           else what_should_be_code_cell_start(target, pathlib.Path(scratch)))
         finish = dict(
             report=report, cell_report=cell_report, target=target, sentences=sentences,
             marked_copy_kept=marked_copy if on_records_route else None,
             full_run_class_name=full_run_class_name, bare_references=bare_references,
             launch_sha256=launch_sha256, on_records_route=on_records_route,
             question_4_cell=question_4_cell, edit_changed_ids=edit_changed_ids,
-            edit_removed_units=edit_removed_units)
+            edit_removed_units=edit_removed_units,
+            text_intended_reader_category=text_intended_reader_category,
+            scratch=pathlib.Path(scratch))
         try:
             quota_error_line = ""
             for attempt in range(1, FAST_READ_ATTEMPTS + 1):  # pragma: no mutate, FAST_READ_ATTEMPTS is even, so | 1 gives + 1
                 exit_code, output = run_one_fast_clarify_cell(
                     AGY_CELL_LAUNCHER, marked_copy, cell_report, prompt_file)
                 if exit_code == 0:
-                    return fast_read_report_finish_and_print_path(**finish, backup_line="")
+                    return fast_read_report_finish_and_print_path(
+                        **finish, backup_line="", word_check_launcher=AGY_CELL_LAUNCHER)
                 gemini_cause = cold_read_cell_reviewer_launcher_failure_cause_line(
                     AGY_CELL_LAUNCHER, exit_code, output)
                 if exit_code == EXIT_BAD_INVOCATION:
@@ -1830,7 +2064,7 @@ def main() -> int:
                 CLAUDE_CELL_LAUNCHER, marked_copy, cell_report, prompt_file)
             if exit_code == 0:
                 return fast_read_report_finish_and_print_path(
-                    **finish,
+                    **finish, word_check_launcher=CLAUDE_CELL_LAUNCHER,
                     backup_line=(f"{SONNET_BACKUP_HASHTAG} The Gemini fast-clarify cell "
                                  f"failed ({gemini_cause}), so {SONNET_BACKUP_MODEL} read "
                                  "this document instead, as the provenance stamp says."),
@@ -1839,7 +2073,7 @@ def main() -> int:
                 CLAUDE_CELL_LAUNCHER, exit_code, output)
         finally:
             # Inside the temporary directory: the cell writes there until it stops.
-            if not question_4_cell.section_collected_output.is_set():
+            if question_4_cell is not None and not question_4_cell.section_collected_output.is_set():
                 what_should_be_code_cell_abandon(question_4_cell)
     if bare_references:
         print(f"{PROGRAM}: bare issue, pull request or task numbers in this walk "

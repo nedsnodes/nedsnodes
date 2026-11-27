@@ -17,7 +17,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 _fixture_spec = importlib.util.spec_from_file_location(
@@ -108,12 +107,17 @@ with tempfile.TemporaryDirectory() as scratch:
     for owner_kind, agent_seat, owner_key, why in (
             ("agent-seat", "", None, "an empty agent-seat name"),
             ("agent-seat", "two words", None, "an agent-seat name with a space"),
+            ("agent-seat", "a.b", None, "an agent-seat name with a dot, which launch-claude-ubuntu refuses"),
+            ("agent-seat", "seat-one\n", None, "an agent-seat name ending in a newline"),
             ("agent-seat", "seat-one", "1-2-3", "an agent-seat with an owner key"),
             ("agent-session", "seat-one", None, "an agent-session without an owner key"),
             ("someone", "seat-one", None, "an owner kind that is neither")):
         error = raised(lambda: module.worktree_owner_file_record_validate_and_build(owner_kind, agent_seat, owner_key))
         check(f"an owner record with {why} is refused",
               isinstance(error, module.WorktreeOwnerFileError), repr(error))
+    check("an owner record for an agent-seat whose name starts with _, which launch-claude-ubuntu accepts, is built",
+          module.worktree_owner_file_record_validate_and_build("agent-seat", "_x")
+          == {"owner_kind": "agent-seat", "agent_seat": "_x"})
 
     other = checkout / ".claude" / "worktrees" / "other"
     git(checkout, "worktree", "add", "-b", "other", str(other))
@@ -151,97 +155,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and not isinstance(unwritable, module.WorktreeOwnerFileAlreadyExistsError)
           and "could not be written" in str(unwritable), repr(unwritable))
 
-    # --- Claude Code's lock ---
-    check("Claude Code's lock reason on a subagent's worktree names the subagent and the "
-          "dispatching process with its start",
-          module.claude_code_subagent_worktree_lock_reason_parse(
-              "claude agent agent-a59101f2afd522964 (pid 3052879 start 197651712)")
-          == module.ClaudeCodeSubagentWorktreeLock("a59101f2afd522964", 3052879, "197651712"))
-    for reason in ("", None, "test lock", "claude agent agent-x (pid 12)",
-                   "claude agent agent-a1 (pid 12 start 3) and more",
-                   "claude agent agent-a1 (pid 12 start Nov  7 17:22:57 2026)"):
-        check(f"no process is read from the lock reason {reason!r}",
-              module.claude_code_subagent_worktree_lock_reason_parse(reason) is None)
-
-    mac_reason = "claude agent agent-a9e3e2fe0e79f0a2c (pid 29741 start Tue Nov  3 21:24:32 2026)"
-    mac_lock = module.claude_code_subagent_worktree_lock_reason_parse(mac_reason)
-    check("Claude Code's lock reason on the Mac, whose start is the date ps prints, names the "
-          "subagent and the dispatching process with its start",
-          mac_lock == module.ClaudeCodeSubagentWorktreeLock("a9e3e2fe0e79f0a2c", 29741,
-                                                            "Tue Nov  3 21:24:32 2026"), mac_lock)
-    mac_start_seconds = str(int(time.mktime(time.strptime("Tue Nov 3 21:24:32 2026",
-                                                          "%a %b %d %H:%M:%S %Y"))))
-
-    fake_proc = scratch / "fake-proc"
-    (fake_proc / "sys" / "kernel" / "random").mkdir(parents=True)
-    (fake_proc / "sys" / "kernel" / "random" / "boot_id").write_text("ab-cd\n")
-    fields_after_command = " ".join(["S"] + [str(number) for number in range(4, 60)])
-    (fake_proc / "41").mkdir()
-    (fake_proc / "41" / "stat").write_text(f"41 (claude) {fields_after_command}\n")
-    (fake_proc / "42").mkdir()
-    (fake_proc / "42" / "stat").write_text("42 (claude) S 1\n")
-    (fake_proc / "43" / "stat").mkdir(parents=True)
-
-    def lock_state(process_id, start, platform="linux"):
-        return module.claude_code_subagent_worktree_lock_dispatching_process_running_state(
-            module.ClaudeCodeSubagentWorktreeLock("a1", process_id, start), fake_proc, platform)
-
-    state, _ = lock_state(41, "22")
-    check("a lock whose process runs with the lock's start is running", state == module.RUNNING, state)
-    state, explanation = lock_state(41, "21")
-    check("a lock whose process id runs with another start has ended",
-          state == module.STOPPED and "has ended" in explanation, explanation)
-    state, _ = lock_state(40, "22")
-    check("a lock whose process is gone has ended", state == module.STOPPED, state)
-    state, explanation = lock_state(42, "22")
-    check("a lock whose process's stat is too short to read is unknown, never ended",
-          state == module.UNKNOWN and "IndexError" in explanation, explanation)
-    state, explanation = lock_state(43, "22")
-    check("a lock whose process's stat cannot be read is unknown, never ended",
-          state == module.UNKNOWN and "could not be read" in explanation, explanation)
-    def mac_lock_state(start_seconds_of_process):
-        return module.claude_code_subagent_worktree_lock_dispatching_process_running_state(
-            mac_lock, fake_proc, "darwin", start_seconds_of_process)
-
-    state, _ = mac_lock_state(lambda pid: mac_start_seconds)
-    check("a macOS lock whose process runs with the lock's start is running",
-          state == module.RUNNING, state)
-    state, explanation = mac_lock_state(lambda pid: str(int(mac_start_seconds) + 60))
-    check("a macOS lock whose process id runs with another start has ended",
-          state == module.STOPPED and "has ended" in explanation, explanation)
-    state, explanation = mac_lock_state(lambda pid: None)
-    check("a macOS lock whose process is gone has ended",
-          state == module.STOPPED and "has ended" in explanation, explanation)
-
-    def process_check_fails(pid):
-        raise OSError("ps failed")
-
-    state, explanation = mac_lock_state(process_check_fails)
-    check("a macOS lock whose process cannot be checked is unknown, never ended",
-          state == module.UNKNOWN and "could not be read" in explanation, explanation)
-    state, explanation = module.claude_code_subagent_worktree_lock_dispatching_process_running_state(
-        module.ClaudeCodeSubagentWorktreeLock("a1", 41, "22"), fake_proc, "darwin", lambda pid: None)
-    check("a macOS lock whose start is not the date ps prints is unknown, never ended",
-          state == module.UNKNOWN and "not the date" in explanation, explanation)
-    state, explanation = lock_state(41, "22", platform="win32")
-    check("a lock on neither Linux nor macOS is unknown",
-          state == module.UNKNOWN and "only on Linux and macOS" in explanation, explanation)
-    check("the ended agent-session's owner key is this boot's id, the lock's process and its start",
-          module.claude_code_subagent_worktree_lock_ended_agent_session_owner_key(
-              module.ClaudeCodeSubagentWorktreeLock("a1", 7, "8"), fake_proc, "linux") == "abcd-7-8")
-    check("on macOS the ended agent-session's owner key is the lock's process and its start in "
-          "seconds, the form a work-snapshot's macOS owner key takes",
-          module.claude_code_subagent_worktree_lock_ended_agent_session_owner_key(
-              mac_lock, fake_proc, "darwin") == f"29741-{mac_start_seconds}")
-    try:
-        module.claude_code_subagent_worktree_lock_ended_agent_session_owner_key(
-            module.ClaudeCodeSubagentWorktreeLock("a1", 7, "8"), fake_proc, "darwin")
-        no_key = None
-    except ValueError as error:
-        no_key = error
-    check("on macOS a lock whose start is not the date ps prints gives no owner key",
-          no_key is not None)
-
+    # --- The agent-seats whose Claude Code transcripts name a subagent ---
     agents_root = scratch / "agents"
     seat_handoffs = scratch / "seat-handoffs"
     projects = scratch / "projects"
@@ -278,18 +192,6 @@ with tempfile.TemporaryDirectory() as scratch:
     check("transcripts of a directory with no handoff records name no agent-seat",
           seats_naming("not-a-seat-only") == [], seats_naming("not-a-seat-only"))
     check("a subagent no transcript names names no agent-seat", seats_naming("absent") == [])
-    check("an unlocked worktree has no lock reason", module.worktree_lock_reason_read(other) is None)
-    git(checkout, "worktree", "lock", "--reason", "claude agent agent-a1 (pid 7 start 8)", str(other))
-    check("a locked worktree's lock reason is read",
-          module.worktree_lock_reason_read(other) == "claude agent agent-a1 (pid 7 start 8)")
-    git(checkout, "worktree", "unlock", str(other))
-    lock_file = module.worktree_owner_file_path_find(other).parent / "locked"
-    lock_file.mkdir()
-    unreadable_lock = raised(lambda: module.worktree_lock_reason_read(other))
-    lock_file.rmdir()
-    check("a lock file that cannot be read is reported, not read as no lock",
-          isinstance(unreadable_lock, module.WorktreeOwnerFileError)
-          and "could not be read" in str(unreadable_lock), repr(unreadable_lock))
 
     # --- Whether the owner runs ---
     session = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
