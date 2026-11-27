@@ -471,6 +471,13 @@ def main():
                   and fact.endswith(": " + files + "."),
                   f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- fact ---\n{fact}")
 
+        for reviewed_before, said in (("", "is empty"), ("0" * 40, "names no commit")):
+            completed = run_program(scratch, helpers, [{**fix_round, "tag": "7r6", "reviewed_before": reviewed_before}])
+            check(f"a fix-round whose reviewed_before {said} exits 1 naming the field, writing no brief",
+                  completed.returncode == 1 and "reviewed_before" in completed.stderr and said in completed.stderr
+                  and not (helpers / "briefs" / "brief-7r6-mac-claude.md").exists(),
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
         completed = run_program(scratch, helpers, [{**first_round, "tag": "8", "number": 8}])
         check("a pull request with no merged worktree exits 1, writing no brief",
               completed.returncode == 1 and "brief not composed" in completed.stderr
