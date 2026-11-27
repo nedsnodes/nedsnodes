@@ -1,5 +1,5 @@
 ---
-issue: "[A post-checkout git hook in `scripts/git-client-side-hooks/` writes the owner file of each new worktree an agent makes](https://github.com/nedschorus/nedschorus/issues/2547)"
+issue: "[A post-checkout git hook in `scripts/git-client-side-hooks/` writes the owner file of each new worktree an agent makes](https://github.com/nedsnodes/nedsnodes/issues/2547)"
 ---
 
 # A post-checkout git hook in `scripts/git-client-side-hooks/` writes the owner file of each new worktree an agent makes
@@ -20,7 +20,7 @@ A `post-checkout` hook in `scripts/git-client-side-hooks/`, the directory that `
 
 ## Open questions
 
-- How the hook tells a subagent's worktree, which Claude Code makes, from one an agent-session makes for its own work, since a `claude` process is among the parent processes of both; Claude Code's lock reason on a subagent's worktree, "claude agent agent-<id> (pid N start M)", which `CLAUDE_CODE_SUBAGENT_WORKTREE_LOCK_REASON` in `scripts/worktree-owner-file-read-and-write.py` matches, would tell them apart if it is set before `post-checkout` runs, so the builder checks when it is set.
+- How the hook tells a subagent's worktree, which Claude Code makes, from one an agent-session makes for its own work, since a `claude` process is among the parent processes of both; Claude Code's lock reason on a subagent's worktree, "claude agent agent-<id> (pid N start M)", would tell them apart if it is set before `post-checkout` runs, so the builder checks when it is set.
 - The builder confirms which kinds of worktree the cleaner keeps on purpose because they have no owner file, as listed in the docstring of `scripts/clean-worktrees.py`, and how the hook tells each of them from a worktree an agent makes, before choosing the exclusions above.
 - GHI [One design of record for the project's git checkouts, worktrees and branch rules](https://github.com/nedschorus/nedschorus/issues/1121), `docs/issues/1121-one-design-of-record-for-the-project-s.md`, plans the design of record for worktree rules; the builder reads it, keeps the hook consistent with it, and adds the hook to it if it lists the hooks.
 
