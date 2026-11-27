@@ -22,6 +22,10 @@ having run to the end only when its END line is its last line and agrees with it
 suite that crashes partway, even before its first case line, is told apart from one whose cases
 failed.
 
+A suite that exits NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES, 75, because a
+cause outside this repository, such as claude's usage limit, kept its cases from running, prints no END
+line and keeps that exit code, so its own last line, naming the cause, stays last for the test runner.
+
 The END line is printed only when the process ends by returning from the suite or by SystemExit,
 such as sys.exit, from anywhere in the suite. It is not printed when an uncaught exception ends the
 suite, when a signal kills it, when it calls os._exit, or in a child the suite forked, so its
@@ -61,6 +65,9 @@ NN_TEST_SUITE_EXIT_CODE_OF_VERDICT_HASHTAG = {
 NN_TEST_SUITE_END_LINE_REGEX = re.compile(
     r"^END \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ passed=(?P<passed>\d+) failed=(?P<failed>\d+) "
     r"(?P<verdict>#nc_test_suite_(?:pass|fail|could_not_run))$")
+# EX_TEMPFAIL of sysexits.h. scripts/run-all-test-suites.py reports a suite that exits with it NOT RUN,
+# repeating its last line, which names the cause, so no END line follows that line.
+NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES = 75
 # sys.monitoring reserves 0, 1, 2 and 5 for debuggers, coverage tools, profilers and optimizers.
 _MONITORING_TOOL_IDS_FREE_FOR_OTHER_USES = (3, 4)
 
@@ -174,6 +181,8 @@ def nn_test_suite_start_time_line_print_now_and_end_results_line_print_at_normal
         elif isinstance(how, SystemExit):
             exit_code = exit_code_of_system_exit(how)
         else:
+            return
+        if exit_code == NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES:
             return
         counting._count(counting._line_head)
         verdict = nn_test_suite_verdict_hashtag(exit_code, bool(_could_not_run), counting.passed, counting.failed)

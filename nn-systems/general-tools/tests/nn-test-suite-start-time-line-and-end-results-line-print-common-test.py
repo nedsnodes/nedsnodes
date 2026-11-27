@@ -81,6 +81,12 @@ try:
     check("a suite that exits 3 prints END with the fail verdict and exits 1, the code the verdict gives",
           completed.returncode == 1 and end_counts(lines) == [(1, 0, FAIL_TAG)], (completed.returncode, lines))
 
+    completed, lines = run_suite("stopped-by-an-outside-cause", "print('NOT RUN: claude is logged out')\nsys.exit(75)\n")
+    check("a suite that exits 75, stopped by a cause outside this repository, prints no END line and exits 75, "
+          "so the line naming the cause stays last",
+          completed.returncode == 75 and lines[-1:] == ["NOT RUN: claude is logged out"] and not end_counts(lines),
+          (completed.returncode, lines))
+
     completed, lines = run_suite("exits-two-on-its-own", "sys.exit(2)\n")
     check("a suite that exits 2 without calling the could-not-run function fails, exit 1",
           completed.returncode == 1 and end_counts(lines) == [(0, 0, FAIL_TAG)], (completed.returncode, lines))
