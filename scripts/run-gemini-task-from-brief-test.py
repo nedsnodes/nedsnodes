@@ -432,6 +432,17 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertIn("PASS scripts/a-test.py (1.0s)", result.stderr)
         self.assertEqual(result.stdout.strip(), f"report: {self.base / 'report.md'}")
 
+    def test_write_run_whose_report_copy_cannot_be_saved_still_commits_then_exits_1(self):
+        start = self.make_checkout_a_worktree()
+        (self.home / ".claude").mkdir(exist_ok=True)
+        (self.home / ".claude" / "codex-or-gemini-task-run-reports").write_text("not a folder\n")
+        result = self.run_in_worktree("change,message")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD~1").strip(), start)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertIn("failed while saving the copy of the report that goes to the log-store",
+                      result.stderr)
+
     def test_test_suites_that_fail_or_give_no_verdict_after_the_commit_exit_1_keeping_it(self):
         for runner_mode, said in (
                 ("fail", "failed after its commit: scripts/a-test.py, scripts/c-test.py."),

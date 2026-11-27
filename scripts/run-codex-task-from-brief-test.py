@@ -1188,6 +1188,22 @@ try:
           and "PASS scripts/a-test.py (1.0s)" in completed.stderr,
           f"calls {test_suite_runner_calls.read_text() if test_suite_runner_calls.exists() else None!r}")
 
+    # The log-store is gone by here; a file stands where the reports folder should be.
+    check("the worktree cases run without the log-store", not log_store.exists())
+    shutil.rmtree(reports_folder, ignore_errors=True)
+    reports_folder.write_text("a file where the folder should be\n")
+    try:
+        start = fresh_worktree()
+        completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+    finally:
+        reports_folder.unlink()
+    check("a write run whose report copy cannot be saved still commits its changes, then exits 1 "
+          "saying so",
+          completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
+          and git("status", "--porcelain") == ""
+          and "could not save the copy of the report that goes to the log-store" in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
     start = fresh_worktree()
     completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write",
                                         test_suite_runner_mode="fail")

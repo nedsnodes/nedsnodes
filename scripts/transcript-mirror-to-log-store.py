@@ -194,7 +194,8 @@ GLOBAL_INSTRUCTIONS_FILE_NAME = "CLAUDE.md"
 REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM = (
     "handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher")
 # scripts/run-codex-task-from-brief.py and scripts/run-gemini-task-from-brief.py save a copy of
-# each run's report here, where this machine has no log-store; ned-box keeps them in the store.
+# each run's report here, where this machine has no log-store; on ned-box a run without -o
+# writes its report into the store itself.
 CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_NAME = "codex-or-gemini-task-run-reports"
 CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_UNDER_HOME_ON_A_MACHINE_WITHOUT_THE_LOG_STORE = (
     pathlib.Path(".claude") / CODEX_OR_GEMINI_TASK_RUN_REPORTS_DIRECTORY_NAME)

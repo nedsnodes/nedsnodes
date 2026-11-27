@@ -287,11 +287,14 @@ def main(argv=None):
         stage = f"reading report {report}"
         if not report.is_file() or not report.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"agy exited 0 but wrote no report at {report}")
-        stage = (f"saving the copy of the report that goes to the log-store; the report is "
-                 f"at {report}")
-        report_copy = (codex_task.
-                       codex_or_gemini_task_report_copy_into_run_numbered_folder_on_a_machine_without_the_log_store(
-                           brief, report))
+        # A copy that fails does not stop the commit: the run's changes are kept either way.
+        report_copy_error = None
+        try:
+            report_copy = (codex_task.
+                           codex_or_gemini_task_report_copy_into_run_numbered_folder_on_a_machine_without_the_log_store(
+                               brief, report))
+        except OSError as error:
+            report_copy, report_copy_error = None, error
         if report_copy:
             print(f"{PROGRAM}: a copy of the report, which goes to the log-store, is at "
                   f"{report_copy}", file=sys.stderr)
@@ -310,6 +313,10 @@ def main(argv=None):
                              worktree_to_commit, start_commit))
                 if error:
                     raise RuntimeError(error)
+        if report_copy_error:
+            stage = (f"saving the copy of the report that goes to the log-store; the report is "
+                     f"at {report}")
+            raise report_copy_error
     except (OSError, UnicodeError, RuntimeError) as error:
         print(f"{PROGRAM}: failed while {stage}: {error}; output: {log_path}", file=sys.stderr)
         status = 1
