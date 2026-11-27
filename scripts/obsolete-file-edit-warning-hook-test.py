@@ -17,6 +17,8 @@ of a hook that runs at every edit an agent makes.
 import importlib.util
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -117,19 +119,28 @@ def overlap_verdict_text(warning: str) -> str:
     return "\n".join(warning.split("\n")[2:])
 
 
-def undo_only_this_edit_lines(path: str) -> str:
+def undo_only_this_edit_lines(checkout: Path, git_directory: Path, path: str) -> str:
     """The lines every verdict that sends an edit away from its path carries."""
+    saved_copy = git_directory / "obsolete-file-edit-warning-saved-copies" / path
+    last_commit_copy = f"{saved_copy}.at-last-commit"
+    quoted_checkout = shlex.quote(str(checkout))
     return (
         f"Undo only the change you just made to {path}, by editing the file back to the "
         f"text it had before that change. Do not run `git checkout -- {path}` or `git "
         f"restore {path}` for this: either one throws away every uncommitted change to the "
         f"file, not only the one this warning is about.\n"
-        f"If `git diff -- {path}` still prints changes after that, the file holds uncommitted "
-        f"work from before your change, which cannot stay at {path} either, and git refuses "
-        f"to switch branch or rebase while it is there: save it with `git diff --binary -- {path} > "
-        f"<a file outside this checkout>`, and only then run `git checkout -- {path}`. "
-        f"Carry the saved changes along with your own in the step below, and tell the user "
-        f"about any you did not make.")
+        f"Then run `git -C {quoted_checkout} status --porcelain -- {path}`. If it prints "
+        f"nothing, go on to the step below. If it prints a line, the file still holds "
+        f"uncommitted work from before your change, staged or not, and git refuses the step "
+        f"below while it is there: run `mkdir -p {shlex.quote(str(saved_copy.parent))} && cp "
+        f"{shlex.quote(str(checkout / path))} {shlex.quote(str(saved_copy))} && git -C "
+        f"{quoted_checkout} show HEAD:{path} > {shlex.quote(last_commit_copy)} && git -C "
+        f"{quoted_checkout} restore --source=HEAD --staged --worktree -- {path}`, which copies "
+        f"the whole file aside, with its version at this checkout's last commit beside it, and "
+        f"only then sets the file back to that last commit. After the step below, `diff -u "
+        f"{shlex.quote(last_commit_copy)} {shlex.quote(str(saved_copy))}` prints that earlier "
+        f"work: make it in the file that does that job, along with your own change, and tell "
+        f"the user what it changed, since another agent-session may have made it.")
 
 
 def agent_text(result) -> str:
@@ -842,6 +853,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     configure_identity(detached)
     git(["checkout", "-q", "--detach"], detached)
     detached_git_dir = Path(git(["rev-parse", "--absolute-git-dir"], detached).stdout.strip())
+    detached_root = Path(git(["rev-parse", "--show-toplevel"], detached).stdout.strip())
     changed_on_main = list(shared_lines)
     changed_on_main[1] = "line 2, as main rewrote it\n"
     commit_file(detached_origin, "lib/shared.py", "".join(changed_on_main), "main rewrites line 2")
@@ -926,7 +938,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
               f"main deleted lib/gone.py in commit {deleting_commit}, so your edit has "
               "nowhere to go. Read why with `git log -1 --stat origin/main -- "
               "lib/gone.py`.\n"
-              + undo_only_this_edit_lines("lib/gone.py") + "\n"
+              + undo_only_this_edit_lines(detached_root, detached_git_dir, "lib/gone.py") + "\n"
               "Then, if your fix is still needed, start a topic branch with `git switch -c "
               "<a-branch-name> origin/main`, and make the same fix in the file that does "
               "that job on main now. If no file on main does that job, do not make the "
@@ -1014,7 +1026,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
               "that git no longer pairs the two paths, so neither a rebase nor a merge "
               "carries your edit there: both stop on a modify/delete conflict at "
               "lib/drifted.py.\n"
-              + undo_only_this_edit_lines("lib/drifted.py") + "\n"
+              + undo_only_this_edit_lines(detached_root, detached_git_dir, "lib/drifted.py") + "\n"
               "Then make the branch, run `git rebase origin/main`, and make the same "
               "change by hand in lib/drifted-to.py."), warning)
     git(["checkout", "-q", "--", "lib/drifted.py"], detached)
@@ -1036,79 +1048,117 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           old_rebase.returncode != 0 and "DU lib/drifted.py" in old_status,
           old_rebase.stdout + old_rebase.stderr + old_status)
     subprocess.run(["git", "rebase", "--abort"], cwd=old_advice, capture_output=True)
-    # The line's steps, followed in a file that already held uncommitted work
-    # before the warned edit: that work must survive them.
-    followed = tmp / "drifted-followed-advice-worktree"
-    git(["worktree", "add", "-q", "--detach", str(followed), "HEAD"], detached)
-    configure_identity(followed)
-    followed_file = followed / "lib" / "drifted.py"
-    before_warned_edit = followed_file.read_text(encoding="utf-8") + "earlier work\n"
-    followed_file.write_text(before_warned_edit, encoding="utf-8")
-    followed_file.write_text(before_warned_edit + "the agent's edit\n", encoding="utf-8")
-    followed_warning = agent_text(run_hook(hook_payload(followed, followed_file)))
-    check("detached, unpushed: the moved-and-rewritten line says to undo only the "
-          "change, and never to discard the file with git checkout or git restore first",
-          undo_only_this_edit_lines("lib/drifted.py") in followed_warning,
-          followed_warning)
-    followed_file.write_text(before_warned_edit, encoding="utf-8")
-    refused_switch = subprocess.run(
-        ["git", "switch", "-q", "-c", "drifted-refused-switch", "origin/main"],
-        cwd=followed, capture_output=True, text=True)
-    check("detached, unpushed: with earlier work still in the file after the undo, "
-          "git refuses to switch branch, as the line says",
-          refused_switch.returncode != 0
-          and "earlier work" in git(["diff", "--", "lib/drifted.py"], followed).stdout,
-          refused_switch.stdout + refused_switch.stderr)
-    saved_changes = tmp / "drifted-followed-advice-saved.patch"
-    saved_changes.write_text(git(["diff", "--binary", "--", "lib/drifted.py"],
-                                 followed).stdout, encoding="utf-8")
-    git(["checkout", "-q", "--", "lib/drifted.py"], followed)
-    git(["switch", "-q", "-c", "drifted-followed-advice"], followed)
-    followed_rebase = subprocess.run(["git", "rebase", "origin/main"], cwd=followed,
-                                     capture_output=True, text=True)
-    new_copy = followed / "lib" / "drifted-to.py"
-    carried = followed_rebase.returncode == 0 and new_copy.exists()
-    if carried:
-        new_copy.write_text(new_copy.read_text(encoding="utf-8") + "earlier work\n"
-                            + "the agent's edit\n", encoding="utf-8")
-        git(["commit", "-q", "-am", "the edit and the saved work, carried by hand"],
-            followed)
-    check("detached, unpushed: the line's steps keep the earlier work in the saved "
-          "changes, rebase cleanly and put both in lib/drifted-to.py, with no file left "
-          "at lib/drifted.py",
-          any(line.startswith("+") and "earlier work" in line
-              for line in saved_changes.read_text(encoding="utf-8").splitlines())
-          and carried and not followed_file.exists()
-          and git(["status", "--porcelain"], followed).stdout == "",
-          followed_rebase.stdout + followed_rebase.stderr)
-    for worktree, branch in ((old_advice, "drifted-old-advice"),
-                             (followed, "drifted-followed-advice")):
-        git(["worktree", "remove", "--force", str(worktree)], detached)
+    # The line's own commands, read from the hook's warning and run from a
+    # subdirectory, followed in a file that already held uncommitted work before
+    # the warned edit, in each state that work can be in: that work must survive
+    # them, and the branch and rebase after them must go through.
+    def set_up_unstaged(worktree, file, earlier):
+        file.write_bytes(earlier)
+
+    def set_up_staged(worktree, file, earlier):
+        file.write_bytes(earlier)
+        git(["add", "lib/drifted.py"], worktree)
+
+    def set_up_removed_from_index(worktree, file, earlier):
+        file.write_bytes(earlier)
+        git(["rm", "-q", "--cached", "lib/drifted.py"], worktree)
+
+    def set_up_binary_staged_and_unstaged(worktree, file, earlier):
+        file.write_bytes(earlier[:-len(b"unstaged\x00\n")])
+        git(["add", "lib/drifted.py"], worktree)
+        file.write_bytes(earlier)
+
+    def set_up_unmerged(worktree, file, earlier):
+        head_blob = git(["rev-parse", "HEAD:lib/drifted.py"], worktree).stdout.strip()
+        ours = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=worktree,
+                              input=b"ours\n", capture_output=True, check=True)
+        theirs = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=worktree,
+                                input=b"theirs\n", capture_output=True, check=True)
+        subprocess.run(["git", "update-index", "--index-info"], cwd=worktree, check=True,
+                       input=("0 " + "0" * 40 + "\tlib/drifted.py\n"
+                              f"100644 {head_blob} 1\tlib/drifted.py\n"
+                              f"100644 {ours.stdout.decode().strip()} 2\tlib/drifted.py\n"
+                              f"100644 {theirs.stdout.decode().strip()} 3\tlib/drifted.py\n"
+                              ).encode())
+        file.write_bytes(earlier)
+
+    original_drifted = (detached / "lib" / "drifted.py").read_bytes()
+    states = (
+        ("unstaged", set_up_unstaged, original_drifted + b"earlier work\n", " M"),
+        ("staged", set_up_staged, original_drifted + b"earlier work\n", "M "),
+        ("taken out of the index with git rm --cached", set_up_removed_from_index,
+         original_drifted + b"earlier work\n", "D "),
+        ("binary, staged and unstaged", set_up_binary_staged_and_unstaged,
+         original_drifted + b"staged\x00\nunstaged\x00\n", "M"),
+        ("unmerged, resolved by hand", set_up_unmerged, b"resolved by hand\n", "UU"))
+    for number, (state_name, set_up, earlier, status_prefix) in enumerate(states):
+        followed = tmp / f"drifted-followed-advice-worktree-{number}"
+        git(["worktree", "add", "-q", "--detach", str(followed), "HEAD"], detached)
+        configure_identity(followed)
+        followed_root = Path(git(["rev-parse", "--show-toplevel"], followed).stdout.strip())
+        followed_git_dir = Path(git(["rev-parse", "--absolute-git-dir"], followed).stdout.strip())
+        followed_file = followed / "lib" / "drifted.py"
+        set_up(followed, followed_file, earlier)
+        followed_file.write_bytes(earlier + b"the agent's edit\n")
+        followed_warning = agent_text(run_hook(hook_payload(followed, followed_file)))
+        commands = re.search(r"Then run `([^`]+)`\..* while it is there: run `([^`]+)`, "
+                             r"which copies .* After the step below, `([^`]+)` prints that "
+                             r"earlier work", followed_warning)
+        check(f"detached, unpushed, earlier work {state_name}: the warning carries the "
+              "undo lines, with the status, copy-and-reset and compare commands",
+              commands is not None
+              and undo_only_this_edit_lines(followed_root, followed_git_dir,
+                                            "lib/drifted.py") in followed_warning,
+              followed_warning)
+        if commands is None:
+            continue
+        status_command, save_and_reset_command, compare_command = commands.groups()
+        followed_file.write_bytes(earlier)
+
+        def run_from_subdirectory(command):
+            return subprocess.run(["bash", "-c", command], cwd=followed / "lib",
+                                  capture_output=True, text=True)
+
+        status = run_from_subdirectory(status_command)
+        if number == 0:
+            blocker = followed_git_dir / "obsolete-file-edit-warning-saved-copies"
+            blocker.write_text("a file where the saved-copies directory goes\n")
+            blocked = run_from_subdirectory(save_and_reset_command)
+            check("detached, unpushed: when the copy fails, the copy-and-reset command "
+                  "stops before the reset, and the earlier work stays in the file",
+                  blocked.returncode != 0 and followed_file.read_bytes() == earlier,
+                  blocked.stdout + blocked.stderr)
+            blocker.unlink()
+        saved = run_from_subdirectory(save_and_reset_command)
+        saved_copy = followed_git_dir / "obsolete-file-edit-warning-saved-copies" / "lib" / "drifted.py"
+        branch = f"drifted-followed-advice-{number}"
+        switched = subprocess.run(["git", "switch", "-q", "-c", branch], cwd=followed,
+                                  capture_output=True, text=True)
+        rebased = subprocess.run(["git", "rebase", "origin/main"], cwd=followed,
+                                 capture_output=True, text=True)
+        compared = subprocess.run(["bash", "-c", compare_command], cwd=followed / "lib",
+                                  capture_output=True)
+        last_commit_copy = Path(f"{saved_copy}.at-last-commit")
+        check(f"detached, unpushed, earlier work {state_name}: after the rebase, the compare "
+              "command compares the copy with the last commit's version and finds the work",
+              compared.returncode == 1 and last_commit_copy.read_bytes() == original_drifted,
+              compared.stdout.decode(errors="replace") + compared.stderr.decode(errors="replace"))
+        check(f"detached, unpushed, earlier work {state_name}: run from a subdirectory, the "
+              "status command reports the work, the copy-and-reset command saves it whole "
+              "and clears the file, and the branch and the rebase then go through",
+              status.returncode == 0 and status.stdout.startswith(status_prefix)
+              and saved.returncode == 0
+              and saved_copy.read_bytes() == earlier
+              and switched.returncode == 0 and rebased.returncode == 0
+              and (followed / "lib" / "drifted-to.py").exists()
+              and not followed_file.exists()
+              and git(["status", "--porcelain"], followed).stdout == "",
+              "\n".join([status.stdout, status.stderr, saved.stderr,
+                         switched.stderr, rebased.stdout + rebased.stderr]))
+        git(["worktree", "remove", "--force", str(followed)], detached)
         git(["branch", "-q", "-D", branch], detached)
-    # The same save, of a file git treats as binary: the saved changes must be
-    # enough to bring the earlier work back after the checkout the line names.
-    binary_repository = tmp / "binary-earlier-work"
-    binary_repository.mkdir()
-    git(["init", "-q"], binary_repository)
-    configure_identity(binary_repository)
-    binary_file = binary_repository / "data.bin"
-    binary_file.write_bytes(b"committed\x00\n")
-    git(["add", "data.bin"], binary_repository)
-    git(["commit", "-q", "-m", "a binary file"], binary_repository)
-    binary_file.write_bytes(b"committed\x00\nearlier work\x00\n")
-    binary_saved = tmp / "binary-earlier-work-saved.patch"
-    binary_saved.write_bytes(subprocess.run(
-        ["git", "diff", "--binary", "--", "data.bin"], cwd=binary_repository,
-        capture_output=True, check=True).stdout)
-    git(["checkout", "-q", "--", "data.bin"], binary_repository)
-    applied = subprocess.run(["git", "apply", str(binary_saved)], cwd=binary_repository,
-                             capture_output=True, text=True)
-    check("the line saves earlier work with git diff --binary, and for a binary file "
-          "git apply of the saved changes brings that work back after the checkout",
-          "`git diff --binary -- data.bin > " in undo_only_this_edit_lines("data.bin")
-          and applied.returncode == 0
-          and binary_file.read_bytes() == b"committed\x00\nearlier work\x00\n",
-          applied.stdout + applied.stderr)
+    git(["worktree", "remove", "--force", str(old_advice)], detached)
+    git(["branch", "-q", "-D", "drifted-old-advice"], detached)
 
     moved_file = detached / "lib/moved.py"
     moved_file.write_text("".join(edited_far_away), encoding="utf-8")
@@ -1135,6 +1185,13 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           and "main deleted lib/moved.py" not in last_line
           and "main moved lib/moved.py to" not in last_line,
           agent_text(result))
+    check("detached: the could-not-tell line ends with the undo lines and the step after them",
+          last_line.endswith(
+              "Otherwise main deleted it, and your edit has nowhere to go:\n"
+              + undo_only_this_edit_lines(detached_root, detached_git_dir, "lib/moved.py")
+              + "\nThen, if your fix is still needed, make it in the file that does that "
+              "job on main now, on a topic branch from origin/main (`git switch -c "
+              "<a-branch-name> origin/main`)."), last_line)
     check("detached: the could-not-tell line names a show command whose R line gives "
           "the new path",
           "`git show --name-status -M --format= <that commit>`.\nIf a line there starts "
@@ -1328,7 +1385,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
               "that git no longer pairs the two paths, so when the pull request merges, "
               "git does not carry your edit there: the merge stops on a modify/delete "
               "conflict at lib/drifted.py. Do not commit the edit.\n"
-              + undo_only_this_edit_lines("lib/drifted.py") + "\n"
+              + undo_only_this_edit_lines(detached_root, detached_git_dir, "lib/drifted.py") + "\n"
               "Then start a topic branch with `git switch -c <a-branch-name> origin/main`, "
               "and make the same change by hand in lib/drifted-to.py there."), warning)
     git(["checkout", "-q", "--", "lib/drifted.py"], detached)
