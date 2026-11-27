@@ -127,15 +127,17 @@ Codex cold read on Linux can leave empty `.codex` and `.agents` directories
 at the checkout's root (seen once, in the scratch repository, not in the
 checkout); git ignores empty directories, and nothing reads them.
 
-CODEX GETS NO GITHUB TOKEN FROM ITS CALLER. This program removes GH_TOKEN
-and GITHUB_TOKEN from the environment it starts codex with; an agent-seat's
-supervisor sets GH_TOKEN to the agent-seat's own GitHub token. On ned-box,
-with both gone and the gh login file denied, the reviewer reaches GitHub as an
-anonymous visitor: it can read public pages, within GitHub's limits on
-unauthenticated requests, and cannot read a private repository. How gh behaves
-inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
-nn-systems/cold-read/cold-read-cell-common.py. This program has no fallback for
-either machine.
+WHICH GITHUB TOKENS CODEX GETS FROM ITS CALLER. This program removes
+GH_TOKEN and GITHUB_TOKEN from the environment it starts codex with; an
+agent-seat's supervisor sets GH_TOKEN to the agent-seat's own GitHub token.
+It leaves GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN in place; gh uses
+those only for a GitHub Enterprise Server host, never for github.com. On
+ned-box, with GH_TOKEN and GITHUB_TOKEN gone and the gh login file denied, the
+reviewer reaches GitHub as an anonymous visitor: it can read public pages,
+within GitHub's limits on unauthenticated requests, and cannot read a private
+repository. How gh behaves inside the Mac sandbox is said once, beside
+CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py. This
+program has no fallback for either machine.
 
 WHY THE CODEX MEMORY STORE IS OFF FOR REVIEW CELLS: written once, in
 scripts/code-review-codex-cell.py's docstring, under that heading.
