@@ -586,7 +586,9 @@ case("an attempt after the ruling is attempt 1", code == 0
 # Show.
 path = fresh()
 code, out, _ = run(path, "show")
-case("show lists each entry", code == 0 and out.startswith("E1: State: open; attempts since the user last decided: 0 of 3; last verdict: none"))
+case("show of a file outside the log-store shows that file alone, under its path", code == 0
+     and out.startswith(f"{path}\nE1: State: open; attempts since the user last decided: 0 of 3; last verdict: none")
+     and out.count("E1:") == 1)
 
 # Show given a GHI-MD's name: every file named after it in the log-store, with or without its GHI number.
 store = Path(tempfile.mkdtemp())
@@ -605,14 +607,40 @@ def show_by_name(name, hostname="ned-box", directory=store):
         return run(name, "show")
 
 
-code, out, _ = show_by_name("1058-daily-x")
-shown = [line for line in out.splitlines() if line.startswith("nedlern@ned-box:")]
-case("show by name shows the GHI-MD's files, -2 and unnumbered ones included, and no other file", code == 0 and shown == [
+GHI_1058_FILES_SHOWN = [
     f"nedlern@ned-box:{store}/1058-daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-19-2.md",
     f"nedlern@ned-box:{store}/1058-daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-19.md",
-    f"nedlern@ned-box:{store}/daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-01.md"])
+    f"nedlern@ned-box:{store}/daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-01.md"]
+
+
+def shown_paths(out):
+    return [line for line in out.splitlines() if line.startswith("nedlern@ned-box:")]
+
+
+code, out, _ = show_by_name("1058-daily-x")
+case("show by name shows the GHI-MD's files, -2 and unnumbered ones included, and no other file",
+     code == 0 and shown_paths(out) == GHI_1058_FILES_SHOWN)
 case("show by name shows each file's entries under its path",
      out.count("E1: State: open; attempts since the user last decided: 0 of 3") == 3)
+
+# Show given a file in the log-store: every file of its GHI-MD there, as by its name.
+GIVEN = "1058-daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-19-2.md"
+for form in (str(store / GIVEN), f"nedlern@ned-box:{store}/{GIVEN}"):
+    code, out, _ = show_by_name(form)
+    case(f"show of a log-store file given as {form.split(':')[0] if form.startswith('nedlern') else 'a path'} shows every file of its GHI-MD",
+         code == 0 and shown_paths(out) == GHI_1058_FILES_SHOWN
+         and out.count("E1: State: open; attempts since the user last decided: 0 of 3") == 3)
+code, out, err = show_by_name(str(store / "daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-01.md"))
+case("show of an unnumbered log-store file whose name files of two GHIs carry is refused, naming both numbers",
+     code == 1 and "REFUSED:" in err and "GHIs 999, 1058" in err and shown_paths(out) == [])
+no_infix = Path(tempfile.mkdtemp())
+(no_infix / "1058-daily-x.md").write_text(FILE_TEXT, encoding="utf-8")
+code, out, err = show_by_name(str(no_infix / "1058-daily-x.md"), directory=no_infix)
+case("show of a log-store file named without the infix is refused",
+     code == 1 and "REFUSED:" in err and "holds no -proposed-improvements-or-changes-" in err and "nothing was shown" in err)
+code, _, err = show_by_name(str(store / "1058-daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-12-31.md"))
+case("show of a log-store file that does not exist fails, though other files of its GHI-MD do",
+     code == 1 and "FAILED:" in err and "could not be read" in err)
 code, out, err = show_by_name("daily-x")
 case("show by a name with no GHI number that files of two GHIs carry is refused, naming both numbers",
      code == 1 and "REFUSED:" in err and "GHIs 999, 1058" in err and "nedlern@ned-box:" not in out)
@@ -632,6 +660,11 @@ unreadable = Path(tempfile.mkdtemp())
 (unreadable / "1058-daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-19.md").mkdir()
 code, _, err = show_by_name("1058-daily-x", directory=unreadable)
 case("show by name with a file that cannot be read fails", code == 1 and "FAILED:" in err and "could not be read" in err)
+(unreadable / "1058-daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-20.md").write_text(FILE_TEXT, encoding="utf-8")
+code, out, err = show_by_name(str(unreadable / "1058-daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-20.md"),
+                              directory=unreadable)
+case("show of a log-store file whose GHI-MD has another file that cannot be read fails",
+     code == 1 and "FAILED:" in err and "could not be read" in err and "1058-daily-x-proposed-improvements-or-changes-ghi-guide-agent-2026-10-19.md" in err)
 code, _, err = show_by_name("1058-daily-x", hostname="ned-mac.local")
 case("show by name off ned-box is refused, with the ssh command",
      code == 1 and "ssh nedlern@ned-box " in err and shlex.split(shlex.split(err.strip().splitlines()[-1])[2])[-2:] == ["show", "1058-daily-x"])
@@ -648,7 +681,7 @@ case("the ssh command carries the arguments, quoted",
 path = fresh()
 with mock.patch.object(PROGRAM.socket, "gethostname", return_value="ned-box"):
     code, out, _ = run(f"nedlern@ned-box:{path}", "show")
-case("the log-store form is a local path on ned-box", code == 0 and out.startswith("E1:"))
+case("the log-store form is a local path on ned-box", code == 0 and out.startswith(f"{path}\nE1:"))
 
 # A change keeps the file's mode.
 path = fresh()

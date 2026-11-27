@@ -18,7 +18,7 @@ Change the file only with `scripts/proposed-improvements-or-changes-file-entry-s
 
 ## 1. Read every file of the GHI-MD first
 
-Read every proposed-improvements-or-changes-file of the GHI-MD before you act, not only the one you were given. Run the program's `show` subcommand with the GHI-MD's name, the part of the given file's name before `-proposed-improvements-or-changes-`: it shows the entries of every such file in the log-store, each file under its path, and you read each file it names.
+Read every proposed-improvements-or-changes-file of the GHI-MD before you act, not only the one you were given. Run the program's `show` subcommand on the file you were given: given a file in the log-store, it shows the entries of every proposed-improvements-or-changes-file of the same GHI-MD there, and given any other file, that file's entries alone, each file under its path; you read each file it names.
 
 Work through every open entry in them before you report, even when one of them goes to the user.
 

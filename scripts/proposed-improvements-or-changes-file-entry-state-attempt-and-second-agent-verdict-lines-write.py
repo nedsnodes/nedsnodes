@@ -10,11 +10,17 @@ touches nothing but an entry's State line, its Attempt lines, its
 "Second agent:" lines and its User-ruling lines, so an entry's own text is
 never rewritten.
 
-Subcommands, each on one file; attempt also reads the GHI-MD's other files:
+Subcommands, each on one file; show and attempt also read the GHI-MD's other files:
 
   show            every entry: its id, its State line, the attempts counted
                   since its last user-ruling line, and its last verdict.
-                  Given a GHI-MD's name instead of a file, shows every
+                  Given a file in GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY, shows
+                  every proposed-improvements-or-changes-file there of the
+                  same GHI-MD, those named after the part of its name before
+                  FILE_NAME_INFIX as for a GHI-MD's name below; given any
+                  other file, that file alone; each file under its path.
+                  Given a GHI-MD's name
+                  instead of a file, shows every
                   proposed-improvements-or-changes-file in the log-store named
                   after that GHI-MD, with or without its leading GHI number,
                   each under its path in the form nedlern@ned-box:<path>.
@@ -248,7 +254,8 @@ def ghi_md_file_names(ghi_md_name: str, directory: str):
     if not names:
         raise Refused(
             f"No file in {directory} is named after GHI-MD {ghi_md_name}.\n"
-            f"Give the GHI-MD's name as the part of the given file's name before {FILE_NAME_INFIX}, or give the file itself.")
+            "Give the file you were given itself, or the GHI-MD's name as the part of that file's name before "
+            f"{FILE_NAME_INFIX}, without its directory.")
     numbers = sorted({match.group(1) for match in (re.match(r"(\d+)-", name) for name in names) if match}, key=int)
     if len(numbers) > 1:
         # Two GHIs can share a slug; their files must not be read as one GHI-MD's.
@@ -345,14 +352,19 @@ def is_open(block) -> bool:
     return state is None or state.startswith(OPEN_STATE_OPENING)
 
 
-def open_entries_of_ghi_md(path: Path, lines):
-    """{(file name, entry id)} of every open entry in the GHI-MD's files beside `path`, reading `path` as `lines`."""
+def ghi_md_file_names_beside(path: Path, what: str):
+    """The names of the files of `path`'s GHI-MD in its directory; `what` says what a refusal left undone."""
     if FILE_NAME_INFIX not in path.name:
         raise Refused(
-            f"{path.name} holds no {FILE_NAME_INFIX}, so its GHI-MD's other files cannot be found and no attempt was recorded.\n"
+            f"{path.name} holds no {FILE_NAME_INFIX}, so its GHI-MD's other files cannot be found and {what}.\n"
             "Give the proposed-improvements-or-changes-file as scripts/ghi-issue-write.py named it.")
+    return ghi_md_file_names(path.name.split(FILE_NAME_INFIX)[0], str(path.parent))
+
+
+def open_entries_of_ghi_md(path: Path, lines):
+    """{(file name, entry id)} of every open entry in the GHI-MD's files beside `path`, reading `path` as `lines`."""
     found = set()
-    for name in ghi_md_file_names(path.name.split(FILE_NAME_INFIX)[0], str(path.parent)):
+    for name in ghi_md_file_names_beside(path, "no attempt was recorded"):
         if name == path.name:
             text_lines = lines
         else:
@@ -563,6 +575,18 @@ def show(lines) -> str:
     return "\n".join(out) or "The file has no entries."
 
 
+def show_files(directory: Path, names, shown_as) -> str:
+    """show of each file in `directory` named, under its path as `shown_as` gives it."""
+    out = []
+    for name in names:
+        try:
+            text = (directory / name).read_text(encoding="utf-8")
+        except OSError as failure:
+            raise Failed(f"{name} in {directory} could not be read: {failure}")
+        out.append(f"{shown_as(name)}\n{show(text.splitlines())}\n")
+    return "\n".join(out)
+
+
 def marking_agent_seat():
     """The agent-seat whose handler marks entries here: the name of the agent-home this agent-session was launched
     in, or None when it was launched in no agent-home."""
@@ -686,22 +710,25 @@ def main(argv=None) -> int:
         # A GHI-MD's name holds no directory and no extension.
         if arguments.command == "show" and "/" not in arguments.file and not arguments.file.endswith(".md"):
             refuse_unless_on_ned_box(f"The files of GHI-MD {arguments.file} are", argv)
-            for name in ghi_md_file_names(arguments.file, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY):
-                try:
-                    text = (Path(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY) / name).read_text(encoding="utf-8")
-                except OSError as failure:
-                    raise Failed(f"{name} in {GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY} could not be read: {failure}")
-                print(f"{LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}\n{show(text.splitlines())}\n")
+            print(show_files(Path(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY),
+                             ghi_md_file_names(arguments.file, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY),
+                             lambda name: f"{LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}"))
             return 0
         path = local_path(arguments.file, argv)
+        if arguments.command == "show":
+            # So a missing file is reported as missing, not as a GHI-MD with no files.
+            path.stat()
+            if path.resolve().parent == Path(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY).resolve():
+                print(show_files(path.resolve().parent, ghi_md_file_names_beside(path.resolve(), "nothing was shown"),
+                                 lambda name: f"{LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}"))
+            else:
+                print(show_files(path.parent, [path.name], lambda name: str(path)))
+            return 0
         seat = marking_agent_seat() if arguments.command in MARKING_COMMANDS else None
         marked = []
         text = path.read_text(encoding="utf-8")
         ending = "\n" if text.endswith("\n") else ""
         lines = text.splitlines()
-        if arguments.command == "show":
-            print(show(lines))
-            return 0
         if arguments.command == "attempt":
             lines, marked = add_attempt(lines, arguments.entries, arguments.by, arguments.found, arguments.source,
                                         arguments.outcome, path)
