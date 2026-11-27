@@ -2734,6 +2734,24 @@ def test_settled_line_a_transcript_record_whose_message_is_a_string_counts_as_a_
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 
+def test_settled_line_a_newest_turn_origin_record_with_no_message_is_no_match_not_a_failed_read():
+    case = Case(next_to_present="item 4 of 9")
+    document = (case.walk / f"{WALK_NAME}.md").read_text()
+    transcript = case.transcript(document)
+    with open(transcript, "a", encoding="utf-8") as records:
+        records.write(json.dumps({"type": "system", "subtype": "turn_duration", "turnOrigin": "peer"}) + "\n")
+    result = case.run("a", transcript_path=transcript)
+    check("an A whose newest turnOrigin record is a turn_duration record with no message is read by its opening "
+          "as the user's: exits 0 and shows the settled line",
+          result.returncode == 0 and SETTLED_LINE in context_lines(result),
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    result = case.run("take the other option", transcript_path=transcript)
+    check("a reply in his own words with that record gives no failed-transcript-read line and exits 0",
+          result.returncode == 0 and context_lines(result)
+          and not any("could not tell who wrote this prompt" in line for line in context_lines(result)),
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
 def test_own_words_output_given_the_walk_state_already_read_does_not_read_it_again():
     import types
     hook = load_module_by_path("short_answer_hook_under_test", HOOK_SCRIPT)

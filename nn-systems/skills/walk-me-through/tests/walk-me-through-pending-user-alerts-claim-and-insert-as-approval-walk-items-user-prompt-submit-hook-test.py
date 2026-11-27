@@ -291,20 +291,6 @@ def run_not_typed_cases(root):
           result.returncode == 0 and case.names("claimed") == ["alert-a"],
           result.stderr + repr(case.names("claimed")))
 
-    case = Case(root, "turn-duration-record")
-    with case.transcript.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps({"type": "system", "subtype": "turn_duration", "turnOrigin": "peer"}) + "\n")
-    specification = importlib.util.spec_from_file_location("pending_user_alerts_hook", HOOK)
-    hook = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(hook)
-    try:
-        typed, error = hook.typed_by_user({"prompt": "hello", "transcript_path": str(case.transcript)}), None
-    except AttributeError as raised:
-        typed, error = None, raised
-    check("a newest turnOrigin record with no message, such as a system turn_duration record, is no match, so "
-          "the prompt's opening decides and no read error is raised",
-          typed is True and error is None, repr(error))
-
 
 def run_headless_cases(root):
     commission = "You are the independent reviewer for the nedschorus project. Review pull request 2891."
