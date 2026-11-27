@@ -93,8 +93,14 @@ below). Reincarnating is this script's job alone: the project's handoff hook
 stays silent in the sessions it runs (run_claude). Reincarnation means: one
 FULL mirror rebuild (not the routine per-ask delta), then the cold-start
 prompt as its own turn, then the actual question as a second turn on that
-same fresh session — both prompts are verbatim from the design's § Prompts,
-never composed here.
+same fresh session. Both prompts follow the design's § Prompts word for
+word except where it asks for a text reply: there they ask for the JSON
+answer the --json-schema holds (COLD_START_PROMPT_TEMPLATE's answer
+sentences and boundaries, and a draft-verdict ask, which relays the asker's
+question in place of the design's title, GHI-MD and reply line).
+One boundary also differs in behavior: a draft that conflicts with a ruling
+the user made gets the ruling question, where the design gives every
+draft-body request a verdict.
 
 Checkout freshness (user-ruled 2026-09-15, nedschorus#324/#334): the lock
 holder fast-forwards the seat CHECKOUT to origin/main before anything reads
