@@ -127,9 +127,14 @@ if notices is not None:
           all("some-guard.py" in notice and "ValueError: injected value" in notice
               and "guard-hook-crash-fail-open-with-notice-common-test.py:" in notice
               for notice in notices), notices)
-    check("the agent notice says what to check, with the guard's path, and gives a subagent line",
-          "/x/.claude/guard-hooks/some-guard.py says what that is" in notices[0]
-          and "subagent" in notices[0] and "dispatched" in notices[0], notices[0])
+    check("the agent notice asks whether the guard would have refused the call, with the guard's "
+          "path, and says whom to ask whether to undo it",
+          "Check whether this call is one some-guard.py would have refused" in notices[0]
+          and "/x/.claude/guard-hooks/some-guard.py says which calls it refuses" in notices[0]
+          and "report what the call did and ask whether to undo it" in notices[0]
+          and "a subagent asks the agent that dispatched it, any other agent asks the user"
+          in notices[0]
+          and "Do not undo the call before you have the answer" in notices[0], notices[0])
 
 try:
     raise_inside(True, SystemExit(2))
@@ -138,6 +143,47 @@ except SystemExit as error:
     exit_code = error.code
 check("a guard's own exit, such as a refusal's 2, passes through unchanged", exit_code == 2,
       exit_code)
+
+# --- traceback is loaded only on the crash path ---
+
+# A fresh interpreter, because this suite's own imports may already have loaded traceback; -I -S
+# because a sitecustomize.py or .pth file could load it at startup.
+LOAD_MODULE_SOURCE = (
+    "import importlib.util\n"
+    "import sys\n"
+    "spec = importlib.util.spec_from_file_location(\n"
+    f"    'guard_hook_crash_fail_open_with_notice_common', {str(MODULE_PATH)!r})\n"
+    "crash_notice = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(crash_notice)\n")
+result = subprocess.run(
+    [sys.executable, "-I", "-S", "-c", LOAD_MODULE_SOURCE + "print('traceback' in sys.modules)"],
+    capture_output=True, text=True, timeout=60)
+check("importing the module in a fresh interpreter leaves traceback out of sys.modules",
+      result.returncode == 0 and result.stdout.strip() == "False",
+      (result.returncode, result.stdout, result.stderr))
+
+crash_results = []
+with tempfile.TemporaryDirectory() as temporary_directory:
+    crashing_guard = Path(temporary_directory) / "crashing-guard.py"
+    # Both first lines keep the raise on line 10, so the two notices can be compared whole.
+    for first_line in ("import traceback", ""):
+        crashing_guard.write_text(
+            first_line + "\n" + LOAD_MODULE_SOURCE
+            + "with crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(\n"
+              "        '/x/.claude/guard-hooks/some-guard.py', True):\n"
+              "    raise ValueError('injected value')\n", encoding="utf-8")
+        crash_results.append(subprocess.run([sys.executable, "-I", "-S", str(crashing_guard)],
+                                            capture_output=True, text=True, timeout=60))
+loaded_before_crash, loaded_on_crash_path = crash_results
+crash_notices = notices_of(loaded_on_crash_path.stdout)
+check("a crash prints the same notice whether traceback was loaded before it or only on the "
+      "crash path, and the notice names the line raised at",
+      all(result.returncode == 0 and result.stderr == "" for result in crash_results)
+      and loaded_on_crash_path.stdout == loaded_before_crash.stdout
+      and crash_notices is not None
+      and all("ValueError: injected value, at crashing-guard.py:10" in notice
+              for notice in crash_notices),
+      [(result.returncode, result.stdout, result.stderr) for result in crash_results])
 
 # --- each guard, crashed for real ---
 

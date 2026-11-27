@@ -116,6 +116,13 @@ threshold_hook = importlib.util.module_from_spec(_threshold_hook_spec)
 _threshold_hook_spec.loader.exec_module(threshold_hook)
 deferred_marker_files = threshold_hook.handoff_deferred_marker_and_refused_commands_files_common
 
+_agent_seat_task_list_spec = importlib.util.spec_from_file_location(
+    "agent_seat_task_list_new_pending_task_write_common",
+    REPOSITORY_ROOT / "nn-systems" / "general-tools" / "agent-seat-task-list-new-pending-task-write-common.py"
+)
+agent_seat_task_list = importlib.util.module_from_spec(_agent_seat_task_list_spec)
+_agent_seat_task_list_spec.loader.exec_module(agent_seat_task_list)
+
 
 HANDOFF_WRITTEN_AND_HANDOFF_SUPERVISOR_IS_WATCHING_VERDICT_LINE = "VERDICT: handoff written; a supervisor is watching"
 HANDOFF_WRITTEN_AND_NO_HANDOFF_SUPERVISOR_WATCHING_VERDICT_LINE = "VERDICT: handoff written; nothing is watching"
@@ -743,13 +750,7 @@ def raise_task_high_water_mark(list_directory: Path, highest_id: int) -> None:
             current = 0
     if current >= highest_id:
         return
-    partial = list_directory / (TASK_HIGH_WATER_MARK_FILE_NAME + ".partial")
-    try:
-        partial.write_text(str(highest_id), encoding="utf-8")
-        os.replace(partial, mark_path)
-    except OSError:
-        partial.unlink(missing_ok=True)
-        raise
+    agent_seat_task_list.agent_seat_task_list_high_water_mark_write(list_directory, highest_id)
 
 
 def prune_completed_tasks(next_step_text: str) -> str:

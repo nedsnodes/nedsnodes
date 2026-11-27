@@ -26,8 +26,7 @@ WHAT ONE RUN DOES, in order:
   1. Takes its own lock, the --state-file path with .lock added, without
      waiting; when another run holds it, exits 0.
   2. Reads the state file. A file that is missing or cannot be read counts as
-     having no passing commit and no last run, and the state this run writes
-     replaces it.
+     having no passing commit and no last run.
   3. Runs `git fetch origin` in --clone and resolves refs/remotes/origin/main;
      when either fails, the run stops, recorded with commit null.
   4. Exits 0 when no run is due. A run is due when there is no last run, the
@@ -63,9 +62,10 @@ WHAT ONE RUN DOES, in order:
      limit, or else the first line of the runner's stderr, or else "no detail".
 
 THE STATE FILE, a JSON object written whole to a temporary file renamed into
-place, with these keys:
+place, with these keys; a run that exits at step 1, 4 or 5 writes nothing to
+it:
   passing_commit           the last commit whose run passed, or null; a run that
-                           stops keeps it
+                           fails or stops keeps it
   last_run.commit          the commit tested, or null when step 3 stopped the run
   last_run.compared_with   the passing commit the run was compared with, or null
   last_run.started, .ended times, UTC, as YYYY-MM-DDTHH:MM:SSZ
@@ -120,20 +120,19 @@ worktree a still-running runner from a killed run of this program uses is
 removed under it, which can make that runner's suites fail.
 """
 
-import argparse
-import contextlib
-import datetime
 import fcntl
 import importlib.util
 import json
 import os
 import re
 import shutil
-import signal
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
+
+# merge-gate.sh runs this with --print-merge-gate-notice-of-last-failed-or-stopped-run on every
+# gate run, and its test suite runs the gate hundreds of times, so the modules only the other modes
+# need are imported in the functions that use them: argparse alone costs Python 3.14 about 30 ms
+# to set up, and subprocess and tempfile together about 15 ms.
 
 PROGRAM = "no-sandbox-test-suites-run-on-main-in-a-quiet-gap"
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -190,6 +189,8 @@ def runner_module():
 
 
 def utc_now():
+    import datetime
+
     return datetime.datetime.now(datetime.timezone.utc)
 
 
@@ -198,6 +199,8 @@ def stamp(moment):
 
 
 def parsed_stamp(text):
+    import datetime
+
     return datetime.datetime.strptime(text, TIME_FORMAT).replace(tzinfo=datetime.timezone.utc)
 
 
@@ -223,6 +226,8 @@ def read_state(state_file):
 
 
 def write_state(state_file, state):
+    import tempfile
+
     state_file = Path(state_file)
     state_file.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=state_file.parent, prefix=f".{state_file.name}.")
@@ -250,6 +255,8 @@ def take_lock_without_waiting(path):
 
 def git(clone, *arguments, time_limit=None):
     """git's completed process; a run past its time limit reads as exit 124 with the reason."""
+    import subprocess
+
     limit = GIT_READ_TIMEOUT_SECONDS if time_limit is None else time_limit
     environment = git_redirecting_environment.environment_without_git_redirecting_variables()
     try:
@@ -297,6 +304,10 @@ def remove_worktree(clone, worktree):
 
 def run_runner_with_time_limit(command, worktree):
     """(exit code or None when stopped at the time limit, stdout, stderr)."""
+    import contextlib
+    import signal
+    import subprocess
+
     process = subprocess.Popen(command, cwd=str(worktree),
                                stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -389,7 +400,7 @@ def stopped(state_file, state, commit, started, reason, compared_with=None):
 
 
 def run(arguments):
-    state_file = Path(arguments.state_file).expanduser()
+    state_file = arguments.state_file
     try:
         lock = take_lock_without_waiting(f"{state_file}.lock")
     except OSError as error:
@@ -406,6 +417,8 @@ def run(arguments):
 
 
 def run_under_lock(arguments, state_file):
+    import tempfile
+
     started = utc_now()
     try:
         state = read_state(state_file)
@@ -439,7 +452,7 @@ def run_under_lock(arguments, state_file):
     quiet.close()
     print(f"{PROGRAM}: running, because {why_due}")
     passing = state.get("passing_commit")
-    base = Path(arguments.temporary_directory) / PROGRAM
+    base = Path(arguments.temporary_directory or tempfile.gettempdir()) / PROGRAM
     worktree, log_dir = base / "worktree-of-main", base / "logs"
     base.mkdir(parents=True, exist_ok=True)
     if worktree.exists():
@@ -522,7 +535,7 @@ def run_under_lock(arguments, state_file):
 
 def record_follow_up_request_sent(arguments):
     """Under the run's own lock, so a run that ends meanwhile cannot have its result overwritten."""
-    state_file = Path(arguments.state_file).expanduser()
+    state_file = arguments.state_file
     try:
         lock = take_lock_without_waiting(f"{state_file}.lock")
     except OSError as error:
@@ -554,8 +567,17 @@ def record_follow_up_request_sent_under_lock(state_file):
     try:
         state = read_state(state_file)
     except StateUnreadable as error:
-        print(f"{PROGRAM}: not recorded — {error}.\nThe next run of this program replaces "
-              f"the file; there is no run to record a follow-up for until then.",
+        # StateUnreadable's text starts with the state file's full path.
+        print(f"{PROGRAM}: the follow-up request was not recorded, because the state file "
+              f"cannot be read: {error}. A state file that cannot be read holds no test run "
+              f"to record the follow-up against; the next invocation of this program that "
+              f"records a passed, failed or stopped test run replaces the state file.\n"
+              f"If you have not yet sent agent-seat reboot-test a follow-up request quoting "
+              f"this message's first line, send it with Claude Code's SendMessage tool; "
+              f"reboot-test owns this program.\n"
+              f"Do not run python3 scripts/{PROGRAM}.py --record-follow-up-request-sent "
+              f"again for this refusal: it would refuse again, and once reboot-test has the "
+              f"request, nothing more is needed.",
               file=sys.stderr)
         return EXIT_REFUSED
     last = state.get("last_run")
@@ -575,15 +597,14 @@ MERGE_LINE = re.compile(r"^Merge pull request #(\d+)")
 
 
 def pull_requests_merged_between(clone, older, newer):
-    """['#N: subject'] from the first-parent merge commits in older..newer, or why not."""
-    listed = git(clone, "log", "--first-parent", "--merges", "--format=%s%x09%b",
+    """['#N'] from the first-parent merge commits in older..newer, or why not."""
+    listed = git(clone, "log", "--first-parent", "--merges", "--format=%s",
                  f"{older}..{newer}")
     if listed.returncode != 0:
         return ["the merged pull requests could not be read: "
                 f"{git_output.git_stderr_first_error_message_else_last_line(listed.stderr)}"]
     found = []
-    for entry in listed.stdout.split("\n"):
-        subject = entry.split("\t", 1)[0]
+    for subject in listed.stdout.split("\n"):
         matched = MERGE_LINE.match(subject)
         if matched:
             found.append(f"#{matched.group(1)}")
@@ -633,11 +654,14 @@ def merge_gate_notice(state_file, clone):
 
 
 def parse_arguments(argv):
+    import argparse
+
     parser = argparse.ArgumentParser(prog=PROGRAM, description=__doc__.split("\n")[0])
     parser.add_argument("--clone", default=str(REPOSITORY_ROOT))
     parser.add_argument("--state-file", default=str(DEFAULT_STATE_FILE))
     parser.add_argument("--log-store-root", default=DEFAULT_LOG_STORE_ROOT)
-    parser.add_argument("--temporary-directory", default=tempfile.gettempdir())
+    # Read only when a run makes its worktree: gettempdir() raises when no temporary directory is writable.
+    parser.add_argument("--temporary-directory")
     parser.add_argument("--runner-lock-file",
                         default=str(Path.home() / ".claude" / ".run-all-test-suites.lock"))
     parser.add_argument("--test-suite-runner-program")
@@ -648,15 +672,24 @@ def parse_arguments(argv):
 
 
 def main(argv=None):
-    arguments = parse_arguments(argv)
-    if arguments.record_follow_up_request_sent:
-        return record_follow_up_request_sent(arguments)
-    if arguments.print_merge_gate_notice_of_last_failed_or_stopped_run:
-        for line in merge_gate_notice(Path(arguments.state_file).expanduser(),
-                                      Path(arguments.clone)):
-            print(line)
-        return EXIT_DONE
-    return run(arguments)
+    argv = sys.argv[1:] if argv is None else list(argv)
+    # merge-gate.sh's own call, read without argparse; any other form goes to parse_arguments.
+    if (len(argv) == 3 and argv[:2] == ["--print-merge-gate-notice-of-last-failed-or-stopped-run",
+                                         "--clone"]
+            and not argv[2].startswith("-")):
+        state_file, clone = DEFAULT_STATE_FILE, argv[2]
+    else:
+        arguments = parse_arguments(argv)
+        # Absolute, so every message names the file wherever the reader's directory is.
+        arguments.state_file = Path(arguments.state_file).expanduser().absolute()
+        if arguments.record_follow_up_request_sent:
+            return record_follow_up_request_sent(arguments)
+        if not arguments.print_merge_gate_notice_of_last_failed_or_stopped_run:
+            return run(arguments)
+        state_file, clone = arguments.state_file, arguments.clone
+    for line in merge_gate_notice(Path(state_file).expanduser().absolute(), Path(clone)):
+        print(line)
+    return EXIT_DONE
 
 
 if __name__ == "__main__":

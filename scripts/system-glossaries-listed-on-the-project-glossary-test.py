@@ -110,9 +110,9 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
-    "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common",
+    "rule_enforcing_nn_test_suite_failure_message_closing_lines_text_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "rule-enforcing-nc-test-suite-failure-message-closing-lines-text-common.py")
+    / "rule-enforcing-nn-test-suite-failure-message-closing-lines-text-common.py")
 RULE_FAILURE_LINES = importlib.util.module_from_spec(_rule_failure_lines_spec)
 _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
 THIS_SUITE_RELATIVE_PATH = "scripts/" + Path(__file__).name
@@ -157,7 +157,8 @@ def git_or_raise(checkout, *arguments):
 
 
 class CouldNotListGlossaries(Exception):
-    """git could not list the checkout's tracked files."""
+    """git could not list the checkout's tracked files; the message gives git's failure only, so that each caller
+    adds its own next step."""
 
 
 def glossary_paths_git_tracks(repo_root):
@@ -166,9 +167,7 @@ def glossary_paths_git_tracks(repo_root):
     from a subdirectory lists only that subdirectory."""
     listed = git(repo_root, "ls-files", "-z", "--", GLOSSARY_PATHSPEC)
     if listed.returncode != 0:
-        raise CouldNotListGlossaries(
-            f"git ls-files failed in {repo_root}: {listed.stderr.strip()} — "
-            f"fix what git reports, then run this suite again")
+        raise CouldNotListGlossaries(f"git ls-files failed in {repo_root}: {listed.stderr.strip()}")
     return sorted(path for path in listed.stdout.split("\0") if path)
 
 
@@ -282,7 +281,8 @@ def project_glossary_promise_cases(repo_root):
     try:
         tracked = glossary_paths_git_tracks(repo_root)
     except CouldNotListGlossaries as refusal:
-        return [("git lists the checkout's tracked glossaries", False, str(refusal))]
+        return [("git lists the checkout's tracked glossaries", False,
+                 f"{refusal} — fix what git reports, then run this suite again")]
 
     page_path = repo_root / PROJECT_GLOSSARY_RELATIVE_PATH
     if not page_path.is_file():

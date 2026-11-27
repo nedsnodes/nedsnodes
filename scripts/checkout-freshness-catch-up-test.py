@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Before anything runs git: a run started with GIT_DIR set, or with another
@@ -365,7 +366,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           merge_note.endswith("\n" + NOT_FOR_THE_USER_LINE), merge_note)
     check("and only once",
           "merge commit(s) from main" not in agent_text(run_catch_up(["--cwd", str(merge_seat)])))
-    # A merge of another nc-topic-branch is not the banned thing.
+    # A merge of another nn-topic-branch is not the banned thing.
     topic_seat = tmp / "topic-merge-worktree"
     git(["worktree", "add", "-q", "-b", "topic-a", str(topic_seat), "main"], reference)
     configure_identity(topic_seat)
@@ -377,7 +378,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     commit_file(other, "topic-b.txt", "b\n", "topic b work")
     git(["-c", "core.editor=true", "merge", "--no-ff", "--no-edit", "topic-b"], topic_seat)
     result = run_catch_up(["--cwd", str(topic_seat)])
-    check("a merge of another nc-topic-branch is NOT reported as a merge from main",
+    check("a merge of another nn-topic-branch is NOT reported as a merge from main",
           "merge commit(s) from main" not in agent_text(result), agent_text(result))
 
     # -----------------------------------------------------------------------
@@ -567,7 +568,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     detached_work_line = (
         "It holds work of its own.\n"
         "This checkout is an agent-home, so git refuses commits in it: carry that work to a "
-        "worktree of your own on an nc-topic-branch, as the refusal of `git commit` here says "
+        "worktree of your own on an nn-topic-branch, as the refusal of `git commit` here says "
         "how.")
     detached_bisect_line = (
         "A bisect is in progress: finish it or abort it; the next turn's end moves the "
@@ -2031,6 +2032,8 @@ with tempfile.TemporaryDirectory() as notes_scratch:
     commit_file(origin_repo, "nn-systems/cold-read/cold-read-fast-clarify-prompt.md", "p\n", "a prompt")
     commit_file(origin_repo, ".claude/skills/walk-me-through/reference.md", "r\n", "not a SKILL.md")
     commit_file(origin_repo, "scripts/tool.py", "t\n", "a script")
+    commit_file(origin_repo, "docs/issues/4080-fix-the-arbitrator-agent-instructions.md", "i\n",
+                "a GHI-MD whose title ends in instructions")
     stop_only(notes_seat)
     told = delivered_text(deliver(notes_seat))
     check("a changed SKILL.md tells the agent to invoke the skill again",
@@ -2043,6 +2046,8 @@ with tempfile.TemporaryDirectory() as notes_scratch:
           in told, told)
     check("a skill's other files and scripts are not told",
           "reference.md" not in told and "scripts/tool.py" not in told, told)
+    check("a GHI-MD whose name ends in -instructions.md is not told",
+          "docs/issues/4080-" not in told, told)
 
     origin_repo, notes_seat = notes_fixture({"CLAUDE.md": "- one rule\n"})
     commit_file(origin_repo, "CLAUDE.md", "".join(f"- new rule {n:04d} {'x' * 60}\n"
@@ -2657,6 +2662,34 @@ with tempfile.TemporaryDirectory() as failing_git_scratch:
               moved == (answer == shared_answer.REBASE_ONTO_MAIN), f"{before} {tip(answered_seat)}")
     check("checkout-freshness asks the shared answer for a branch with no open pull request",
           asked == [False, False], repr(asked))
+
+    # The branch lock the turn-end push hook pushes under: catch-up waits for it before deciding
+    # the branch was never pushed, and a turn end that cannot take it leaves the branch as it is.
+    branch_lock = catch_up_module.branch_lock
+    _, locked_seat = seat_behind_main(own_commit=True)
+    locked_git_dir = Path(git(["rev-parse", "--absolute-git-dir"], locked_seat).stdout.strip())
+    before = tip(locked_seat)
+    real_wait = catch_up_module.CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS
+    catch_up_module.CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = 0
+    try:
+        with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(locked_git_dir, 0) as held:
+            catch_up_module.catch_up_session_checkout(locked_seat, 0)
+    finally:
+        catch_up_module.CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = real_wait
+    check("a never-pushed branch whose lock another process holds past the wait is left where it is",
+          held and tip(locked_seat) == before, f"{held} {before} {tip(locked_seat)}")
+    released = []
+    with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(locked_git_dir, 0) as held:
+        run = subprocess.Popen([sys.executable, str(SCRIPT_PATH), "--interval-seconds", "0",
+                                "--cwd", str(locked_seat)], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+        time.sleep(2)
+        tip_while_held = tip(locked_seat)
+        released.append(time.monotonic())
+    run_stdout, run_stderr = run.communicate(timeout=120)
+    check("catch-up waits while the push hook holds the branch lock, and rebases once it is released",
+          held and tip_while_held == before and tip(locked_seat) != before and run.returncode == 0,
+          f"{held} {before} {tip_while_held} {tip(locked_seat)} {run_stdout} {run_stderr}")
 
     # merges_from_main: a merge commit from main on the seat.
     _, merged_seat = seat_behind_main(own_commit=True)

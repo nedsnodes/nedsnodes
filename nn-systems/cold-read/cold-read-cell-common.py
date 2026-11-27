@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -59,18 +60,46 @@ class CellRefusal(Exception):
         self.exit_code = exit_code
 
 
-# The keychain remains accessible because masking it logs the agent-binaries out.
+# The launchers treat Linux as ned-box. Each file on ned-box that holds a credential, by its exact path; with
+# REVIEWER_PROGRAM_LOGIN_FILES below, this is the whole of ned-box's list.
+CREDENTIAL_FILES_ON_NED_BOX = tuple(pathlib.Path.home() / path for path in (
+    ".ssh/id_ed25519_mac_side_action",
+    ".ssh/id_ed25519_ned_box_to_itself",
+    ".config/gh/hosts.yml",
+    ".config/nedsnodes/gemini-api.key",
+    ".config/nedsnodes/mac-claude.token",
+    ".config/nedsnodes/ned-review-merge.token",
+    ".config/nedsnodes/nn-shared-database-service-accepted-tokens",
+    ".config/nedsnodes/nn-shared-database-service.token",
+    ".config/nedsnodes/ubuntu-claude.token",
+    ".claude/daemon/control.key",
+    ".local/share/gnome-remote-desktop/certificates/rdp-tls.key",
+    "nedsmessenger/.env",
+    "nedsmessenger/secrets/claude-bot-token.json",
+    "nedsmessenger/secrets/claude-oauth-token",
+    "nedsmessenger/secrets/github-ubuntu-claude",
+    "nedsmessenger/secrets/github-ubuntu-codex",
+    "nedsmessenger/secrets/mac-claude-token.json",
+))
+# The Mac denies these folders and name patterns until its own list of credential files replaces them. On ned-box
+# the patterns only find files to ask the user about: nn-systems/cold-read/
+# cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write.py reports each file so
+# named that CREDENTIAL_FILES_ON_NED_BOX leaves out. The keychain remains accessible because masking it logs the
+# agent-binaries out. gh still fails inside the Mac sandbox, though its login is in the keychain: gh reads its
+# configuration directory, which is $GH_CONFIG_DIR when set, else $XDG_CONFIG_HOME/gh when that is set, else
+# ~/.config/gh, denied here, and when that directory is denied gh exits with "failed to read configuration" before it
+# looks for a stored login. The launchers keep both variables, so when the directory they select is readable, gh
+# starts; it is still not logged in unless that directory's hosts.yml names the host, or GH_TOKEN is set.
 CREDENTIAL_DIRECTORIES = (
     pathlib.Path.home() / ".config" / "nedsnodes",
     pathlib.Path.home() / ".config" / "gh",
     pathlib.Path.home() / ".ssh",
     pathlib.Path.home() / ".steam",
-    # Denied whole: secrets/ holds credential files no name pattern matches.
     pathlib.Path.home() / "nedsmessenger",
 )
 CREDENTIAL_FILE_NAME_PATTERNS = ("*.token", ".env")
 
-# agy reads its login inside its sandbox; Claude and Codex authenticate outside model tools.
+# Both machines. agy reads its login inside its sandbox; Claude and Codex authenticate outside model tools.
 REVIEWER_PROGRAM_LOGIN_FILES = {
     "claude": (pathlib.Path.home() / ".claude" / ".credentials.json",),
     "codex": (pathlib.Path.home() / ".codex" / "auth.json",),
@@ -78,6 +107,10 @@ REVIEWER_PROGRAM_LOGIN_FILES = {
             pathlib.Path.home() / ".gemini" / "oauth_creds.json",
             pathlib.Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"),
 }
+
+# The Codex and agy launchers remove these from the reviewer's environment; the Claude cold-read-cell
+# runs without Bash, so it cannot run gh.
+COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
 
 
 def reviewer_program_login_files(except_program: str = None,
@@ -87,6 +120,12 @@ def reviewer_program_login_files(except_program: str = None,
     return [str(path) for program, paths in REVIEWER_PROGRAM_LOGIN_FILES.items()
             if program != except_program
             for path in paths if not only_present or path.is_file()]
+
+
+def ned_box_credential_and_login_files_present(except_program: str = None) -> list:
+    """Return ned-box's credential files that exist, login files included except except_program's."""
+    return ([str(path) for path in CREDENTIAL_FILES_ON_NED_BOX if path.is_file()]
+            + reviewer_program_login_files(except_program, only_present=True))
 
 
 def credential_directories_present() -> list:
@@ -101,9 +140,11 @@ def codex_credential_denying_permission_profile_arguments(
     # JSON string escaping also works for TOML basic strings used as path keys.
     entries = ({":slash_tmp": "read", ":tmpdir": "read"}
                if platform.startswith("linux") and extends == ":workspace" else {})
-    denied = credential_directories_present()
-    denied += reviewer_program_login_files(only_present=True)
-    if not platform.startswith("linux"):
+    if platform.startswith("linux"):
+        denied = ned_box_credential_and_login_files_present()
+    else:
+        denied = credential_directories_present()
+        denied += reviewer_program_login_files(only_present=True)
         denied += [f"/**/{pattern}" for pattern in CREDENTIAL_FILE_NAME_PATTERNS]
     entries.update((path, "deny") for path in denied)
     table = "{" + ",".join(f"{json.dumps(path)}={json.dumps(access)}"
@@ -128,6 +169,7 @@ class BadInvocationArgumentParser(argparse.ArgumentParser):
 def build_argument_parser(
     description: str, model_help: str, tier_choices=tuple(TIER_CHOICES),
     cold_read_cell_launcher_own_command_line_options_adder=None,
+    tier_to_effort=None,
 ) -> argparse.ArgumentParser:
     parser = BadInvocationArgumentParser(
         description=description, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -165,9 +207,11 @@ def build_argument_parser(
              "with no fallback, the way --model is: a caller who names an "
              "effort is answering the question the tier map exists to answer, "
              "and quietly running the mapped level instead would defeat the "
-             "request. The fast tier's own launcher "
-             "(nn-systems/cold-read/cold-read-agy-cell.py) pins medium; on the Claude and "
-             "Codex launchers a low-effort run goes through this flag.",
+             "request."
+             + (" This launcher's tier mapping: "
+                + ", ".join(f"{tier} runs at {effort}"
+                            for tier, effort in tier_to_effort.items())
+                + "." if tier_to_effort else ""),
     )
     parser.add_argument(
         "--prompt-file", metavar="PATH",
@@ -301,26 +345,21 @@ class WriteDetectorUnavailable(Exception):
 CAUSE_PHRASE = "cause:"
 CAUSE_SEPARATOR = " — "
 # Match line starts to avoid quoted document text, allowing the Codex tracing timestamp.
-AGENT_BINARY_WIDE_CAUSE_CLASSES = frozenset(
-    {"account-limit", "logged-out", "agent-binary-missing"})
-USER_CLEARABLE_CAUSE_CLASSES = frozenset(
-    {"logged-out", "agent-binary-missing", "account-limit", "model-limit"})
+# A cause the user can clear also fails every cold-read-cell of its agent-binary.
+USER_CLEARABLE_CAUSE_CLASSES = frozenset({"logged-out", "agent-binary-missing"})
 CAUSE_DETAIL_MAX_CHARACTERS = 120
 # Drop per-attempt timestamps from details that the grid reports for an entire agent-binary.
-DETAIL_IS_REST_OF_LINE = "rest-of-line"
 DETAIL_IS_WHOLE_LINE = "whole-line"
 LEADING_TRACING_LOGGER_TIMESTAMP = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\s+")
 
 
 class RecognisedFailureText(typing.NamedTuple):
-    """An agent-binary failure prefix, cause class, rule for extracting the detail, and an
-    optional pattern the rest of the line after the prefix must start with."""
+    """An agent-binary failure prefix, cause class, and rule for extracting the detail."""
 
     cause_class: str
     line_prefix: str
     detail: str
-    rest_of_line_pattern: typing.Optional[re.Pattern] = None
 
 
 def classify_failed_attempt(
@@ -332,15 +371,8 @@ def classify_failed_attempt(
         timestamp = LEADING_TRACING_LOGGER_TIMESTAMP.match(stripped)
         untimestamped = stripped[timestamp.end():] if timestamp else stripped
         for text in recognised_texts or ():
-            if untimestamped.startswith(text.line_prefix) and (
-                    text.rest_of_line_pattern is None
-                    or text.rest_of_line_pattern.match(untimestamped[len(text.line_prefix):])):
-                if text.detail == DETAIL_IS_REST_OF_LINE:
-                    detail = untimestamped[len(text.line_prefix):].lstrip(" \t·")
-                elif text.detail == DETAIL_IS_WHOLE_LINE:
-                    detail = untimestamped
-                else:
-                    detail = text.detail
+            if untimestamped.startswith(text.line_prefix):
+                detail = untimestamped if text.detail == DETAIL_IS_WHOLE_LINE else text.detail
                 return text.cause_class, detail
     if start_error:
         return "agent-binary-missing", start_error
@@ -658,7 +690,8 @@ def run_reviewer_program_in_own_process_group_until_timeout(
     """Run `command` in a session of its own and return its result; when it
     runs past `timeout_seconds`, kill its whole process group and return a
     result whose returncode is None. The group is also killed when this
-    process is interrupted or sent SIGTERM while waiting.
+    process is interrupted while waiting, or sent SIGTERM at any point from
+    the program's start on.
 
     With `parse_agent_binary_final_result_from_stdout_line`, a function given each
     stdout line that returns None or (exit code, response text), the first
@@ -678,14 +711,30 @@ def run_reviewer_program_in_own_process_group_until_timeout(
     holds them past that loses what it printed after, and stderr says so."""
     # The reviewer's own session puts it outside the group the grid stops, so
     # SIGTERM must reach the except BaseException handler below that stops
-    # the reviewer's group.
-    signal.signal(signal.SIGTERM, exit_on_sigterm)
-    process = subprocess.Popen(
-        command,
-        # communicate closes stdin after writing stdin_text, or at once when it is None.
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        cwd=REPO_ROOT, env=child_environment, text=True, start_new_session=True, pass_fds=pass_fds)
+    # the reviewer's group. Until `process` is bound inside that try, SIGTERM
+    # is only recorded: raised inside Popen after the fork, it would leave the
+    # started reviewer running with nothing to stop it. A Python handler is
+    # reset at exec, unlike SIG_IGN or a blocked signal, so the reviewer still
+    # starts with SIGTERM's default action.
+    sigterm_during_launch = []
+    signal.signal(signal.SIGTERM, lambda number, _frame: sigterm_during_launch.append(number))
+
+    def exit_on_sigterm_from_now_and_now_if_one_came_during_launch():
+        signal.signal(signal.SIGTERM, exit_on_sigterm)
+        if sigterm_during_launch:
+            exit_on_sigterm(sigterm_during_launch[0], None)
+
     try:
+        process = subprocess.Popen(
+            command,
+            # communicate closes stdin after writing stdin_text, or at once when it is None.
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=REPO_ROOT, env=child_environment, text=True, start_new_session=True, pass_fds=pass_fds)
+    except BaseException:
+        exit_on_sigterm_from_now_and_now_if_one_came_during_launch()
+        raise
+    try:
+        exit_on_sigterm_from_now_and_now_if_one_came_during_launch()
         if parse_agent_binary_final_result_from_stdout_line is not None:
             return run_reviewer_program_until_its_result_line(
                 process, command, stdin_text, timeout_seconds,
@@ -806,7 +855,7 @@ def run_model_chain(
     prompt: str, report: pathlib.Path, cell: str, tier: str, target_argument: str,
     baseline, cell_started_at: float, prompt_file_argument: str = "",
     recover_report_from_stdout=None, model_to_effort=None,
-    recognised_failure_texts_for_model=None, child_environment=None,
+    recognised_failure_texts=(), child_environment=None,
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
 ) -> int:
@@ -856,8 +905,6 @@ def run_model_chain(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
                 start_error=str(error))), file=sys.stderr)
             continue
-        recognised_texts = (recognised_failure_texts_for_model(model)
-                            if recognised_failure_texts_for_model else ())
         if completed.stderr:
             print(completed.stderr, file=sys.stderr, end="")
         if isinstance(completed, ReviewerRunEndedByResultLine):
@@ -882,7 +929,7 @@ def run_model_chain(
             print(f"{program}: {model} failed (exit {completed.returncode})", file=sys.stderr)
             print(cause_line(program, *classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
-                exit_code=completed.returncode, recognised_texts=recognised_texts)),
+                exit_code=completed.returncode, recognised_texts=recognised_failure_texts)),
                 file=sys.stderr)
             continue
         # Recover only after exit 0; a failed model's leftover file is not an accepted review.
@@ -902,7 +949,7 @@ def run_model_chain(
             print(str(refusal), file=sys.stderr)
             print(cause_line(program, *classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
-                exit_code=0, recognised_texts=recognised_texts)), file=sys.stderr)
+                exit_code=0, recognised_texts=recognised_failure_texts)), file=sys.stderr)
             continue
         produced_by = model
         # Use only this attempt's stderr: stdout may quote token counts, and earlier attempts cost other models.
@@ -964,27 +1011,36 @@ def record_directory_being_written_lock_hold_shared_until_exit_unless_parent_pas
 def run_cell(
     *, program: str, runtime: str, description: str, model_help: str,
     tier_to_model_chain: dict, tier_to_effort: dict, invocation_builder,
-    recover_report_from_stdout=None, recognised_failure_texts_for_model=None,
+    recover_report_from_stdout=None, recognised_failure_texts=(),
     stage_report_outside_checkout: bool = False, child_environment=None,
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
     cold_read_cell_launcher_own_command_line_options_adder=None,
+    pass_cold_read_tier_to_invocation_builder: bool = False,
+    per_model_run_timeout_seconds_from_parsed_arguments_getter=None,
 ) -> int:
     """cold_read_cell_launcher_own_command_line_options_adder, when given, adds
     one launcher's own options to the parser, and invocation_builder then also
-    gets the parsed arguments as parsed_arguments=."""
+    gets the parsed arguments as parsed_arguments=. With
+    pass_cold_read_tier_to_invocation_builder, invocation_builder also gets the
+    cold-read-tier as tier=. per_model_run_timeout_seconds_from_parsed_arguments_getter,
+    when given, takes the parsed arguments and returns the value used in place
+    of per_model_run_timeout_seconds."""
     # Include failed attempts in the cell's total cost.
     cell_started_at = time.time()
     parser = build_argument_parser(
         description, model_help, tier_choices=tuple(tier_to_model_chain),
-        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder)
+        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
+        tier_to_effort=tier_to_effort)
     args = parser.parse_args()
+    if per_model_run_timeout_seconds_from_parsed_arguments_getter is not None:
+        per_model_run_timeout_seconds = per_model_run_timeout_seconds_from_parsed_arguments_getter(args)
 
     # Snapshot before execution so pre-existing edits are not reported as changes from this run.
     try:
         baseline = working_tree_state()
     except WriteDetectorUnavailable as error:
-        baseline = None
+        baseline = error
         print(f"{program}: could not snapshot the working tree ({error}); "
               "stray writes will not be checked for this run.", file=sys.stderr)
 
@@ -1026,6 +1082,8 @@ def run_cell(
     launcher_own_option_arguments = (
         {"parsed_arguments": args}
         if cold_read_cell_launcher_own_command_line_options_adder else {})
+    if pass_cold_read_tier_to_invocation_builder:
+        launcher_own_option_arguments["tier"] = args.tier
     build_invocation = (invocation_builder(effort, staging_directory, **launcher_own_option_arguments)
                         if stage_report_outside_checkout
                         else invocation_builder(effort, **launcher_own_option_arguments))
@@ -1039,7 +1097,7 @@ def run_cell(
             cell_started_at=cell_started_at,
             prompt_file_argument=args.prompt_file or "",
             recover_report_from_stdout=recover_report_from_stdout,
-            recognised_failure_texts_for_model=recognised_failure_texts_for_model,
+            recognised_failure_texts=recognised_failure_texts,
             child_environment=child_environment,
             per_model_run_timeout_seconds=per_model_run_timeout_seconds,
             parse_agent_binary_final_result_from_stdout_line=parse_agent_binary_final_result_from_stdout_line,
@@ -1066,25 +1124,90 @@ def move_staged_report(program: str, staged: pathlib.Path, report: pathlib.Path)
     return 0
 
 
+def splits_a_line(character: str) -> bool:
+    """A character str.splitlines splits a line at, such as a newline or U+2028."""
+    return len(f"a{character}a".splitlines()) > 1
+
+
+def breaks_a_line(character: str) -> bool:
+    """A control character, or a character str.splitlines splits a line at, such as U+2028."""
+    return ord(character) < 32 or ord(character) == 127 or splits_a_line(character)
+
+
+def holds_a_line_breaking_character(text: str) -> bool:
+    return any(breaks_a_line(character) for character in text)
+
+
+def shell_quoted_on_one_line(text: str) -> str:
+    """`text` as one shell argument on one line: git's `-z` output keeps a newline in a
+    path, and shlex.quote would carry it into the command, splitting the printed line."""
+    if not holds_a_line_breaking_character(text):
+        return shlex.quote(text)
+    escaped = "".join(
+        "\\\\" if character == "\\" else "\\'" if character == "'"
+        # \xHH bytes, not \u: bash 3.2 and bash under LC_ALL=C leave $'\u2028' unexpanded.
+        else "".join(f"\\x{byte:02x}" for byte in character.encode("utf-8"))
+        if breaks_a_line(character) else character for character in text)
+    return f"$'{escaped}'"
+
+
+def path_shown_on_one_line(path: str) -> str:
+    """`path` as written, or, when it holds a line-breaking character such as a newline,
+    its one-line shell-quoted form, so the line it is printed in stays one line."""
+    return shell_quoted_on_one_line(path) if holds_a_line_breaking_character(path) else path
+
+
+# When git's safe.directory remedy comes out wrong in a new way, fix it by building the remedy from the repository path, not by patching this copying again.
+def join_error_text_lines_with_one_space(text) -> str:
+    """`text`'s lines joined by one space, each line's own spaces kept: a path in a git
+    message may hold two spaces in a row. Only a newline or carriage return ends a line
+    here; any other character str.splitlines splits at, such as a U+2028 inside a path in
+    the message, is escaped, so the printed line stays one line for the grid, which reads
+    the cell log with str.splitlines. In a line that is a git command, such as git's
+    `git config --global --add safe.directory '<path>'` remedy, each argument holding such a
+    character becomes its `$'...'` form, so a copied command still names the same path;
+    elsewhere the character is written as `\\u2028`."""
+    lines = [line.strip() for line in re.split(r"\r\n|\r|\n", str(text)) if line.strip()]
+    return " ".join(map(git_command_requoted_on_one_line, lines))
+
+
+def escaped_where_it_splits_a_line(text: str) -> str:
+    return "".join(character.encode("unicode_escape").decode("ascii")
+                   if splits_a_line(character) else character for character in text)
+
+
+def git_command_requoted_on_one_line(line: str) -> str:
+    # Parsed one line at a time: git's prose prints a path's apostrophe bare, while its
+    # remedy command escapes it as '\'', so quotes paired across lines would mismatch.
+    if not line.startswith("git ") or not any(splits_a_line(character) for character in line):
+        return escaped_where_it_splits_a_line(line)
+    try:
+        arguments = shlex.split(line)
+    except ValueError:
+        return escaped_where_it_splits_a_line(line)
+    return " ".join(map(shell_quoted_on_one_line, arguments))
+
+
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:
     """Report changes outside the requested report without raising."""
     # Check every agent-binary and every exit path: a failed reviewer may still have edited the target.
-    if baseline is None:
+    if isinstance(baseline, WriteDetectorUnavailable):
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — no pre-run "
-              f"snapshot of the working tree was taken. This is "
+              f"snapshot of the working tree was taken (git status failed: "
+              f"{join_error_text_lines_with_one_space(baseline)}). This is "
               f"{COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.", file=sys.stderr)
         return
     try:
         stray = stray_writes_since(baseline, own_report_path)
     except WriteDetectorUnavailable as error:
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — git status "
-              f"failed ({error}). This is {COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
+              f"failed ({join_error_text_lines_with_one_space(error)}). This is {COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
               file=sys.stderr)
         return
     if stray:
         # Snapshots detect changed content, not authorship; another worker may have made the edit.
         print(
-            f"{program}: {STRAY_WRITE_PHRASE} — {', '.join(stray)}. This cell "
+            f"{program}: {STRAY_WRITE_PHRASE} — {', '.join(map(path_shown_on_one_line, stray))}. This cell "
             "cannot tell whether the reviewer wrote them or someone else working "
             "in the checkout did. Inspect before triage and revert only what is "
             "the reviewer's; any report still stands on its own.",

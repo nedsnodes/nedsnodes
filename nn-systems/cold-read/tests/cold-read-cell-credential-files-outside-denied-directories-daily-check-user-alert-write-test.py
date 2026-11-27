@@ -68,17 +68,17 @@ def home_environment(home):
 
 
 with scratch_home() as home:
+    # Files in what were once denied folders are reported too, since only the exact list protects a file now.
     reported = [make_file(home, "project/.env"), make_file(home, "a/b/github.token"),
-                make_file(home, ".ssh-old/.env")]
-    for relative in (".ssh/id.token", ".config/gh/hosts.token", ".config/nedsnodes/x.token",
-                     ".steam/steam.token", "nedsmessenger/.env", "nedsmessenger/secrets/a.token",
+                make_file(home, ".config/nedsnodes/new.token"), make_file(home, "nedsmessenger/secrets/a.token")]
+    for relative in (".config/nedsnodes/ubuntu-claude.token", "nedsmessenger/.env", ".steam/steam.token",
                      "nedsnodes-logs/seats/test/.env", "project/.env.local", "project/token",
                      "other/.env/inside"):
         make_file(home, relative)
     result = run(home)
     alerts = pending_alerts(home)
-    check("a *.token or .env file outside every listed folder and the log-store is named in one user-alert, "
-          "and nothing inside a listed folder, inside the log-store, or merely like the patterns is",
+    check("a *.token or .env file missing from CREDENTIAL_FILES_ON_NED_BOX is named in one user-alert, and no listed, "
+          "ignored or log-store file, nor one merely like the patterns, is",
           result.returncode == 0 and len(alerts) == 1
           and alerts[0]["title"] == program.FOUND_TITLE and alerts[0]["action"] == program.FOUND_ACTION
           and alerts[0]["alert_text"].splitlines()[1:] == [str(path) for path in sorted(reported)],
@@ -86,10 +86,10 @@ with scratch_home() as home:
     MESSAGES_NAMING_THE_PATTERNS["the user-alert naming the files found"] = alerts[0]["alert_text"] if alerts else ""
 
 with scratch_home() as home:
-    make_file(home, ".ssh/id.token")
+    make_file(home, ".config/nedsnodes/mac-claude.token")
     result = run(home)
     MESSAGES_NAMING_THE_PATTERNS["the report that no file was found"] = result.stdout
-    check("with no credential file outside the listed folders, no user-alert is written and the exit is 0",
+    check("with every credential-named file on the list, no user-alert is written and the exit is 0",
           result.returncode == 0 and pending_alerts(home) == [] and "The search found no file" in result.stdout,
           result)
 
@@ -127,8 +127,8 @@ def walk_that_fails(home):
     raise OSError(5, "Input/output error")
 
 
-real_search = program.credential_files_outside_denied_directories
-program.credential_files_outside_denied_directories = walk_that_fails
+real_search = program.credential_named_files_missing_from_the_list
+program.credential_named_files_missing_from_the_list = walk_that_fails
 try:
     with scratch_home() as home, home_environment(home):
         errors = io.StringIO()
@@ -159,7 +159,7 @@ try:
     finally:
         program.user_alerts.user_alert_write_to_pending = real_write
 finally:
-    program.credential_files_outside_denied_directories = real_search
+    program.credential_named_files_missing_from_the_list = real_search
 
 unnamed = {message: pattern for message, text in MESSAGES_NAMING_THE_PATTERNS.items()
            for pattern in program.cell_common.CREDENTIAL_FILE_NAME_PATTERNS if pattern not in text}

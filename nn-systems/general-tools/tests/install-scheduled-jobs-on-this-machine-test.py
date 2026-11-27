@@ -74,6 +74,12 @@ MAC_FULL_TEST_RUN_PLIST = {
     "StandardOutPath": "/Users/el/.claude/scheduled-full-test-run-of-main.log",
     "StandardErrorPath": "/Users/el/.claude/scheduled-full-test-run-of-main.log",
 }
+NED_BOX_STANDING_USER_RULINGS_STORE_LINE = (
+    "* * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
+    "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.py"
+    " --failures-only >> /home/nedlern/.claude/"
+    "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.log"
+    " 2>&1")
 NED_BOX_SESSION_DIALOGS_LINE = (
     "*/10 * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
     "log-store-session-dialogs-refresh-hack.py --failures-only >> "
@@ -171,12 +177,6 @@ NED_BOX_GHI_MD_EDIT_PULL_REQUESTS_MERGE_LINE = (
     "*/5 * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
     "merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.py >> "
     "/home/nedlern/.claude/merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.log 2>&1")
-# The scheduled full mutation pass of merged pull requests, on ned-box alone.
-NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE = (
-    "30 0 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
-    "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py >> "
-    "/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-"
-    "tasks-open.log 2>&1")
 MAC_GUARDED_FILE_PRUNE_PLIST = {
     "Label": "com.nedsnodes.guarded-file-versions-and-approvals-store-removed-checkout-"
              "copies-prune",
@@ -208,6 +208,29 @@ MAC_NN_SHARED_DATABASE_BACKUP_COPY_PLIST = {
     "StartCalendarInterval": {"Hour": 4, "Minute": 15},
     "StandardOutPath": "/Users/el/.claude/nn-shared-database-newest-backup-copy-to-mac.log",
     "StandardErrorPath": "/Users/el/.claude/nn-shared-database-newest-backup-copy-to-mac.log",
+}
+# The deletion of agent-seat terminal captures older than seven days, last in the table.
+NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE = (
+    "* * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
+    "merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once >> "
+    "/home/nedlern/.claude/merge-lane-open-prs-watch-and-reviewer-assign-poll-once.log 2>&1")
+NED_BOX_TERMINAL_CAPTURES_DELETE_LINE = (
+    "45 5 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/handoff/"
+    "agent-seat-terminal-captures-older-than-seven-days-delete.py >> "
+    "/home/nedlern/.claude/agent-seat-terminal-captures-older-than-seven-days-delete.log 2>&1")
+MAC_TERMINAL_CAPTURES_DELETE_PLIST = {
+    "Label": "com.nedsnodes.agent-seat-terminal-captures-older-than-seven-days-delete",
+    "ProgramArguments": ["/opt/homebrew/bin/python3",
+                         "/Users/el/Projects/nedsnodes/nn-systems/handoff/"
+                         "agent-seat-terminal-captures-older-than-seven-days-delete.py"],
+    "EnvironmentVariables": {
+        "PATH": "/Users/el/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:"
+                "/usr/sbin:/sbin"},
+    "StartCalendarInterval": {"Hour": 5, "Minute": 45},
+    "StandardOutPath":
+        "/Users/el/.claude/agent-seat-terminal-captures-older-than-seven-days-delete.log",
+    "StandardErrorPath":
+        "/Users/el/.claude/agent-seat-terminal-captures-older-than-seven-days-delete.log",
 }
 DOMAIN = f"gui/{os.getuid()}"
 
@@ -320,13 +343,16 @@ check("the table's jobs are the two typed by hand before this program, the workt
       "cleanup, ned-box's crash restart watcher, ned-box's agent-seat idle sweep, ned-box's Remote Control reconnect watcher, the "
       "scheduled owner check of the work-snapshot hook, the session dialogs refresh, the "
       "guarded-file store's prune, the nn-shared-database's backup and its copy to the "
-      "Mac, the deletion of exited agent-sessions' temp folders, the scheduled full "
-      "mutation pass, the no-sandbox test suites' run on main, the GHI-MD edit pull "
+      "Mac, the deletion of exited agent-sessions' temp folders, the no-sandbox test "
+      "suites' run on main, the GHI-MD edit pull "
       "requests' check, approval and merge, the daily search for credential files no "
       "cold-read-cell is denied, the weekly count of each hook rule ID in both machines' "
-      "transcripts, the one count of cold-read-fast-read finding outcomes, and no other",
+      "transcripts, the one count of cold-read-fast-read finding outcomes, the deletion of "
+      "old agent-seat terminal captures, the open-pull-request watcher's poll, the standing "
+      "user-rulings store's each-minute add, and no other",
       sorted(real_jobs) == ["agent-seat-idle-sweep-headless-judge-wake-messages-send-and-"
                             "user-alerts-write",
+                            "agent-seat-terminal-captures-older-than-seven-days-delete",
                             "claude-code-registered-hook-rule-ids-in-both-machines-transcripts-weekly-count-"
                             "and-never-seen-rules-report",
                             "claude-code-temp-folders-of-exited-agent-sessions-delete",
@@ -342,12 +368,13 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "tmux-typing-watcher",
                             "log-store-session-dialogs-refresh",
                             "merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge",
+                            "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job",
                             "nn-shared-database-newest-backup-copy-to-mac",
                             "nn-shared-database-nightly-backup-with-integrity-check",
                             "no-sandbox-test-suites-run-on-main-in-a-quiet-gap",
-                            "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-"
-                            "tasks-open",
                             "scheduled-full-test-run-of-main",
+                            "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-"
+                            "anchor-list-for-hooks-write",
                             "transcript-mirror-to-log-store",
                             "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner"],
       sorted(real_jobs))
@@ -422,16 +449,24 @@ check("the count of cold-read-fast-read finding outcomes runs on ned-box alone, 
       and "nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py"
       in (REPOSITORY_ROOT / finding_outcomes_count["program"]).read_text(encoding="utf-8"),
       installer.cron_line(ned_box, finding_outcomes_count, finding_outcomes_count["on"]["ned-box"]))
-full_mutation_pass = real_jobs[
-    "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open"]
-check("the scheduled full mutation pass runs on ned-box alone, at 00:30, and its program "
-      "documents the table's line",
-      list(full_mutation_pass["on"]) == ["ned-box"]
-      and installer.cron_line(ned_box, full_mutation_pass, full_mutation_pass["on"]["ned-box"])
-      == NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE
-      and f"    {NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE}\n"
-      in (REPOSITORY_ROOT / full_mutation_pass["program"]).read_text(encoding="utf-8"),
-      installer.cron_line(ned_box, full_mutation_pass, full_mutation_pass["on"]["ned-box"]))
+terminal_captures_delete = real_jobs["agent-seat-terminal-captures-older-than-seven-days-delete"]
+terminal_captures_delete_documentation = (
+    REPOSITORY_ROOT / terminal_captures_delete["program"]).read_text(encoding="utf-8")
+check("the deletion of old agent-seat terminal captures runs at 05:45 by cron on ned-box and by "
+      "launchd on the Mac, and its program documents the table's ned-box line and names this "
+      "installer",
+      sorted(terminal_captures_delete["on"]) == ["mac", "ned-box"]
+      and installer.cron_line(ned_box, terminal_captures_delete,
+                              terminal_captures_delete["on"]["ned-box"])
+      == NED_BOX_TERMINAL_CAPTURES_DELETE_LINE
+      and installer.launch_agent_plist(mac, terminal_captures_delete,
+                                       terminal_captures_delete["on"]["mac"])
+      == MAC_TERMINAL_CAPTURES_DELETE_PLIST
+      and f"    {NED_BOX_TERMINAL_CAPTURES_DELETE_LINE}\n" in terminal_captures_delete_documentation
+      and "nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py"
+      in terminal_captures_delete_documentation,
+      installer.cron_line(ned_box, terminal_captures_delete,
+                          terminal_captures_delete["on"]["ned-box"]))
 no_sandbox_suites = real_jobs["no-sandbox-test-suites-run-on-main-in-a-quiet-gap"]
 check("the no-sandbox test suites' run on main runs on ned-box alone, every 10 minutes, and its "
       "program documents the table's line and names this installer",
@@ -493,12 +528,12 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
       and printed.getvalue().splitlines() == [
           "machine: ned-box (linux, /home/nedlern)",
           "transcript-mirror-to-log-store — cron line:", NED_BOX_MIRROR_LINE,
+          "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-"
+          "hooks-write — cron line:", NED_BOX_STANDING_USER_RULINGS_STORE_LINE,
           "log-store-session-dialogs-refresh — cron line:", NED_BOX_SESSION_DIALOGS_LINE,
           "scheduled-full-test-run-of-main — cron line:", NED_BOX_FULL_TEST_RUN_LINE,
           "no-sandbox-test-suites-run-on-main-in-a-quiet-gap — cron line:",
           NED_BOX_NO_SANDBOX_SUITES_LINE,
-          "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open — cron "
-          "line:", NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE,
           "clean-worktrees — cron line:", NED_BOX_CLEAN_LINE,
           "handoff-agent-crash-watcher — cron line:",
           NED_BOX_CRASH_RESTART_WATCHER_LINE,
@@ -521,7 +556,11 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "claude-code-registered-hook-rule-ids-in-both-machines-transcripts-weekly-count-and-never-seen-rules-"
           "report — cron line:", NED_BOX_HOOK_RULE_IDS_WEEKLY_COUNT_LINE,
           "cold-read-fast-read-finding-outcomes-count-as-user-alert-once-14-days-after-own-first-cron-run — cron "
-          "line:", NED_BOX_FINDING_OUTCOMES_COUNT_LINE],
+          "line:", NED_BOX_FINDING_OUTCOMES_COUNT_LINE,
+          "agent-seat-terminal-captures-older-than-seven-days-delete — cron line:",
+          NED_BOX_TERMINAL_CAPTURES_DELETE_LINE,
+          "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job — cron line:",
+          NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE],
       (exit_code, printed.getvalue(), errors.getvalue()))
 printed, errors = io.StringIO(), io.StringIO()
 with redirect_stdout(printed), redirect_stderr(errors):
@@ -546,10 +585,18 @@ owner_check_part, _, prune_and_backup_copy_part = owner_check_and_prune_part.par
 backup_copy_heading = ("nn-shared-database-newest-backup-copy-to-mac — launchd job, "
                        "/Users/el/Library/LaunchAgents/com.nedsnodes.nn-shared-database-"
                        "newest-backup-copy-to-mac.plist:\n")
-prune_part, _, backup_copy_part = prune_and_backup_copy_part.partition(backup_copy_heading)
+prune_part, _, backup_copy_and_captures_delete_part = prune_and_backup_copy_part.partition(
+    backup_copy_heading)
+captures_delete_heading = (
+    "agent-seat-terminal-captures-older-than-seven-days-delete — launchd job, "
+    "/Users/el/Library/LaunchAgents/com.nedsnodes.agent-seat-terminal-captures-older-than-"
+    "seven-days-delete.plist:\n")
+backup_copy_part, _, captures_delete_part = backup_copy_and_captures_delete_part.partition(
+    captures_delete_heading)
 check("--print as the Mac prints the mirror's cron line, the full test run's and the worktree "
-      "cleanup's plists, the Remote Control reconnect watcher's cron line, the scheduled owner check's and the guarded-file prune's plists, and the "
-      "nn-shared-database backup copy's plist, and runs nothing",
+      "cleanup's plists, the Remote Control reconnect watcher's cron line, the scheduled owner check's and the guarded-file prune's plists, the "
+      "nn-shared-database backup copy's plist and the terminal captures deletion's plist, and "
+      "runs nothing",
       exit_code == 0 and stub.commands == [] and clean_part.startswith("<?xml")
       and full_test_run_part.startswith(
           "machine: mac (darwin, /Users/el)\ntranscript-mirror-to-log-store — cron line:\n"
@@ -565,7 +612,10 @@ check("--print as the Mac prints the mirror's cron line, the full test run's and
       and plistlib.loads(prune_part.encode("utf-8")) == MAC_GUARDED_FILE_PRUNE_PLIST
       and backup_copy_part.startswith("<?xml")
       and plistlib.loads(backup_copy_part.encode("utf-8"))
-      == MAC_NN_SHARED_DATABASE_BACKUP_COPY_PLIST,
+      == MAC_NN_SHARED_DATABASE_BACKUP_COPY_PLIST
+      and captures_delete_part.startswith("<?xml")
+      and plistlib.loads(captures_delete_part.encode("utf-8"))
+      == MAC_TERMINAL_CAPTURES_DELETE_PLIST,
       (exit_code, mac_printed, errors.getvalue()))
 
 

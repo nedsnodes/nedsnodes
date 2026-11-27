@@ -35,6 +35,16 @@
         ]
       }
     ],
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -72,6 +82,11 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py",
+            "timeout": 10
           }
         ]
       }
@@ -89,6 +104,11 @@
           },
           {
             "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py",
+            "timeout": 180
+          },
+          {
+            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/checkout-freshness-changed-skill-invoke-again-refusal-stop-hook.py",
             "timeout": 30
           },
@@ -96,6 +116,11 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/scripts/agent-seat-due-task-raise-hook.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook.py",
+            "timeout": 10
           },
           {
             "type": "command",

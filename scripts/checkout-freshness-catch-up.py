@@ -60,7 +60,8 @@ Wired as a Stop hook, so it runs at every turn boundary. Each run:
      only when main changed a standing instruction the agent may hold in its
      context: a CLAUDE.md, whose changed lines the note carries; a skill's
      SKILL.md, whose skill the agent is told to invoke again; or an
-     -instructions.md or -prompt.md file. Claude Code reloads skills' list,
+     -instructions.md or -prompt.md file that is not a numbered GHI-MD, whose
+     name comes from its issue's title. Claude Code reloads skills' list,
      hooks and subagent definitions by itself, and reads CLAUDE.md only at an
      agent-session's start and after a compaction, so nothing else needs
      telling. A diff git cannot produce is told as such, never read as
@@ -159,6 +160,24 @@ _rebase_or_replace_spec = importlib.util.spec_from_file_location(
     / "pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
 rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
 _rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
+
+_branch_lock_spec = importlib.util.spec_from_file_location(
+    "branch_rebase_and_push_per_checkout_mutual_exclusion_lock_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "branch-rebase-and-push-per-checkout-mutual-exclusion-lock-common.py")
+branch_lock = importlib.util.module_from_spec(_branch_lock_spec)
+_branch_lock_spec.loader.exec_module(branch_lock)
+
+# Well under the Stop hook's 60-second default, which the fetch before it also spends. A turn end
+# that cannot take the lock leaves the checkout as it is; the next turn end catches it up.
+CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS = 20
+
+_reusable_prompt_rule_spec = importlib.util.spec_from_file_location(
+    "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py")
+reusable_prompt_rule = importlib.util.module_from_spec(_reusable_prompt_rule_spec)
+_reusable_prompt_rule_spec.loader.exec_module(reusable_prompt_rule)
 
 STAMP_FILE_NAME = "checkout-freshness-stamp.json"
 
@@ -284,7 +303,7 @@ DETACHED_OPERATION_IN_PROGRESS_LINE = (
 DETACHED_WORK_OF_ITS_OWN_LINE = (
     "It holds work of its own.\n"
     "This checkout is an agent-home, so git refuses commits in it: carry that work to a "
-    "worktree of your own on an nc-topic-branch, as the refusal of `git commit` here says how."
+    "worktree of your own on an nn-topic-branch, as the refusal of `git commit` here says how."
 )
 DETACHED_FAST_FORWARD_REFUSED_LINES = (
     "Git refused the fast-forward: {error}\n"
@@ -458,14 +477,10 @@ def skill_of(path: str):
     return None
 
 
-def is_instruction_file(path: str) -> bool:
-    name = path.rsplit("/", 1)[-1]
-    return name.endswith("-instructions.md") or name.endswith("-prompt.md")
-
-
 def standing_instruction_paths(paths):
     return [path for path in paths
-            if is_claude_md(path) or skill_of(path) or is_instruction_file(path)]
+            if is_claude_md(path) or skill_of(path)
+            or reusable_prompt_rule.has_reusable_prompt_file_name_and_is_not_ghi_md(path)]
 
 
 # A CLAUDE.md diff longer than this is named by its changed lines instead of
@@ -1211,7 +1226,7 @@ def merges_from_main(checkout: Path):
     branch's merges. Raises GitCommandFailed when git cannot read a merge's
     second parent or cannot say whether that parent is on origin/main.
 
-    A merge of another nc-topic-branch is not the banned thing, so the second
+    A merge of another nn-topic-branch is not the banned thing, so the second
     parent is tested for being on main rather than every merge being flagged.
     A branch that carries older catch-up merges is flagged once, which is
     correct: those merges are real and the agent has not been told of them.
@@ -1466,6 +1481,16 @@ def catch_up_session_checkout(checkout: Path, interval_seconds: int) -> None:
     branch = current_branch(checkout)
     if branch is None:
         return
+    # Held from deciding the branch was never pushed until any rebase ends, so the turn-end push
+    # hook, running in parallel, pushes the branch either before that decision or after the rebase.
+    with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(
+            git_dir, CATCH_UP_BRANCH_REBASE_AND_PUSH_LOCK_WAIT_SECONDS) as held:
+        if held:
+            catch_up_session_checkout_branch_under_lock(checkout, git_dir, stamp_path, stamp, branch)
+
+
+def catch_up_session_checkout_branch_under_lock(checkout: Path, git_dir: Path, stamp_path: Path,
+                                                stamp: dict, branch: str) -> None:
     state_key, state_text = head_state(checkout, branch)
 
     # 1. Misbehaviour, to the agent, once per distinct finding of each

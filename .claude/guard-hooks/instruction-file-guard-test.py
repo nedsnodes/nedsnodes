@@ -245,7 +245,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     result = run_hook(decoy, workspace, str(workspace / "docs" / "issues" / "queue" / "x-prompt.md"))
     check("a draft in docs/issues/queue/ passes", result.returncode == 0, result.stderr)
     result = run_hook(decoy, workspace, str(workspace / "nn-queue" / "x-prompt.md"))
-    check("a note in nn-queue/ passes", result.returncode == 0, result.stderr)
+    check("a prompt in nn-queue/, which is not a draft place, is blocked", result.returncode == 2, result.stderr)
     result = run_hook(decoy, workspace, str(workspace / "docs" / "drafts" / "x-instructions.md"))
     check("a draft in docs/drafts/ passes", result.returncode == 0, result.stderr)
     result = run_hook(decoy, workspace, str(workspace / ".claude" / "jobs" / "ab12" / "tmp" / "x-prompt.md"))
@@ -312,7 +312,6 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         ("a draft in docs/nedsnodes-wiki/queue/", workspace / "docs" / "nedsnodes-wiki" / "queue" / "x.md"),
         ("a design draft in docs/issues/queue/", workspace / "docs" / "issues" / "queue" / "foo.tool.design.md"),
         ("a design draft in docs/drafts/", workspace / "docs" / "drafts" / "foo.tool.design.md"),
-        ("a design draft in nn-queue/", workspace / "nn-queue" / "foo.tool.design.md"),
     ]
     for label, target in draft_places:
         result = run_hook(decoy, workspace, str(target))
@@ -410,7 +409,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
               in result.stderr.splitlines(), result.stderr)
     for label, marker_text in (
             ("naming an exception", "#pre_approved_change\ncosmetic-change\n"),
-            ("saying on neither list", "#pre_approved_change\non neither list\n")):
+            ("saying on neither list", "#pre_approved_change\non neither list\n"),
+            ("in the closed form, with the closing `#`", "#pre_approved_change#\ncosmetic-change\n")):
         marker.write_text(marker_text, encoding="utf-8")
         result = run_hook(decoy, workspace, str(workspace / "CLAUDE.md"))
         check(f"a #pre_approved_change marker {label} passes", result.returncode == 0,
@@ -427,6 +427,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           result.returncode == 0, result.stderr)
     for label, marker_text in (
             ("with no second line", "#pre_approved_change\n"),
+            ("in the closed form with no second line", "#pre_approved_change#\n"),
             ("with the exception on its first line", "#pre_approved_change cosmetic-change\n"),
             ("with the exception on its first line and on its second",
              "#pre_approved_change cosmetic-change\ncosmetic-change\n"),
