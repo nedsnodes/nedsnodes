@@ -23,7 +23,11 @@ worktrees directory's pr<n>-merged, and gh reads from GitHub as the merge
 account. Among the facts are the merged pull requests whose not-fixed line, in
 either form, links to an issue the pull request closes, as GitHub lists them,
 or to the pull request itself: the reviewer judges whether this pull request
-makes useless a point fix or workaround they kept. For each pull request a
+makes useless a point fix or workaround they kept. gh reads them from the
+cross-references on the timeline of each of those issues and of the pull
+request, which GitHub records whenever a description links to one, not from a
+list of every merged pull request. A gh read that fails with HTTP 502 or 504 is
+run once more. For each pull request a
 "#follow_up_request pull request <number>" in the description names, anywhere
 in it, the facts give merge-lane-2's follow-up request block for that pull
 request as --review-tools-worktree-at-main's FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME
@@ -92,8 +96,9 @@ class StepFailed(Exception):
 
 GITHUB_ISSUE_OR_PULL_REQUEST_LINK = re.compile(
     r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/(?:issues|pull)/([0-9]+)")
-# Far above the merged count, so gh lists them all.
-MERGED_PULL_REQUESTS_LIMIT = "100000"
+# GitHub's gateway errors, which pass: gh met them six times from 2026-10-26 to 2026-11-13 in this program.
+# `gh pr view` prints "HTTP 502: 502 Bad Gateway (...)", and `gh api` prints "gh: Bad Gateway (HTTP 502)".
+GH_GATEWAY_ERROR_PATTERN = re.compile(r"\bHTTP 50[24]\b")
 FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME = "pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py"
 FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER = re.compile(r"#follow_up_request#? pull request ([0-9]+)\b")
 _follow_up_request_program_spec = importlib.util.spec_from_file_location(
@@ -138,6 +143,11 @@ def run(command, gh_token=None, refusal_allowed=False):
         environment["GH_TOKEN"] = gh_token
     completed = subprocess.run(
         command, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=environment)
+    # Every gh command this program runs is a read, so running it again is safe.
+    if (command[0] == "gh" and completed.returncode != 0
+            and GH_GATEWAY_ERROR_PATTERN.search(completed.stderr)):
+        completed = subprocess.run(
+            command, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=environment)
     if refusal_allowed and completed.returncode == 1 and completed.stderr.startswith("REFUSED: "):
         raise Refused(completed.stderr.strip())
     if completed.returncode != 0:
@@ -185,19 +195,31 @@ def linked_items(text):
 
 
 class MergedPullRequests:
-    """The repository's merged pull requests, read from GitHub once per run."""
+    """The repository's merged pull requests that link to an issue or pull request, read from GitHub once per
+    issue or pull request per run."""
 
     def __init__(self, gh_token):
         self.gh_token = gh_token
-        self.listed = None
+        self.read = {}
 
-    def all(self):
-        if self.listed is None:
-            self.listed = json.loads(run(
-                ["gh", "pr", "list", "--repo", common.REPOSITORY, "--state", "merged",
-                 "--limit", MERGED_PULL_REQUESTS_LIMIT, "--json", "number,title,url,body"],
+    def linking_to(self, item):
+        """The repository's merged pull requests whose description links to `item`, an (owner/repository, number),
+        as the cross-references on its timeline show them, each as {number, title, url, body}."""
+        if item not in self.read:
+            repository, number = item
+            pages = json.loads(run(
+                ["gh", "api", "--paginate", "--slurp", f"repos/{repository}/issues/{number}/timeline"],
                 self.gh_token))
-        return self.listed
+            self.read[item] = [
+                {"number": source["number"], "title": source["title"], "url": source["html_url"],
+                 "body": source.get("body")}
+                for page in pages for event in page
+                if event.get("event") == "cross-referenced"
+                for source in [(event.get("source") or {}).get("issue") or {}]
+                if (source.get("pull_request") or {}).get("merged_at")
+                and repository_names.normalize_repository_name_reading_name_before_project_rename_as_current(
+                    (source.get("repository") or {}).get("full_name", "")) == common.REPOSITORY.lower()]
+        return self.read[item]
 
 
 def follow_up_pull_requests_text(number, closing_issues, merged_pull_requests):
@@ -205,8 +227,12 @@ def follow_up_pull_requests_text(number, closing_issues, merged_pull_requests):
     an issue pull request `number` closes, or to `number` itself."""
     targets = linked_items(" ".join(issue["url"] for issue in closing_issues))
     targets.add((common.REPOSITORY.lower(), int(number)))
+    linking = {}
+    for target in sorted(targets):
+        for merged in merged_pull_requests.linking_to(target):
+            linking[merged["number"]] = merged
     found = []
-    for merged in merged_pull_requests.all():
+    for merged in (linking[number] for number in sorted(linking)):
         for defect_line in defect_line_reader.pull_request_description_defect_lines(merged["body"] or ""):
             line = defect_line["line"]
             if (defect_line["kind"] == defect_line_reader.ROOT_CAUSE_NOT_FIXED

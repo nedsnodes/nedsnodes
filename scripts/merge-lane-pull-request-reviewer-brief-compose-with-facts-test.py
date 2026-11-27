@@ -8,8 +8,8 @@ instructions file committed on main. wt/pr7-merged is a worktree of that
 repository. The reviewer's scratch directories are made in their own directory
 of the scratch, in place of the default parent outside the log-store. The program runs with GIT_DIR pointing at a directory that does
 not exist, so a case passes only if the program drops it. A stand-in for gh
-on PATH serves the pull request's closing issues and description and the merged
-pull requests from routes each case arranges, and logs each call with the GH_TOKEN it saw;
+on PATH serves the pull request's closing issues and description and the timelines of
+the pull request and the issues it closes from routes each case arranges, and logs each call with the GH_TOKEN it saw;
 a stand-in for the follow-up request program, committed on main, does the same for the
 follow-up request blocks; HOME is a scratch directory holding the merge account's token file.
 
@@ -53,8 +53,18 @@ argv = sys.argv[1:]
 with open(os.environ["BRIEF_COMPOSE_TEST_GH_CALL_LOG"], "a") as log:
     log.write(json.dumps({"argv": argv, "gh_token": os.environ.get("GH_TOKEN")}) + "\n")
 routes = json.load(open(os.environ["BRIEF_COMPOSE_TEST_GH_ROUTES"]))
-key = {"view": "closing", "list": "merged"}.get(argv[1] if argv[:1] == ["pr"] else "")
-route = routes.get(key)
+if argv[:2] == ["pr", "view"]:
+    route = routes.get("closing")
+elif argv[:3] == ["api", "--paginate", "--slurp"]:
+    timelines = routes.get("timeline", {})
+    route = timelines.get(argv[3], timelines.get("*"))
+else:
+    route = None
+if isinstance(route, list):
+    # Successive identical calls get successive responses, the last one repeating.
+    with open(os.environ["BRIEF_COMPOSE_TEST_GH_CALL_LOG"]) as log:
+        earlier = sum(1 for line in log if json.loads(line)["argv"] == argv) - 1
+    route = route[min(earlier, len(route) - 1)]
 if route is None:
     sys.stderr.write("brief-compose-test stand-in: unarranged gh call %r\n" % (argv,))
     sys.exit(97)
@@ -84,7 +94,11 @@ def closing_route(closing_issues=(), body=DESCRIPTION):
     return {"stdout": json.dumps({"closingIssuesReferences": list(closing_issues), "body": body})}
 
 
-QUIET_GH_ROUTES = {"closing": closing_route(), "merged": {"stdout": "[]"}}
+def timeline_path(number):
+    return f"repos/nedsnodes/nedsnodes/issues/{number}/timeline"
+
+
+QUIET_GH_ROUTES = {"closing": closing_route(), "timeline": {"*": {"stdout": "[[]]"}}}
 
 failures = []
 
@@ -170,11 +184,40 @@ MERGED_PULL_REQUESTS = [
     {"number": 106, "title": "No description", "url": "https://github.com/nedsnodes/nedsnodes/pull/106",
      "body": None},
 ]
+MATCHING_NOT_FIXED_BODY = f"#root_cause_not_fixed it stays. #follow_up {ISSUE_THIS_PULL_REQUEST_CLOSES}"
+
+
+def cross_reference(number, title, body, merged=True, pull_request=True, repository="nedsnodes/nedsnodes"):
+    """A timeline event as GitHub's REST API gives it, for a cross-reference from issue or pull request `number`."""
+    source = {"number": number, "title": title, "html_url": f"https://github.com/{repository}/pull/{number}",
+              "body": body, "repository": {"full_name": repository}}
+    if pull_request:
+        source["pull_request"] = {"merged_at": "2026-11-20T10:00:00Z" if merged else None}
+    return {"event": "cross-referenced", "source": {"type": "issue", "issue": source}}
+
+
+def merged_cross_reference(merged):
+    return cross_reference(merged["number"], merged["title"], merged["body"])
+
+
+# Issue 50's timeline in two pages, holding besides the merged pull requests that link to it: an open pull
+# request, an issue, another repository's merged pull request, all with a matching not-fixed line, and an event
+# that is no cross-reference. Pull request 7's timeline holds #102, which links it by the old name, and #101 again.
+FOLLOW_UP_TIMELINES = {
+    timeline_path(50): {"stdout": json.dumps([
+        [merged_cross_reference(MERGED_PULL_REQUESTS[0]), {"event": "labeled"},
+         cross_reference(107, "Still open", MATCHING_NOT_FIXED_BODY, merged=False)],
+        [*(merged_cross_reference(merged) for merged in MERGED_PULL_REQUESTS[2:]),
+         cross_reference(108, "An issue", MATCHING_NOT_FIXED_BODY, pull_request=False),
+         cross_reference(109, "Elsewhere", MATCHING_NOT_FIXED_BODY, repository="cli/cli")]])},
+    timeline_path(7): {"stdout": json.dumps(
+        [[merged_cross_reference(MERGED_PULL_REQUESTS[1]), merged_cross_reference(MERGED_PULL_REQUESTS[0])]])},
+}
 FOLLOW_UP_GH_ROUTES = {
     "closing": closing_route([
         {"number": 50, "url": ISSUE_THIS_PULL_REQUEST_CLOSES,
          "repository": {"name": "nedschorus", "owner": {"login": "nedschorus"}}}]),
-    "merged": {"stdout": json.dumps(MERGED_PULL_REQUESTS)}}
+    "timeline": FOLLOW_UP_TIMELINES}
 
 
 def main():
@@ -243,10 +286,11 @@ def main():
 
         calls = gh_calls(scratch)
         check("gh is asked for this pull request's closing issues and description in one call, "
-              "and for the merged pull requests, as the merge account",
-              [call["argv"][:3] for call in calls] == [["pr", "view", "7"], ["pr", "list", "--repo"]]
-              and calls[0]["argv"][-2:] == ["--json", "closingIssuesReferences,body"]
-              and "merged" in calls[1]["argv"] and "body" in calls[1]["argv"][-1]
+              "and, for a pull request that closes no issue, only for its own timeline, as the merge account; "
+              "never for the list of every merged pull request",
+              [call["argv"] for call in calls]
+              == [["pr", "view", "7", "--repo", "nedsnodes/nedsnodes", "--json", "closingIssuesReferences,body"],
+                  ["api", "--paginate", "--slurp", timeline_path(7)]]
               and all(call["gh_token"] == TEST_TOKEN for call in calls), json.dumps(calls))
         check("a description that names no follow-up request runs no follow-up request program",
               not follow_up_calls(scratch), json.dumps(follow_up_calls(scratch)))
@@ -356,20 +400,48 @@ def main():
                    "line is `**Root cause not fixed:** the cause stays until "
                    "https://github.com/NedSchorus/nedschorus/pull/7 merges.`.\n") in brief,
               f"exit {completed.returncode}\n{completed.stderr}\n--- brief ---\n{brief}")
-        check("the merged pull requests are read once for two briefs",
-              [call["argv"][1] for call in gh_calls(scratch)]
-              == ["view", "list", "view"],
+        check("the merged pull requests are read from the timelines of the closing issue and of this pull "
+              "request, once each for two briefs",
+              [call["argv"][-1] for call in gh_calls(scratch)]
+              == ["closingIssuesReferences,body", timeline_path(7), timeline_path(50),
+                  "closingIssuesReferences,body"],
               json.dumps(gh_calls(scratch)))
 
-        for route, what in (("closing", "closing issues"), ("merged", "merged pull requests")):
-            failing = {**QUIET_GH_ROUTES, route: {"exit": 1, "stderr": "HTTP 502: Bad Gateway\n"}}
-            (helpers / "briefs" / "brief-10-mac-claude.md").unlink(missing_ok=True)
-            completed = run_program(scratch, helpers, [{**first_round, "tag": "10"}], gh_routes=failing)
-            check(f"gh failing on the {what} exits 1, naming gh's error, and writes no brief",
-                  completed.returncode == 1 and "brief not composed: StepFailed" in completed.stderr
-                  and "HTTP 502: Bad Gateway" in completed.stderr
-                  and not (helpers / "briefs" / "brief-10-mac-claude.md").exists(),
-                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        # Each in the form that gh command prints it.
+        for route, what, answer, error_text in (
+                ("closing", "closing issues", QUIET_GH_ROUTES["closing"],
+                 "HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)"),
+                ("timeline", "merged pull requests", QUIET_GH_ROUTES["timeline"]["*"],
+                 "gh: Gateway Timeout (HTTP 504)")):
+            gateway_error = {"exit": 1, "stderr": error_text + "\n"}
+            for responses, outcome in (([gateway_error, answer], "passing"),
+                                       ([gateway_error], "failing")):
+                routes = {**QUIET_GH_ROUTES,
+                          route: {"*": responses} if route == "timeline" else responses}
+                (helpers / "briefs" / "brief-10-mac-claude.md").unlink(missing_ok=True)
+                completed = run_program(scratch, helpers, [{**first_round, "tag": "10"}], gh_routes=routes)
+                asked = sum(1 for call in gh_calls(scratch)
+                            if (call["argv"][0] == "api") == (route == "timeline"))
+                if outcome == "passing":
+                    check(f"gh failing once with `{error_text}` on the {what} is run again, and the brief is written",
+                          completed.returncode == 0 and asked == 2
+                          and (helpers / "briefs" / "brief-10-mac-claude.md").exists(),
+                          f"exit {completed.returncode}, asked {asked}\n{completed.stdout}{completed.stderr}")
+                else:
+                    check(f"gh failing twice with `{error_text}` on the {what} exits 1 after two tries, naming "
+                          "gh's error, and writes no brief",
+                          completed.returncode == 1 and asked == 2
+                          and "brief not composed: StepFailed" in completed.stderr
+                          and error_text in completed.stderr
+                          and not (helpers / "briefs" / "brief-10-mac-claude.md").exists(),
+                          f"exit {completed.returncode}, asked {asked}\n{completed.stdout}{completed.stderr}")
+
+        routes = {**QUIET_GH_ROUTES, "timeline": {"*": {"exit": 1, "stderr": "gh: Not Found (HTTP 404)\n"}}}
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "10"}], gh_routes=routes)
+        asked = sum(1 for call in gh_calls(scratch) if call["argv"][0] == "api")
+        check("gh failing with an error other than HTTP 502 or 504 is not run again, and exits 1",
+              completed.returncode == 1 and asked == 1 and "gh: Not Found (HTTP 404)" in completed.stderr,
+              f"exit {completed.returncode}, asked {asked}\n{completed.stdout}{completed.stderr}")
 
         completed = run_program(scratch, helpers, [{**first_round, "tag": "11"}], token=None)
         check("a missing merge account token exits 1, naming the token file, and asks gh nothing",
@@ -511,14 +583,14 @@ def main():
         shutil.rmtree(scratch, ignore_errors=True)
 
     class MergedWithOldName:
-        def all(self):
+        def linking_to(self, item):
             return [{"number": 5, "title": "Kept with an old link", "url": "https://github.com/nedsnodes/nedsnodes/pull/5",
                      "body": f"#root_cause_not_fixed it stays. #follow_up https://github.com/{program.repository_names.OLD_REPOSITORY}/pull/7"}]
     old_name_fact = program.follow_up_pull_requests_text(7, [], MergedWithOldName())
     check("a not-fixed line linking this pull request by the repository's old name, which GitHub redirects, is found",
           "#5 " in old_name_fact, old_name_fact)
     class MergedLinkingClosedIssueByOldName:
-        def all(self):
+        def linking_to(self, item):
             return [{"number": 5, "title": "Left an issue open", "url": "https://github.com/nedsnodes/nedsnodes/pull/5",
                      "body": f"#root_cause_not_fixed it stays. #follow_up https://github.com/{program.repository_names.OLD_REPOSITORY}/issues/9"}]
     old_issue_fact = program.follow_up_pull_requests_text(
