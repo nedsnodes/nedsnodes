@@ -10,7 +10,8 @@ Usage:
   --merge-program, --follow-up-program and --gh, which only tests change.
 
 merge-lane-2 runs merge-batch-start, which starts merge-batch-run-in-queue-order as a
-process in its own session, so the merge batch outlives the command that started it, and
+process in its own session, so the merge batch outlives the command that started it, hands
+that batch the merge-batch.lock it holds, so no other start can launch a batch in between, and
 prints one line opening with its outcome state, checked in this order:
   STOPPED            the stop file exists, with no in-progress file a dead batch left beside
                      it; the line quotes it; nothing was started
@@ -89,7 +90,8 @@ sends the merge notices, handles each notice, moves it into handled/, and runs
 merge-batch-resume once a stopped merge batch is handled.
 
 merge-batch-resume refuses while a merge batch holds merge-batch.lock; otherwise, holding
-that lock, it removes the stop file and the in-progress file, then starts a merge batch. With --merge-only, that
+that lock, it removes the stop file and the in-progress file, then starts a merge batch and
+hands it the lock, as merge-batch-start does. With --merge-only, that
 pull request, which must be waiting, merges first; the merge batch goes on only when it
 merged and its after-merge test run passed, and otherwise stops again, with the stop file
 and a stopped notice naming its outcome.
@@ -211,6 +213,10 @@ def parse_arguments(argv):
     start.add_argument("--quiet", action="store_true")
     for name in ("merge-batch-resume", "merge-batch-run-in-queue-order"):
         subcommands.add_parser(name).add_argument("--merge-only", type=int)
+    subcommands.choices["merge-batch-run-in-queue-order"].add_argument(
+        "--merge-batch-lock-fd", type=int,
+        help="an inherited descriptor that already holds merge-batch.lock; only "
+             "merge-batch-start and merge-batch-resume pass it")
     subcommands.add_parser("merge-batch-list-waiting")
     return parser.parse_args(argv)
 
@@ -467,9 +473,11 @@ class MergeQueuePullRequestMergeBatchRunner:
 
     # One merge batch
 
-    def run_in_queue_order(self, merge_only):
+    def run_in_queue_order(self, merge_only, lock_fd=None):
         self.directory.mkdir(parents=True, exist_ok=True)
-        lock = open(self.directory / MERGE_BATCH_LOCK_FILE_NAME, "a")
+        # flock on a descriptor that already holds the lock succeeds, so the handed lock is kept.
+        lock = (os.fdopen(lock_fd, "a") if lock_fd is not None
+                else open(self.directory / MERGE_BATCH_LOCK_FILE_NAME, "a"))
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -760,7 +768,10 @@ class MergeQueuePullRequestMergeBatchRunner:
                       "until then the in-progress file is kept, so every merge-batch-start "
                       "reports DIED MID-MERGE and starts nothing.")
                 return 1
-        # Released before the merge batch starts, since that batch takes the lock itself.
+            return self.merge_batch_started_with_held_lock(lock, merge_only)
+
+    def merge_batch_started_with_held_lock(self, lock, merge_only):
+        # The batch inherits the held lock, so no start can take it before the batch runs.
         command = [sys.executable, str(Path(__file__).resolve()),
                    "--merge-queue-file", str(self.arguments.merge_queue_file),
                    "--merge-batches-directory", str(self.directory),
@@ -768,14 +779,16 @@ class MergeQueuePullRequestMergeBatchRunner:
                    str(self.arguments.merge_program_outputs_directory),
                    "--merge-program", str(self.arguments.merge_program),
                    "--follow-up-program", str(self.arguments.follow_up_program),
-                   "--gh", self.arguments.gh, "merge-batch-run-in-queue-order"]
+                   "--gh", self.arguments.gh, "merge-batch-run-in-queue-order",
+                   "--merge-batch-lock-fd", str(lock.fileno())]
         if merge_only is not None:
             command += ["--merge-only", str(merge_only)]
         log_file = self.directory / MERGE_BATCH_LOG_FILE_NAME
         try:
             with open(log_file, "a") as log:
                 subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log,
-                                 stderr=subprocess.STDOUT, start_new_session=True)
+                                 stderr=subprocess.STDOUT, start_new_session=True,
+                                 pass_fds=(lock.fileno(),))
         except OSError as error:
             print(f"NOT STARTED: the merge batch could not be started: {error}\n"
                   f"Tell the user that merges cannot start on ned-box because: {error}. A "
@@ -820,7 +833,7 @@ class MergeQueuePullRequestMergeBatchRunner:
                 return 2
             self.stop_file.unlink(missing_ok=True)
             self.in_progress_file.unlink(missing_ok=True)
-        return self.start(quiet=False, merge_only=merge_only)
+            return self.merge_batch_started_with_held_lock(lock, merge_only)
 
     def list_waiting(self):
         for line in self.waiting(self.queue_lines()):
@@ -836,7 +849,7 @@ def main(argv=None):
     queue = MergeQueuePullRequestMergeBatchRunner(arguments)
     try:
         if arguments.subcommand == "merge-batch-run-in-queue-order":
-            return queue.run_in_queue_order(arguments.merge_only)
+            return queue.run_in_queue_order(arguments.merge_only, arguments.merge_batch_lock_fd)
         if arguments.subcommand == "merge-batch-start":
             return queue.start(arguments.quiet)
         if arguments.subcommand == "merge-batch-resume":
