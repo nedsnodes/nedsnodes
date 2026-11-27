@@ -529,7 +529,7 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a skill's document part is SKILL, a hyphen, and the skill's name",
           record_name(skill_target) == "SKILL-cold-read", record_name(skill_target))
     check("a skill's prompt file is its stem alone, like any other document",
-          record_name(terminology_target) == "terminology-prompt", record_name(terminology_target))
+          record_name(terminology_target) == "terminology.prompt", record_name(terminology_target))
     check("an ordinary document is its stem, with no directory",
           record_name(Path("/r/docs/drafts/explain-skill-draft.md")) == "explain-skill-draft")
     check("README gets no special case",

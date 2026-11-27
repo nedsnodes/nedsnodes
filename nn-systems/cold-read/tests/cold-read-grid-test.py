@@ -2837,7 +2837,7 @@ try:
           grid_record_name("/r/docs/drafts/explain-skill-draft.md"))
     check("grid: a skill's prompt file is its stem alone, like any other document",
           grid_record_name("/r/.claude/skills/cold-read/prompts/terminology.prompt.md")
-          == "terminology-prompt-2026-09-16",
+          == "terminology.prompt-2026-09-16",
           grid_record_name("/r/.claude/skills/cold-read/prompts/terminology.prompt.md"))
     check("grid: README and index get no special case",
           grid_record_name("/r/docs/nedsnodes-wiki/README.md") == "README-2026-09-16"
