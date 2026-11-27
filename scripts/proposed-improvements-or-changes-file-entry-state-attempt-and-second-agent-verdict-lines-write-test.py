@@ -111,7 +111,7 @@ def entry(path, name):
 
 # An attempt goes under the entry, numbered, timed, and touches nothing else.
 path = fresh()
-code, out, _ = run(path, "attempt", "E1", "--by", "h handler", "--found", "read the ruling", "--source", "PR 5")
+code, out, _ = run(path, "attempt", "E1", "--by", "h handler", "--found", "read the ruling", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("an attempt exits 0", code == 0)
 case("an attempt is the entry's last line",
      entry(path, "E1")[-1] == "Attempt 1 — h handler, 2026-11-10T12:00Z: read the ruling — sources read: PR 5")
@@ -125,32 +125,117 @@ case("show is printed after a change", "E1: State: open; attempts since the user
 
 # Related entries: one attempt line under each, each numbered for its own entry.
 path = fresh()
-run(path, "attempt", "E2", "--by", "h", "--found", "first", "--source", "PR 5")
-code, _, _ = run(path, "attempt", "E1", "E2", "--by", "h", "--found", "one cause", "--source", "PR 5")
+run(path, "attempt", "E2", "--by", "h", "--found", "first", "--outcome", "not-worth-doing", "--source", "PR 5")
+code, _, _ = run(path, "attempt", "E1", "E2", "--by", "h", "--found", "one cause", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("an attempt on two entries exits 0", code == 0)
 case("the first related entry gets attempt 1", entry(path, "E1")[-1] == "Attempt 1 — h, 2026-11-10T12:00Z: one cause — sources read: PR 5")
 case("the second related entry gets attempt 2", entry(path, "E2")[-1] == "Attempt 2 — h, 2026-11-10T12:00Z: one cause — sources read: PR 5")
 
-# The fourth attempt is refused, under every entry named, and the file is unchanged.
+# A third not-worth-doing attempt sends the entry to the second agent; while another entry is open, a fourth
+# attempt is refused, under every entry named, and the file is unchanged.
 path = fresh()
 for number in range(3):
-    _, third_out, _ = run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--source", "PR 5")
-case("a second attempt says nothing of 3 attempts", "now has" not in run(fresh(), "attempt", "E1", "--by", "h", "--found", "x", "--source", "PR 5")[1])
+    _, third_out, _ = run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--outcome", "not-worth-doing", "--source", "PR 5")
+case("a second attempt says nothing of 3 attempts",
+     "now has" not in run(fresh(), "attempt", "E1", "--by", "h", "--found", "x", "--outcome", "not-worth-doing", "--source", "PR 5")[1])
 before = path.read_text(encoding="utf-8")
-code, _, err = run(path, "attempt", "E2", "E1", "--by", "h", "--found", "fourth", "--source", "PR 5")
-case("the third attempt says the entry has 3 attempts", "Entry E1 now has 3 attempts" in third_out)
-case("the third attempt sends a not-worth-doing attempt to the second agent, and only another attempt to needs-the-user",
-     "If this attempt found it not worth doing, run the second-agent-verdict subcommand" in third_out
-     and "If this attempt neither settles it nor found it not worth doing, run the needs-the-user subcommand" in third_out)
-case("a fourth attempt exits 1", code == 1)
-case("a fourth attempt says to mark the entry for the user", "REFUSED:" in err and "--because three-attempts" in err)
+code, _, err = run(path, "attempt", "E2", "E1", "--by", "h", "--found", "fourth", "--outcome", "left-open", "--source", "PR 5")
+case("a third not-worth-doing attempt leaves the entry open", entry(path, "E1")[2] == "State: open")
+case("a third not-worth-doing attempt sends the entry to the second agent",
+     "Entry E1 now has 3 attempts: run the second-agent-verdict subcommand" in third_out)
+case("a fourth attempt while another entry is open exits 1", code == 1)
+case("a fourth attempt while another entry is open says to mark the entry for the user",
+     "REFUSED:" in err and "while another entry of the GHI-MD is open" in err and "--because three-attempts" in err)
 case("a refused attempt changes no entry", path.read_text(encoding="utf-8") == before)
+
+# A third left-open attempt marks the entry as needing the user while another entry of its GHI-MD is open,
+# in its own file or in another of the GHI-MD's files.
+SOLE_ENTRY_TEXT = FILE_TEXT.split("\n## E2")[0] + "\n"
+
+
+def sibling(path, text, suffix="-2"):
+    other = path.with_name(path.name.replace(".md", f"{suffix}.md"))
+    other.write_text(text, encoding="utf-8")
+    return other
+
+
+for name, text, other_text in (("in its own file", FILE_TEXT, None),
+                               ("in another file of its GHI-MD", SOLE_ENTRY_TEXT, FILE_TEXT)):
+    path = fresh(text)
+    if other_text is not None:
+        sibling(path, other_text)
+    for number in range(3):
+        code, out, _ = run(path, "attempt", "E1", "--by", "h", "--found", f"could not settle {number}", "--outcome", "left-open", "--source", "PR 5")
+    case(f"a third left-open attempt while an entry is open {name} marks the entry as needing the user", code == 0
+         and entry(path, "E1")[2] == "State: needs the user — h, 2026-11-10T12:00Z: still open after 3 attempts; could not settle 2")
+    case(f"a third left-open attempt while an entry is open {name} says the entry was marked",
+         "Attempt 3 left entry E1 open" in out and "marked as needing the user" in out)
+
+# When the other file's entries are settled or need the user, the third left-open attempt does not mark the
+# entry, and the fourth does; a fifth is refused.
+for name, other_state in (("settled", "State: settled, done — h, t: removed"), ("needing the user", "State: needs the user — h, t: decide")):
+    path = fresh(SOLE_ENTRY_TEXT)
+    other = sibling(path, FILE_TEXT.replace("State: open", other_state))
+    for number in range(3):
+        code, out, _ = run(path, "attempt", "E1", "--by", "h", "--found", f"could not settle {number}", "--outcome", "left-open", "--source", "PR 5")
+    case(f"with the other file's entries {name}, a third left-open attempt leaves the entry open",
+         code == 0 and entry(path, "E1")[2] == "State: open")
+    case(f"with the other file's entries {name}, a third left-open attempt says a fourth is allowed",
+         "Entry E1 now has 3 attempts, and no other entry of the GHI-MD is open, so it gets a fourth attempt" in out)
+    code, out, _ = run(path, "attempt", "E1", "--by", "h", "--found", "could not settle 3", "--outcome", "left-open", "--source", "PR 5")
+    case(f"with the other file's entries {name}, a fourth left-open attempt marks the entry as needing the user", code == 0
+         and entry(path, "E1")[2] == "State: needs the user — h, 2026-11-10T12:00Z: still open after 4 attempts; could not settle 3"
+         and entry(path, "E1")[-1].startswith("Attempt 4 — h"))
+    case(f"with the other file's entries {name}, the other file is unchanged",
+         other.read_text(encoding="utf-8") == FILE_TEXT.replace("State: open", other_state))
+path = fresh(SOLE_ENTRY_TEXT.replace("State: open\n", "State: open\nAttempt 1 — h, t: a\nAttempt 2 — h, t: b\n"
+                                     "Attempt 3 — h, t: c\nAttempt 4 — h, t: d\n"))
+before = path.read_text(encoding="utf-8")
+code, _, err = run(path, "attempt", "E1", "--by", "h", "--found", "fifth", "--outcome", "settles", "--source", "PR 5")
+case("a fifth attempt is refused", code == 1 and "already has 4 attempts" in err and path.read_text(encoding="utf-8") == before)
+
+# A file of another GHI-MD beside it is not counted; an entry with no State line is.
+path = fresh(SOLE_ENTRY_TEXT)
+other = path.with_name("y" + path.name[1:])
+other.write_text(FILE_TEXT, encoding="utf-8")
+for number in range(3):
+    run(path, "attempt", "E1", "--by", "h", "--found", f"n {number}", "--outcome", "left-open", "--source", "PR 5")
+case("an open entry of another GHI-MD's file does not take the fourth attempt away", entry(path, "E1")[2] == "State: open")
+path = fresh(SOLE_ENTRY_TEXT)
+sibling(path, FILE_TEXT.replace("Gain: a smaller tool.\nState: open\n", "Gain: a smaller tool.\n")
+        .replace("changes without the user.\nState: open", "changes without the user.\nState: settled, done — h, t: x"))
+for number in range(3):
+    run(path, "attempt", "E1", "--by", "h", "--found", f"n {number}", "--outcome", "left-open", "--source", "PR 5")
+case("an entry with no State line in another file counts as open", entry(path, "E1")[2].startswith("State: needs the user"))
+
+# Two related entries left open together: each is the other's open entry, so both are marked.
+path = fresh()
+for number in range(3):
+    code, _, _ = run(path, "attempt", "E1", "E2", "--by", "h", "--found", f"one cause {number}", "--outcome", "left-open", "--source", "PR 5")
+case("a third left-open attempt on two related entries marks both", code == 0
+     and entry(path, "E1")[2].startswith("State: needs the user") and entry(path, "E2")[2].startswith("State: needs the user"))
+
+# Another file of the GHI-MD that cannot be read fails, and the file is left as it was.
+path = fresh(SOLE_ENTRY_TEXT.replace("State: open\n", "State: open\nAttempt 1 — h, t: a\nAttempt 2 — h, t: b\n"))
+path.with_name(path.name.replace(".md", "-2.md")).mkdir()
+before = path.read_text(encoding="utf-8")
+code, _, err = run(path, "attempt", "E1", "--by", "h", "--found", "n", "--outcome", "left-open", "--source", "PR 5")
+case("another file of the GHI-MD that cannot be read fails", code == 1 and "FAILED:" in err
+     and "another file of the same GHI-MD, could not be read" in err and path.read_text(encoding="utf-8") == before)
+
+# A file whose name holds no -proposed-improvements-or-changes- cannot have its GHI-MD's files found.
+path = Path(tempfile.mkdtemp()) / "notes.md"
+path.write_text(SOLE_ENTRY_TEXT.replace("State: open\n", "State: open\nAttempt 1 — h, t: a\nAttempt 2 — h, t: b\n"), encoding="utf-8")
+before = path.read_text(encoding="utf-8")
+code, _, err = run(path, "attempt", "E1", "--by", "h", "--found", "n", "--outcome", "left-open", "--source", "PR 5")
+case("a third left-open attempt on a file named without the infix is refused", code == 1 and "REFUSED:" in err
+     and "holds no -proposed-improvements-or-changes-" in err and path.read_text(encoding="utf-8") == before)
 
 # A user-ruling line starts the count again.
 path = fresh(FILE_TEXT.replace("State: open\n\n## E2",
                                "State: open\nAttempt 1 — h, t: a\nAttempt 2: b\nAttempt 3 — h, t: c\n"
                                "User-ruling — the user, 2026-11-09: keep it\n\n## E2"))
-code, _, _ = run(path, "attempt", "E1", "--by", "h", "--found", "after the ruling", "--source", "PR 5")
+code, _, _ = run(path, "attempt", "E1", "--by", "h", "--found", "after the ruling", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("an attempt after a user-ruling line is allowed", code == 0)
 case("an attempt after a user-ruling line is attempt 1",
      entry(path, "E1")[-1] == "Attempt 1 — h, 2026-11-10T12:00Z: after the ruling — sources read: PR 5")
@@ -158,13 +243,13 @@ case("an attempt after a user-ruling line is attempt 1",
 # A Try line is not an Attempt line, so it is not counted.
 path = fresh(FILE_TEXT.replace("State: open\n\n## E2",
                                "State: open\nTry 1 — h, t: a\nTry 2 — h, t: b\nTry 3 — h, t: c\n\n## E2"))
-code, _, _ = run(path, "attempt", "E1", "--by", "h", "--found", "after Try lines", "--source", "PR 5")
+code, _, _ = run(path, "attempt", "E1", "--by", "h", "--found", "after Try lines", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("an attempt after three Try lines is attempt 1", code == 0
      and entry(path, "E1")[-1] == "Attempt 1 — h, 2026-11-10T12:00Z: after Try lines — sources read: PR 5")
 
 # A settled entry takes no attempt, verdict or new state.
 settled_text = FILE_TEXT.replace("Gain: a smaller tool.\nState: open", "Gain: a smaller tool.\nState: settled, done — h, t: removed")
-for command in (["attempt", "E2", "--by", "h", "--found", "x", "--source", "PR 5"],
+for command in (["attempt", "E2", "--by", "h", "--found", "x", "--outcome", "not-worth-doing", "--source", "PR 5"],
                 ["second-agent-verdict", "E2", "--by", "h"],
                 ["settle", "E2", "--kind", "done", "--by", "h", "--how", "x"],
                 ["needs-the-user", "E2", "--because", "user-ruling-change", "--by", "h", "--why", "x"]):
@@ -188,7 +273,7 @@ case("an entry with a hashtag line and a lower heading keeps its State line", co
 
 # A value with a line break is refused, since it would split the line.
 path = fresh()
-code, _, err = run(path, "attempt", "E1", "--by", "h", "--found", "one\nState: settled", "--source", "PR 5")
+code, _, err = run(path, "attempt", "E1", "--by", "h", "--found", "one\nState: settled", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("a value with a line break is refused", code == 1 and "line break" in err
      and path.read_text(encoding="utf-8") == FILE_TEXT)
 code, _, _ = run(path, "settle", "E1", "--kind", "done", "--by", "h", "--how", "a\rb")
@@ -196,7 +281,7 @@ case("a carriage return is refused too", code == 1 and path.read_text(encoding="
 
 # A missing entry is refused, naming the entries there are.
 path = fresh()
-code, _, err = run(path, "attempt", "E9", "--by", "h", "--found", "x", "--source", "PR 5")
+code, _, err = run(path, "attempt", "E9", "--by", "h", "--found", "x", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("a missing entry is refused", code == 1 and "no entry E9" in err and "E1, E2" in err)
 
 # A verdict needs an attempt after the last verdict, and the agent is not run without one.
@@ -205,7 +290,7 @@ second_agent_answers(AGREES)
 code, _, err = run(path, *VERDICT)
 case("a verdict with no attempt is refused", code == 1 and "no Attempt line after its last verdict" in err)
 case("no second agent runs for a refused verdict", second_agent_calls() == [])
-run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--outcome", "not-worth-doing", "--source", "PR 5")
 second_agent_answers(DISAGREES)
 code, out, _ = run(path, *VERDICT)
 case("a verdict after an attempt exits 0", code == 0)
@@ -220,12 +305,12 @@ case("a second verdict on one attempt is refused", code == 1 and "no Attempt lin
 # A disagreement on the third attempt marks the entry as needing the user; on an earlier attempt, or an agreement, does not.
 path = fresh()
 for number in range(2):
-    run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--source", "PR 5")
+    run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--outcome", "not-worth-doing", "--source", "PR 5")
     second_agent_answers(DISAGREES)
     code, out, _ = run(path, *VERDICT)
 case("a disagreement on the second attempt leaves the entry open", code == 0 and entry(path, "E1")[2] == "State: open"
      and "marked as needing the user" not in out)
-run(path, "attempt", "E1", "--by", "h", "--found", "attempt 3", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "attempt 3", "--outcome", "not-worth-doing", "--source", "PR 5")
 code, out, _ = run(path, *VERDICT)
 case("a disagreement on the third attempt is recorded", code == 0
      and entry(path, "E1")[-1].startswith("Second agent: disagrees that it is not worth doing"))
@@ -235,7 +320,7 @@ case("a disagreement on the third attempt marks the entry as needing the user",
 case("a disagreement on the third attempt says the entry was marked", "so the entry was marked as needing the user" in out)
 path = fresh()
 for number in range(3):
-    run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--source", "PR 5")
+    run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--outcome", "not-worth-doing", "--source", "PR 5")
     second_agent_answers(DISAGREES if number < 2 else AGREES)
     run(path, *VERDICT)
 case("an agreement on the third attempt leaves the entry open to settle",
@@ -243,7 +328,7 @@ case("an agreement on the third attempt leaves the entry open to settle",
 
 # An agreement is recorded; the agent is run headless, with Bash to read its sources.
 path = fresh()
-run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--outcome", "not-worth-doing", "--source", "PR 5")
 second_agent_answers(AGREES)
 code, _, _ = run(path, *VERDICT)
 case("an agreement is recorded", code == 0 and entry(path, "E1")[-1].startswith("Second agent: agrees that it is not worth doing"))
@@ -262,7 +347,7 @@ for name, answer, expected in (
         ("a nonzero exit", dict(stdout="VERDICT: agrees\n", stderr="Not logged in", exit_code=1), "exited 1"),
         ("a run past the timeout", dict(stdout="VERDICT: agrees\n", sleep_seconds=5), "did not finish within 1 s")):
     path = fresh()
-    run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--source", "PR 5")
+    run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--outcome", "not-worth-doing", "--source", "PR 5")
     before = path.read_text(encoding="utf-8")
     second_agent_answers(**answer)
     with mock.patch.object(PROGRAM, "SECOND_AGENT_TIMEOUT_SECONDS", 1):
@@ -270,7 +355,7 @@ for name, answer, expected in (
     case(f"{name} exits 1 with what came back", code == 1 and "FAILED:" in err and expected in err)
     case(f"{name} records no verdict", path.read_text(encoding="utf-8") == before)
 path = fresh()
-run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--outcome", "not-worth-doing", "--source", "PR 5")
 second_agent_answers("Not logged in\n", exit_code=1, stderr="Please run /login")
 code, _, err = run(path, *VERDICT)
 case("a nonzero exit prints what the agent printed", "Please run /login" in err and "Not logged in" in err)
@@ -281,7 +366,7 @@ case("a missing claude exits 1 and says claude could not be started",
 
 # The verdict is written into the file as it is when the agent finishes.
 path = fresh()
-run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--outcome", "not-worth-doing", "--source", "PR 5")
 
 
 def reply_while_another_attempt_lands(prompt):
@@ -305,14 +390,14 @@ case("a verdict typed by the handler is not accepted", refused)
 
 # Not worth doing needs an agreement that answers the last attempt.
 path = fresh()
-run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "not real", "--outcome", "not-worth-doing", "--source", "PR 5")
 code, _, err = run(path, "settle", "E1", "--kind", "not-worth-doing", "--by", "h", "--how", "x")
 case("not worth doing with no verdict is refused", code == 1 and "stays open" in err)
 second_agent_answers(DISAGREES)
 run(path, *VERDICT)
 code, _, _ = run(path, "settle", "E1", "--kind", "not-worth-doing", "--by", "h", "--how", "x")
 case("not worth doing after a disagreement is refused", code == 1)
-run(path, "attempt", "E1", "--by", "h", "--found", "again", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "again", "--outcome", "not-worth-doing", "--source", "PR 5")
 second_agent_answers(AGREES)
 run(path, *VERDICT)
 code, _, _ = run(path, "settle", "E1", "--kind", "not-worth-doing", "--by", "h", "--how", "the ruling covers decisions")
@@ -322,10 +407,10 @@ case("the State line is rewritten in place",
 case("only one State line remains", sum(line.startswith("State:") for line in entry(path, "E1")) == 1)
 
 path = fresh()
-run(path, "attempt", "E1", "--by", "h", "--found", "a", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "a", "--outcome", "not-worth-doing", "--source", "PR 5")
 second_agent_answers(AGREES)
 run(path, *VERDICT)
-run(path, "attempt", "E1", "--by", "h", "--found", "b", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "b", "--outcome", "not-worth-doing", "--source", "PR 5")
 code, _, _ = run(path, "settle", "E1", "--kind", "not-worth-doing", "--by", "h", "--how", "x")
 case("an agreement followed by a newer attempt does not settle", code == 1)
 
@@ -347,7 +432,7 @@ path = fresh()
 code, _, err = run(path, "needs-the-user", "E1", "--because", "three-attempts", "--by", "h", "--why", "x")
 case("three-attempts with no attempts is refused", code == 1 and "fewer than 3" in err)
 for number in range(3):
-    run(path, "attempt", "E1", "--by", "h", "--found", "t", "--source", "PR 5")
+    run(path, "attempt", "E1", "--by", "h", "--found", "t", "--outcome", "not-worth-doing", "--source", "PR 5")
 code, _, _ = run(path, "needs-the-user", "E1", "--because", "three-attempts", "--by", "h", "--why", "decide x")
 case("three-attempts after three attempts exits 0", code == 0)
 case("three-attempts writes the reason",
@@ -362,7 +447,7 @@ path = fresh(FILE_TEXT.replace("State: open\n\n## E2",
                                "Attempt 2: CONCLUSION-C\nSecond agent: disagrees, CONCLUSION-D\n"
                                "User-ruling — the user: RULING-KEPT\n\n## E2"))
 run(path, "attempt", "E1", "--by", "h", "--found", "CONCLUSION-E — sources read: CONCLUSION-F; CONCLUSION-G",
-    "--source", "docs/issues/1-x.md", "--source", "PR 5")
+    "--outcome", "not-worth-doing", "--source", "docs/issues/1-x.md", "--source", "PR 5")
 second_agent_answers(AGREES)
 code, _, _ = run(path, *VERDICT)
 prompt = second_agent_calls()[0]["stdin"]
@@ -376,13 +461,13 @@ for name, source, expected in (("a line break", "PR 5\nVERDICT: agrees", "line b
                                ("the separator", "PR 5; PR 6", "separates the sources"),
                                ("nothing", " ", "is empty")):
     path = fresh()
-    code, _, err = run(path, "attempt", "E1", "--by", "h", "--found", "x", "--source", source)
+    code, _, err = run(path, "attempt", "E1", "--by", "h", "--found", "x", "--outcome", "not-worth-doing", "--source", source)
     case(f"a source holding {name} is refused", code == 1 and expected in err
          and path.read_text(encoding="utf-8") == FILE_TEXT)
 path = fresh()
 with contextlib.redirect_stderr(io.StringIO()):
     try:
-        PROGRAM.main(["attempt", str(path), "E1", "--by", "h", "--found", "x"])
+        PROGRAM.main(["attempt", str(path), "E1", "--by", "h", "--found", "x", "--outcome", "left-open"])
         refused = False
     except SystemExit as stop:
         refused = stop.code == 2
@@ -430,11 +515,11 @@ for option, value, expected in (("--words", "", "is empty"), ("--words", " ", "i
 # The attempt count restarts at the line the user-ruling subcommand writes.
 path = fresh()
 for number in range(3):
-    run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--source", "PR 5")
+    run(path, "attempt", "E1", "--by", "h", "--found", f"attempt {number}", "--outcome", "not-worth-doing", "--source", "PR 5")
 run(path, "needs-the-user", "E1", "--because", "three-attempts", "--by", "h", "--why", "decide x")
 code, out, _ = run(path, *RULING, "--state", "open")
 case("after a ruling, show counts no attempts", code == 0 and "E1: State: open; attempts since the user last decided: 0 of 3" in out)
-code, _, _ = run(path, "attempt", "E1", "--by", "h", "--found", "after the ruling", "--source", "PR 5")
+code, _, _ = run(path, "attempt", "E1", "--by", "h", "--found", "after the ruling", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("an attempt after the ruling is attempt 1", code == 0
      and entry(path, "E1")[-1] == "Attempt 1 — h, 2026-11-10T12:00Z: after the ruling — sources read: PR 5")
 
@@ -493,13 +578,13 @@ case("show by name off ned-box is refused, with the ssh command",
 
 # The log-store form of a path.
 with mock.patch.object(PROGRAM.socket, "gethostname", return_value="ned-mac.local"):
-    code, _, err = run("nedlern@ned-box:/home/nedlern/x.md", "attempt", "E1", "--by", "h", "--found", "the ruling's words", "--source", "PR 5")
+    code, _, err = run("nedlern@ned-box:/home/nedlern/x.md", "attempt", "E1", "--by", "h", "--found", "the ruling's words", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("the log-store form is refused off ned-box, with the ssh command",
      code == 1 and "ssh nedlern@ned-box " in err)
 command_line = err.strip().splitlines()[-1]
 case("the ssh command carries the arguments, quoted",
-     shlex.split(shlex.split(command_line)[2])[-9:]
-     == ["attempt", "nedlern@ned-box:/home/nedlern/x.md", "E1", "--by", "h", "--found", "the ruling's words", "--source", "PR 5"])
+     shlex.split(shlex.split(command_line)[2])[-11:]
+     == ["attempt", "nedlern@ned-box:/home/nedlern/x.md", "E1", "--by", "h", "--found", "the ruling's words", "--outcome", "not-worth-doing", "--source", "PR 5"])
 path = fresh()
 with mock.patch.object(PROGRAM.socket, "gethostname", return_value="ned-box"):
     code, out, _ = run(f"nedlern@ned-box:{path}", "show")
@@ -508,7 +593,7 @@ case("the log-store form is a local path on ned-box", code == 0 and out.startswi
 # A change keeps the file's mode.
 path = fresh()
 os.chmod(path, 0o644)
-run(path, "attempt", "E1", "--by", "h", "--found", "x", "--source", "PR 5")
+run(path, "attempt", "E1", "--by", "h", "--found", "x", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("a change keeps the file's mode", (path.stat().st_mode & 0o777) == 0o644)
 
 # A file that cannot be read, and a write that fails, leave the file as it was.
@@ -519,7 +604,7 @@ case("a file named without a directory is read as a file, not a GHI-MD's name",
      code == 1 and "could not be read or written" in err)
 path = fresh()
 with mock.patch.object(PROGRAM.os, "replace", side_effect=OSError("disk full")):
-    code, _, err = run(path, "attempt", "E1", "--by", "h", "--found", "x", "--source", "PR 5")
+    code, _, err = run(path, "attempt", "E1", "--by", "h", "--found", "x", "--outcome", "not-worth-doing", "--source", "PR 5")
 case("a failed write exits 1", code == 1 and "disk full" in err)
 case("a failed write leaves the file as it was", path.read_text(encoding="utf-8") == FILE_TEXT)
 case("a failed write leaves no temporary file", sorted(os.listdir(path.parent)) == [path.name])

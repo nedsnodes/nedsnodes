@@ -10,7 +10,7 @@ touches nothing but an entry's State line, its Attempt lines, its
 "Second agent:" lines and its User-ruling lines, so an entry's own text is
 never rewritten.
 
-Subcommands, each on one file:
+Subcommands, each on one file; attempt also reads the GHI-MD's other files:
 
   show            every entry: its id, its State line, the attempts counted
                   since its last user-ruling line, and its last verdict.
@@ -20,10 +20,20 @@ Subcommands, each on one file:
                   each under its path in the form nedlern@ned-box:<path>.
   attempt         adds one "Attempt <n> — <by>, <time>: <found> — sources read:
                   <source>; <source>" line under each entry named, the same
-                  line under each for related entries.
-                  Refused for an entry that already has MAXIMUM_ATTEMPTS attempts
-                  since its last user-ruling line; says so when an attempt
-                  brings an entry to that number.
+                  line under each for related entries. `--outcome` is what the
+                  attempt reached. After an attempt whose outcome is left-open
+                  brings an entry to MAXIMUM_ATTEMPTS attempts since its last
+                  user-ruling line, marks the entry as needing the user, as
+                  needs-the-user --because three-attempts does, giving
+                  <found> as what the attempts could not settle; but when no
+                  other entry is open in any proposed-improvements-or-changes-file
+                  of its GHI-MD, it marks the entry only after a fourth
+                  left-open attempt. The GHI-MD's files are the files beside
+                  the given one that show would list for the part of its name
+                  before FILE_NAME_INFIX; an entry with no State line counts
+                  as open. Refused for an entry
+                  that already has MAXIMUM_ATTEMPTS attempts while another
+                  entry is open, and for one with MAXIMUM_ATTEMPTS + 1.
   second-agent-verdict
                   runs the second agent through `claude -p`, giving it
                   SECOND_AGENT_PROMPT, the entry's text without its State,
@@ -76,7 +86,7 @@ design's open question 2): the file is read, changed and replaced whole, so the 
 writer's replacement drops the earlier writer's lines.
 
 Failures: a value holding a line break, a refused change, a missing file or entry, a file that cannot be
-read or written, a log-store directory that cannot be listed, or a second agent that cannot be run, exits nonzero, runs past
+read or written, another file of the GHI-MD that cannot be read, a log-store directory that cannot be listed, or a second agent that cannot be run, exits nonzero, runs past
 SECOND_AGENT_TIMEOUT_SECONDS or ends its reply with a line other than
 "VERDICT: agrees" or "VERDICT: disagrees", is printed to stderr with what to
 do, and the program exits 1 without changing the file. Exit 0: done.
@@ -152,12 +162,13 @@ SETTLED_KINDS = {
 NEEDS_THE_USER_REASONS = {
     "cold-read-document": "the change would alter a document the cold-read skill sends to a cold-read-full-run, in a way its step 9 sends to the user",
     "user-ruling-change": "a question whether a user-ruling should change",
-    "three-attempts": "still open after 3 attempts",
+    "three-attempts": "still open after {attempts} attempts",
 }
 # Not in SETTLED_KINDS, so `settle --kind` cannot claim a ruling the user never made.
 USER_RULING_SETTLED_KIND = "by the user's ruling"
 NEEDS_THE_USER_STATE_OPENING = "State: needs the user"
 USER_RULING_STATES = ("open", "settled")
+ATTEMPT_OUTCOMES = ("settles", "not-worth-doing", "goes-to-the-user", "left-open")
 THIRD_ATTEMPT_DISAGREEMENT_WHY = "the last attempt found the entry not worth doing, and the second agent disagreed"
 
 
@@ -191,27 +202,26 @@ def local_path(named: str, argv) -> Path:
     return Path(named)
 
 
-def ghi_md_file_names(ghi_md_name: str, argv):
-    """The names of the GHI-MD's files in GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY, oldest name first."""
-    refuse_unless_on_ned_box(f"The files of GHI-MD {ghi_md_name} are", argv)
+def ghi_md_file_names(ghi_md_name: str, directory: str):
+    """The names of the GHI-MD's files in `directory`, oldest name first."""
     number = re.match(r"(\d+)-", ghi_md_name)
     bare = ghi_md_name[number.end():] if number else ghi_md_name
     leading = re.escape(number.group(0)) if number else r"\d+-"
     pattern = re.compile(f"(?:{leading})?{re.escape(bare + FILE_NAME_INFIX)}.*\\.md")
     try:
-        names = sorted(name for name in os.listdir(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY) if pattern.fullmatch(name))
+        names = sorted(name for name in os.listdir(directory) if pattern.fullmatch(name))
     except OSError as failure:
-        raise Failed(f"the log-store directory {GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY} could not be listed: {failure}")
+        raise Failed(f"the directory {directory} could not be listed: {failure}")
     if not names:
         raise Refused(
-            f"No file in {GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY} is named after GHI-MD {ghi_md_name}.\n"
+            f"No file in {directory} is named after GHI-MD {ghi_md_name}.\n"
             f"Give the GHI-MD's name as the part of the given file's name before {FILE_NAME_INFIX}, or give the file itself.")
     numbers = sorted({match.group(1) for match in (re.match(r"(\d+)-", name) for name in names) if match}, key=int)
     if len(numbers) > 1:
         # Two GHIs can share a slug; their files must not be read as one GHI-MD's.
         raise Refused(
             f"GHI-MD name {ghi_md_name} has no GHI number, and files of GHIs {', '.join(numbers)} in "
-            f"{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY} carry it, so nothing was shown.\n"
+            f"{directory} carry it, so nothing was shown or changed.\n"
             f"Give the name with its GHI number, such as {numbers[0]}-{bare}.")
     return names
 
@@ -297,22 +307,63 @@ def refuse_unless_open(block, entry):
             "A settled entry is never changed. An entry that needs the user waits for his ruling, which the agent-seat that brought it to him records with this program's user-ruling subcommand.")
 
 
-def add_attempt(lines, entries, by, found, sources):
+def is_open(block) -> bool:
+    state = state_line(block)
+    return state is None or state.startswith(OPEN_STATE_OPENING)
+
+
+def open_entries_of_ghi_md(path: Path, lines):
+    """{(file name, entry id)} of every open entry in the GHI-MD's files beside `path`, reading `path` as `lines`."""
+    if FILE_NAME_INFIX not in path.name:
+        raise Refused(
+            f"{path.name} holds no {FILE_NAME_INFIX}, so its GHI-MD's other files cannot be found and no attempt was recorded.\n"
+            "Give the proposed-improvements-or-changes-file as scripts/ghi-issue-write.py named it.")
+    found = set()
+    for name in ghi_md_file_names(path.name.split(FILE_NAME_INFIX)[0], str(path.parent)):
+        if name == path.name:
+            text_lines = lines
+        else:
+            try:
+                text_lines = (path.parent / name).read_text(encoding="utf-8").splitlines()
+            except OSError as failure:
+                raise Failed(f"{name} in {path.parent}, another file of the same GHI-MD, could not be read: {failure}")
+        spans = entry_spans(text_lines)
+        found |= {(name, entry) for entry in spans if is_open(entry_lines(text_lines, spans, entry))}
+    return found
+
+
+def another_entry_is_open(path: Path, lines, entry) -> bool:
+    return bool(open_entries_of_ghi_md(path, lines) - {(path.name, entry)})
+
+
+def add_attempt(lines, entries, by, found, sources, outcome, path: Path):
+    """(the lines, and the entries the attempt marked as needing the user)."""
     spans = entry_spans(lines)
     for entry in entries:
         block = entry_lines(lines, spans, entry)
         refuse_unless_open(block, entry)
-        if attempts_since_user_ruling(block) >= MAXIMUM_ATTEMPTS:
+        count = attempts_since_user_ruling(block)
+        if count > MAXIMUM_ATTEMPTS or (count == MAXIMUM_ATTEMPTS and another_entry_is_open(path, lines, entry)):
             raise Refused(
-                f"Entry {entry} already has {MAXIMUM_ATTEMPTS} attempts since the user last decided on it, so no attempt was recorded under any entry named.\n"
-                "Rule 4 of GHI 1132 allows no more; the entry goes to the user:\n"
+                f"Entry {entry} already has {count} attempts since the user last decided on it, so no attempt was recorded under any entry named.\n"
+                f"Rule 4 of GHI 1132 allows no more{'' if count > MAXIMUM_ATTEMPTS else ' while another entry of the GHI-MD is open'}; the entry goes to the user:\n"
                 f"run this program's needs-the-user subcommand on {entry} with --because three-attempts.")
     listed = ATTEMPT_SOURCES_SEPARATOR.join(sources)
     for entry in sorted(entries, key=lambda name: spans[name][0], reverse=True):
         number = attempts_since_user_ruling(entry_lines(lines, spans, entry)) + 1
         lines.insert(insertion_index(lines, spans, entry),
                      f"Attempt {number} — {by}, {now()}: {found}{ATTEMPT_SOURCES_DELIMITER}{listed}")
-    return lines
+    if outcome != "left-open":
+        return lines, []
+    spans = entry_spans(lines)
+    counts = {entry: attempts_since_user_ruling(entry_lines(lines, spans, entry)) for entry in entries}
+    # Decided for every entry before any is marked, so that marking one does not leave another the only one open.
+    marked = [entry for entry in entries
+              if counts[entry] > MAXIMUM_ATTEMPTS
+              or (counts[entry] == MAXIMUM_ATTEMPTS and another_entry_is_open(path, lines, entry))]
+    for entry in marked:
+        lines = needs_the_user(lines, entry, "three-attempts", by, found)
+    return lines, marked
 
 
 def second_agent_input(lines, entry, sources) -> str:
@@ -422,7 +473,8 @@ def needs_the_user(lines, entry, because, by, why):
         raise Refused(
             f"Entry {entry} has {attempts_since_user_ruling(block)} attempts since the user last decided on it, fewer than {MAXIMUM_ATTEMPTS}, so it was not marked.\n"
             "Record another attempt with the attempt subcommand, or name the reason rule 7 of GHI 1132 sends it to the user with --because.")
-    replace_state(lines, spans, entry, f"State: needs the user — {by}, {now()}: {NEEDS_THE_USER_REASONS[because]}; {why}")
+    reason = NEEDS_THE_USER_REASONS[because].format(attempts=attempts_since_user_ruling(block))
+    replace_state(lines, spans, entry, f"State: needs the user — {by}, {now()}: {reason}; {why}")
     return lines
 
 
@@ -476,6 +528,10 @@ def parser():
     command.add_argument("entries", nargs="+")
     command.add_argument("--by", required=True)
     command.add_argument("--found", required=True)
+    command.add_argument("--outcome", required=True, choices=ATTEMPT_OUTCOMES,
+                         help="settles: you settle the entry next, as done or new GHI filed; not-worth-doing: you run "
+                              "second-agent-verdict next; goes-to-the-user: you run needs-the-user next; left-open: the "
+                              "entry stays open, such as one worth doing but not doable now")
     command.add_argument("--source", action="append", required=True,
                          help="one source the attempt read: a path in this repository, a log-store path, PR <number> or GHI <number>")
     command = commands.add_parser("second-agent-verdict")
@@ -526,7 +582,8 @@ def main(argv=None) -> int:
         argv = sys.argv[1:] if argv is None else argv
         # A GHI-MD's name holds no directory and no extension.
         if arguments.command == "show" and "/" not in arguments.file and not arguments.file.endswith(".md"):
-            for name in ghi_md_file_names(arguments.file, argv):
+            refuse_unless_on_ned_box(f"The files of GHI-MD {arguments.file} are", argv)
+            for name in ghi_md_file_names(arguments.file, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY):
                 try:
                     text = (Path(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY) / name).read_text(encoding="utf-8")
                 except OSError as failure:
@@ -541,7 +598,8 @@ def main(argv=None) -> int:
             print(show(lines))
             return 0
         if arguments.command == "attempt":
-            lines = add_attempt(lines, arguments.entries, arguments.by, arguments.found, arguments.source)
+            lines, marked = add_attempt(lines, arguments.entries, arguments.by, arguments.found, arguments.source,
+                                        arguments.outcome, path)
         elif arguments.command == "second-agent-verdict":
             sources = refuse_unless_an_attempt_awaits_a_verdict(lines, arguments.entry)
             reply = second_agent_reply(second_agent_input(lines, arguments.entry, sources))
@@ -577,10 +635,16 @@ def main(argv=None) -> int:
     if arguments.command == "attempt":
         spans = entry_spans(lines)
         for entry in arguments.entries:
-            if attempts_since_user_ruling(entry_lines(lines, spans, entry)) >= MAXIMUM_ATTEMPTS:
-                print(f"Entry {entry} now has {MAXIMUM_ATTEMPTS} attempts.\n"
-                      "If this attempt found it not worth doing, run the second-agent-verdict subcommand on it: if the second agent disagrees, that subcommand marks the entry as needing the user.\n"
-                      "If this attempt neither settles it nor found it not worth doing, run the needs-the-user subcommand on it with --because three-attempts.")
+            count = attempts_since_user_ruling(entry_lines(lines, spans, entry))
+            if entry in marked:
+                print(f"Attempt {count} left entry {entry} open, the last attempt rule 4 of GHI 1132 allows, so the entry was marked as needing the user.\n"
+                      "In your report, say what the user must decide, from what the attempts found.")
+            elif count >= MAXIMUM_ATTEMPTS and arguments.outcome == "left-open":
+                print(f"Entry {entry} now has {count} attempts, and no other entry of the GHI-MD is open, so it gets a fourth attempt.\n"
+                      "A fourth attempt whose outcome is left-open marks it as needing the user.")
+            elif count >= MAXIMUM_ATTEMPTS and arguments.outcome == "not-worth-doing":
+                print(f"Entry {entry} now has {count} attempts: run the second-agent-verdict subcommand on it.\n"
+                      "If the second agent disagrees, that subcommand marks the entry as needing the user.")
     if arguments.command == "second-agent-verdict" and marked_for_the_user:
         print(f"The second agent disagreed on attempt {MAXIMUM_ATTEMPTS} of entry {arguments.entry}, the last attempt rule 4 of GHI 1132 allows, so the entry was marked as needing the user.\n"
               "In your report, say what the user must decide, from the second agent's reasons above.")
