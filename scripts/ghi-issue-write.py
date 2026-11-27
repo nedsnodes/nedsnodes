@@ -1101,6 +1101,19 @@ def refuse_if_filing_is_in_flight(repo: str, issues, title: str, runner):
             64)
 
 
+def ghi_guide_agent_ask_failure_reason_from_stderr(stderr: str | None) -> str | None:
+    """The one stderr line of a failed ghi-guide-agent ask that says why it
+    failed, or None when stderr is empty. The ask prints its reason, such as
+    ned-box being unreachable, as its last stderr line, except that an
+    unusable answer's line is followed by what to do, which is for an agent
+    and not this program."""
+    stderr_lines = [line.strip() for line in (stderr or "").splitlines()
+                    if line.strip()]
+    return next((line for line in stderr_lines if
+                 GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH in line),
+                stderr_lines[-1] if stderr_lines else None)
+
+
 def adjudicate(repo: str, title: str, text: str, repository_root: Path,
                runner, report, exclude_issue=None):
     """Step 2. Fail-open by design: ghi-guide-agent unreachable means the write
@@ -1167,14 +1180,7 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     except json.JSONDecodeError:
         answer = None
     if not isinstance(answer, dict):
-        # The ask prints why it failed, such as ned-box being unreachable,
-        # as its last stderr line, except that an unusable answer's line is
-        # followed by what to do, which is for an agent and not this program.
-        stderr_lines = [line.strip() for line in
-                        (completed.stderr or "").splitlines() if line.strip()]
-        why = next((line for line in stderr_lines if
-                    GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH in line),
-                   stderr_lines[-1] if stderr_lines else None)
+        why = ghi_guide_agent_ask_failure_reason_from_stderr(completed.stderr)
         report("adjudication skipped: ghi-guide-agent did not answer" +
                (f": {why}" if why else ""))
         return None
