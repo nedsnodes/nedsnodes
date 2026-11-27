@@ -26,8 +26,10 @@ logins, recover reports from chat, retry models, or verify report content.
 
 agy runs on its own Google login, never on a Gemini API key: the launcher
 removes GEMINI_API_KEY from agy's environment, because a key is billed per
-call. It also removes GH_TOKEN and GITHUB_TOKEN, so agy gets no GitHub token from its caller;
-how gh behaves inside the macOS sandbox is said beside CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py. When agy has no login, its "Authentication required." message is in
+call. It also removes GH_TOKEN and GITHUB_TOKEN, and leaves GH_ENTERPRISE_TOKEN
+and GITHUB_ENTERPRISE_TOKEN in place; how gh behaves inside the macOS sandbox is
+said beside CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py.
+When agy has no login, its "Authentication required." message is in
 the log.
 
 Runs `agy models` inside the same sandbox before starting the task, refusing

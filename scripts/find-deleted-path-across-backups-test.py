@@ -16,6 +16,7 @@ AND that the output says what to do about it.
 
 import atexit
 import contextlib
+import errno
 import importlib.util
 import io
 import json
@@ -23,6 +24,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -4272,6 +4274,287 @@ with tempfile.TemporaryDirectory() as tmp:
     check("... and argparse accepts that command once <checkout> is filled in",
           recovery.returncode != 2 and "usage:" not in recovery.stderr,
           "exit %s\n%s" % (recovery.returncode, recovery.stderr))
+
+# --restore copies the chosen copy to the path and searches nothing.
+RESTORE_TOP_LEVEL = ("rev-parse --show-toplevel", top_level_is_the_directory_given)
+
+
+def run_restore(argv, table=(RESTORE_TOP_LEVEL,)):
+    runner = FakeRunner(list(table))
+    out, errors = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(errors):
+        try:
+            code = finder.main(argv, runner=runner)
+        except SystemExit as stop:
+            code = stop.code
+    return code, out.getvalue(), errors.getvalue(), runner.calls
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    content = b"\xff\xfe not utf-8 \x00\n"
+    copy = tmp / "found" / "b.md-from-git"
+    copy.parent.mkdir()
+    copy.write_bytes(content)
+    repo = tmp / "repo"
+    repo.mkdir()
+    code, out, errors, calls = run_restore(["deleted/dir/b.md", "--repo", str(repo), "--restore", str(copy)])
+    restored = repo / "deleted" / "dir" / "b.md"
+    check("--restore copies the copy's bytes to the repo-relative path under the repository's top level, "
+          "creating its missing directories, exits 0, says so, and runs no git command but the top-level one",
+          code == 0 and restored.is_file() and restored.read_bytes() == content
+          and "restored %s to %s" % (copy, restored) in out
+          and calls == ["git -C %s rev-parse --show-toplevel" % repo] and errors == "",
+          "exit=%s calls=%s\n%s\n%s" % (code, calls, out, errors))
+
+    existing = tmp / "elsewhere" / "c.md"
+    existing.parent.mkdir()
+    existing.write_bytes(b"what was there before\n")
+    subdirectory = repo / "docs"
+    subdirectory.mkdir()
+    code, out, errors, calls = run_restore(["deleted/f.md", "--repo", str(subdirectory), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (0, "%s\n" % repo, ""))])
+    check("--restore places a relative path under the top level of the repository --repo is in, not under --repo",
+          code == 0 and (repo / "deleted" / "f.md").read_bytes() == content
+          and not (subdirectory / "deleted").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
+    outside = tmp / "outside"
+    outside.mkdir()
+    code, out, errors, calls = run_restore(["g.md", "--repo", str(outside), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel",
+                                                   (128, "", "fatal: not a git repository"))])
+    check("--restore places a relative path under --repo itself when --repo is in no repository",
+          code == 0 and (outside / "g.md").read_bytes() == content, "exit=%s\n%s\n%s" % (code, out, errors))
+
+    code, out, errors, calls = run_restore(["h.md", "--repo", str(outside), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (128, "", "fatal: unable to read index"))])
+    check("--restore of a relative path exits 1 and says on stderr what failed when git cannot give the top level",
+          code == 1 and "could NOT restore %s to h.md" % copy in errors and "unable to read index" in errors
+          and not (outside / "h.md").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
+    code, out, errors, calls = run_restore([str(existing), "--repo", str(repo), "--restore", str(copy)])
+    check("--restore given an absolute path copies to that path, replacing the file already there",
+          code == 0 and existing.read_bytes() == content and calls == [],
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    missing_copy = tmp / "found" / "never-copied.md"
+    code, out, errors, calls = run_restore(["gone/d.md", "--repo", str(repo), "--restore", str(missing_copy)])
+    check("--restore of a copy that does not exist exits 1, says on stderr what failed, and writes nothing",
+          code == 1 and "could NOT restore %s to %s" % (missing_copy, repo / "gone" / "d.md") in errors
+          and "FileNotFoundError" in errors and not (repo / "gone").exists() and out == "",
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    (repo / "a-file").write_bytes(b"not a directory\n")
+    code, out, errors, calls = run_restore(["a-file/e.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore to a path whose parent is a file exits 1 and says on stderr what failed",
+          code == 1 and "could NOT restore %s to %s" % (copy, repo / "a-file" / "e.md") in errors
+          and (repo / "a-file").read_bytes() == b"not a directory\n",
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    code, out, errors, calls = run_restore([finder.git_blob_id_of(content), "--restore", str(copy)])
+    check("--restore with a git blob id in place of a path is a usage error, exit 2, searching nothing",
+          code == 2 and "--restore needs the path the file was deleted from" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    code, out, errors, calls = run_restore(["someone@elsewhere:docs/x.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore with an unknown host's relative path is a usage error, exit 2, running nothing",
+          code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    code, out, errors, calls = run_restore(["someone@elsewhere:x.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore with an unknown host's bare file name is a usage error, exit 2, running nothing, "
+          "not a write to the repository's file of that name",
+          code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    # A path written from the current directory is placed from there, as a search reads it, never from the
+    # top level: "../up.md" from <repo>/docs is <repo>/up.md, not a file beside the repository.
+    directory_before = os.getcwd()
+    os.chdir(str(subdirectory))
+    try:
+        # os.getcwd() gives the resolved directory, such as macOS's /private/var for /var.
+        for given, placed in (("../up.md", repo.resolve() / "up.md"), ("./i.md", subdirectory.resolve() / "i.md"),
+                              ("sub/../j.md", subdirectory.resolve() / "j.md")):
+            code, out, errors, calls = run_restore([given, "--restore", str(copy)],
+                                                   table=[("rev-parse --show-toplevel", (0, "%s\n" % repo, ""))])
+            check("--restore places %s, run from a subdirectory, from the current directory as a search reads it, "
+                  "not from the top level, and runs no git command" % given,
+                  code == 0 and placed.read_bytes() == content and "restored %s to %s" % (copy, placed) in out
+                  and not (tmp / "up.md").exists() and calls == [], "exit=%s calls=%s\n%s\n%s"
+                  % (code, calls, out, errors))
+    finally:
+        os.chdir(directory_before)
+
+    # "<link>/.." is the directory above where the link leads, as the system resolves it, not the link's own
+    # parent, which os.path.abspath would give by collapsing ".." lexically.
+    led_to = tmp / "real" / "inner"
+    led_to.mkdir(parents=True)
+    link = tmp / "link"
+    link.symlink_to(led_to)
+    code, out, errors, calls = run_restore(["s.md", "--repo", str(link) + "/..", "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel",
+                                                   (128, "", "fatal: not a git repository"))])
+    check("--restore with a --repo in no repository whose path holds a symlink and then .. places the file in "
+          "the directory the system reaches, not where .. collapsed lexically would",
+          code == 0 and (tmp / "real" / "s.md").is_file() and (tmp / "real" / "s.md").read_bytes() == content
+          and not (tmp / "s.md").exists(),
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    # The same for a path written from the current directory: "./link/../d.md" is real/d.md, not ./d.md.
+    os.chdir(str(tmp))
+    try:
+        code, out, errors, calls = run_restore(["./link/../d.md", "--restore", str(copy)])
+    finally:
+        os.chdir(directory_before)
+    check("--restore of a path from the current directory that holds a symlink and then .. places the file in "
+          "the directory the system reaches, not where .. collapsed lexically would",
+          code == 0 and (tmp / "real" / "d.md").is_file() and (tmp / "real" / "d.md").read_bytes() == content
+          and not (tmp / "d.md").exists() and calls == [],
+          "exit=%s calls=%s\n%s\n%s" % (code, calls, out, errors))
+    symlink_at_path = tmp / "real" / "at-path.md"
+    symlink_at_path.symlink_to(tmp / "elsewhere.md")
+    os.chdir(str(tmp / "real"))
+    try:
+        code, out, errors, calls = run_restore(["./at-path.md", "--restore", str(copy)])
+    finally:
+        os.chdir(directory_before)
+    check("--restore keeps the file name as given, replacing a symlink at the path, not the file it leads to",
+          code == 0 and not symlink_at_path.is_symlink() and symlink_at_path.read_bytes() == content
+          and not (tmp / "elsewhere.md").exists(),
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    # A path ending in /, . or .. names a directory; placing "./note.md/" followed the symlink note.md and
+    # overwrote the file it leads to.
+    link_target = tmp / "real" / "link-target.md"
+    link_target.write_bytes(b"the symlink's target\n")
+    note = tmp / "real" / "note.md"
+    note.symlink_to(link_target)
+    listing_before = sorted(os.listdir(str(tmp / "real")))
+    os.chdir(str(tmp / "real"))
+    try:
+        for given in ("./note.md/", "./note.md/.", "./note.md/..", "note.md/", ".", "nedlern@ned-box:~/x/.."):
+            code, out, errors, calls = run_restore([given, "--restore", str(copy)])
+            check("--restore of %s, which names a directory, is a usage error, exit 2, writing nothing" % given,
+                  code == 2 and "ends in /, . or .., which names a directory" in errors and calls == []
+                  and note.is_symlink() and link_target.read_bytes() == b"the symlink's target\n"
+                  and sorted(os.listdir(str(tmp / "real"))) == listing_before,
+                  "exit=%s calls=%s listing=%s\n%s\n%s"
+                  % (code, calls, sorted(os.listdir(str(tmp / "real"))), out, errors))
+    finally:
+        os.chdir(directory_before)
+
+    # The scp form naming this machine is placed as the system places it, so ".." climbs from where a
+    # symlink leads; another machine's path keeps the lexical form, since its symlinks cannot be read here.
+    home = tmp / "home"
+    (home / "nedsnodes").mkdir(parents=True)
+    (home / "config").mkdir()
+    (home / "config" / "nedschorus").symlink_to(home / "nedsnodes" / "inner")
+    (home / "nedsnodes" / "inner").mkdir()
+    known_homes_before = dict(finder.locator.KNOWN_HOST_HOMES)
+    real_gethostname = finder.socket.gethostname
+    finder.locator.KNOWN_HOST_HOMES["ned-box"] = str(home)
+    try:
+        finder.socket.gethostname = lambda: "ned-box"
+        code, out, errors, calls = run_restore(["nedlern@ned-box:~/config/nedschorus/../x.md", "--restore", str(copy)])
+        on_this_machine = (code, errors, (home / "nedsnodes" / "x.md").is_file(), (home / "config" / "x.md").exists())
+        finder.socket.gethostname = lambda: "Els-MacBook-Pro.local"
+        from_another_machine = plain("nedlern@ned-box:~/config/nedschorus/../x.md")
+    finally:
+        finder.socket.gethostname = real_gethostname
+        finder.locator.KNOWN_HOST_HOMES.clear()
+        finder.locator.KNOWN_HOST_HOMES.update(known_homes_before)
+    check("--restore of the scp form naming this machine resolves .. through a symlink as the system does, "
+          "not lexically",
+          on_this_machine[0] == 0 and on_this_machine[2] and not on_this_machine[3], repr(on_this_machine))
+    check("cited query: the scp form naming another machine collapses .. lexically, since that machine's "
+          "symlinks cannot be read from here",
+          from_another_machine == str(home / "config" / "x.md"), repr(from_another_machine))
+
+    real_expanduser = os.path.expanduser
+    os.path.expanduser = lambda given: given
+    try:
+        code, out, errors, calls = run_restore(["~/home-x.md", "--repo", str(repo), "--restore", str(copy)])
+    finally:
+        os.path.expanduser = real_expanduser
+    check("--restore of a ~/ path no home directory expands is a usage error, exit 2, writing nothing and "
+          "running nothing, not a write to <repo>/~/",
+          code == 2 and "could not expand '~/home-x.md'" in errors and not (repo / "~").exists() and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    code, out, errors, calls = run_restore(["~tilde.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore places a name that starts with ~ but not ~/ under the repository's top level, "
+          "with no traceback",
+          code == 0 and (repo / "~tilde.md").read_bytes() == content, "exit=%s\n%s\n%s" % (code, out, errors))
+
+    spaced = tmp / "repo ending in a space "
+    spaced.mkdir()
+    code, out, errors, calls = run_restore(["k.md", "--repo", str(spaced), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (0, "%s\n" % spaced, ""))])
+    check("--restore keeps the whitespace that ends the repository's top-level name, and makes no sibling "
+          "directory without it",
+          code == 0 and (spaced / "k.md").read_bytes() == content
+          and not (tmp / "repo ending in a space").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
+# --restore refuses a <path> that is the copy itself, and a failed write leaves the file already there as it was.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    content = b"the only copy\n"
+    copy = tmp / "found" / "only.md"
+    copy.parent.mkdir()
+    copy.write_bytes(content)
+    symlink = tmp / "symlink.md"
+    symlink.symlink_to(copy)
+    hard_link = tmp / "hard-link.md"
+    os.link(copy, hard_link)
+    for name, destination in (("the same path", copy), ("a symlink to the copy", symlink),
+                              ("a hard link to the copy", hard_link)):
+        code, out, errors, calls = run_restore([str(destination), "--restore", str(copy)])
+        check("--restore to %s exits 1, says the two are the same file, and leaves the copy whole" % name,
+              code == 1 and "same file" in errors and "could NOT restore" in errors and out == ""
+              and copy.read_bytes() == content,
+              "exit=%s size=%s\n%s\n%s" % (code, copy.stat().st_size, out, errors))
+
+    existing = tmp / "kept" / "e.md"
+    existing.parent.mkdir()
+    existing.write_bytes(b"what was there before\n")
+    real_copyfileobj = shutil.copyfileobj
+
+    def copy_then_fail(source, target, *rest):
+        target.write(source.read(4))
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    shutil.copyfileobj = copy_then_fail
+    try:
+        code, out, errors, calls = run_restore([str(existing), "--restore", str(copy)])
+        fresh = tmp / "kept" / "new.md"
+        fresh_code, fresh_out, fresh_errors, _ = run_restore([str(fresh), "--restore", str(copy)])
+    finally:
+        shutil.copyfileobj = real_copyfileobj
+    check("--restore whose write fails partway exits 1, leaves the file already there as it was, says so, "
+          "and leaves no staged file behind",
+          code == 1 and existing.read_bytes() == b"what was there before\n"
+          and "No space left on device" in errors and "the file already there was left as it was" in errors
+          and sorted(p.name for p in existing.parent.iterdir()) == ["e.md"] and out == "",
+          "exit=%s %s\n%s\n%s" % (code, sorted(existing.parent.iterdir()), out, errors))
+    check("--restore whose write fails partway to a new path exits 1, says nothing was written there, "
+          "and leaves nothing there",
+          fresh_code == 1 and not fresh.exists() and "nothing was written there" in fresh_errors
+          and sorted(p.name for p in existing.parent.iterdir()) == ["e.md"],
+          "exit=%s\n%s" % (fresh_code, fresh_errors))
+
+    restored = tmp / "kept" / "made.md"
+    code, out, errors, calls = run_restore([str(restored), "--restore", str(copy)])
+    umask = os.umask(0)
+    os.umask(umask)
+    check("--restore to a new path gives the file the mode open() would, not mkstemp's 0600",
+          code == 0 and restored.read_bytes() == content
+          and stat.S_IMODE(restored.stat().st_mode) == 0o666 & ~umask,
+          "exit=%s mode=%o\n%s" % (code, stat.S_IMODE(restored.stat().st_mode), errors))
+    existing.chmod(0o640)
+    code, out, errors, calls = run_restore([str(existing), "--restore", str(copy)])
+    check("--restore over a file already there keeps that file's mode",
+          code == 0 and existing.read_bytes() == content and stat.S_IMODE(existing.stat().st_mode) == 0o640,
+          "exit=%s mode=%o\n%s" % (code, stat.S_IMODE(existing.stat().st_mode), errors))
 
 # A copy of this suite whose finder raises on import, as an unhandled error or a Ctrl-C would, still removes
 # its found-copies scratch folder.

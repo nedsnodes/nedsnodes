@@ -187,6 +187,12 @@ _session_handoff_field_names_spec = importlib.util.spec_from_file_location(
 session_handoff_field_names = importlib.util.module_from_spec(_session_handoff_field_names_spec)
 _session_handoff_field_names_spec.loader.exec_module(session_handoff_field_names)
 
+_remote_control_name_common_spec = importlib.util.spec_from_file_location(
+    "handoff_remote_control_name_common",
+    Path(__file__).with_name("handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py"))
+remote_control_name_common = importlib.util.module_from_spec(_remote_control_name_common_spec)
+_remote_control_name_common_spec.loader.exec_module(remote_control_name_common)
+
 _worth_resuming_spec = importlib.util.spec_from_file_location(
     "seat_transcript_worth_resuming",
     SCRIPTS_DIRECTORY / "agent-seat-transcript-worth-resuming-common.py")
@@ -229,6 +235,15 @@ handoff_user_review_of_agent_memory_stores_mark = importlib.util.module_from_spe
     _handoff_user_review_of_agent_memory_stores_mark_spec)
 _handoff_user_review_of_agent_memory_stores_mark_spec.loader.exec_module(
     handoff_user_review_of_agent_memory_stores_mark)
+
+_successor_conversation_tail_display_hook_spec = importlib.util.spec_from_file_location(
+    "handoff_successor_conversation_tail_last_lines_first_message_display_hook",
+    Path(__file__).resolve().with_name(
+        "handoff-successor-conversation-tail-last-lines-first-message-display-hook.py"))
+successor_conversation_tail_display_hook = importlib.util.module_from_spec(
+    _successor_conversation_tail_display_hook_spec)
+_successor_conversation_tail_display_hook_spec.loader.exec_module(
+    successor_conversation_tail_display_hook)
 
 _checkout_freshness_catch_up_spec = importlib.util.spec_from_file_location(
     "checkout_freshness_catch_up", SCRIPTS_DIRECTORY / "checkout-freshness-catch-up.py")
@@ -342,11 +357,17 @@ DEFAULT_APPENDED_SYSTEM_PROMPT_PATH = (
 )
 
 # The writer needs the launch directory after a cd; the session ID prevents a child session from handing off its parent.
-HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
+_launched_agent_session_environment_spec = importlib.util.spec_from_file_location(
+    "handoff_supervisor_launched_agent_session_environment_variable_names_common",
+    Path(__file__).with_name("handoff-supervisor-launched-agent-session-environment-variable-names-common.py"))
+launched_agent_session_environment = importlib.util.module_from_spec(_launched_agent_session_environment_spec)
+_launched_agent_session_environment_spec.loader.exec_module(launched_agent_session_environment)
+HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE = (
+    launched_agent_session_environment.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE)
 HANDOFF_SUPERVISOR_WORKING_DIRECTORY_ENVIRONMENT_VARIABLE = (
-    "NEDSNODES_HANDOFF_SUPERVISOR_WORKING_DIRECTORY"
-)
-HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_SESSION_ID"
+    launched_agent_session_environment.HANDOFF_SUPERVISOR_WORKING_DIRECTORY_ENVIRONMENT_VARIABLE)
+HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE = (
+    launched_agent_session_environment.HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE)
 
 # Claude Code (2.1.296) sets these for every command an agent-session runs, and they name that
 # agent-session. An agent that launches or recovers another agent-seat from its own shell would
@@ -570,10 +591,19 @@ ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION = (
 
 WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE = (
     "Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
-    "{link}. Before your first message, open that page with the Artifact tool. If it is gone, publish "
-    "the item again from docs/walk/{walk}.md and append the line \"#item_page item {count} <new link>\" "
-    "to docs/walk/{walk}-minutes.md. Show the item in full, and end your first message with its closing "
-    "line, holding the link that opens."
+    "{link}. Before your first message, check, with the Artifact tool's read action, that the link "
+    "still works. If the read fails, publish the item again from docs/walk/{walk}.md and append the line "
+    "\"#item_page item {count} <new link>\" to docs/walk/{walk}-minutes.md. Show the item in full, and "
+    "end your first message with the item's closing line, holding the link that works: this one, or "
+    "the new link when you published again."
+)
+
+# The Artifact tool reads only claude.ai pages, and a `file:` page is recorded when publishing failed, so the
+# successor keeps that link rather than reading it and publishing again.
+WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE = (
+    "Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
+    "{link}, a file on ned-box, which the Artifact tool cannot read. Show the item in full, and end your "
+    "first message with the item's closing line, holding this link."
 )
 
 WAITING_APPROVAL_WALK_ITEM_WITHOUT_PAGE_LINK_INSTRUCTION_TEMPLATE = (
@@ -674,6 +704,7 @@ def parse_handoff_file(handoff_path: Path) -> dict:
 
 # This names the launched session; a later worktree takeover does not update it.
 LAUNCHED_SESSION_ID_STATE_KEY = "launched_session_id"
+LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY = "launched_remote_control_name"
 # Read compatibility for existing state files; subsequent writes use only the new key.
 LEGACY_SESSION_ID_STATE_KEY = "session_id"
 
@@ -1236,9 +1267,8 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
     the walk-minutes'
     `#next_to_present` line names several items, the line names the first, where the walk resumes. When the
     walk-document cannot be read, the line names the item from the walk-minutes alone, without its point, and
-    says why; its count then lacks `of M` when the `#next_to_present` line gives none, so the `#item_page` line
-    it asks for would not be read until the agent adds M. When the walk-minutes cannot be read, or the walk
-    finder cannot be loaded, the line names the error instead."""
+    says why; its count then lacks `of M` when the `#next_to_present` line gives none. When the walk-minutes
+    cannot be read, or the walk finder cannot be loaded, the line names the error instead."""
     walk_directory = working_directory / APPROVAL_WALK_DIRECTORY
     if not walk_directory.is_dir():
         return ()
@@ -1278,17 +1308,23 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
             walk_directory=walk_directory, error=f"{type(error).__name__}: {error}"),)
     point, document_problem = None, ""
     try:
-        walk_short_answer_hook = load_module_from_path(
-            "walk_me_through_user_short_answer_to_approval_walk_item_expanded_into_instructions_user_prompt_submit_hook",
-            WALK_SHORT_ANSWER_HOOK_PATH)
         document = minutes.with_name(name + ".md")
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
-        # Every named item is checked, so that a missing or repeated heading is reported; the point is read from
-        # the first-named item's unit alone, because units come back in walk-document order, and a later waiting
-        # item's heading may name the first item too.
-        walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
-        total, units = walk_finder.waiting_item_units(document, value, [number], total, parser, spans)
+        # The total is counted before any heading is looked up or the hook loaded, so that a missing or repeated
+        # heading, or a hook that fails to load, leaves the count its `of M`. A count of 0 means no heading was
+        # recognised, and the finder reports that. Every named item is checked against the total the walk-minutes
+        # gave, so that each missing or repeated heading is reported; the point is read from the first-named item's
+        # unit alone, because a later waiting item's heading may name the first item too.
+        total_in_walk_minutes = total
+        if total is None:
+            total = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(spans)
+            total = None if total == "0" else total
+        walk_finder.waiting_item_units(document, value, numbers, total_in_walk_minutes, parser, spans)
+        _, units = walk_finder.waiting_item_units(document, value, [number], total_in_walk_minutes, parser, spans)
+        walk_short_answer_hook = load_module_from_path(
+            "walk_me_through_user_short_answer_to_approval_walk_item_expanded_into_instructions_user_prompt_submit_hook",
+            WALK_SHORT_ANSWER_HOOK_PATH)
         point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
     except Exception as error:
         print(f"handoff-supervisor: waiting approval-walk item's walk-document unreadable: "
@@ -1299,6 +1335,9 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
     values = {"walk": name, "count": count, "count_and_point": f"{count}, {point}," if point else count}
     if link is None or link == walk_finder.ITEM_PAGE_PUBLISH_FAILED:
         return (WAITING_APPROVAL_WALK_ITEM_WITHOUT_PAGE_LINK_INSTRUCTION_TEMPLATE.format(**values)
+                + document_problem,)
+    if link.startswith("file:"):
+        return (WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE.format(link=link, **values)
                 + document_problem,)
     return (WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE.format(link=link, **values) + document_problem,)
 
@@ -1356,6 +1395,53 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
         return preamble + NO_NEXT_STEP_TAIL_SENTENCE
     # Keep line breaks: the next step is one argv element and may contain Markdown formatting.
     return f"{preamble}{NEXT_STEP_HEADING}{next_step}"
+
+
+CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE = 100
+CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE = (
+    "The end of the last session: the last {line_count} lines of {conversation_tail_path}, "
+    "shown to you and not to the new session's agent.\n\n")
+CONVERSATION_TAIL_LAST_LINES_FOOTER = "\n\nThe new session's first message:\n\n"
+
+
+def conversation_tail_last_lines_display_file_write(
+        handoff_directory: Path, session_id: str, conversation_tail_path: Path) -> None:
+    """Leave the conversation-tail's last lines for the MessageDisplay hook that shows them to
+    the user above the successor's first message.
+
+    The display is optional, and the caller runs after the handoff's counter is saved, where a
+    raise would stop the successor's launch: a read or write failure is reported on stderr and
+    the successor launches without the display. The report gives no instruction: it goes to the
+    supervisor's stderr, normally the agent-seat's tmux pane and that pane's terminal-capture log,
+    which no agent reads and no program parses, and a missing display costs no work."""
+    display_path = successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path_for_session_id(
+        handoff_directory, session_id)
+    try:
+        # newline="" keeps a bare "\r" inside a line, and split("\n") does not split at U+2028 as
+        # splitlines() would, so only the file's own "\n" delimiters count as lines.
+        with conversation_tail_path.open(encoding="utf-8", newline="") as conversation_tail:
+            text = conversation_tail.read()
+    except OSError as error:
+        print(f"handoff-supervisor: the user is not shown the last session's last lines above "
+              f"the successor's first message, because reading the conversation-tail "
+              f"{conversation_tail_path} failed: {error}. The successor launches as usual. "
+              f"No work is lost.",
+              file=sys.stderr)
+        return
+    lines = text.removesuffix("\n").split("\n")[-CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE:]
+    try:
+        display_path.write_text(
+            CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
+                line_count=len(lines), conversation_tail_path=conversation_tail_path)
+            + "\n".join(lines) + CONVERSATION_TAIL_LAST_LINES_FOOTER,
+            encoding="utf-8")
+    except OSError as error:
+        print(f"handoff-supervisor: the user is not shown the last session's last lines above "
+              f"the successor's first message, because writing {display_path}, the file the "
+              f"first-message display hook reads them from, failed: {error}. The successor "
+              f"launches as usual, and the conversation-tail stays whole at "
+              f"{conversation_tail_path}, so no work is lost.",
+              file=sys.stderr)
 
 
 @dataclass
@@ -1483,19 +1569,16 @@ def run_git_here(arguments: list, working_directory: Path, timeout: int = 60):
         return subprocess.CompletedProcess(arguments, 1, "", f"{type(error).__name__}: {error}")
 
 
-# The handoff-supervisor restarts itself on main's code only after a report holding one of these.
-LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN = " is current with main"
-LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN = " fast-forwarded to main"
-
-
 class LaunchTimeGitSyncReport(str):
     """A launch-time-git-sync report's text, with the sync's outcome beside it: whether the fetch
-    of origin succeeded and the checkout then held all of main. A plain str report has no such
-    outcome, so it counts as not holding main."""
+    of origin succeeded and the checkout then held all of main, and whether the checkout's commit
+    is now origin/main's. A plain str report has no such outcome, so it counts as neither."""
 
-    def __new__(cls, text: str, checkout_has_main_after_a_fetch: bool):
+    def __new__(cls, text: str, checkout_has_main_after_a_fetch: bool,
+                checkout_is_at_main_commit: bool = False):
         report = super().__new__(cls, text)
         report.checkout_has_main_after_a_fetch = checkout_has_main_after_a_fetch
+        report.checkout_is_at_main_commit = checkout_is_at_main_commit
         return report
 
 
@@ -1578,8 +1661,9 @@ def launch_time_git_sync(working_directory: Path) -> str:
             ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
             if ahead == "0":
                 return LaunchTimeGitSyncReport(
-                    f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN}{fetch_note}",
-                    checkout_has_main_after_a_fetch=fetched.returncode == 0)
+                    f"launch-time-git-sync: {branch} is current with main{fetch_note}",
+                    checkout_has_main_after_a_fetch=fetched.returncode == 0,
+                    checkout_is_at_main_commit=True)
             return LaunchTimeGitSyncReport(
                 f"launch-time-git-sync: {branch} is {ahead} commit(s) ahead of main and has all of "
                 f"it — nothing to pull{fetch_note}",
@@ -1603,11 +1687,13 @@ def launch_time_git_sync(working_directory: Path) -> str:
     try:
         tip = answer(["rev-parse", "--short", "HEAD"], 15)
     except git.GitCommandFailed as error:
-        return (f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} (its new commit could not be "
-                f"read: {error}){fetch_note}\n{launch_time_git_sync_git_failure_next_steps(error)}")
+        return LaunchTimeGitSyncReport(
+            f"launch-time-git-sync: {branch} fast-forwarded to main (its new commit could not be "
+            f"read: {error}){fetch_note}\n{launch_time_git_sync_git_failure_next_steps(error)}",
+            checkout_has_main_after_a_fetch=False, checkout_is_at_main_commit=True)
     return LaunchTimeGitSyncReport(
-        f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} ({tip}){fetch_note}",
-        checkout_has_main_after_a_fetch=fetched.returncode == 0)
+        f"launch-time-git-sync: {branch} fast-forwarded to main ({tip}){fetch_note}",
+        checkout_has_main_after_a_fetch=fetched.returncode == 0, checkout_is_at_main_commit=True)
 
 
 class OverviewCheckGitFailure(Exception):
@@ -2155,9 +2241,10 @@ def launch_agent_session(agent_command: str, session_id: str, working_directory:
     flag = "--resume" if resume else "--session-id"
     command = [agent_command, flag, session_id]
     if remote_control_name:
-        command += ["--remote-control", remote_control_name,
-                    "--name", remote_control_name,
-                    "--remote-control-session-name-prefix", remote_control_name]
+        # The = form, because a name the user gives in claude.ai can start with dashes.
+        command += [f"--remote-control={remote_control_name}",
+                    f"--name={remote_control_name}",
+                    f"--remote-control-session-name-prefix={remote_control_name}"]
     if appended_system_prompt_file:
         command += ["--append-system-prompt-file", appended_system_prompt_file]
     # The test stub reads the final argument as the prompt, so no flag may follow it.
@@ -2475,6 +2562,74 @@ def handoff_supervisor_not_restarted_on_main_code_notice(
             f"{RESTART_PROGRAM_PATH_FROM_HOME} {seat}", on_the_mac))
 
 
+HANDOFF_SUPERVISOR_CLAUDE_AI_RENAME_NOT_CHECKED_SUCCESSOR_NOTICE_TEMPLATE = (
+    "The handoff-supervisor could not check whether the user renamed agent-seat {agent_seat} in "
+    "claude.ai during the last agent-session, so a rename, if any, was not passed on: {error}\n"
+    "If ListAgents lists this agent-session under a name other than the one the other agent-seats "
+    "use for it, send each of them that name with SendMessage.")
+
+
+def handoff_supervisor_remote_control_name_choose_for_agent_session_launch(agent_seat: str) -> str:
+    """Return the stored Remote Control name; an unreadable name file must not stop a launch."""
+    try:
+        return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)
+    except OSError as error:
+        print(f"handoff-supervisor: Remote Control lists agent-seat {agent_seat}'s new agent-session "
+              f"under the agent-seat name, because the Remote Control name stored for it could not be "
+              f"read: {error}\nTo have it listed under the name the user gave it in claude.ai, write "
+              "that name alone into the file the error names.", file=sys.stderr)
+        return agent_seat
+
+
+def handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(settings: SupervisorSettings, successor_notice: str,
+                                                launched_session_id: Optional[str],
+                                                launched_remote_control_name: Optional[str]) -> str:
+    """Store a rename the launched agent-session's last turn end did not, and, when the name
+    changed during that agent-session, add the instruction to tell the other agent-seats."""
+    # The launched session, not the handoff's writer: a session that took over the worktree
+    # may carry a title of its own, which is not this agent-seat's name.
+    if not launched_session_id:
+        return successor_notice
+    rename, failure = None, ""
+    try:
+        transcript_path = claude_code_session_transcript_lookup_and_text_search_common.claude_code_session_transcript_path_found_by_session_id(
+            launched_session_id, settings.working_directory, PROJECTS_ROOT)
+        rename = (remote_control_name_common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
+            settings.agent, transcript_path) if transcript_path is not None else None)
+    except (OSError, claude_code_session_transcript_lookup_and_text_search_common.ClaudeCodeSessionTranscriptFoundInSeveralProjectDirectoriesError) as error:
+        failure = HANDOFF_SUPERVISOR_CLAUDE_AI_RENAME_NOT_CHECKED_SUCCESSOR_NOTICE_TEMPLATE.format(
+            agent_seat=settings.agent, error=error)
+    try:
+        stored_name = remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(settings.agent)
+    except OSError as error:
+        failure = HANDOFF_SUPERVISOR_CLAUDE_AI_RENAME_NOT_CHECKED_SUCCESSOR_NOTICE_TEMPLATE.format(
+            agent_seat=settings.agent, error=error)
+        stored_name = None
+    if failure:
+        print(f"handoff-supervisor: {failure}", file=sys.stderr)
+        successor_notice = f"{successor_notice} {failure}" if successor_notice else failure
+    if stored_name is None:
+        return successor_notice
+    try:
+        recorded_names = remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_read(settings.agent)
+    except OSError as error:
+        # Announcing from the launched name alone still reaches the agent-seats that never heard a rename.
+        print(f"handoff-supervisor: the names agent-seat {settings.agent} was announced under since its "
+              f"launch could not be read, so only its launched name is announced as old: {error}", file=sys.stderr)
+        recorded_names = []
+    # Any name the others may know the agent-seat by, other than the current one, gets a line:
+    # the Stop hook may have stored a name the agent-session handed off before announcing.
+    heard_names = ([launched_remote_control_name] if launched_remote_control_name else []) + recorded_names + (
+        [rename.old_name] if rename is not None else [])
+    old_names = [name for index, name in enumerate(heard_names)
+                 if name != stored_name and name not in heard_names[:index]]
+    if not old_names:
+        return successor_notice
+    instruction = remote_control_name_common.handoff_agent_seat_remote_control_rename_from_each_old_name_agent_told_to_message_other_agent_seats_instruction_build(
+        old_names, stored_name)
+    return f"{successor_notice} {instruction}" if successor_notice else instruction
+
+
 def handoff_supervisor_restart_arguments_build(settings: SupervisorSettings) -> list:
     """The argv of the restarted handoff-supervisor, built from the settings so that
     flags describing only the first start, such as --resume-session-id, are left out."""
@@ -2503,11 +2658,9 @@ def launch_time_git_sync_of_own_checkout_first_line_if_not_on_main() -> str:
     first line of the launch-time-git-sync's report, which says why not."""
     report = launch_time_git_sync(REPOSITORY_ROOT)
     print(f"handoff-supervisor: its own checkout {REPOSITORY_ROOT}: {report}")
-    first_line = report.splitlines()[0]
-    if (LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN in first_line
-            or LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN in first_line):
+    if getattr(report, "checkout_is_at_main_commit", False):
         return ""
-    return first_line
+    return report.splitlines()[0]
 
 
 def handoff_supervisor_not_restarted_notice_and_console_line(
@@ -2603,6 +2756,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
 
     # Compose at launch so the branch-state line reports the sync performed for that launch.
     ignition_plan = None
+    # Set only for the launch an ignition plan with a conversation-tail composes, not for a later resume.
+    conversation_tail_path_for_next_launch = None
     # Reusing a state-file ID for a fresh launch can collide with an existing transcript or live session.
     next_launch_resumes_the_session = bool(settings.resume_session_id)
     # Charge at launch so startup resumes count, and a successor does not inherit a predecessor's spent budget.
@@ -2658,6 +2813,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
             retiring_session_id = (
                 retiring_session_id_from_handoff_writer_or_tracked_launch(tracked_session_id, boot_fields)
                 if tracked_session_id else None)
+            successor_notice = handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
+                settings, successor_notice, tracked_session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
             successor_session_id, ignition_plan = (
                 carry_over_to_successor(settings, retiring_session_id, boot_fields, generation)
                 if retiring_session_id else (None, None)
@@ -2709,8 +2866,19 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                   f"nothing worth resuming ({by_hand_detail}); starting fresh")
 
     while True:
+        remote_control_name = handoff_supervisor_remote_control_name_choose_for_agent_session_launch(settings.agent)
         state.update({LAUNCHED_SESSION_ID_STATE_KEY: session_id,
+                      LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY: remote_control_name,
                       "generation": generation})
+        # A resume continues the agent-session whose names the others may know, so its record is kept.
+        if not next_launch_resumes_the_session:
+            try:
+                remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name(
+                    settings.agent, remote_control_name)
+            except OSError as error:
+                print(f"handoff-supervisor: the record of the names agent-seat {settings.agent} is announced "
+                      f"under could not be started, so its next handoff may announce a rename from a name "
+                      f"the others no longer use: {error}", file=sys.stderr)
         clear_agent_exit_record_from_supervisor_state(state)
         write_supervisor_state(settings.state_path, state)
 
@@ -2736,6 +2904,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                 launch_time_git_sync_report, overview_refresh_due, memory_review_due,
                 branch_state_instruction=branch_state_instruction,
                 waiting_approval_walk_item=waiting_approval_walk_item)
+            if isinstance(ignition_plan, DialogIgnitionPlan):
+                conversation_tail_path_for_next_launch = ignition_plan.extract_path
             ignition_plan = None
             if successor_notice:
                 prompt += " " + successor_notice
@@ -2768,9 +2938,14 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
         launch_prompt = launch_prompt_with_leftovers_before_the_next_step(
             prompt, (leftover_work_snapshots, worktrees_and_branches),
             leftover_prompt_listing_counts_path(settings.handoff_directory, settings.agent))
+        if conversation_tail_path_for_next_launch is not None:
+            conversation_tail_last_lines_display_file_write(
+                settings.handoff_directory, session_id, conversation_tail_path_for_next_launch)
+            conversation_tail_path_for_next_launch = None
         process = launch_agent_session(
             settings.agent_command, session_id, settings.working_directory, launch_prompt,
-            resume=next_launch_resumes_the_session, remote_control_name=settings.agent,
+            resume=next_launch_resumes_the_session,
+            remote_control_name=remote_control_name,
             appended_system_prompt_file=appended_system_prompt_file,
             handoff_supervisor_agent_name=settings.agent,
             update_timeout_seconds=settings.agent_update_timeout_seconds,
@@ -2861,6 +3036,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
 
         retiring_session_id = retiring_session_id_from_handoff_writer_or_tracked_launch(
             session_id, handoff_fields)
+        successor_notice = handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
+            settings, successor_notice, session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
         successor_session_id, ignition_plan = carry_over_to_successor(
             settings, retiring_session_id, handoff_fields, generation
         )
@@ -2881,7 +3058,8 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--agent", required=True,
                         help="agent name; names the handoff and state files, and the Remote "
-                             "Control name the session answers to. That name is how agents on "
+                             "Control name the session answers to until the user renames it in "
+                             "claude.ai. That name is how agents on "
                              "OTHER machines address this seat, so it has to be unique across "
                              "the whole fleet, not just this machine")
     parser.add_argument("--cd", default=".", help="the agent's worktree")

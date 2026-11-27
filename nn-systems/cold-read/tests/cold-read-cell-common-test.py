@@ -144,9 +144,11 @@ WHAT IS PINNED HERE.
 Run: python3 nn-systems/cold-read/tests/cold-read-cell-common-test.py
 """
 
+import contextlib
 import errno
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -213,8 +215,9 @@ CONCURRENT_RUN_REVIEW_TEXT = (
 # agent-binary's own words on each stream, "dump_prompt" is a path to write the
 # prompt the stub received to -- the whole of stdin on the Claude leg, which
 # is how a case reads what the cell composed -- "dump_argv" is a path to
-# write the argv the cell built, as JSON, and "exit" is the code to
-# exit with.
+# write the argv the cell built, as JSON, "dump_environment" a path to write
+# the environment the stub was started with, as JSON, and "exit" is the code
+# to exit with.
 # The report path arrives by environment rather than by parsing the prompt,
 # so a change to the prompt templates cannot silently unhook the stub.
 STUB_MODEL_RUNTIME = """#!/usr/bin/env python3
@@ -294,6 +297,8 @@ if "dump_argv" in step:
     # Bash are one pair, and a joined string could not tell that from a
     # single argument that happens to contain both.
     pathlib.Path(step["dump_argv"]).write_text(json.dumps(argv), encoding="utf-8")
+if "dump_environment" in step:
+    pathlib.Path(step["dump_environment"]).write_text(json.dumps(dict(os.environ)), encoding="utf-8")
 if "dump_record_directory_descriptor_count" in step:
     # How many of the stub's descriptors are open on the record directory: one when the cell passed
     # its being-written lock on to the reviewer program, none when the cell closed it.
@@ -803,7 +808,7 @@ with tempfile.TemporaryDirectory() as scratch:
     check("an Opus failure fails the `deep`-tier cell",
           result.returncode == 1, f"exit {result.returncode}; stderr={result.stderr!r}")
     check("no other model is tried in Opus's place",
-          not report.exists() and "claude-fable-5-1" not in result.stderr
+          not report.exists() and "claude-fable-5-2" not in result.stderr
           and "fell back to" not in result.stderr,
           f"stderr={result.stderr!r}")
     check("the failure names the one attempt",
@@ -850,6 +855,79 @@ with tempfile.TemporaryDirectory() as scratch:
     check("git that does not start makes the write detector unavailable, saying why",
           unavailable_detail is not None and "could not start git" in unavailable_detail,
           repr(unavailable_detail))
+
+    # The grid lifts only the cell-log line holding the phrase, so a path or git error of
+    # several lines must reach the log as one line, or the rest of it is dropped.
+    real_stray_writes_since = common_module.stray_writes_since
+
+    def stray_write_check_printed(stray_writes_since_stand_in):
+        common_module.stray_writes_since = stray_writes_since_stand_in
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(captured):
+                common_module.report_stray_writes("cell", set())
+        finally:
+            common_module.stray_writes_since = real_stray_writes_since
+        return captured.getvalue().splitlines()
+
+    stray_lines = stray_write_check_printed(lambda baseline, own: ["stray\nwrite.md", "plain.md"])
+    check("a stray-write path holding a newline stays on the STRAY WRITE line",
+          len(stray_lines) == 1 and "$'stray\\x0awrite.md', plain.md" in stray_lines[0], repr(stray_lines))
+
+    def git_status_failing_with_several_lines(baseline, own):
+        raise common_module.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository at '/x/two  spaces'\nTo add an exception, run:")
+
+    skipped_lines = stray_write_check_printed(git_status_failing_with_several_lines)
+    check("a git error of several lines stays on the check-skipped line, with its doubled space",
+          len(skipped_lines) == 1 and "'/x/two  spaces' To add an exception, run:" in skipped_lines[0],
+          repr(skipped_lines))
+
+    separator_path = "/x/a\u2028b\u0085c"
+    joined_remedy = common_module.join_error_text_lines_with_one_space(
+        f"fatal: dubious ownership at '{separator_path}'\nTo add an exception, run:\n\n"
+        f"\tgit config --global --add safe.directory '{separator_path}'")
+    copied_remedy = joined_remedy.split("To add an exception, run: ", 1)[1]
+    check("a U+2028 inside a quoted path in a git error leaves the line one line",
+          len(joined_remedy.splitlines()) == 1, repr(joined_remedy))
+    check("git's remedy, copied from the joined line, still names the original path",
+          subprocess.run(["bash", "-c", copied_remedy.replace("git config", "printf %s", 1)
+                          .replace(" --global --add safe.directory", "", 1)],
+                         capture_output=True, text=True).stdout == separator_path,
+          repr(copied_remedy))
+    apostrophe_path = "/x/a b'c"
+    git_quoted_apostrophe_path = "'" + apostrophe_path.replace("'", "'\\''") + "'"
+    joined_apostrophe_remedy = common_module.join_error_text_lines_with_one_space(
+        f"fatal: detected dubious ownership in repository at '{apostrophe_path}'\n"
+        "To add an exception for this directory, call:\n\n"
+        f"\tgit config --global --add safe.directory {git_quoted_apostrophe_path}")
+    copied_apostrophe_remedy = joined_apostrophe_remedy.split("call: ", 1)[1]
+    check("git's remedy for a path holding U+2028 and an apostrophe, copied from the joined "
+          "line, still names the original path",
+          len(joined_apostrophe_remedy.splitlines()) == 1
+          and subprocess.run(["bash", "-c", copied_apostrophe_remedy.replace("git config", "printf %s", 1)
+                              .replace(" --global --add safe.directory", "", 1)],
+                             capture_output=True, text=True).stdout == apostrophe_path,
+          repr(joined_apostrophe_remedy))
+    check("a U+2028 outside any quoted span is written as its escape",
+          common_module.join_error_text_lines_with_one_space("fatal: a\u2028b") == "fatal: a\\u2028b")
+    unparsable_command = common_module.join_error_text_lines_with_one_space(
+        "git config --global --add safe.directory '/x/a\u2028b")
+    check("a git command line shlex cannot split, holding U+2028 and an unmatched quote, stays "
+          "one line with the character escaped",
+          unparsable_command == "git config --global --add safe.directory '/x/a\\u2028b",
+          repr(unparsable_command))
+
+    # A cell whose pre-run snapshot failed passes git's reason, so the line the grid lifts carries it.
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured):
+        common_module.report_stray_writes("cell", common_module.WriteDetectorUnavailable(
+            "fatal: not a git repository\nhint: run git init"))
+    not_taken_lines = captured.getvalue().splitlines()
+    check("a failed pre-run snapshot's git reason is on the check-skipped line",
+          len(not_taken_lines) == 1 and STRAY_WRITE_CHECK_SKIPPED_PHRASE in not_taken_lines[0]
+          and "git status failed: fatal: not a git repository hint: run git init" in not_taken_lines[0],
+          repr(not_taken_lines))
 
     # A stamp whose reviewed file cannot be read says so instead of failing the report.
     with tempfile.TemporaryDirectory() as stamp_scratch:
@@ -906,41 +984,26 @@ with tempfile.TemporaryDirectory() as scratch:
     PERMISSION_NOISE = ("Permission allow rule (/Users/el/.claude/settings.json): "
                         "Glob(//Users/el/agents/**) is not matched by file permission checks\n")
 
-    def classify(stdout="", stderr="", exit_code=1, model="claude-fable-5-1", start_error=None):
+    def classify(stdout="", stderr="", exit_code=1, start_error=None):
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
-            recognised_texts=claude_module.recognised_failure_texts_for_model(model),
+            recognised_texts=claude_module.RECOGNISED_FAILURE_TEXTS,
             start_error=start_error)
 
-    check("the weekly limit line is account-limit, the limit and its reset as detail",
+    check("the weekly limit line is no recognised text: exit-N, the line as detail",
           classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")
-          == ("account-limit", "weekly limit · resets Nov 7, 3am (America/Los_Angeles)"),
+          == ("exit-1", WEEKLY_LIMIT_LINE),
           repr(classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")))
-    check("a line starting \"You've hit your \" whose next words do not end in limit is exit-N",
-          classify(stdout="You've hit your limitless quota · resets Nov 7\n")[0] == "exit-1",
-          repr(classify(stdout="You've hit your limitless quota · resets Nov 7\n")))
-    check("three words before limit is still account-limit",
-          classify(stdout="You've hit your Opus weekly usage limit · resets Nov 7\n")
-          == ("account-limit", "Opus weekly usage limit · resets Nov 7"),
-          repr(classify(stdout="You've hit your Opus weekly usage limit · resets Nov 7\n")))
-    check("exactly four words before limit is exit-N",
-          classify(stdout="You've hit your a b c d limit\n")[0] == "exit-1",
-          repr(classify(stdout="You've hit your a b c d limit\n")))
-    check("a line whose \"limit\" comes five or more words after \"You've hit your \" is exit-N",
-          classify(stdout="You've hit your stride and now the speed limit\n")[0] == "exit-1",
-          repr(classify(stdout="You've hit your stride and now the speed limit\n")))
-    check("the Fable limit line is model-limit for a Fable attempt, the family as detail",
-          classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n") == ("model-limit", "Fable"),
+    check("the Fable limit line is no recognised text: exit-N, the line as detail",
+          classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n")
+          == ("exit-1", FABLE_LIMIT_LINE[:120]),
           repr(classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n")))
-    check("the same line on an Opus attempt is not that model's limit: exit-N",
-          classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")[0] == "exit-1",
-          repr(classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")))
     check("the logged-out capture is logged-out with the whole line as detail",
           classify(stdout=LOGGED_OUT_LINE + "\n") == ("logged-out", LOGGED_OUT_LINE),
           repr(classify(stdout=LOGGED_OUT_LINE + "\n")))
-    check("a limit text inside a line, not at its start, is not recognised",
-          classify(stdout=f"The document quotes: {WEEKLY_LIMIT_LINE}\n")[0] == "exit-1",
-          repr(classify(stdout=f"The document quotes: {WEEKLY_LIMIT_LINE}\n")))
+    check("a recognised text inside a line, not at its start, is not recognised",
+          classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")[0] == "exit-1",
+          repr(classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")))
     check("an agent-binary that was not found is agent-binary-missing with the error",
           classify(exit_code=None, start_error=FileNotFoundError(
               errno.ENOENT, "No such file or directory", "claude"))
@@ -962,10 +1025,8 @@ with tempfile.TemporaryDirectory() as scratch:
           classify(exit_code=None, start_error=not_executable)
           == ("agent-binary-missing", "[Errno 13] Permission denied: 'claude'"),
           repr(classify(exit_code=None, start_error=not_executable)))
-    check("agent-binary-argument-list-too-long is neither user-clearable nor agent-binary-wide",
-          "agent-binary-argument-list-too-long" not in common_module.USER_CLEARABLE_CAUSE_CLASSES
-          and "agent-binary-argument-list-too-long"
-          not in common_module.AGENT_BINARY_WIDE_CAUSE_CLASSES)
+    check("agent-binary-argument-list-too-long is not user-clearable, so not agent-binary-wide",
+          "agent-binary-argument-list-too-long" not in common_module.USER_CLEARABLE_CAUSE_CLASSES)
     check("exit 0 with no report is no-report, with the reviewer's last line as the reason",
           classify(stdout="I read it.\n\nI wrote nothing.\n\n", exit_code=0)
           == ("no-report", "no report written; the reviewer's last line: I wrote nothing."),
@@ -982,10 +1043,10 @@ with tempfile.TemporaryDirectory() as scratch:
           classify(stdout="only stdout\n", exit_code=64) == ("exit-64", "only stdout")
           and classify(stdout="only stdout\n", stderr=" \n\n", exit_code=64) == ("exit-64", "only stdout")
           and classify(exit_code=-9) == ("exit--9", "no output"))
-    check("a Codex attempt recognises no text, so the Claude limit line is exit-1 there",
+    check("an attempt given no recognised texts makes the Claude logged-out line exit-1",
           common_module.classify_failed_attempt(
-              stdout=WEEKLY_LIMIT_LINE + "\n", stderr="", exit_code=1, recognised_texts=[])
-          == ("exit-1", WEEKLY_LIMIT_LINE))
+              stdout=LOGGED_OUT_LINE + "\n", stderr="", exit_code=1, recognised_texts=[])
+          == ("exit-1", LOGGED_OUT_LINE))
 
     # The Codex logged-out line carries the tracing logger's timestamp, which
     # the classifier skips before matching by how the line starts; the
@@ -993,7 +1054,7 @@ with tempfile.TemporaryDirectory() as scratch:
     def classify_codex(stdout="", stderr="", exit_code=1):
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
-            recognised_texts=codex_module.recognised_failure_texts_for_model("gpt-5-codex"))
+            recognised_texts=codex_module.RECOGNISED_FAILURE_TEXTS)
 
     check("the Codex 401 capture on stderr is logged-out, the line after its timestamp as detail",
           classify_codex(stderr=CODEX_LOGGED_OUT_LINE + "\n")
@@ -1014,19 +1075,6 @@ with tempfile.TemporaryDirectory() as scratch:
           repr(classify_codex(stderr=f"{CODEX_LOGGED_OUT_TIMESTAMP} {WEEKLY_LIMIT_LINE}\n")))
     check("the Claude logged-out line still matches at column 0 with no timestamp",
           classify(stdout=LOGGED_OUT_LINE + "\n") == ("logged-out", LOGGED_OUT_LINE))
-    check("the family name is the model id's second word, capitalised",
-          claude_module.model_family_name("claude-fable-5-1") == "Fable"
-          and claude_module.model_family_name("claude-opus-5") == "Opus")
-    check("a one-word alias such as haiku is capitalised too, as Claude's model-limit message spells it",
-          claude_module.model_family_name("haiku") == "Haiku",
-          repr(claude_module.model_family_name("haiku")))
-    check("a two-word model id such as claude-haiku gives its second word",
-          claude_module.model_family_name("claude-haiku") == "Haiku",
-          repr(claude_module.model_family_name("claude-haiku")))
-    check("a model id whose second word is empty is capitalised whole",
-          claude_module.model_family_name("claude--x") == "Claude--x",
-          repr(claude_module.model_family_name("claude--x")))
-
     # Through the real cells: the cause line is the last line of the attempt
     # in the log the grid reads, in the form the grid parses.
     shutil.rmtree(repository)
@@ -1034,29 +1082,29 @@ with tempfile.TemporaryDirectory() as scratch:
     report = repository / "cold-read-records" / "run-cause-a" / "claude-defect-hunt-second-strongest-model.md"
     result = run_claude_cell(
         repository, stubs,
-        {"claude-fable-5-1": {"exit": 1, "stdout": FABLE_LIMIT_LINE + "\n"}},
+        {"claude-fable-5-2": {"exit": 1, "stdout": FABLE_LIMIT_LINE + "\n"}},
         report, "--tier", "second-strongest-model",
     )
-    check("a Claude cell that hit the Fable limit prints cause: model-limit — Fable",
+    check("a Claude cell that hit the Fable limit prints cause: exit-1 with the line as detail",
           result.returncode == 1
-          and "cold-read-claude-cell: cause: model-limit — Fable" in result.stderr,
+          and f"cold-read-claude-cell: cause: exit-1 — {FABLE_LIMIT_LINE[:120]}" in result.stderr,
           repr(result.stderr))
     cause_lines = [line for line in result.stderr.splitlines()
                    if line.startswith("cold-read-claude-cell: cause:")]
     check("the cause line is the last line of its own about the attempt",
           len(cause_lines) == 1
-          and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: model-limit"),
+          and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: exit-1"),
           repr(result.stderr))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
     report = repository / "cold-read-records" / "run-cause-b" / "codex-defect-hunt-second-strongest-model.md"
     result = run_codex_cell(
         repository, stubs,
-        {"*": {"exit": 1, "stdout": WEEKLY_LIMIT_LINE + "\n"}},
+        {"*": {"exit": 1, "stdout": LOGGED_OUT_LINE + "\n"}},
         report,
     )
-    check("a Codex cell printing the Claude limit text names exit-1, the line as detail",
-          f"cold-read-codex-cell: cause: exit-1 — {WEEKLY_LIMIT_LINE}" in result.stderr,
+    check("a Codex cell printing the Claude logged-out text names exit-1, the line as detail",
+          f"cold-read-codex-cell: cause: exit-1 — {LOGGED_OUT_LINE}" in result.stderr,
           repr(result.stderr))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
@@ -1161,6 +1209,9 @@ with tempfile.TemporaryDirectory() as scratch:
     )
     check("a cell that could not take a baseline says the check did not run",
           STRAY_WRITE_CHECK_SKIPPED_PHRASE in result.stderr, repr(result.stderr))
+    check("...giving git's reason on that line",
+          any(STRAY_WRITE_CHECK_SKIPPED_PHRASE in line and "git status failed:" in line
+              for line in result.stderr.splitlines()), repr(result.stderr))
     check("...and says a missing check is not a clean result",
           "failure to look, not a clean result" in result.stderr, repr(result.stderr))
 
@@ -1588,6 +1639,7 @@ with tempfile.TemporaryDirectory() as scratch:
     repository = build_scratch_repository(scratch)
     report = report_path_for(repository, "claude-denies-bash", "claude")
     received_argv_path = scratch / "claude-denies-bash-argv.json"
+    received_environment_path = scratch / "claude-denies-bash-environment.json"
     # HOME is a scratch home, so the login-file rules below name paths in it
     # and no real login path reaches a failure line.
     claude_scratch_home = scratch / "claude-scratch-home"
@@ -1595,10 +1647,13 @@ with tempfile.TemporaryDirectory() as scratch:
     result = run_claude_cell(
         repository, stubs,
         {"*": {"report": "STUB REVIEW: one finding\n",
-               "dump_argv": str(received_argv_path)}},
-        report, environment_overrides={"HOME": str(claude_scratch_home)},
+               "dump_argv": str(received_argv_path),
+               "dump_environment": str(received_environment_path)}},
+        report, environment_overrides={"HOME": str(claude_scratch_home),
+                                       "CLAUDE_CODE_TASK_LIST_ID": "launching-agent-seat-task-list"},
     )
     claude_argv = json.loads(received_argv_path.read_text(encoding="utf-8"))
+    claude_environment = json.loads(received_environment_path.read_text(encoding="utf-8"))
     check("a Claude cell's run reaches the runtime at all",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     # Monitor runs shell commands too, so it is denied beside Bash
@@ -1618,16 +1673,28 @@ with tempfile.TemporaryDirectory() as scratch:
     # Every hook off, for the reviewer's session only (user-ruled
     # 2026-09-18): the project's write guard refused a reviewer's report and
     # its Stop hook rebased the author's branch mid-run, both on 2026-09-16.
-    # Hooks only: CLAUDE.md must still load, so --setting-sources, which
-    # would drop it along with the hooks, must not be passed.
     passed_settings = (claude_argv[claude_argv.index("--settings") + 1]
                        if "--settings" in claude_argv else "")
     check("the Claude cell switches every hook off by --settings",
           passed_settings.startswith("{")
           and json.loads(passed_settings).get("disableAllHooks") is True,
           repr(claude_argv))
-    check("the Claude cell keeps CLAUDE.md: no --setting-sources",
-          "--setting-sources" not in claude_argv, repr(claude_argv))
+    # A cell knows only CLAUDE.md, the glossaries and the text: user,project
+    # leaves out the local source, which carries the launching agent-seat's
+    # CLAUDE.local.md, and still loads CLAUDE.md.
+    check("the Claude cell loads only the user and project setting sources, so CLAUDE.md still loads",
+          "--setting-sources" in claude_argv
+          and claude_argv[claude_argv.index("--setting-sources") + 1] == "user,project",
+          repr(claude_argv))
+    check("the Claude cell is offered no slash commands or skill listing",
+          "--disable-slash-commands" in claude_argv, repr(claude_argv))
+    check("the Claude cell is offered only the five tools it is allowed",
+          "--tools" in claude_argv
+          and claude_argv[claude_argv.index("--tools") + 1] == "Read,Grep,Glob,Write,WebFetch",
+          repr(claude_argv))
+    check("the Claude cell starts without the launching agent-seat's task list",
+          "CLAUDE_CODE_TASK_LIST_ID" not in claude_environment,
+          claude_environment.get("CLAUDE_CODE_TASK_LIST_ID"))
 
     # No credential file is readable (user-ruled 2026-09-28): Claude Code's
     # own deny rules, in the absolute `//` form -- a rule without it is
@@ -2275,6 +2342,36 @@ with tempfile.TemporaryDirectory() as instrument_scratch:
         check(f"a record directory holding only {file_name} "
               f"{'is' if built else 'is not'} taken as instrument-built",
               _instrument_common.instrument_built_record_directory(directory) is built)
+
+# Each launcher's --effort help states the efforts its own tier map pins, so
+# the help cannot name a launcher's effort the map no longer holds.
+# The agy cell refuses before argparse runs when no sandbox program is on PATH,
+# so the stand-ins go first on the child's PATH.
+help_sandbox_scratch = tempfile.TemporaryDirectory()
+help_environment = dict(os.environ, PATH=os.pathsep.join([
+    str(scratch_repository_fixture.install_fake_sandbox_programs(
+        Path(help_sandbox_scratch.name) / "fake-sandbox-programs")),
+    os.environ.get("PATH", "")]))
+for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
+                      "cold-read-codex-cell.py"):
+    launcher_help_run = subprocess.run(
+        [sys.executable, str(SYSTEM_DIRECTORY / launcher_file), "--help"],
+        capture_output=True, text=True, timeout=60, env=help_environment)
+    check(f"{launcher_file} --help exits 0", launcher_help_run.returncode == 0,
+          f"exit {launcher_help_run.returncode}; stderr: {launcher_help_run.stderr[-600:]}")
+    launcher_help = launcher_help_run.stdout
+    launcher_help_words = " ".join(launcher_help.split())
+    # argparse wraps after a hyphen, so compare with every space removed.
+    launcher_help_unspaced = "".join(launcher_help.split())
+    _launcher_spec = importlib.util.spec_from_file_location(
+        "cold_read_launcher_" + launcher_file.replace("-", "_").replace(".py", ""),
+        SYSTEM_DIRECTORY / launcher_file)
+    _launcher = importlib.util.module_from_spec(_launcher_spec)
+    _launcher_spec.loader.exec_module(_launcher)
+    for tier, effort in _launcher.TIER_TO_REASONING_EFFORT.items():
+        check(f"{launcher_file}'s --effort help says its {tier} tier runs at {effort}",
+              f"{tier}runsat{effort}" in launcher_help_unspaced, launcher_help_words[-600:])
+help_sandbox_scratch.cleanup()
 
 print()
 if failures:

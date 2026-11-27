@@ -32,6 +32,7 @@ REPOSITORY = _repository_names.REPOSITORY
 DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY = Path(
     "/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers")
 REVIEW_WORKTREES_DIRECTORY_UNDER_HOME = Path(".cache") / "merge-lane-review-worktrees"
+CODEX_REVIEW_RUN_RECORD_FILE_NAME = "codex-review-run-record.json"
 # A clone or worktree of this repository, from which a missing review tools
 # worktree can be made.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +65,24 @@ def read_merge_account_token():
     if not token:
         raise MergeAccountTokenUnusable(f"the token file {token_file} is empty")
     return token
+
+
+def fix_round_reviewed_whole_because(git, checkout, head_reviewed_before, head):
+    """Return why a fix-round is reviewed whole, from the merge base with main, or None.
+
+    `git(checkout, *arguments)` runs git and returns its stripped output. The same
+    two checks as pull-request-review-plan.py's for reviewing a fix-round whole: a
+    diff from the earlier head across a merge of main holds main's changes, and one
+    from a commit the head does not descend from holds the rewrite.
+    """
+    merges = git(checkout, "rev-list", "--merges", "--first-parent",
+                 f"{head_reviewed_before}..{head}").split()
+    if merges:
+        return (f"the commits since the nn-head-commit reviewed before hold merge commit(s) "
+                f"{', '.join(merge[:12] for merge in merges)}")
+    if int(git(checkout, "rev-list", "--count", f"{head}..{head_reviewed_before}")):
+        return "the head does not descend from the nn-head-commit reviewed before"
+    return None
 
 
 def add_directory_options(parser, holds):

@@ -266,8 +266,8 @@ def cases_with_the_stand_in_sandbox(root, home):
 
 class StubGeminiLauncher:
     """Stands in for the Gemini launcher: a fixed macOS prefix, and an environment
-    filter that removes one more variable than the real one, so a case can tell
-    that the program uses the launcher's filter."""
+    filter that removes only a test variable, so a case can tell that the
+    program uses the launcher's filter rather than a list of its own."""
 
     EXTRA_REMOVED_VARIABLE = "AGY_PRINT_PROMPT_TEST_VARIABLE_THE_SHARED_FILTER_REMOVES"
 

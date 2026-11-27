@@ -42,6 +42,7 @@ GLOSSARIES_LISTED = importlib.util.module_from_spec(_listed_spec)
 _listed_spec.loader.exec_module(GLOSSARIES_LISTED)
 RULE_FAILURE_LINES = GLOSSARIES_LISTED.RULE_FAILURE_LINES
 PROJECT_GLOSSARY_RELATIVE_PATH = GLOSSARIES_LISTED.PROJECT_GLOSSARY_RELATIVE_PATH
+HASHTAG_GLOSSARY_RELATIVE_PATH = "docs/nedsnodes-wiki/nedsnodes-hashtag-glossary.md"
 
 ENTRY_HEAD = re.compile(r"- (\*\*[^*\n]+\*\*(?:\s*,\s*\*\*[^*\n]+\*\*)*)")
 BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
@@ -143,7 +144,9 @@ if __name__ == "__main__":
           f"found only {paths}; run "
           f"scripts/system-glossaries-listed-on-the-project-glossary-test.py and fix what it "
           f"reports")
-    texts = {path: (REPO_ROOT / path).read_text(encoding="utf-8") for path in paths}
+    # The hashtag glossary lists hashtags, not terms, in a form of its own that its own test checks.
+    texts = {path: (REPO_ROOT / path).read_text(encoding="utf-8") for path in paths
+             if path != HASHTAG_GLOSSARY_RELATIVE_PATH}
     unreadable = [path for path, text in texts.items() if not entry_terms(text)]
     check("an entry is read from every glossary", not unreadable,
           f"no line beginning `- **term**` was read from {unreadable}; write each glossary "
