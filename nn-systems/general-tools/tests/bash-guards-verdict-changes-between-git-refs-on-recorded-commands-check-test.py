@@ -329,7 +329,7 @@ def stopped_by_sigterm(*_):
 
 def files_the_replay_reads_in_a_checkout():
     """Return the paths, relative to REPOSITORY_ROOT, of the files of this checkout that a replay of the fixture
-    pairs reads: .claude/settings.json; every file the guards open while they load and read each fixture pair,
+    pairs reads: .claude/settings.json and every file the replay opens to list the guards it runs; every file the guards open while they load and read each fixture pair,
     in-process and through the search-file guard's main(); and every file a loaded module names in a
     module-level Path, such as the shell reader's pinned requirements, which only a machine missing a library
     reads."""
@@ -344,6 +344,8 @@ def files_the_replay_reads_in_a_checkout():
     alarm_handler = signal.signal(signal.SIGALRM, replay.raise_pair_timed_out)
     worker_as_found = dict(replay.WORKER)
     try:
+        # Reads .claude/settings.json and, when settings run the Bash guard hooks dispatcher, its guard list.
+        replay.bash_hook_files(REPOSITORY_ROOT)
         guards, _, _, _ = replay.guards_loaded(REPOSITORY_ROOT, False)
         replay.WORKER["checkout"] = root
         with tempfile.TemporaryDirectory() as search_file_directory:
@@ -702,6 +704,15 @@ try:
           and main_rows is not None and main_rows[0][0] != "TIMEOUT",
           f"status {status}; rows {main_rows}\n{out}\n{err}")
 
+    def dispatcher_guard_list_without(worktree, guard_file_text):
+        """Drop from the worktree's Bash guard hooks dispatcher guard list, when it has one, each guard whose path
+        holds the text, as dropping the guard's hook from settings.json does for a hook settings runs itself."""
+        guard_list = worktree / replay.BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST
+        if guard_list.exists():
+            listed = json.loads(guard_list.read_text())
+            listed["guards"] = [entry for entry in listed["guards"] if guard_file_text not in entry["path"]]
+            guard_list.write_text(json.dumps(listed, indent=2))
+
     def drop_codex_hook(worktree):
         path = worktree / ".claude" / "settings.json"
         settings = json.loads(path.read_text())
@@ -709,6 +720,7 @@ try:
             entry["hooks"] = [hook for hook in entry.get("hooks", [])
                               if "hand-typed-codex-exec-command-refusal-hook.py" not in hook.get("command", "")]
         path.write_text(json.dumps(settings, indent=2))
+        dispatcher_guard_list_without(worktree, "hand-typed-codex-exec-command-refusal-hook.py")
     fewer_hooks = commit_with_change(drop_codex_hook, scratch)
     status, out, err = run_replay(fewer_hooks, scratch)
     check("a head whose settings.json lacks a Bash hook the replay reads: exit 2, naming the hook",
@@ -722,6 +734,9 @@ try:
         git("mv", TMUX_KILL_GUARD, former_tmux_kill_guard, cwd=worktree)
         path = worktree / ".claude" / "settings.json"
         path.write_text(path.read_text().replace(TMUX_KILL_GUARD, former_tmux_kill_guard))
+        guard_list = worktree / replay.BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST
+        if guard_list.exists():
+            guard_list.write_text(guard_list.read_text().replace(TMUX_KILL_GUARD, former_tmux_kill_guard))
     before_rename = commit_with_change(move_tmux_kill_guard_to_its_former_path, scratch)
     status, out, err = run_replay("HEAD", scratch, base_ref=before_rename)
     check("a head that renames a guard whose former path the replay does not know: exit 2, naming the former path "
@@ -774,6 +789,7 @@ try:
             for entry in settings["hooks"]["PreToolUse"]:
                 entry["hooks"] = [hook for hook in entry.get("hooks", []) if guard_path not in hook.get("command", "")]
             path.write_text(json.dumps(settings, indent=2))
+            dispatcher_guard_list_without(worktree, guard_path)
             (worktree / guard_path).unlink()
         return commit_with_change(remove, scratch)
 

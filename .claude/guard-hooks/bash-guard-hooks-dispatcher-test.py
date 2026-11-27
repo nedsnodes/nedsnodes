@@ -7,8 +7,8 @@ listed guard run, and each failure the dispatcher handles caused for real (a gua
 nonzero, is killed by a signal, runs past its timeout, cannot be compiled, or prints output that cannot
 be combined, and a guard list that cannot be read). One case calls the dispatcher's function in this
 process instead, with an injected clock, for a guard that refuses and exits just before its deadline.
-One case checks that the guard list names exactly the Bash PreToolUse hooks in .claude/settings.json,
-with their timeouts.
+The last cases check that .claude/settings.json runs the dispatcher as its only Bash PreToolUse hook,
+with a timeout above every guard's, and still runs the emergency-stop hook on every other tool.
 
 Run: python3 .claude/guard-hooks/bash-guard-hooks-dispatcher-test.py
 Prints one line per case and exits non-zero if any case fails.
@@ -268,9 +268,27 @@ def settings_bash_hooks():
     return hooks
 
 
+def settings_hooks_matching(tool_name):
+    settings = json.loads((REPOSITORY_ROOT / ".claude" / "settings.json").read_text())
+    return [re.search(r'"\$CLAUDE_PROJECT_DIR"/(\S+)', hook["command"]).group(1)
+            for entry in settings["hooks"]["PreToolUse"]
+            if (entry.get("matcher") or "*") == "*" or re.fullmatch(entry["matcher"], tool_name)
+            for hook in entry["hooks"]]
+
+
 listed = dispatcher.bash_guard_hooks_dispatcher_guard_list_read()
-check("the guard list names exactly the Bash PreToolUse hooks in .claude/settings.json, in order, with their "
-      "timeouts", listed == settings_bash_hooks(), f"list {listed}\nsettings {settings_bash_hooks()}")
+dispatcher_path = ".claude/guard-hooks/bash-guard-hooks-dispatcher.py"
+check("the dispatcher is the only PreToolUse hook .claude/settings.json runs on Bash",
+      [path for path, _ in settings_bash_hooks()] == [dispatcher_path], settings_bash_hooks())
+check("the dispatcher's settings timeout is above every guard's, so Claude Code never stops it first",
+      all(seconds < dict(settings_bash_hooks()).get(dispatcher_path, 0) for _, seconds in listed),
+      settings_bash_hooks())
+emergency_stop = "nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py"
+check("the emergency-stop hook runs on Bash through the dispatcher and on every other tool on its own",
+      emergency_stop in [path for path, _ in listed]
+      and all(emergency_stop in settings_hooks_matching(tool) for tool in ("Read", "Edit", "Write", "Agent",
+                                                                          "mcp__some_server__some_tool")),
+      settings_hooks_matching("Read"))
 check("every guard in the guard list exists", all((REPOSITORY_ROOT / path).is_file() for path, _ in listed),
       [path for path, _ in listed if not (REPOSITORY_ROOT / path).is_file()])
 

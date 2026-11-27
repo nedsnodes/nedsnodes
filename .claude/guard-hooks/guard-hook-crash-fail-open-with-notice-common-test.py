@@ -38,16 +38,24 @@ def registered_guards():
     registers, so that a guard added there is crash-tested without being listed here."""
     guards = {}
     settings = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-    for group in settings["hooks"]["PreToolUse"]:
-        for hook in group["hooks"]:
-            for guard_name in re.findall(r"\.claude/guard-hooks/([A-Za-z0-9_.-]+\.py)",
-                                         hook.get("command", "")):
-                source = (GUARD_HOOKS_DIRECTORY / guard_name).read_text(encoding="utf-8")
-                guards[guard_name] = any(
-                    name != MODULE_PATH.name for name in COMMON_MODULE_NAME_PATTERN.findall(source))
+    commands = [hook.get("command", "") for group in settings["hooks"]["PreToolUse"] for hook in group["hooks"]]
+    if any(DISPATCHER_NAME in command for command in commands):
+        # The dispatcher stands for the guards in its guard list; its own crash is tested by its own suite.
+        commands = [command for command in commands if DISPATCHER_NAME not in command] + [
+            path for path, _ in DISPATCHER.bash_guard_hooks_dispatcher_guard_list_read()]
+    for command in commands:
+        for guard_name in re.findall(r"\.claude/guard-hooks/([A-Za-z0-9_.-]+\.py)", command):
+            source = (GUARD_HOOKS_DIRECTORY / guard_name).read_text(encoding="utf-8")
+            guards[guard_name] = any(
+                name != MODULE_PATH.name for name in COMMON_MODULE_NAME_PATTERN.findall(source))
     return sorted(guards.items())
 
 
+DISPATCHER_NAME = "bash-guard-hooks-dispatcher.py"
+_dispatcher_spec = importlib.util.spec_from_file_location(
+    "bash_guard_hooks_dispatcher", GUARD_HOOKS_DIRECTORY / DISPATCHER_NAME)
+DISPATCHER = importlib.util.module_from_spec(_dispatcher_spec)
+_dispatcher_spec.loader.exec_module(DISPATCHER)
 GUARDS = registered_guards()
 
 failures = []

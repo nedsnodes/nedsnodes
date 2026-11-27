@@ -20,7 +20,9 @@ Steps:
      each as a detached worktree in the scratch directory; a merge that conflicts fails the replay. From
      here on, the head is that merged commit. Check that the
      guards this replay reads are exactly the Bash PreToolUse hooks in the head checkout's
-     .claude/settings.json, and, less the guards the head adds, in the base checkout's. A base hook
+     .claude/settings.json, and, less the guards the head adds, in the base checkout's; a hook that
+     runs .claude/guard-hooks/bash-guard-hooks-dispatcher.py counts as every guard in that checkout's
+     bash-guard-hooks-dispatcher-guard-list.json. A base hook
      at a former path, a key of this script's BASH_GUARD_CURRENT_PATHS_BY_FORMER_PATH map, is the
      guard that key maps to, read at the base from its former path; its rows are named by its current
      path, so a renamed guard is not an added guard. A base hook in this script's
@@ -373,8 +375,15 @@ def recorded_command_pairs(transcript_directories):
 
 # ---------------------------------------------------------------- step 2: the guards a checkout has
 
+BASH_GUARD_HOOKS_DISPATCHER = ".claude/guard-hooks/bash-guard-hooks-dispatcher.py"
+BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST = ".claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json"
+
+
 def bash_hook_files(checkout):
-    """Return the repository paths of the PreToolUse hooks that .claude/settings.json runs on a Bash call."""
+    """Return the repository paths of the PreToolUse hooks that .claude/settings.json runs on a Bash call.
+
+    The Bash guard hooks dispatcher stands for every guard in its guard list, at the same checkout.
+    """
     settings = json.loads((Path(checkout) / ".claude" / "settings.json").read_text())
     files = set()
     for entry in settings.get("hooks", {}).get("PreToolUse", []):
@@ -386,8 +395,26 @@ def bash_hook_files(checkout):
             if not found:
                 raise ReplayFailed(f"a Bash hook in {checkout}/.claude/settings.json runs "
                                    f"{hook.get('command')!r}, which names no file in the repository")
-            files.add(found.group(1))
+            if found.group(1) == BASH_GUARD_HOOKS_DISPATCHER:
+                files.update(dispatcher_guard_list_files(checkout))
+            else:
+                files.add(found.group(1))
     return files
+
+
+def dispatcher_guard_list_files(checkout):
+    """Return the guard files the checkout's Bash guard hooks dispatcher runs, from its guard list.
+
+    Only the paths are read: a list the dispatcher would refuse, such as one with an entry that has no valid
+    timeout_seconds, is refused by .claude/guard-hooks/bash-guard-hooks-dispatcher-test.py, not by this check.
+    """
+    list_path = Path(checkout) / BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST
+    try:
+        return [entry["path"] for entry in json.loads(list_path.read_text(encoding="utf-8"))["guards"]]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ReplayFailed(f"{checkout}/.claude/settings.json runs {BASH_GUARD_HOOKS_DISPATCHER}, whose guard "
+                           f"list {list_path} cannot be read ({error!r}), so the guards it runs are not "
+                           f"known") from error
 
 
 def check_guards_match_settings(hooks, replayed, label):

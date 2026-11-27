@@ -228,6 +228,8 @@ GITHUB_PULL_REQUEST_FIELDS = "number,title,url,state,author,headRefOid,baseRefNa
 GIT_FULL_HASH_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 DIFF_HUNK_HEADER_PATTERN = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 REGISTERED_HOOK_PATH_PATTERN = re.compile(r'\$CLAUDE_PROJECT_DIR"?/([^"\s]+)')
+BASH_GUARD_HOOKS_DISPATCHER = ".claude/guard-hooks/bash-guard-hooks-dispatcher.py"
+BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST = ".claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json"
 MARKDOWN_SECTION_HEADING_PATTERN = re.compile(r"^##\s")
 COLD_READ_RECORD_PATH_IN_DESCRIPTION_PATTERN = re.compile(
     r"(/[^\s`'\"<>()\[\],;:]*/" + cold_read_record_names.RECORDS_DIRECTORY_NAME + r"/[^\s/`'\"<>()\[\],;:]+)")
@@ -570,6 +572,10 @@ def registered_hook_paths_at_revision(repository, revision):
                 command = hook_entry.get("command") if isinstance(hook_entry, dict) else None
                 if isinstance(command, str):
                     registered_paths.update(REGISTERED_HOOK_PATH_PATTERN.findall(command))
+    if BASH_GUARD_HOOKS_DISPATCHER in registered_paths:
+        # The dispatcher runs each guard its guard list names, so each is a registered hook too.
+        listed = read_revision_blob_or_none(repository, revision, BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST)
+        registered_paths.update(entry["path"] for entry in json.loads(listed)["guards"])
     return registered_paths
 
 

@@ -34,6 +34,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import selectors
 import signal
 import socket
@@ -125,6 +126,32 @@ def bash_guard_hooks_dispatcher_guard_list_read(list_path=BASH_GUARD_HOOKS_DISPA
                 "guard checked this call; " + GUARD_LIST_FIX_LINE)
         guards.append((path, timeout))
     return guards
+
+
+BASH_GUARD_HOOKS_DISPATCHER_REPOSITORY_PATH = ".claude/guard-hooks/bash-guard-hooks-dispatcher.py"
+BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST_REPOSITORY_PATH = ".claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json"
+_CLAUDE_PROJECT_DIRECTORY_HOOK_FILE_PATTERN = re.compile(r'"\$CLAUDE_PROJECT_DIR"/(\S+)')
+
+
+def bash_pre_tool_use_hook_path_and_timeout_pairs_read_from_settings_with_each_dispatcher_guard_listed_in_its_place(settings, repository_root):
+    """Return [(repository path, timeout seconds or None)] for each PreToolUse hook the parsed settings run on a
+    Bash call, in order; this dispatcher stands for each guard in repository_root's guard list, with that
+    guard's timeout."""
+    hooks = []
+    for entry in settings.get("hooks", {}).get("PreToolUse", []):
+        matcher = entry.get("matcher") or "*"
+        if matcher != "*" and not re.fullmatch(matcher, "Bash"):
+            continue
+        for hook in entry.get("hooks", []):
+            found = _CLAUDE_PROJECT_DIRECTORY_HOOK_FILE_PATTERN.search(hook.get("command", ""))
+            if found is None:
+                continue
+            if found.group(1) == BASH_GUARD_HOOKS_DISPATCHER_REPOSITORY_PATH:
+                hooks += bash_guard_hooks_dispatcher_guard_list_read(
+                    Path(repository_root) / BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST_REPOSITORY_PATH)
+            else:
+                hooks.append((found.group(1), hook.get("timeout")))
+    return hooks
 
 
 def _library_modules_preloaded():

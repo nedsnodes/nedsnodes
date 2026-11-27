@@ -163,7 +163,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "*",
+        "matcher": "^(?!Bash$).*",
         "hooks": [
           {
             "type": "command",
@@ -177,53 +177,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/synthetic-keystroke-guard-hook.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/search-file-argument-read-as-option-guard-hook.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/claude-code-tmux-kill-server-and-kill-session-missing-server-selection-refusal-hook.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/pkill-killall-and-process-name-pattern-kill-refusal-hook.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/hand-typed-codex-exec-command-refusal-hook.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/claude-code-bash-git-push-of-markdown-change-citation-checks-reminder-hook.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/ghi-md-whole-file-replacement-soft-block.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/handoff-deferral-cold-read-full-run-launch-refusal-hook.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/git-worktree-remove-cold-read-record-and-sanity-check-record-ship-to-log-store-first-guard-hook.py",
-            "timeout": 300
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/bash-guard-hooks-dispatcher.py",
+            "timeout": 310
           }
         ]
       },
