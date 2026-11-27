@@ -2949,6 +2949,8 @@ def test_only_a_line_the_program_writes_records_a_decision_or_a_deferral():
             ("item 3 of 9: not asked, kind 8; every text the change adds has had a fast read. <accepted>\n",
              ({"3"}, {}), "the line close writes for an item settled as kind 8 decides it"),
             ("item 3 of 9: not asked, kind 9; every text the change adds has had a fast read. <accepted>\n",
+             ({"3"}, {}), "the line close writes for an item settled as kind 9 decides it"),
+            ("item 3 of 9: not asked, kind 10; every text the change adds has had a fast read. <accepted>\n",
              (set(), {}), "close's took-effect form with a kind --not-asked never accepts records nothing"),
             ("item 3 of 9: part 1 approved <rejected>; every text the change adds has had a fast read.\n",
              (set(), {}), "close's parts form pairing a part's answer with the other answer's outcome records "
@@ -4600,7 +4602,7 @@ def refused_as_rated_none(case, *problems):
 def test_an_item_of_no_kind_is_refused_when_rated_above_weak_or_rated_none_and_touching_a_guarded_file():
     check("an item of no kind rated medium is refused",
           *refused_as_rated_none(rated_none_case(rating="medium: the option changes what users see."),
-                                 "rates the case against medium; an item of none of the kinds 1 to 8 that `--help` "
+                                 "rates the case against medium; an item of none of the kinds 1 to 9 that `--help` "
                                  "lists under `--not-asked` settles without the user only when its case against is "
                                  "rated none, or weak with a case against that names only cost, or only that the change "
                                  "alters text the user approved word for word on an earlier date"))
@@ -4619,7 +4621,7 @@ def test_an_item_of_no_kind_is_refused_when_rated_above_weak_or_rated_none_and_t
 
 WEAK_COST_ONLY = "weak: the option costs a few lines of code."
 WEAK_COST_ONLY_SETTLED = "item 1 of 3 is recorded as settled without asking the user, case against weak, cost only;"
-PERMISSIONS_JUDGEMENT = ("item 1 of 3 is of none of the kinds 1 to 8 that `--help` lists under `--not-asked` and "
+PERMISSIONS_JUDGEMENT = ("item 1 of 3 is of none of the kinds 1 to 9 that `--help` lists under `--not-asked` and "
                          "its case against is rated weak: if its change "
                          "widens an agent's permissions, as a settings change can, or turns off a guard, do not run "
                          "close: present item 1 of 3 to the user.")
@@ -4670,7 +4672,7 @@ def test_an_item_of_no_kind_rated_weak_settles_when_it_touches_guarded_code_but_
               result.returncode == 1
               and "cannot be settled without asking the user as case against weak, cost only, because:" in result.stderr
               and f"`#not_asked_touches` names {path}, a Markdown file the instruction-file guard protects; this item "
-                  "is of none of the kinds 1 to 8 that `--help` lists under `--not-asked` and rated weak, and it "
+                  "is of none of the kinds 1 to 9 that `--help` lists under `--not-asked` and rated weak, and it "
                   "changes such a file, so it is shown to the user."
                   in result.stderr
               and "which the instruction-file guard protects;" not in result.stderr
@@ -4922,13 +4924,13 @@ def test_walk_minutes_written_before_the_ground_was_named_are_still_read():
 
 
 def test_a_not_asked_value_other_than_a_kind_or_a_no_kind_value_is_refused_as_usage():
-    for value in ("9", "0", "weak", "adds"):
+    for value in ("10", "0", "weak", "adds"):
         case = rated_none_case()
         result = case.run("check", "--not-asked", value)
         check(f"`--not-asked {value}` is refused as usage, writing nothing",
               result.returncode == 2
-              and f"`{value}` is not a kind: give 1, 2, 3, 4, 5, 6, 7, 8, or, for an item of no kind, adds-nothing, "
-                  "none, weak-cost-only, weak-alters-earlier-approved-text-only or "
+              and f"`{value}` is not a kind: give 1, 2, 3, 4, 5, 6, 7, 8, 9, or, for an item of no kind, "
+                  "adds-nothing, none, weak-cost-only, weak-alters-earlier-approved-text-only or "
                   "proposed-check-dropped-search-found-no-case" in result.stderr
               and case.minutes.read_text().rstrip().endswith("#next_to_present item 1 of 3"), described(result))
 
@@ -5225,6 +5227,53 @@ def test_kind_7_reads_each_touched_path_from_the_checkout_top_whatever_its_spell
     check("kind 7 settles a tracked system glossary spelled with `./` and as an absolute path in the checkout",
           result.returncode == 0 and "settled without asking the user, not asked, kind 7 " in case.minutes.read_text(),
           described(result))
+
+
+PROJECT_GLOSSARY = "docs/nedsnodes-wiki/nedsnodes-glossary.md"
+
+
+def kind_9_case(touches, evidence="", files=None):
+    """Item 4 of the fixture made a kind 9 item: its rename line replaced by the evidence given, touching the files
+    named; the fixture's project glossary lists the term `poem-index`."""
+    files = {PROJECT_GLOSSARY: "- **poem-index** — the page that lists every poem.\n", **(files or {})}
+    return kind_6_case(evidence, files, touches)
+
+
+def test_a_format_only_fix_of_project_glossary_entries_settles_as_kind_9_and_close_records_it():
+    for touches, evidence, files in (
+            (PROJECT_GLOSSARY, "", None),
+            (f"./{PROJECT_GLOSSARY}", "", None),
+            (f"{PROJECT_GLOSSARY} docs/poems/index.md", RENAME_LINE, None)):
+        case = kind_9_case(touches, evidence, files)
+        result = case.run("check", "--not-asked", "9")
+        check(f"kind 9 settles an item touching {touches!r} with evidence {evidence!r}",
+              result.returncode == 0 and "settled without asking the user, not asked, kind 9 " in case.minutes.read_text()
+              and "means exactly what it meant before" in result.stdout, described(result))
+    closed = case.run("close")
+    check("close records a settled kind 9 item as accepted",
+          closed.returncode == 0 and "\nitem 4 of 7: not asked, kind 9; every text the change adds has had a fast read. "
+                                     "<accepted>\n" in case.minutes.read_text(), described(closed))
+
+
+def test_kind_9_is_refused_unless_it_fixes_the_project_glossary_and_updates_every_use_of_a_respelled_term():
+    check("kind 9 is refused when the item lists no file it touches",
+          *refused(kind_9_case(""), 9, "it has no `#not_asked_touches` line"))
+    check("kind 9 is refused when it does not touch the project glossary",
+          *refused(kind_9_case("docs/poems-glossary.md"), 9,
+                   f"`#not_asked_touches` does not name the project glossary {PROJECT_GLOSSARY}"))
+    check("kind 9 is refused when it touches another file with no rename line",
+          *refused(kind_9_case(f"{PROJECT_GLOSSARY} docs/poems/index.md"), 9,
+                   "`#not_asked_touches` names docs/poems/index.md, which is not the project glossary, and the item "
+                   "has no `#not_asked_rename` line"))
+    check("kind 9 is refused when an untouched file keeps a respelled term's old spelling",
+          *refused(kind_9_case(PROJECT_GLOSSARY, RENAME_LINE, {"docs/about.md": "See poem-list.\n"}), 9,
+                   "`poem-list`, named on its `#not_asked_rename` line, is still named in docs/about.md"))
+    check("kind 9 is refused when a respelled term's new spelling is no glossary entry's term",
+          *refused(kind_9_case(PROJECT_GLOSSARY, "#not_asked_rename poem-list poem-page"), 9,
+                   "the new name `poem-page` is the term of no entry"))
+    check("kind 9 is refused when its case against is rated above weak",
+          *refused(kind_9_case(PROJECT_GLOSSARY, "#case_against medium: misread meaning."), 9,
+                   "rates the case against medium"))
 
 
 def walk_document_spelling_touches(case, placeholder, replacement):
@@ -6090,7 +6139,7 @@ def no_answer_rows_printed(result):
 
 def test_help_prints_every_row_of_the_no_answer_table():
     usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True).stdout
-    for value in (1, 2, 3, 4, 5, 6, 7, "none", "weak-cost-only", "weak-alters-earlier-approved-text-only",
+    for value in (1, 2, 3, 4, 5, 6, 7, 8, 9, "none", "weak-cost-only", "weak-alters-earlier-approved-text-only",
                   "proposed-check-dropped-search-found-no-case"):
         check(f"--help lists the no-answer table's row --not-asked {value}",
               f"\n  --not-asked {value}: " in usage, usage[-3000:])

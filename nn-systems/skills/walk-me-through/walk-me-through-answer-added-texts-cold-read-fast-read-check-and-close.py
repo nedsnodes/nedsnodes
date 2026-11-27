@@ -785,6 +785,29 @@ def system_glossary_problems(found):
     return not_system_glossary_problems(found.touched, found.top, found.item)
 
 
+def project_glossary_format_problems(found):
+    """Return why an item cannot settle as a format-only fix of project glossary entries: it must touch the project
+    glossary; a file other than it may be touched only to update the uses of a term whose spelling a rename line
+    changes; and each rename meets kind 4's check."""
+    project_glossary = load_module("system_glossaries_listed_on_the_project_glossary_test",
+                                   SYSTEM_GLOSSARIES_LISTED_FILE).PROJECT_GLOSSARY_RELATIVE_PATH
+    root = Path(found.top).resolve()
+    relative = {}
+    for path in found.touched:
+        try:
+            relative[path] = (root / path).resolve().relative_to(root).as_posix()
+        except ValueError:
+            relative[path] = None
+    problems = []
+    if project_glossary not in relative.values():
+        problems.append(NOT_ASKED_PROJECT_GLOSSARY_NOT_TOUCHED_PROBLEM.format(touches=TOUCHES,
+                                                                          project_glossary=project_glossary))
+    if not found.found[RENAME]:
+        problems += [NOT_ASKED_GLOSSARY_FORMAT_OTHER_FILE_PROBLEM.format(touches=TOUCHES, path=path, marker=RENAME)
+                     for path, posix in relative.items() if posix != project_glossary]
+    return problems + rename_problems(found)
+
+
 def dropped_proposal_search_problems(found):
     """Return why an item that drops a proposed check cannot settle on its `#not_asked_search` line: the line must
     be the SEARCH_LINE fields, with a window of at least SEARCH_WINDOW_DAYS ending yesterday or today and a count
@@ -871,6 +894,14 @@ NO_ANSWER_CASES = (
                  "or what the code does",
                  NOT_ASKED_ANY_RATING, (TOUCHES,), (rating_and_needed_lines_problems, touched_files_exist_problems),
                  "touches; every touched file exists", None, NOT_ASKED_FLAG),
+    NoAnswerCase(9, "kind 9", "a project glossary entry changed only to meet the format the glossary states for its "
+                 "entries, with its meaning unchanged and every use of a changed term updated",
+                 NOT_ASKED_ANY_RATING, (TOUCHES,),
+                 (rating_and_needed_lines_problems, touched_files_exist_problems, project_glossary_format_problems),
+                 "touches, naming the project glossary; for each term whose spelling changes, a rename line whose new "
+                 "spelling is a glossary entry's term and whose old spelling is in no file outside the touched ones "
+                 "and docs/walk/; with no rename line, the project glossary is the only touched file", None,
+                 NOT_ASKED_FLAG),
     NoAnswerCase(NOT_ASKED_ADDS_NOTHING, NOT_ASKED_ADDS_NOTHING_LABEL,
                  "an item whose recommendation adds and changes nothing, such as leaving out a definition, a check or "
                  "a step that its alternative would add, whatever its case against is rated",
@@ -1448,6 +1479,12 @@ NOT_ASKED_NOT_SYSTEM_GLOSSARY_PROBLEM = (
     "- `{touches}` names {path}, which is not a system glossary, a " + GLOSSARY_FILES + " file git tracks in the "
     "checkout {top} other than the project glossary {project_glossary}; kind 7 changes only entries of system "
     "glossaries.")
+NOT_ASKED_PROJECT_GLOSSARY_NOT_TOUCHED_PROBLEM = (
+    "- `{touches}` does not name the project glossary {project_glossary}; kind 9 changes entries of the project "
+    "glossary.")
+NOT_ASKED_GLOSSARY_FORMAT_OTHER_FILE_PROBLEM = (
+    "- `{touches}` names {path}, which is not the project glossary, and the item has no `{marker}` line; kind 9 "
+    "touches another file only to update the uses of a term whose spelling a `{marker}` line changes.")
 NOT_ASKED_TERM_NOT_IN_GLOSSARY_PROBLEM = ("- the term `{term}` is the term of no entry, a line opening `- **{term}**` "
                                           "or `- **{term} (aka ...)**`, in a glossary file ({pattern}) in the "
                                           "checkout.")
@@ -1500,6 +1537,11 @@ NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE = (
     "the problem that check guards against would have left a trace in the places its `#not_asked_search` line names. "
     "If {item} drops no such proposal, or the problem would leave no trace there, as for code too new to have run, do "
     "not run close: present {item} to the user.")
+# Code cannot tell a format change from a change of meaning, so kind 9 leaves that to the agent and the advisor.
+NOT_ASKED_GLOSSARY_FORMAT_JUDGEMENT_LINE = (
+    "Judge also, with the advisor, whether each entry {item} changes means exactly what it meant before, only now in "
+    "the format the project glossary's opening paragraphs state for its entries. If any meaning changed, do not run "
+    "close: present {item} to the user.")
 NOT_ASKED_WEAK_JUDGEMENT_LINE = (
     "{item} is of " + NOT_ASKED_KINDS_NAMED + " and its case against is rated weak: if its change "
     "widens an agent's permissions, as a settings change can, or turns off a guard, do not run close: present {item} to the user.")
@@ -2928,6 +2970,8 @@ def check(arguments):
             output.append(NOT_ASKED_WEAK_JUDGEMENT_LINE.format(item=item))
         if arguments.not_asked == DROPPED_PROPOSAL_VALUE:
             output.append(NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE.format(item=item))
+        if arguments.not_asked == 9:
+            output.append(NOT_ASKED_GLOSSARY_FORMAT_JUDGEMENT_LINE.format(item=item))
     output.append(CHECK_CLOSE_LINE.format(command=step_command_with_cwd(top, "close")))
     log = arguments.counts_log or (log_store_records.parent / COUNTS_LOG_FILE_NAME if log_store_records else None)
     try:
