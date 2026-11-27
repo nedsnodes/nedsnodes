@@ -4,6 +4,12 @@ issue: "[The walk-me-through waiting-item read step offers the handoff row again
 
 # The walk-me-through waiting-item read step offers the handoff row again after an unclosed `check --already-decided`, so a rerun records the answer twice
 
+## Outcome
+
+Done, before this GHI-MD merged. PR [Walk check --already-decided records a disapproval, and no item is settled twice](https://github.com/nedsnodes/nedsnodes/pull/4961) merged to main at 2026-11-26T09:34:04Z as merge commit `31eef15b4`; its commit `9763b0210` removed `settling_left_unclosed`, so the function and the line numbers this file names below no longer describe main. In its place, `unclosed_last_answer` in `nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py` returns the walk-minutes' last answer line whenever no close line follows it, whatever the answer's form and whichever item it names. `no_answer_rows_for_waiting_item_lines` offers no row while it returns one, and `check` refuses every `--not-asked`, `--already-decided` and `--now-over-later-already-decided` then, which covers both places the next action below names.
+
+On main at `60ad213e5` the reproduction below prints `NOT REPRODUCED (handoff row offered again: False; answer lines for item 1: 1)`; with the program put back to its version at `9802b30ef` it prints `DEFECT REPRODUCED (handoff row offered again: True; answer lines for item 1: 2)`. The tests are already in the suite `nn-systems/skills/walk-me-through/tests/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close-test.py`: `test_the_read_step_presents_an_item_rated_none_that_is_shown_all_the_same` checks that the read step offers no no-answer row after an unclosed `check --already-decided`, and `test_check_refuses_a_second_settling_of_an_item_whose_settling_has_no_close_and_takes_his_own_answer` checks that a second settling is refused, writing nothing. With the read-step guard removed from `no_answer_rows_for_waiting_item_lines`, the first of these and four other cases fail. An unclosed `--moved-on` answer also blocks every settling, but a second `--moved-on` is not refused, since `--moved-on` is not one of `SETTLING_FLAGS`; that is outside this defect. The GHI is closed as completed.
+
 ## Reproduction
 
 Run this from the repository root on main at 9802b30ef. It builds its walk in the test suite's own temporary directory and removes it afterwards; it touches no real walk-minutes and no log-store.
