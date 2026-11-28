@@ -2362,8 +2362,15 @@ def _inside_text(root, byte, text_node_types):
     return False
 
 
-if __name__ == "__main__" and sys.argv[1:] == [NEW_PROCESS_READ_FLAG]:
-    _read_command_on_standard_input()
-if __name__ == "__main__" and sys.argv[1:] == [
-        NEW_PROCESS_READ_ONE_REQUEST_PER_LINE_UNTIL_INPUT_CLOSES_FLAG]:
-    _read_one_request_per_line_until_input_closes()
+if __name__ == "__main__":
+    arguments = sys.argv[1:]
+    if arguments == [NEW_PROCESS_READ_FLAG]:
+        _read_command_on_standard_input()
+    elif arguments == [NEW_PROCESS_READ_ONE_REQUEST_PER_LINE_UNTIL_INPUT_CLOSES_FLAG]:
+        _read_one_request_per_line_until_input_closes()
+    else:
+        help_requested = arguments in (["-h"], ["--help"])
+        print(f"usage: {Path(__file__).name} {NEW_PROCESS_READ_FLAG} | "
+              f"{NEW_PROCESS_READ_ONE_REQUEST_PER_LINE_UNTIL_INPUT_CLOSES_FLAG}",
+              file=sys.stdout if help_requested else sys.stderr)
+        sys.exit(0 if help_requested else 2)
