@@ -147,6 +147,21 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     check("an on-demand snapshot tagged hourly does count", result.stdout.strip() == "",
           result.stdout)
 
+    for metadata in ("{", '{"created":"yesterday","tags":"hourly"}', None):
+        for newer in (True, False):
+            _, snapshots = build_layout(root, log_age_seconds=300, snapshot_age_seconds=1800)
+            entry = snapshots / ("2026-08-15_12-00-01" if newer else "2026-08-13_12-00-01")
+            entry.mkdir()
+            metadata_path = entry / "info.json"
+            metadata_path.write_text(metadata or "{}", encoding="utf-8")
+            if metadata is None:
+                metadata_path.chmod(0)
+            for status_line in (True, False):
+                result = run_check(root, mounted=True, status_line=status_line)
+                check(f"unreadable metadata {metadata!r}, newer={newer}, status_line={status_line}",
+                      result.returncode == (2 if newer else 0)
+                      and (entry.name in result.stdout) == newer, result.stdout)
+
     # Nothing has ever run here.
     build_layout(root, log_age_seconds=None, snapshot_age_seconds=None)
     result = run_check(root, mounted=True)
