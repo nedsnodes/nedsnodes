@@ -738,7 +738,7 @@ def read_walk(cwd):
     spans = walk_finder.item_unit_spans(text, parser)
     chosen, shown_texts, shown_text_problem, no_decision_numbers = {}, {}, None, set()
     try:
-        _, chosen = walk_finder.waiting_item_unit_chosen_for_each_item_number(document, value, numbers, total, parser,
+        _, chosen = walk_finder.approval_walk_waiting_item_number_to_its_chosen_heading(document, value, numbers, total, parser,
                                                                               spans)
         for number in numbers:
             shown_texts[number] = walk_finder.approval_walk_item_text_as_shown_to_user(text, parser, spans,
@@ -761,7 +761,7 @@ def read_walk(cwd):
 
 def item_numbers_each_unit_states(spans, chosen):
     """For each of spans, the item numbers whose text it holds: those no other unit names, and a waiting item's number
-    in the unit chosen for it, chosen being waiting_item_unit_chosen_for_each_item_number's {number: unit}. A number
+    in the unit chosen for it, chosen being approval_walk_waiting_item_number_to_its_chosen_heading's {number: unit}. A number
     two units name is in the list of the unit chosen for it, or, when none was chosen, in neither list."""
     naming = collections.Counter(number for unit in spans for number in unit[0])
     return [[number for number in unit[0]
@@ -779,9 +779,9 @@ def heading_points(lines, spans, parser):
     return points
 
 
-def waiting_item_heading_points(lines, chosen, parser):
+def approval_walk_waiting_item_number_to_its_chosen_heading_point_text(lines, chosen, parser):
     """{waiting item number: the point the heading chosen for it states}, chosen being
-    waiting_item_unit_chosen_for_each_item_number's {number: unit}, so a later heading that also names the item
+    approval_walk_waiting_item_number_to_its_chosen_heading's {number: unit}, so a later heading that also names the item
     does not give it its own point."""
     points = {}
     for number, unit in chosen.items():

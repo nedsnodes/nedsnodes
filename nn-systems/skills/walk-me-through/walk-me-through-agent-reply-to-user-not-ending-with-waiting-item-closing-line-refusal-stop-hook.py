@@ -457,7 +457,7 @@ def output_for(payload, environment):
         return block(UNUSABLE_OPENING_TEMPLATE, UNUSABLE_INSTRUCTIONS, problem=(
             f"its minutes' last `#next_to_present` line, `{value}`, {problem}."))
     try:
-        total, chosen = walk_finder.waiting_item_unit_chosen_for_each_item_number(document, value, numbers, total,
+        total, chosen = walk_finder.approval_walk_waiting_item_number_to_its_chosen_heading(document, value, numbers, total,
                                                                                   parser)
     except walk_finder.UnusableRange as problem:
         return block(UNUSABLE_OPENING_TEMPLATE, UNUSABLE_INSTRUCTIONS, problem=str(problem))
@@ -468,7 +468,7 @@ def output_for(payload, environment):
         ANSWER_HOOK_FILE)
     letters = answer_hook.ANSWER_LETTERS_TEXT
     document_text = document.read_text(encoding="utf-8")
-    points = answer_hook.waiting_item_heading_points(document_text.split("\n"), chosen, parser)
+    points = answer_hook.approval_walk_waiting_item_number_to_its_chosen_heading_point_text(document_text.split("\n"), chosen, parser)
     no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
         document_text, parser, chosen, numbers)
 

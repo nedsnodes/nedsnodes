@@ -513,7 +513,7 @@ def approval_walk_sub_step_no_decision_closing_line_page_link_or_none(line):
 def approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
         text, parser, chosen, numbers, all_units=None):
     """The set of numbers that are sub-steps asking for no decision, as the module docstring's CLOSING LINES says, of
-    the walk-document text; chosen is waiting_item_unit_chosen_for_each_item_number's {number: unit} for numbers, and
+    the walk-document text; chosen is approval_walk_waiting_item_number_to_its_chosen_heading's {number: unit} for numbers, and
     all_units item_unit_spans' units of text when the caller has them already."""
     sub_steps = [number for number in numbers if "." in number]
     if not sub_steps:
@@ -958,15 +958,15 @@ def approval_walk_next_unnumbered_item_number(units):
 
 def waiting_item_units(document, value, numbers, total, parser, all_units=None):
     """Return (M to show, the units of item_unit_spans that hold the waiting items), the units in walk-document
-    order, as waiting_item_unit_chosen_for_each_item_number chooses them."""
-    shown_total, chosen = waiting_item_unit_chosen_for_each_item_number(document, value, numbers, total, parser,
+    order, as approval_walk_waiting_item_number_to_its_chosen_heading chooses them."""
+    shown_total, chosen = approval_walk_waiting_item_number_to_its_chosen_heading(document, value, numbers, total, parser,
                                                                         all_units)
     if all_units is None:
         all_units = item_unit_spans(document.read_text(encoding="utf-8"), parser)
     return shown_total, [unit for unit in all_units if unit in chosen.values()]
 
 
-def waiting_item_unit_chosen_for_each_item_number(document, value, numbers, total, parser, all_units=None):
+def approval_walk_waiting_item_number_to_its_chosen_heading(document, value, numbers, total, parser, all_units=None):
     """Return (M to show, {waiting item number: the unit of item_unit_spans chosen for it}) for the item numbers and
     total that parse_items read from the `#next_to_present` value, total None when it gives none. A unit that
     names several items can be chosen for one of them and not another, as when `## Item 2 of 8: keep it` is chosen
