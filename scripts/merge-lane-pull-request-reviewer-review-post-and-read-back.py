@@ -121,8 +121,8 @@ no verdict, posted as COMMENT with the body as written, for the review
 scripts/merge-gate.sh asks for when the pull request has activity after
 reviewed-since: one saying what merge-lane-2 read. The program asks the gate's
 own check, merge-gate.sh --print-new-activity-count-after-reviewed-since-bound,
-how much was posted or edited after the latest time the gate accepts as
-reviewed-since, and refuses the file when the answer is nothing, since a verdict
+how much was posted or edited after reviewed-since, which the gate works out
+itself, and refuses the file when the answer is nothing, since a verdict
 review is then what is due.
 
 GitHub refuses a whole review when one inline comment is on a line outside the
@@ -920,8 +920,8 @@ def reason_of(error):
 
 
 def new_activity_count_after_reviewed_since_bound(number):
-    """What scripts/merge-gate.sh counts as posted or edited on the pull request after the latest
-    reviewed-since it accepts, or raise GhFailed naming why the gate could not count it."""
+    """What scripts/merge-gate.sh counts as posted or edited on the pull request after
+    reviewed-since, or raise GhFailed naming why the gate could not count it."""
     completed = subprocess.run(["bash", str(MERGE_GATE), NEW_ACTIVITY_COUNT_OPTION, str(number)],
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if completed.returncode != 0 or not completed.stdout.strip().isdigit():

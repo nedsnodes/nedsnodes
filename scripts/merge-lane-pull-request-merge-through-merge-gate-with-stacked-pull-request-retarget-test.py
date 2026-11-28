@@ -71,7 +71,6 @@ _spec.loader.exec_module(program)
 
 PULL_REQUEST = "10"
 HEAD = "a" * 40
-SINCE = "2026-10-09T21:00:00Z"
 BRANCH = "topic-of-pull-request-10"
 TOKEN = "merge-lane-merge-test-token-not-a-credential"
 EXPECTED_MERGE = ["pr", "merge", PULL_REQUEST, "--repo", "nedsnodes/nedsnodes", "--merge",
@@ -302,7 +301,7 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
              origin_files=None, before_the_program_runs=None,
              merge_commit_new_to_the_clone=False,
              another_fetch_races_the_after_merge_fetch=False,
-             go_ahead_answer=GO_AHEAD_COUNT_ONLY):
+             go_ahead_answer=GO_AHEAD_COUNT_ONLY, extra_arguments=()):
     """Run main() once; return (exit code, output, gh calls, gate calls, waits).
 
     Each "MERGE_COMMIT" in routes becomes origin's commit, and each "ORIGIN"
@@ -456,7 +455,7 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
         before_the_program_runs(directory)
     try:
         with contextlib.redirect_stdout(output):
-            exit_code = program.main([PULL_REQUEST, HEAD, SINCE, "--review-tools-worktree-at-main",
+            exit_code = program.main([PULL_REQUEST, HEAD, *extra_arguments, "--review-tools-worktree-at-main",
                                       str(review_tools), "--merge-lane-review-worktrees-directory",
                                       str(review_worktrees),
                                       "--merge-lane-worktrees-and-outputs-directory",
@@ -2359,7 +2358,7 @@ def main():
         check("the merge runs exactly the command the gate printed",
               merge is not None and calls[merge] == EXPECTED_MERGE, json.dumps(calls))
         check("the gate that runs is --review-tools-worktree-at-main's, not the one beside the program",
-              gate_calls == [f"{PULL_REQUEST} {HEAD} {SINCE}"], repr(gate_calls))
+              gate_calls == [f"{PULL_REQUEST} {HEAD}"], repr(gate_calls))
         check("every gh call carries the merge account's token, read from the gate's own file",
               gh_calls and all(call["gh_token"] == TOKEN for call in gh_calls),
               json.dumps(gh_calls))
@@ -2544,6 +2543,21 @@ def main():
               and (review_worktrees / "pr10-merged").is_dir(), f"exit {exit_code}\n{output}")
 
         exit_code, output, gh_calls, gate_calls, _ = run_case(
+            scratch, "reviewed-since-time-given", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+            extra_arguments=["2026-10-09T21:00:00Z"])
+        check("a third argument, the reviewed-since time the gate once took, exits 2 before the gate "
+              "or gh runs, giving the form to use",
+              exit_code == 2 and gate_calls == [] and gh_calls == []
+              and output == "STOP: not merged: this program takes two arguments, the pull request number "
+                            "and the nn-head-commit, and was also given 2026-10-09T21:00:00Z.\n"
+                            "If that is a reviewed-since time, leave it out: merge-gate.sh works "
+                            "reviewed-since out from the pull request's reviews.\n"
+                            "Run it as: scripts/merge-lane-pull-request-merge-through-merge-gate-with-"
+                            "stacked-pull-request-retarget.py <pull request number> <the nn-head-commit, "
+                            "all 40 characters>\n",
+              f"exit {exit_code}\n{output}")
+
+        exit_code, output, gh_calls, gate_calls, _ = run_case(
             scratch, "no-token", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
             token=None)
         check("an unreadable token file exits 2 before the gate or gh runs, quoting the "
@@ -2574,7 +2588,7 @@ def main():
               and git_output(review_tools, "symbolic-ref", "-q", "HEAD", check=False) == ""
               and (review_tools / "new-on-main.txt").is_file()
               and (review_tools / "scripts" / "merge-gate.sh").is_file()
-              and gate_calls == [f"{PULL_REQUEST} {HEAD} {SINCE}"]
+              and gate_calls == [f"{PULL_REQUEST} {HEAD}"]
               and index_of(argvs(gh_calls), ["pr", "merge"]) is not None
               and printed_in_order(output,
                                    f"checked out origin/main in {review_tools}, which was at ",

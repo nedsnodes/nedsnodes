@@ -66,10 +66,9 @@ branch is passed over until that pull request merges; any other base branch gets
 line. A HELD line is appended only while the line that was checked is still the pull
 request's last line; otherwise the pull request is read again at once, from the line a lane
 appended meanwhile. A pull request passed over as stacked is tried again after the next merge in the same
-pass. Otherwise it runs the merge program, with reviewed-since the merge account's latest
-review of the queued nn-head-commit, or the queued time when there is none, since that
-review is the record that its author read everything posted before it, and with this
-program's --merge-program-outputs-directory as its outputs directory.
+pass. Otherwise it runs the merge program, with this program's
+--merge-program-outputs-directory as its outputs directory. The time in an approved line is
+a record only: the merge gate works out reviewed-since itself.
 
 Before each merge, one function decides whether it may start. It stops the merge batch
 when the stop file, merge-queue-stopped.txt in the merge program's outputs directory,
@@ -136,7 +135,6 @@ review_plan = importlib.util.module_from_spec(_review_plan_spec)
 _review_plan_spec.loader.exec_module(review_plan)
 
 REPOSITORY = "nedsnodes/nedsnodes"
-MERGE_ACCOUNT = "ned-review-merge"
 DEFAULT_MERGE_QUEUE_FILE = Path(
     "/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-queue-2026-11-21.txt")
 DEFAULT_MERGE_BATCHES_DIRECTORY = Path(
@@ -306,14 +304,6 @@ class MergeQueuePullRequestMergeBatchRunner:
     def pull_request(self, number):
         return self.gh_json("pr", "view", str(number), "--repo", REPOSITORY, "--json",
                             "state,headRefOid,baseRefName,mergeCommit")
-
-    def reviewed_since(self, number, head, queued_since):
-        reviews = self.gh_json("api", f"repos/{REPOSITORY}/pulls/{number}/reviews",
-                               "--paginate", "--slurp")
-        times = [review.get("submitted_at") for page in reviews for review in page
-                 if (review.get("user") or {}).get("login") == MERGE_ACCOUNT
-                 and review.get("commit_id") == head and review.get("submitted_at")]
-        return max(times) if times else queued_since
 
     def open_pull_requests_with_branch(self, branch):
         return self.gh_json("pr", "list", "--repo", REPOSITORY, "--head", branch,
@@ -628,8 +618,7 @@ class MergeQueuePullRequestMergeBatchRunner:
             return self.held(number, author, f"base branch {base} is not main and is not the "
                                              f"branch of exactly one open pull request",
                              line.string)
-        return self.merged(number, head, author,
-                           self.reviewed_since(number, head, line["since"]), line.string)
+        return self.merged(number, head, author, line.string)
 
     def held(self, number, author, why, checked_line):
         held_line = f"HELD {number} {why}"
@@ -644,16 +633,16 @@ class MergeQueuePullRequestMergeBatchRunner:
                     f"its lane appends a new approved line for it.\n")
         return True
 
-    def merged(self, number, head, author, reviewed_since, checked_line):
+    def merged(self, number, head, author, checked_line):
         output_file = self.directory / f"merge-{number}.out"
         self.in_progress_file.write_text(f"pull request {number}, started {now()}\n")
-        self.log(f"merging pull request {number} at {head} with reviewed-since {reviewed_since}")
+        self.log(f"merging pull request {number} at {head}")
         with open(output_file, "w") as output:
             # The outputs directory is passed on, so the merge program locks and writes the
             # stop file in the directory this program reads them from.
             exit_code = subprocess.run(
                 [sys.executable, str(self.arguments.merge_program), str(number), head,
-                 reviewed_since, "--merge-lane-worktrees-and-outputs-directory",
+                 "--merge-lane-worktrees-and-outputs-directory",
                  str(self.arguments.merge_program_outputs_directory)],
                 stdout=output, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, cwd=self.arguments.merge_program.parent.parent).returncode

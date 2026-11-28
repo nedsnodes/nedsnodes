@@ -55,8 +55,7 @@ different place in one file, nothing checks the file main ends up with.
 A passing pull request is approved as ned-review-merge, pinned to the
 nn-head-commit that was read, and merged by running
 merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py
-from the checkout this program is in, with the approval's time as the
-reviewed-since time. That merge program runs scripts/merge-gate.sh from this
+from the checkout this program is in. That merge program runs scripts/merge-gate.sh from this
 program's own review tools worktree, by default
 ~/.cache/merge-lane-review-worktrees/merge-lane-ghi-md-edit-pull-requests-check-approve-and-merge-review-tools-worktree-at-main, which is
 made when missing and moved to origin/main before each merge, so no review
@@ -509,17 +508,16 @@ class Invocation:
         section_is_new = PROVISIONAL_HEADING not in base_text.split("\n")
         review_tools_worktree_move_to_main(self.arguments.review_tools_worktree_at_main)
         try:
-            review = gh_json(self.environment, "api", "--method", "POST",
-                             f"repos/{REPOSITORY}/pulls/{number}/reviews",
-                             "-f", f"commit_id={head}", "-f", "event=APPROVE",
-                             "-f", f"body={approval_body(path, section_is_new)}")
-            reviewed_since = review["submitted_at"]
-        except (Stopped, KeyError, TypeError) as error:
+            gh_json(self.environment, "api", "--method", "POST",
+                    f"repos/{REPOSITORY}/pulls/{number}/reviews",
+                    "-f", f"commit_id={head}", "-f", "event=APPROVE",
+                    "-f", f"body={approval_body(path, section_is_new)}")
+        except Stopped as error:
             self.failed = True
             self.report(pull_request, f"its approval failed: {error}")
             return
         merge = subprocess.run(
-            [sys.executable, str(MERGE_PROGRAM), str(number), head, reviewed_since,
+            [sys.executable, str(MERGE_PROGRAM), str(number), head,
              *common.directory_options_argv(self.arguments)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             stdin=subprocess.DEVNULL, cwd=CHECKOUT)
