@@ -190,11 +190,13 @@ CHECK finds the texts the answer adds: the item's lines whose first word,
 after any list or quotation marker and a part's opening `Part N.`, outside
 fenced code, is a mark the answer adds;
 the text is the rest of the line, without one pair of surrounding quotation
-marks. Before it reads them, CHECK refuses, writing nothing, for every answer but
---deferred, --moved-on-no-decision and --moved-on, which add no text, when
-any `#new` or `#new_if_d` line of the item has no text after its mark,
-is inside fenced or indented code, has text cut from its own line as an HTML
-comment, even one inside a code span, or opens a paragraph that runs onto the
+marks, or, for a mark with nothing after it, the fenced block after the blank
+lines below it, fences and line breaks kept. Before it reads them, CHECK
+refuses, writing nothing, for every answer but --deferred,
+--moved-on-no-decision and --moved-on, which add no text, when any `#new` or
+`#new_if_d` line of the item has no text after its mark and no fenced block
+below it, is inside fenced or indented code, has text cut from its own line as
+an HTML comment, even one inside a code span, or opens a paragraph that runs onto the
 lines right below it, since those texts would miss their fast read; the
 refusal lists each such mark by its line number, gives the text joined into
 one line where it can find it, from the run-on lines, from the rest of the
@@ -1380,10 +1382,11 @@ UNREADABLE_NEW_MARKS = (
     "For a mark whose line holds `<!--`: move any HTML comment on that line to a line of its own, and if the "
     "mark's text holds `<!--`, write it there in words, as in `an HTML comment opening`.\n"
     "For a mark with no text after it: if a text was meant, write it after the mark, on the mark's line, and "
-    "delete any lines below that held it; if none was meant, delete the mark.\n"
+    "delete any lines below that held it, or, for a text whose line breaks matter, such as pseudocode, put it in "
+    "a fenced block right below the mark; if none was meant, delete the mark.\n"
     "Then run `{command}` again.\n"
     "From now on, write every `#new` or `#new_if_d` text on one line, after its mark, outside fenced or indented "
-    "code.")
+    "code, or as one fenced block right below a mark that has nothing after it.")
 UNREADABLE_BARE = "- line {line}: `{mark}` has no text after it on its line."
 UNREADABLE_FENCED = "- line {line}: `{mark}` is inside fenced or indented code, where no mark's text is read."
 UNREADABLE_RUN_ON = "- line {line}: the text of `{mark}` runs onto {below} right below it, where it is not read."
@@ -2152,12 +2155,13 @@ def approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value,
 def proposed_texts(marks_found, marks):
     """Return (mark, text) for each mark of new_marks' list that is one of marks, outside code and with a text,
     in the document's order. The text is every line new_marks gives the mark, so it is the text that
-    unreadable_new_marks judged."""
+    unreadable_new_marks judged; a fenced block keeps its lines, since its line breaks and indents are its
+    meaning."""
     texts = []
     for mark in marks_found:
         if mark.mark not in marks or mark.in_code:
             continue
-        text = unquoted(lines_joined(mark.text_lines))
+        text = "\n".join(mark.text_lines) if mark.fenced else unquoted(lines_joined(mark.text_lines))
         if text:
             texts.append((mark.mark, text))
     return texts
@@ -2207,11 +2211,22 @@ def block_right_below(lines, first, end):
     return []
 
 
-NewMark = collections.namedtuple("NewMark", "mark number in_code comment_cut text_lines below")
+NewMark = collections.namedtuple("NewMark", "mark number in_code comment_cut text_lines below fenced",
+                                 defaults=(False,))
 NewMark.__doc__ = """One `#new` or `#new_if_d` mark: mark, its 0-based line number, whether it is inside fenced or
 indented code, whether text was cut from its line as an HTML comment, text_lines, the mark's own text as written followed by every line its text runs onto, and below,
 for a mark in code or with no text, the lines it may have meant; lines below the mark's own line lose their
-quotation markers."""
+quotation markers. fenced is true for a mark with no text on its line whose text is the fenced block after the
+blank lines below it; its text_lines are then that block's lines, fences included, as written."""
+
+
+def fenced_block_below(lines, first, end, fences):
+    """Return the lines, fences included, of the fenced block that starts after the blank lines from first and
+    ends by end, else None; fences maps each fenced block's first line to the line after its last."""
+    while first < end and not lines[first].strip():
+        first += 1
+    stop = fences.get(first)
+    return None if stop is None or stop > end else lines[first:stop]
 
 
 def new_marks(text, tokens, ranges, shown):
@@ -2224,12 +2239,14 @@ def new_marks(text, tokens, ranges, shown):
     short-answer hook reads it, so a mark with only the label has no text on its line."""
     new_text_label = load_module("walk_me_through_user_short_answer_hook", SHORT_ANSWER_HOOK_FILE).NEW_TEXT_LABEL
     lines = text.split("\n")
-    code, paragraphs = {}, []
+    code, paragraphs, fences = {}, [], {}
     for token in tokens:
         if token.map is None:
             continue
         if token.type in ("fence", "code_block"):
             code.update((number, token.map[1]) for number in range(*token.map))
+            if token.type == "fence":
+                fences[token.map[0]] = token.map[1]
         elif token.type == "paragraph_open":
             paragraphs.append(token.map)
         elif token.type == "heading_open" and token.markup in ("=", "-"):
@@ -2249,6 +2266,10 @@ def new_marks(text, tokens, ranges, shown):
             comment_cut = shown[number] != lines[number]
             own_text = new_text_label.sub("", match[2])
             if not unquoted(own_text):
+                fenced = None if comment_cut else fenced_block_below(lines, number + 1, end, fences)
+                if fenced:
+                    marks.append(NewMark(match[1], number, False, False, fenced, [], True))
+                    continue
                 marks.append(NewMark(match[1], number, False, comment_cut, [own_text],
                                      block_right_below(lines, number + 1, end)))
                 continue
@@ -2269,6 +2290,8 @@ def unreadable_new_marks(marks):
     problems = []
     for found in marks:
         mark, line = found.mark, found.number + 1
+        if found.fenced:
+            continue
         if found.comment_cut:
             problems.append(UNREADABLE_COMMENT_CUT.format(line=line, mark=mark))
         elif found.in_code or not unquoted(found.text_lines[0]):
@@ -2400,6 +2423,7 @@ def run_fast_read(text, name, fast_read_program, after_removal):
 
 def excerpt(walk_finder, text):
     """The start of text, as a code span, so that no marker in it is read from the minutes."""
+    text = squeezed(text)
     return walk_finder.text_wrapped_as_markdown_code_span(text if len(text) <= 60 else text[:57].rstrip() + "...")
 
 

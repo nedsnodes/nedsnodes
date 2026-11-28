@@ -643,9 +643,8 @@ UNREADABLE_MARK_CASES = (
     ("a `#new_if_d` mark with no text, on an A answer", "#new_if_d\n\n> A note\n> says why.\n\nThe end.\n",
      ["- line 5: `#new_if_d` has no text after it on its line. The mark's line with its text joined onto it: "
       "#new_if_d A note says why."]),
-    ("a mark with no text above a fenced block", "#new\n\n```\nThe page lists\none poem.\n```\n",
-     ["- line 5: `#new` has no text after it on its line. The mark's line with its text joined onto it: "
-      "#new The page lists one poem."]),
+    ("a mark with no text above indented code", "#new\n\n    The page lists\n    one poem.\n",
+     ["- line 5: `#new` has no text after it on its line."]),
     ("a mark with no text whose text runs on right below it", '#new\n"The page lists\none poem."\n',
      ["- line 5: `#new` has no text after it on its line. The mark's line with its text joined onto it: "
       '#new "The page lists one poem."']),
@@ -725,6 +724,23 @@ def test_a_mark_whose_text_would_not_be_read_whole_is_refused_for_every_answer_t
         result = case.run("check", *flags)
         check(f"check {flags[0]}, which adds no text, records the answer to an item with a mark that has no text",
               result.returncode == 0 and "item 3 of 9: " in case.minutes.read_text(), described(result))
+
+
+def test_a_mark_with_nothing_after_it_reads_the_closed_fenced_block_below_it_whole():
+    body = "#new\n\n```\nif a:\n    b\n\nelse:\n    c\n```\n\nThe end.\n"
+    case = Case(document=marks_document(body))
+    result = case.run("check")
+    check("a bare mark with a closed fenced block below it is not refused, and the fast read gets the block, its "
+          "fences, line breaks, indents and blank line kept",
+          result.returncode == 0
+          and case.calls.read_text() == "```\nif a:\n    b\n\nelse:\n    c\n```\n", described(result))
+    check("the minutes' excerpt of the fenced text stays on one line",
+          all("if a:" not in line or "else:" in line for line in case.minutes.read_text().split("\n")),
+          case.minutes.read_text())
+    case = Case(document=marks_document("#new_if_d\n```\nrow\n```\n"))
+    result = case.run("check", "--disapproved")
+    check("a bare `#new_if_d` mark reads the fenced block right below it on D",
+          result.returncode == 0 and case.calls.read_text() == "```\nrow\n```\n", described(result))
 
 
 def test_marks_whose_texts_are_read_whole_are_not_refused():
