@@ -336,8 +336,10 @@ REPLACE_INSTEAD_OF_ROUND_INSTRUCTION = (
     "pull request's link and head, or the comment that closed this one.")
 ADVISOR_FIX_ROUND_NUMBER = 3
 ADVISOR_FIX_ROUND_INSTRUCTION = (
-    "This is the pull request's third fix-round, its last before merge-lane-2 brings it to the user: "
-    "before you change anything, call the advisor with the blocking findings and the fix you plan.")
+    "This is the pull request's third fix-round, and merge-lane-2 starts no fix-round after it: when blocking "
+    "findings remain after this round, merge-lane-2 grades them again, then closes the pull request if one must "
+    "still be fixed before a merge, or else merges it and sends the rest to the author to fix next.\n"
+    "Before you change anything, call the advisor with the blocking findings and the fix you plan.")
 
 
 # Messages to agents follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.

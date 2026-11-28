@@ -41,9 +41,11 @@ ROUND_RECORD_POST = f"api repos/{{owner}}/{{repo}}/issues/{NUMBER}/comments -f b
 PR_VIEW = f"pr view {NUMBER} --json url,headRefOid,headRefName,body,author"
 BRANCH = "topic-branch-of-the-pull-request"
 URL = f"https://github.com/o/r/pull/{NUMBER}"
-ADVISOR_SENTENCE = ("This is the pull request's third fix-round, its last before merge-lane-2 brings it to "
-                    "the user: before you change anything, call the advisor with the blocking findings and "
-                    "the fix you plan.")
+ADVISOR_SENTENCE = ("This is the pull request's third fix-round, and merge-lane-2 starts no fix-round after it: "
+                    "when blocking findings remain after this round, merge-lane-2 grades them again, then "
+                    "closes the pull request if one must still be fixed before a merge, or else merges it and "
+                    "sends the rest to the author to fix next.\nBefore you change anything, call the advisor "
+                    "with the blocking findings and the fix you plan.")
 CARRYING_OUT_USER_RULING_PARAGRAPH = (
     "When a finding asks you to change a file the instruction-file guard protects, and the fix only makes the "
     "file do what a ruling of the user's already says, the change is a user-approved-change: before each edit, "
