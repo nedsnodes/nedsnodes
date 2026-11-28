@@ -30,9 +30,9 @@ Demonstrated live, 2026-09-11: the user asked the cold-read-research seat to rep
 
 ### Half one, buildable now and needing no rule
 
-A Stop-hook delta report that **reports and never judges**, reusing the proven code in `scripts/cold-read-cell-common.py`: `working_tree_state()` (git status --porcelain --untracked-files=all, around line 414), `stray_writes_since()` (the delta, subtracting the run's expected output), and `report_stray_writes()` (never raises, and says loudly when the check could not run, because a failure to look is not a clean result). That module has run on every cold-read cell since August. It exists because on 2026-08-21 a reviewer agent wrote a 25,170-byte file into the worktree root and the only notice anyone got was the agent confessing in its own report.
+A Stop-hook delta report that **reports and never judges**, reusing the proven code in `nn-systems/cold-read/cold-read-cell-common.py`: `working_tree_state()` (git status --porcelain --untracked-files=all, around line 420), `stray_writes_since()` (the delta, subtracting the run's expected output), and `report_stray_writes()` (never raises, and says loudly when the check could not run, because a failure to look is not a clean result). That module has run on every cold-read cell since August. It exists because on 2026-08-21 a reviewer agent wrote a 25,170-byte file into the worktree root and the only notice anyone got was the agent confessing in its own report.
 
-Known limit to state in the code rather than discover later: git cannot see gitignored paths, which that module's docstring records at lines 38-39. A file misplaced into `docs/walk/` stays invisible.
+Known limit to state in the code rather than discover later: git cannot see gitignored paths, which that module's docstring recorded at [lines 37-38](https://github.com/nedsnodes/nedsnodes/blob/d9bd94c9406d6baeec3aefe9bc04d13f5351654f/scripts/cold-read-cell-common.py#L37-L38) before it moved to `nn-systems/cold-read/`. A file misplaced into `docs/walk/` stays invisible.
 
 Use plain stdout, not a block decision — see GHI [checkout-freshness catch-up's block decision overwrites the answer of a claude -p subprocess whose output a program reads](https://github.com/nedsnodes/nedsnodes/issues/334), where this repository's other Stop hook's block consumed a subagent's answer.
 
