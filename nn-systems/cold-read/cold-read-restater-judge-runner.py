@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Score one restater: two judge runs over its restatements, and one result.
 
-One invocation = one restater class judged. It takes that restater's
-restatements beside the rough drafts they came from, the perfect versions and
-the scrubbed defect lists, launches the two ruled judge runs in parallel
+One invocation = one restater class judged; restater, restater class, perfect
+version and the scrub are defined in the judge cold-read-cell's docstring. It
+takes that restater's restatements beside the rough drafts they came from, the
+perfect versions and the defect lists, launches the two ruled judge runs in parallel
 through nn-systems/cold-read/cold-read-restater-judge-cell.py, and writes their two reports
 and one combined result into a cold-read-record of this restater's own --
 its own, and no earlier judging's: the default directory name takes a -2, -3
 suffix when the day's name is taken in this checkout or in the log-store, the way nn-systems/cold-read/cold-read-grid.py's
-`make_record_dir` does, because the shared module clears a report path before
+`make_record_dir` does, because nn-systems/cold-read/cold-read-cell-common.py clears a report path before
 every run and a second judging on one name would delete the first's reports.
 
 Usage:
@@ -19,22 +20,19 @@ Usage:
 
 --prompt-file is required, and is handed to both runs unchanged. Neither this
 program nor the judge cold-read-cell carries the judge's instructions:
-that text is operative prose, and this project reads operative prose before
-a pull request, by cold read and by the user, so it travels through the
-user's walk rather than inside a program. The cold-read-cell's docstring
-says where it lands.
+that text is prose a model acts on, which this project has read by cold read
+and by the user before it lands, so it travels through the user's
+approval-walk rather than inside a program. The judge cold-read-cell's
+docstring names the file that will hold it.
 
-THE RULED DESIGN THIS IMPLEMENTS (user-ruled 2026-09-05, "Opus max is the
-backup to Fable. y"), from item 5 of the walk
-docs/walk/fast-cold-read-perfect-test-cases.md at the cold-read-research seat,
-uncommitted there, which is why the ruling is written out here and in the
-cold-read-cell. One fresh Fable 5.2 instance at xhigh per restater class, given
-the three rough drafts, the three perfect versions, the three defect lists and
-that restater's three restatements; it counts the problems the restatements
-caught, BY DEFECT NUMBER, and the places the restatement was stupid -- a
-sentence the perfect version keeps unchanged that the restatement misread --
-and reports one score weighted 80 percent caught and 20 percent stupid, with
-the raw counts beside the composite. TWO judge runs per restater, the two shown
+THE RULED DESIGN THIS IMPLEMENTS. One fresh Fable 5.2 instance at xhigh per
+restater class judges the three rough drafts, the three perfect versions, the
+three defect lists and that restater's three restatements. The judging
+yields the problems the restatements caught, BY DEFECT NUMBER, and the places
+the restatement was stupid -- a sentence the perfect version keeps unchanged
+that the restatement misread -- and one score weighted 80 percent caught and
+20 percent stupid, with the raw counts beside the composite; the next section
+says which part the model does and which this program does. TWO judge runs per restater, the two shown
 separately when they disagree. Opus 5.5 at max judges when Fable is unavailable,
 marked as such in the record. Problems a restatement caught that are not on the
 defect list go back to the scrub rather than being scored.
@@ -44,9 +42,8 @@ line per defect it says the restatement caught, naming the defect's number;
 one line per place the restatement was stupid; one line per problem caught
 that no row of the list names. It is told, twice, to count nothing and score
 nothing. THIS program counts the lines and computes the composite, because
-the arithmetic is the part a model gets wrong and a program does not -- the
-2026-08-29 trial's scorer "was wrong six ways until two agents hand-counted
-it" (the walk, item 5) -- and because a total of the model's beside a total
+the arithmetic is the part a model gets wrong and a program does not, and
+because a total of the model's beside a total
 of this program's would be two answers to one question.
 
 THE SCORE, and the one thing in it the ruling did not settle. The ruling says
@@ -82,8 +79,9 @@ the combined result, named and quoted, never into a case's count. A `## CASE
 4` heading in a three-case run, a `## Summary` heading after the last case, an
 item before the first heading -- each ends this program's certainty about
 which case the items below belong to, and each sends them to that section with
-the heading they sat under. Nothing is dropped and nothing is guessed at; the
-rule and its one cost are written out over `parse_judge_report`.
+the heading they sat under. Nothing is dropped and nothing is guessed at. A
+case heading reads `CASE <n>`, numbering the cases in the order --case gave
+them, and a defect number cited twice in one case counts once.
 
 NO RETRY, deliberately. The cold-read-fast-read retries its cold-read-cell
 once because a walk is waiting on it. A judge run has already tried both models
@@ -93,10 +91,12 @@ spend another xhigh run on it.
 
 Exit codes: 0 both runs were judged and scored; 1 one or both runs failed (the
 combined result is still written when one landed); 64 this program refused the
-invocation and never launched a run, naming its own fix.
+invocation and never launched a run, with a message that says how to fix the
+invocation.
 
-Output: exactly one line on stdout -- the combined result's path on success,
-or a line opening `FAILED` -- and every cold-read-cell's own progress on
+Output: exactly one line on stdout -- the combined result's path whenever one
+is written, even when one run failed and the exit is 1, or else a line opening
+`FAILED` -- and every cold-read-cell's own progress on
 stderr, the launcher's lines and the agent-binary's alike.
 """
 
