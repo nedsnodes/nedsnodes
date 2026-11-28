@@ -140,10 +140,10 @@ def code_file_marks(line: str, document: pathlib.Path,
     return marks
 
 
-def line_number_citations(document: pathlib.Path, repository_root: pathlib.Path, lint):
+def line_number_citations(text: str, document: pathlib.Path, repository_root: pathlib.Path, lint):
     """Yield (document_line, cited_file, first, last, written_text) for each citation."""
     # Attach line-number phrases only to the nearest preceding path on the same line to avoid attributing unrelated prose.
-    lines = document.read_text(encoding="utf-8").splitlines()
+    lines = text.splitlines()
     for number, line in lint.lines_outside_fenced_code_blocks(lines):
         if any(marker in line
                for marker in lint.HISTORY_MARKERS + lint.FOREIGN_ROOT_MARKERS):
@@ -208,22 +208,17 @@ def last_change_date(relative: str, repository_root: pathlib.Path) -> str:
     return _last_change_cache[key]
 
 
-def stamped_documents(repository_root: pathlib.Path, lint) -> list:
+def stamped_documents(repository_root: pathlib.Path, lint, unchecked):
     names = git_output(["ls-files", "-z", "--", "*.md"], repository_root).split("\0")
-    found = []
     for name in names:
         if not name:
             continue
         path = repository_root / name
         if not path.is_file() or lint.in_frozen_measured_data(path, repository_root):
             continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        if frontmatter_field(text, DESIGN_AS_OF_FIELD) is not None:
-            found.append(path)
-    return found
+        text = lint.read_text_for_check(path, unchecked)
+        if text is not None and frontmatter_field(text, DESIGN_AS_OF_FIELD) is not None:
+            yield path, text
 
 
 def newest_commit_date_in_range(relative: str, base: str,
@@ -291,10 +286,9 @@ def repository_relative_name(found: pathlib.Path, repository_root: pathlib.Path)
         return None
 
 
-def findings_for_document(document: pathlib.Path, repository_root: pathlib.Path,
+def findings_for_document(text: str, document: pathlib.Path, repository_root: pathlib.Path,
                           lint, wanted_paths=None, moved_on_by_path=None):
     """Return findings as (line_number, problem) pairs and the count of pinned citations."""
-    text = document.read_text(encoding="utf-8")
     stamp_field = frontmatter_field(text, DESIGN_AS_OF_FIELD)
     if stamp_field is None:
         return [], 0
@@ -304,7 +298,7 @@ def findings_for_document(document: pathlib.Path, repository_root: pathlib.Path,
     citations = [(number, repository_relative_name(found, repository_root),
                   first, last)
                  for number, found, first, last, _written
-                 in line_number_citations(document, repository_root, lint)]
+                 in line_number_citations(text, document, repository_root, lint)]
     cites_a_wanted_path = wanted_paths is None or any(
         relative in wanted_paths
         for _number, relative, _first, _last in citations)
@@ -392,6 +386,7 @@ def run_check(argv) -> int:
 
     lint = load_md_drift_lint()
     findings = []
+    unchecked = {}
     pinned_total = 0
 
     if arguments.files:
@@ -404,13 +399,15 @@ def run_check(argv) -> int:
                 continue
             if lint.in_frozen_measured_data(path, REPOSITORY_ROOT):
                 continue
-            text = path.read_text(encoding="utf-8")
+            text = lint.read_text_for_check(path, unchecked)
+            if text is None:
+                continue
             if frontmatter_field(text, DESIGN_AS_OF_FIELD) is None:
                 print(f"{PROGRAM}: {name} carries no {DESIGN_AS_OF_NAME} stamp, "
                       f"so no citation in it is dated; not checked",
                       file=sys.stderr)
                 continue
-            problems, pinned = findings_for_document(path, REPOSITORY_ROOT, lint)
+            problems, pinned = findings_for_document(text, path, REPOSITORY_ROOT, lint)
             pinned_total += pinned
             for number, problem in sorted(problems):
                 print(f"{name}:{number}: {problem}")
@@ -425,10 +422,10 @@ def run_check(argv) -> int:
             return EXIT_BAD_INVOCATION
         changed = changed_code_paths(arguments.base, REPOSITORY_ROOT, lint)
         wanted = set(changed)
-        for document in stamped_documents(REPOSITORY_ROOT, lint) if changed else []:
+        for document, text in stamped_documents(REPOSITORY_ROOT, lint, unchecked) if changed else ():
             relative = document.relative_to(REPOSITORY_ROOT)
             problems, pinned = findings_for_document(
-                document, REPOSITORY_ROOT, lint, wanted_paths=wanted,
+                text, document, REPOSITORY_ROOT, lint, wanted_paths=wanted,
                 moved_on_by_path=changed)
             pinned_total += pinned
             for number, problem in sorted(problems):
@@ -443,6 +440,9 @@ def run_check(argv) -> int:
                     f"commit by a section that says its line numbers are "
                     f"that commit's.")
     print(summary, file=sys.stderr)
+    if unchecked:
+        lint.report_unchecked_files(unchecked)
+        return EXIT_COULD_NOT_CHECK
     return EXIT_FINDINGS if findings else 0
 
 
