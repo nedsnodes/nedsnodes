@@ -1170,7 +1170,8 @@ def run_user_systemd_scope_cases(root: Path):
               (exit_code, tmux_calls))
         check("USER SCOPE: and stderr carries the marker the crash watcher reads, the seat's "
               "name and systemd-run's own words",
-              f"recover-crashed-seats: seat-a: {marker}" in stderr and bus_failure in stderr,
+              (f"recover-crashed-seats: {recovery.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_HASHTAG} "
+               f"seat-a: {marker}") in stderr and bus_failure in stderr,
               stderr)
 
         exit_code, stderr, probe = launch(systemd_run_installed=False)
@@ -3903,7 +3904,10 @@ with tempfile.TemporaryDirectory() as temporary:
         return (len(printed_lines) == len(names) and len(logged_lines) == len(names)
                 and [launch[0] for launch in launches]
                     == [name for name in names if name not in running]
-                and all(line.startswith(f"recover-crashed-seats: {name}: ")
+                and all(line.startswith("recover-crashed-seats: " + (
+                            f"{recovery.AGENT_SEAT_ALREADY_RUNNING_HASHTAG} " if name in running
+                            else f"{recovery.AGENT_SEAT_NOT_RECOVERED_HASHTAG} " if name in failing
+                            else "") + f"{name}: ")
                         and ("ALREADY RUNNING" in line) == (name in running)
                         and ("LAUNCH FAILED" in line) == (name in failing)
                         and ("relaunched resuming" in line)
@@ -3978,7 +3982,8 @@ with tempfile.TemporaryDirectory() as temporary:
     check("EXIT: and so does --all --dry-run, reporting the running seat ALREADY RUNNING",
           exit_code == 0 and launches == [] and logged == ""
           and printed.splitlines() == [
-              "recover-crashed-seats: all-seat-already-running: ALREADY RUNNING — tmux "
+              "recover-crashed-seats: #agent_seat_already_running# all-seat-already-running: "
+              "ALREADY RUNNING — tmux "
               "session 'all-seat-already-running' is alive on socket "
               "'all-seat-already-running', and process 5000 is the supervisor of "
               "all-seat-already-running — this tool recovers crashes, it never touches "
@@ -4230,7 +4235,7 @@ with tempfile.TemporaryDirectory() as temporary:
           and "+00:00 all-seat-crashed: relaunched resuming resume-all-seat-crashed"
               in logged_lines[0]
           and logged_lines[1][:4].isdigit()
-          and "+00:00 all-seat-exited: NOT RELAUNCHED AFTER A RECORDED EXIT — its supervisor "
+          and "+00:00 #agent_seat_not_recovered# all-seat-exited: NOT RELAUNCHED AFTER A RECORDED EXIT — its supervisor "
               "recorded at " in logged_lines[1],
           (exit_code, logged, printed.getvalue()))
 
@@ -4498,7 +4503,7 @@ with tempfile.TemporaryDirectory() as temporary:
     printed = printed.getvalue()
     first_question = "two-seats-first stopped on purpose. Restart it anyway? y/n "
     second_question = "two-seats-second stopped with exit code 1. Restart it? y/n "
-    first_line = "recover-crashed-seats: two-seats-first: NOT RELAUNCHED AFTER A RECORDED EXIT — "
+    first_line = "recover-crashed-seats: #agent_seat_not_recovered# two-seats-first: NOT RELAUNCHED AFTER A RECORDED EXIT — "
     second_line = ("recover-crashed-seats: two-seats-second: relaunched resuming "
                    "resume-two-seats-second")
     log_path = workspace.handoffs / "recover-crashed-seats-log.txt"
@@ -5234,7 +5239,8 @@ with tempfile.TemporaryDirectory() as temporary:
     check("LEFTOVER SHELL (ruled 2026-09-18): its line is exactly \"seat-a: NOT RESTARTED — "
           "something may have started in it while you were answering, so it was left alone\", "
           "logged, and main exits 1",
-          printed[-1:] == ["recover-crashed-seats: " + left_alone_as_something_may_have_started]
+          printed[-1:] == ["recover-crashed-seats: #agent_seat_not_recovered# "
+                           + left_alone_as_something_may_have_started]
           and len(logged) == 1
           and logged[0].endswith(" " + left_alone_as_something_may_have_started)
           and exit_code == 1,
@@ -5386,7 +5392,8 @@ with tempfile.TemporaryDirectory() as temporary:
     check("LEFTOVER SHELL: when tmux cannot answer at the recheck, nothing is closed and the "
           "seat is REFUSED in the liveness check's words, byte for byte",
           events == ["proof", "question", "proof"] and workspace.launches == []
-          and printed[-1:] == ["recover-crashed-seats: " + refused_as_tmux_cannot_be_run]
+          and printed[-1:] == ["recover-crashed-seats: #agent_seat_not_recovered# "
+                           + refused_as_tmux_cannot_be_run]
           and len(logged) == 1 and logged[0].endswith(" " + refused_as_tmux_cannot_be_run)
           and exit_code == 1,
           (events, workspace.launches, printed, logged, exit_code))
@@ -5398,7 +5405,7 @@ with tempfile.TemporaryDirectory() as temporary:
     check("LEFTOVER SHELL (ruled 2026-09-18): over the real proof, vim started in the shell "
           "while the question waited is not closed, and the seat is reported NOT RESTARTED",
           events == ["proof", "question", "proof"] and workspace.launches == []
-          and printed[-1:] == ["recover-crashed-seats: "
+          and printed[-1:] == ["recover-crashed-seats: #agent_seat_not_recovered# "
                                + left_alone_as_something_may_have_started]
           and exit_code == 1,
           (events, workspace.launches, printed, exit_code))
@@ -5470,7 +5477,7 @@ with tempfile.TemporaryDirectory() as temporary:
               "\"; on a no, or with no terminal, it reports: REFUSED — <the unattended "
               "refusal>\", byte for byte",
               printed.getvalue().splitlines() == [
-                  "recover-crashed-seats: seat-a: would ask an operator at a terminal — "
+                  "recover-crashed-seats: #agent_seat_not_recovered# seat-a: would ask an operator at a terminal — "
                   f'"{question}" — and on a yes close that session and {what_a_yes_does} '
                   "(it is one pane at a shell)" + dry_run_ending_quoting_the_refusal(workspace)],
               printed.getvalue())

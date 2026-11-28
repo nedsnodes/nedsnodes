@@ -4,6 +4,9 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 
 `scripts/nedsnodes-hashtag-glossary-lists-every-hashtag-in-use-and-no-other-test.py` fails when a hashtag is used but not listed here, when one is listed here but used nowhere else, or when a one-word hashtag not listed today is added; a pull request that adds a hashtag adds its bullet in the same commit.
 
+- `#agent_seat_already_running#` — on a report line of `scripts/recover-crashed-seats.py`, after the program's name: the agent-seat was already running, so it needed no recovery.
+- `#agent_seat_not_recovered#` — on a report line of `scripts/recover-crashed-seats.py`, after the program's name: the agent-seat is still down, for the reason the words after it give.
+- `#agent_seat_started_outside_user_systemd_manager#` — on a line `scripts/recover-crashed-seats.py` prints, after the program's name: the agent-seat was started, but outside the user's systemd manager, so the test suites' low CPU weight does not reach it.
 - `#approval_walk_item_first_entered#` — the walk-document line under an approval-walk item that gives the date the item was first written, which the walk check program uses to order items not yet shown.
 - `#approval_walk_item_in_category_file_an_improvement_feature_or_change#` — the walk-document line that puts an approval-walk item in the category of an improvement, feature or change to file for later.
 - `#approval_walk_item_in_category_fix_during_maintenance#` — the walk-document line that puts an approval-walk item in the category of a fix to make during maintenance.

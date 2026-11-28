@@ -386,8 +386,7 @@ def seat_came_up(exit_code, report: str) -> bool:
     # A confirmed already-running supervisor counts as up even though no seat was launched,
     # and so does a seat whose window on the Mac did not open.
     return (exit_code in (0, recovery.ALL_AGENT_SEATS_RECOVERED_BUT_MAC_WINDOW_OPEN_FAILED_EXIT_STATUS)
-            and not any(marker in report
-                        for marker in recovery.SEAT_NOT_RECOVERED_REPORT_MARKERS))
+            and recovery.AGENT_SEAT_NOT_RECOVERED_HASHTAG not in report)
 
 
 def launch_seats_decided_restart(decisions, handoff_directory: Path,
