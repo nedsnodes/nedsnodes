@@ -64,6 +64,18 @@ check("every pinned line records the library's license beside it",
 
 with tempfile.TemporaryDirectory() as scratch:
     bad = Path(scratch) / "requirements.txt"
+    bad.write_text("fixture==1\nfixture==2\n", encoding="utf-8")
+    try:
+        checker.pinned_versions(bad)
+        conflict = None
+    except ValueError as error:
+        conflict = str(error)
+    check("contradictory pins cannot be reported as satisfied by the last version",
+          conflict and "fixture" in conflict and "1" in conflict and "2" in conflict, conflict)
+    bad.write_text("fixture==1\nfixture==1\n", encoding="utf-8")
+    check("an identical repeated pin still denotes one required version",
+          checker.pinned_versions(bad) == {"fixture": "1"})
+
     bad.write_text("# a comment\ntree-sitter>=0.25\n", encoding="utf-8")
     try:
         checker.pinned_versions(bad)
@@ -202,12 +214,13 @@ def check_failing(host):
 
 checker.check_and_install = check_failing
 printed = io.StringIO()
-with contextlib.redirect_stdout(printed):
+diagnostic = io.StringIO()
+with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(diagnostic):
     status = checker.main([])
 checker.check_and_install = real_check_and_install
-check("a check that cannot run exits 1 and says why, naming the machine",
-      status == 1 and "could not be checked: python3 not found" in printed.getvalue(),
-      (status, printed.getvalue()))
+check("a check that cannot run exits 2 and says why, naming the machine",
+      status == 2 and not printed.getvalue() and "could not be checked: python3 not found" in diagnostic.getvalue(),
+      (status, printed.getvalue(), diagnostic.getvalue()))
 
 print("all cases passed" if not failures else f"{failures} case(s) failed")
 sys.exit(1 if failures else 0)

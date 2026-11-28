@@ -34,22 +34,22 @@ def check(case_name, condition, detail=""):
             print(f"      {detail!r}"[:1500])
 
 
-def unavailable_because():
+def skip_message_if_unavailable():
     if not sys.platform.startswith("linux"):
-        return f"{sys.platform} has no systemd user manager"
+        return f"[this machine cannot run it] every case: {sys.platform} has no systemd user manager"
     if os.environ.get("RUN_ALL_TEST_SUITES_INSIDE_SIGNAL_SANDBOX"):
-        return "this suite is inside a sandbox, which hides the user's session bus"
+        return "every case: this suite is inside a sandbox, which hides the user's session bus"
     if not Path(f"/run/user/{os.getuid()}/bus").exists():
-        return f"/run/user/{os.getuid()}/bus does not exist"
+        return f"every case: /run/user/{os.getuid()}/bus does not exist"
     for program in ("systemd-run", "tmux"):
         if shutil.which(program) is None:
-            return f"{program} is not on PATH"
+            return f"[this machine cannot run it] every case: {program} is not on PATH"
     return None
 
 
-why = unavailable_because()
+why = skip_message_if_unavailable()
 if why is not None:
-    print(f"SKIP  every case: {why}")
+    print(f"SKIP  {why}")
     sys.exit(0)
 
 spec = importlib.util.spec_from_file_location("recover_crashed_seats", SCRIPT_PATH)

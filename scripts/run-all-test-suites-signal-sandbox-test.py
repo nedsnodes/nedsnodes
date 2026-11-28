@@ -1521,6 +1521,12 @@ if linux_only_cases_run_here("the run of the runner's test files as if on a Mac"
               (output, lines))
         for name in RUNNER_TEST_FILES_RUN_AS_IF_ON_A_MAC:
             code, output, lines = run_as_if_on_a_mac(SCRIPTS_DIR / name, stub_directory)
+            if name in ("run-suite-in-signal-sandbox-test.py", "run-all-test-suites-test.py"):
+                platform_skips = [line for line in output.splitlines()
+                                  if line.startswith("SKIP") and line.endswith("bwrap and /proc exist only on Linux")]
+                check(f"{name} marks its Linux-only cases on the simulated Mac",
+                      bool(platform_skips) and all(runner.SKIPPED_CASE_LINE_THIS_MACHINE_CANNOT_RUN.match(line)
+                                                   for line in platform_skips), platform_skips)
             failed = [line for line in output.splitlines()
                       if line.startswith("FAIL") or line.startswith("Traceback")]
             check(f"run as if on a Mac, {name} passes, and none of its cases reads /proc or "

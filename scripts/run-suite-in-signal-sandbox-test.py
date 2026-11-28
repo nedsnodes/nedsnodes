@@ -61,7 +61,7 @@ def linux_only_cases_run_here(cases):
     """
     if sys.platform.startswith("linux"):
         return True
-    print(f"SKIP  {cases}: nn-test-sandboxes, bwrap and /proc exist only on Linux")
+    print(f"SKIP  [this machine cannot run it] {cases}: nn-test-sandboxes, bwrap and /proc exist only on Linux")
     return False
 
 

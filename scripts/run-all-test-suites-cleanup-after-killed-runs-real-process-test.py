@@ -299,7 +299,7 @@ for refused_pid, why in ((1, "pid 1"), (0, "pid 0, the whole process group"),
 # The cases below read start times and ancestry from /proc, which only Linux has.
 not_linux = None if sys.platform.startswith("linux") else f"{sys.platform} is not Linux"
 if not_linux:
-    print(f"SKIP  the signal helper's descendant and start-time cases: {not_linux}, "
+    print(f"SKIP  [this machine cannot run it] the signal helper's descendant and start-time cases: {not_linux}, "
           f"so there is no /proc to read start times and ancestry from")
 else:
     try:
@@ -394,7 +394,7 @@ check("the launcher starts no suite, exits 125 and says why, when prctl refuses"
       and "was not started" in captured_stderr.getvalue(), captured_stderr.getvalue())
 
 if not_linux:
-    print(f"SKIP  the launcher's and the orphaned-descendant cases: {not_linux}, so there is "
+    print(f"SKIP  [this machine cannot run it] the launcher's and the orphaned-descendant cases: {not_linux}, so there is "
           f"no child subreaper")
 else:
     missing = subprocess.run([*LAUNCHER_COMMAND, "/nonexistent/suite-command"],
@@ -490,7 +490,8 @@ else:
 # --- A killed run's suite that still runs keeps its traces ---------------------
 not_runnable = not_linux or sandbox_starts()
 if not_runnable:
-    print(f"SKIP  every killed-run case: {not_runnable}")
+    marker = "[this machine cannot run it] " if not_linux else ""
+    print(f"SKIP  {marker}every killed-run case: {not_runnable}")
 else:
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:

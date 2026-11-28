@@ -3849,7 +3849,7 @@ def run_cases():
                   f"rc={completed.returncode} out={completed.stdout[-600:]} "
                   f"err={completed.stderr[-600:]}")
     else:
-        print("SKIP  the signal sandbox cases: bwrap is used only on Linux")
+        print("SKIP  [this machine cannot run it] the signal sandbox cases: bwrap is used only on Linux")
 
     run_quick_mutation_pass_cases()
 

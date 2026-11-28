@@ -463,6 +463,13 @@ def main() -> int:
         # when the fast read printed a readable path but exited non-zero; its
         # contract is exit 0 on success only.
         readable_report = scratch / "readable-report.md"
+        unreadable_report = scratch / "invalid-report.md"
+        unreadable_report.write_bytes(b"\xff")
+        completed, _ = run_program(scratch, {"stdout": str(unreadable_report) + "\n", "exit": 0}, GOOD_INPUT)
+        check("an undecodable fast-read report gives the failure response naming its file",
+              completed.returncode == 1 and str(unreadable_report) in completed.stdout
+              and "could not be read" in completed.stdout and "Traceback" not in completed.stderr,
+              (completed.stdout, completed.stderr))
         readable_report.write_text("## Question 2: Where you struggled\nA finding.\n")
         completed, _ = run_program(
             scratch, {"stdout": f"{readable_report}\n", "exit": 1}, GOOD_INPUT)
@@ -572,7 +579,7 @@ def main() -> int:
               completed.stdout)
 
         # Oracle: exit code and whether the stand-in ran. Red: exit other
-        # than 64, or the stand-in launched on input it should refuse.
+        # than 2, or the stand-in launched on input it should refuse.
         refused_inputs = {
             "input not opening with the user's words":
                 "The reply to him:\nSome reply.\n",
@@ -584,14 +591,15 @@ def main() -> int:
         }
         for case_name, text in refused_inputs.items():
             completed, logged = run_program(scratch, success_plan, text)
-            check(f"{case_name} exits 64 and launches nothing",
-                  completed.returncode == 64 and logged is None
-                  and "Nothing was run." in completed.stdout,
+            check(f"{case_name} exits 2 and launches nothing",
+                  completed.returncode == 2 and logged is None
+                  and "Nothing was run." in completed.stderr and not completed.stdout,
                   f"exit {completed.returncode}, launched {logged is not None}")
         completed, logged = run_program(scratch, success_plan, GOOD_INPUT,
                                         arguments=("--target", "x.md"))
-        check("any argument exits 64 and launches nothing",
-              completed.returncode == 64 and logged is None,
+        check("any argument exits 2 and launches nothing",
+              completed.returncode == 2 and logged is None and not completed.stdout
+              and "Pass no arguments." in completed.stderr,
               f"exit {completed.returncode}, launched {logged is not None}")
 
         # Oracle: the return value, the elapsed time and the child process.

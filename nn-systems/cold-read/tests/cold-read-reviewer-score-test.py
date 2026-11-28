@@ -276,13 +276,13 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
     })
     result = run("--placements", str(wrong_u), "--defect-list", str(ruler))
     check("an UNFIXED number the declined table does not hold is refused, exit "
-          "64, naming the ones it holds",
-          result.returncode == 64 and "UNFIXED U9" in result.stderr
+          "2, naming the ones it holds",
+          result.returncode == 2 and "UNFIXED U9" in result.stderr
           and "holds only U1" in result.stderr, result.stdout + result.stderr)
     result = run("--placements", str(placements), "--defect-list", str(plain_ruler))
     check("an UNFIXED placement against a list with no declined table is "
           "refused, saying the table is missing",
-          result.returncode == 64
+          result.returncode == 2
           and "has no declined table" in result.stderr
           and "`UNFIXED U<n>` for" not in result.stderr, result.stderr)
     result = run("--placements", str(wrong_u), "--defect-list", str(ruler))
@@ -311,9 +311,9 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
         "zeta--placement.md": [("1", "ROW 2", "sure", "x")],
     })
     result = run("--placements", str(same_reviewer), "--defect-list", str(ruler))
-    check("two files that name one reviewer are refused, exit 64, naming both "
+    check("two files that name one reviewer are refused, exit 2, naming both "
           "files, instead of one replacing the other",
-          result.returncode == 64 and "zeta.md" in result.stderr
+          result.returncode == 2 and "zeta.md" in result.stderr
           and "zeta--placement.md" in result.stderr
           and "nothing was scored" in result.stderr
           and "The two files are different." in result.stderr
@@ -326,7 +326,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
     result = run("--placements", str(identical_copies), "--defect-list", str(ruler))
     check("two byte-identical files that name one reviewer are refused, saying "
           "they are byte-identical",
-          result.returncode == 64
+          result.returncode == 2
           and "The two files are byte-identical." in result.stderr,
           result.stdout + result.stderr)
     # "zeta--placement.md" sorts first, so here the earlier file's bytes are the lesser.
@@ -337,7 +337,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
     result = run("--placements", str(earlier_bytes_lesser), "--defect-list", str(ruler))
     check("two files of one reviewer whose earlier file has the lesser bytes are "
           "called different, not byte-identical",
-          result.returncode == 64
+          result.returncode == 2
           and "The two files are different." in result.stderr,
           result.stdout + result.stderr)
     same_run = write_placements(scratch / "same-reader-run", {
@@ -346,9 +346,9 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
         "ann-run-2--placement.md": [("1", "ROW 3", "sure", "x")],
     })
     result = run("--placements", str(same_run), "--defect-list", str(ruler))
-    check("an unsuffixed file and a -run-1 file of one reader are refused, exit 64, "
+    check("an unsuffixed file and a -run-1 file of one reader are refused, exit 2, "
           "naming both files, instead of one run replacing the other",
-          result.returncode == 64 and "ann--placement.md" in result.stderr
+          result.returncode == 2 and "ann--placement.md" in result.stderr
           and "ann-run-1--placement.md" in result.stderr
           and "both run 1 of reader 'ann'" in result.stderr
           and "The two files are different." in result.stderr
@@ -364,7 +364,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
     result = run("--placements", str(padded_run), "--defect-list", str(ruler))
     check("-run-01 and -run-1 of one reader are refused as the same run, and "
           "byte-identical copies are told to delete one",
-          result.returncode == 64 and "both run 1 of reader 'ann'" in result.stderr
+          result.returncode == 2 and "both run 1 of reader 'ann'" in result.stderr
           and "The two files are byte-identical" in result.stderr
           and f"delete {padded_run / 'ann-run-1--placement.md'}." in result.stderr
           and "rename" not in without_test_paths(result.stderr),
@@ -520,29 +520,45 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
           result.stdout + result.stderr)
 
     # --- Bad invocations ---------------------------------------------------
-    check("a missing defect list is a bad invocation, exit 64",
+    check("a missing defect list is a bad invocation, exit 2",
           run("--placements", str(placements),
-              "--defect-list", str(scratch / "nope.md")).returncode == 64)
-    check("a missing placements directory is a bad invocation, exit 64",
+              "--defect-list", str(scratch / "nope.md")).returncode == 2)
+    check("a missing placements directory is a bad invocation, exit 2",
           run("--placements", str(scratch / "nope"),
-              "--defect-list", str(ruler)).returncode == 64)
-    check("a non-numeric --union-sizes is a bad invocation, exit 64",
+              "--defect-list", str(ruler)).returncode == 2)
+    for sizes in ("-1", "0"):
+        result = run("--placements", str(placements), "--defect-list", str(ruler),
+                     f"--union-sizes={sizes}")
+        check(f"unusable roster sizes {sizes!r} are rejected before any score is printed",
+              result.returncode == 2 and "--union-sizes" in result.stderr
+              and "Traceback" not in result.stderr and not result.stdout, result.stderr)
+    check("a non-numeric --union-sizes is a bad invocation, exit 2",
           run("--placements", str(placements), "--defect-list", str(ruler),
-              "--union-sizes", "two").returncode == 64)
+              "--union-sizes", "two").returncode == 2)
 
     empty = scratch / "empty"
     empty.mkdir()
     check("an empty placements directory is a bad invocation, not a zero score",
           run("--placements", str(empty),
-              "--defect-list", str(ruler)).returncode == 64)
+              "--defect-list", str(ruler)).returncode == 2)
 
     ruler_without = scratch / "no-weights.md"
     ruler_without.write_text("# a list with no weights section\n", encoding="utf-8")
     result = run("--placements", str(placements), "--defect-list", str(ruler_without))
     check("a defect list with no weights section is refused, saying so",
-          result.returncode != 0 and "cannot be used as a ruler" in
+          result.returncode == 2 and "cannot be used as a ruler" in
           (result.stdout + result.stderr), result.stdout + result.stderr)
 
+    for label in ("defect-list", "placement"):
+        bad_dir = scratch / f"bad-encoding-{label}"
+        bad_dir.mkdir()
+        bad = bad_dir / "bad--placement.md"
+        bad.write_bytes(b"\xff")
+        result = run("--placements", str(bad_dir if label == "placement" else placements),
+                     "--defect-list", str(ruler if label == "placement" else bad))
+        check(f"unreadable {label} input names its path and yields no score",
+              result.returncode == 2 and str(bad) in result.stderr
+              and "Traceback" not in result.stderr and not result.stdout, result.stderr)
     # --- Parse anomalies are reported, not swallowed -----------------------
     stray = scratch / "stray"
     stray.mkdir()

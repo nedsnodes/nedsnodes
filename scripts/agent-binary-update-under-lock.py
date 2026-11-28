@@ -74,6 +74,8 @@ def main() -> int:
     parser.add_argument("command", nargs=argparse.REMAINDER,
                         help="-- then the update command, e.g. -- claude update")
     arguments = parser.parse_args()
+    if arguments.timeout_seconds < 0:
+        parser.error("--timeout-seconds must be zero or greater")
     command = arguments.command
     if command and command[0] == "--":
         command = command[1:]

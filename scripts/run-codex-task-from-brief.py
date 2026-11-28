@@ -72,6 +72,7 @@ it can run as a background task.
 
 import argparse
 import importlib.util
+import math
 import os
 import pathlib
 import re
@@ -118,6 +119,13 @@ PREFETCH_API_ACCEPTED_OPTIONS_TEXT = (
 PREFETCH_FILE_NAME_WORDS_MAX_CHARACTERS = 80
 
 
+def positive_deadline_minutes(value: str) -> float:
+    minutes = float(value)
+    if not math.isfinite(minutes * 60) or minutes <= 0:
+        raise argparse.ArgumentTypeError("use a positive deadline that is finite in seconds")
+    return minutes
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="scripts/run-codex-task-from-brief.py",
@@ -143,7 +151,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
                         help="let -C name a folder that is not a git checkout")
     parser.add_argument("--web-search", action="store_true",
                         help="give Codex its live web search tool")
-    parser.add_argument("--deadline-minutes", type=float,
+    parser.add_argument("--deadline-minutes", type=positive_deadline_minutes,
                         default=DEFAULT_DEADLINE_MINUTES,
                         help="stop the run, the --prefetch-github commands and Codex "
                              f"together, after this many minutes (default {DEFAULT_DEADLINE_MINUTES})")
@@ -360,13 +368,13 @@ def main(argv=None) -> int:
     run_log = pathlib.Path(args.run_log).resolve() if args.run_log else report.with_name(
         report.name + ".run.log")
     if not checkout.is_dir():
-        return fail(f"the checkout {checkout} is not a directory.")
+        parser.error(f"the checkout {checkout} is not a directory.")
     try:
         prompt = brief.read_text(encoding="utf-8")
-    except OSError as error:
-        return fail(f"could not read the brief {brief}: {error}")
+    except (OSError, UnicodeError) as error:
+        parser.error(f"could not read the brief {brief}: {error}")
     if not prompt.strip():
-        return fail(f"the brief {brief} is empty.")
+        parser.error(f"the brief {brief} is empty.")
     # A report left by an earlier run must not pass for this run's.
     report.unlink(missing_ok=True)
     last_message = report.with_name(report.name + ".last-message")
@@ -418,7 +426,11 @@ def main(argv=None) -> int:
     place_final_message(report, last_message)
     if exit_code != 0:
         return fail(f"Codex exited {exit_code}; its output is in {run_log}.")
-    if not report.is_file() or not report.read_text(encoding="utf-8").strip():
+    try:
+        has_report = report.is_file() and report.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as error:
+        return fail(f"could not read the report at {report}: {error}; the run log is {run_log}.")
+    if not has_report:
         return fail(f"Codex exited 0 but wrote no report at {report}; "
                     f"its output is in {run_log}.")
     if last_message.exists():

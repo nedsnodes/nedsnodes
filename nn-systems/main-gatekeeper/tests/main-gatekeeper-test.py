@@ -760,6 +760,17 @@ with tempfile.TemporaryDirectory() as workspace_name:
     check("T7 status on an unknown digest answers unknown",
           payload.get("outcome") == "unknown", payload)
 
+    blocked_state = state_home / "not-a-state-directory"
+    blocked_state.touch()
+    for action in ("status", "cancel"):
+        code, payload = run_gatekeeper([action, "0" * 64, "--repo", str(work)], blocked_state)
+        check(f"{action} reports inability to inspect the workspace",
+              code == 1 and payload.get("error") == "workspace-io-error"
+              and str(blocked_state) in payload.get("facts", ""), payload)
+    code, payload = run_gatekeeper(["cancel", nowait_digest, "--repo", str(work)], blocked_state)
+    check("a confirmed check-in still answers too-late when its leftover cannot be inspected",
+          code == 0 and payload.get("outcome") == "too-late", payload)
+
     # T7's release step when status fails after the worker announced
     # after-push: the worker must still be released and sweep its workspace.
     remote, work, base = make_fixture(workspace, "t7-status-fails")

@@ -105,15 +105,15 @@ time.sleep(3)
 '''
 
 
-def unavailable_because():
+def skip_message_if_unavailable():
     if not sys.platform.startswith("linux"):
-        return f"{sys.platform} has no nn-test-sandbox"
+        return f"[this machine cannot run it] every case: {sys.platform} has no nn-test-sandbox"
     # A runner older than this suite runs it inside its sandbox, as merge-lane-2's head test
     # run does with main's runner; there the inner runs cannot build nn-test-sandboxes.
     if os.environ.get("RUN_ALL_TEST_SUITES_INSIDE_SIGNAL_SANDBOX"):
-        return "this suite is already inside a sandbox, where bwrap cannot start again"
+        return "every case: this suite is already inside a sandbox, where bwrap cannot start again"
     if shutil.which("bwrap") is None:
-        return "bwrap is not on PATH"
+        return "[this machine cannot run it] every case: bwrap is not on PATH"
     return None
 
 
@@ -138,9 +138,9 @@ def case_rows(log_dir):
     return [row.split("\t") for row in rows]
 
 
-why = unavailable_because()
+why = skip_message_if_unavailable()
 if why is not None:
-    print(f"SKIP  every case: {why}")
+    print(f"SKIP  {why}")
     sys.exit(0)
 
 with tempfile.TemporaryDirectory(prefix="run-all-test-suites-overlapping-runs-") as scratch_name:

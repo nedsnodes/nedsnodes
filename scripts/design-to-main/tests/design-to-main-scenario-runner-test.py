@@ -367,6 +367,16 @@ class TheCommandLine(unittest.TestCase):
         return subprocess.run([sys.executable, str(RUNNER_PATH), str(path)],
                               capture_output=True, text=True)
 
+    def test_undecodable_scenario_exits_as_malformed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "invalid.yaml"
+            path.write_bytes(b"\xff")
+            result = self.run_runner(path)
+        self.assertEqual(result.returncode, runner.EXIT_MALFORMED_SCENARIO)
+        self.assertIn(str(path), result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(result.stdout, "")
+
     def test_a_played_scenario_exits_zero_with_the_trace_on_stdout(self):
         result = self.run_runner(HAPPY_PATH_SCENARIO)
         self.assertEqual(result.returncode, 0, result.stderr)

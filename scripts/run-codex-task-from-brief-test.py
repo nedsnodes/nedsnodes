@@ -57,6 +57,8 @@ elif mode == "report-file-only":
 elif mode == "report-then-fail":
     open(report, "w").write("a partial report\n")
     sys.exit(3)
+elif mode == "undecodable-report":
+    open(report, "wb").write(b"\xff")
 elif mode == "no-report":
     pass
 elif mode in ("sleep", "sleep-child-ignores-sigterm"):
@@ -350,6 +352,12 @@ try:
           completed.returncode == 1 and "wrote no report" in completed.stderr
           and not report.exists(),
           f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    completed, report, _ = run("undecodable-report")
+    check("an unreadable report remains available and its path is reported without a traceback",
+          completed.returncode == 1 and report.read_bytes() == b"\xff"
+          and str(report) in completed.stderr and "could not read" in completed.stderr
+          and "Traceback" not in completed.stderr and not completed.stdout, completed.stderr)
 
     stale_last_message = scratch / "report-no-report.md.last-message"
     stale_last_message.write_text("an earlier run's final message\n")
@@ -827,13 +835,30 @@ try:
           main_error is not None and "could not start Codex" not in captured.getvalue(),
           f"error {main_error!r}, exit {main_exit}, stderr {captured.getvalue()!r}")
 
+    for invalid_deadline in ("0", "-1", "nan", "inf", "1e308"):
+        existing_report = scratch / "report-report.md"
+        existing_report.write_text("previous report")
+        completed, _, _ = run("report", "--deadline-minutes", invalid_deadline)
+        check(f"deadline {invalid_deadline} is refused before an existing report is touched",
+              completed.returncode == 2 and "--deadline-minutes" in completed.stderr
+              and existing_report.read_text() == "previous report", completed.stderr)
+
     empty_brief = scratch / "empty.md"
     empty_brief.write_text("  \n")
-    completed = subprocess.run(
-        [sys.executable, str(PROGRAM), "-C", str(checkout), "--brief", str(empty_brief),
-         "-o", str(scratch / "r.md")], capture_output=True, text=True, check=False)
-    check("an empty brief exits 1 without running Codex",
-          completed.returncode == 1 and "is empty" in completed.stderr, completed.stderr)
+    bad_encoding = scratch / "bad-encoding.md"
+    bad_encoding.write_bytes(b"\xff")
+    for directory, input_file, reason in (
+        (scratch / "missing-checkout", brief, "not a directory"),
+        (checkout, scratch / "missing-brief", "could not read the brief"),
+        (checkout, bad_encoding, "could not read the brief"),
+        (checkout, empty_brief, "is empty"),
+    ):
+        completed = subprocess.run(
+            [sys.executable, str(PROGRAM), "-C", str(directory), "--brief", str(input_file),
+             "-o", str(scratch / "r.md")], capture_output=True, text=True, check=False)
+        check(f"invalid input {input_file.name} in {directory.name} exits 2 with usage and cause",
+              completed.returncode == 2 and "usage:" in completed.stderr
+              and reason in completed.stderr and not completed.stdout, completed.stderr)
 
     completed = subprocess.run(
         [sys.executable, str(PROGRAM), "--brief", str(brief), "-o", str(scratch / "r.md")],

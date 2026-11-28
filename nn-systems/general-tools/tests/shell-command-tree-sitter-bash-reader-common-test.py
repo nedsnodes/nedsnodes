@@ -2193,6 +2193,14 @@ for command in ["cd ~/x && git -C ~/y push > ~/z", "env -C ~/w git push -f",
           same_reading(in_a_new_process, in_this_process), (in_a_new_process, in_this_process))
 # Every command this test read, through the same encoder, in one child process that reads one request per
 # line, and in one new process per command as a hook reads it: both must give this process's reading.
+for flags, expected_code in (([], 2), (["--unknown"], 2), (["--help"], 0), (["-h"], 0)):
+    result = subprocess.run([sys.executable, str(MODULE_PATH), *flags],
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    output = result.stderr if expected_code else result.stdout
+    check(f"shell reader {flags} reports its usage with exit {expected_code}",
+          result.returncode == expected_code and reader.NEW_PROCESS_READ_FLAG in output
+          and reader.NEW_PROCESS_READ_ONE_REQUEST_PER_LINE_UNTIL_INPUT_CLOSES_FLAG in output,
+          (result.returncode, result.stdout, result.stderr))
 recorded = list(dict.fromkeys((text, json.dumps(markers)) for text, markers in COMMANDS_READ))
 requests = [json.dumps({"command": text, "glob_markers": json.loads(markers)}, ensure_ascii=False)
             .encode("utf-8", reader.SHELL_TEXT_ERRORS) for text, markers in recorded]

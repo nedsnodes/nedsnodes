@@ -70,13 +70,18 @@ def workspace_root() -> Path:
     return base / WORKSPACE_ROOT_NAME
 
 
-def workspace_for(digest: str) -> Path | None:
+def workspace_for(digest: str, *, best_effort_cleanup: bool = False) -> Path | None:
     """Return the workspace matching a digest, or None."""
     # Enumerate names instead of joining caller input, which could escape the root.
     try:
         entries = list(workspace_root().iterdir())
-    except OSError:
+    except FileNotFoundError:
         return None
+    except OSError as error:
+        if best_effort_cleanup:
+            return None
+        raise Refusal("workspace-io-error", f"could not list {workspace_root()}: {error}",
+                      f"Check that {workspace_root()} is a readable directory, then retry.") from error
     return next((entry for entry in entries
                  if entry.name == digest and entry.is_dir()), None)
 
@@ -976,7 +981,7 @@ def cancel_request(arguments) -> int:
     repository = resolve_repository(getattr(arguments, "repo", None))
     commit = fetch_and_find(repository, digest)
     if commit:
-        leftover = workspace_for(digest)
+        leftover = workspace_for(digest, best_effort_cleanup=True)
         if leftover is not None:
             shutil.rmtree(leftover, ignore_errors=True)
         return emit({"outcome": "too-late", "digest": digest, "commit": commit,

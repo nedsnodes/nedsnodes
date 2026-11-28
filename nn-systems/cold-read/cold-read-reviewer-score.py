@@ -13,7 +13,7 @@ own, and sets of readers are scored once per run index k from the k-th run of
 each member, reporting the median over the run indices every member has. A
 file with no `-run-<k>` is run 1 of its reader, and two files that give one
 reader the same run index, such as `ann--placement.md` and
-`ann-run-1--placement.md`, are refused with exit 64.
+`ann-run-1--placement.md`, are refused with exit 2.
 
 When the defect list has a `## Sentences with no defect` section, a FALSE
 finding whose quote, whitespace normalised, lies inside one of its sentences
@@ -47,11 +47,18 @@ REVIEWER_RUN_PATTERN = re.compile(r"^(.+)-run-(\d+)$")
 SELF_REPORTED_TOTAL_PATTERN = re.compile(r"^\s*Findings:\s*(\d+)\s*$", re.MULTILINE)
 
 EXIT_SCORED = 0
-EXIT_BAD_INVOCATION = 64
+EXIT_BAD_INVOCATION = 2
 
 
-class PlacementParseError(Exception):
+class ScoreInputError(Exception):
     pass
+
+
+def read_score_input(path: pathlib.Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise ScoreInputError(f"could not read {path}: {error}") from error
 
 
 def read_section(text: str, heading: str):
@@ -75,10 +82,10 @@ def table_rows(section: str):
 
 def read_severity_weights(path: pathlib.Path) -> dict:
     """Return {row: weight} from the Severity weights table."""
-    section = read_section(path.read_text(encoding="utf-8"), WEIGHTS_SECTION_HEADING)
+    section = read_section(read_score_input(path), WEIGHTS_SECTION_HEADING)
     if section is None:
-        raise SystemExit(
-            f"{PROGRAM}: {path} has no '{WEIGHTS_SECTION_HEADING}' section, so "
+        raise ScoreInputError(
+            f"{path} has no '{WEIGHTS_SECTION_HEADING}' section, so "
             f"it cannot be used as a ruler")
     weights = {}
     for cells in table_rows(section):
@@ -88,21 +95,21 @@ def read_severity_weights(path: pathlib.Path) -> dict:
             continue
         row, weight = int(cells[0]), int(cells[1])
         if row in weights:
-            raise SystemExit(f"{PROGRAM}: {path} weights row {row} twice")
+            raise ScoreInputError(f"{path} weights row {row} twice")
         weights[row] = weight
     if not weights:
-        raise SystemExit(f"{PROGRAM}: {path} has no weight rows")
+        raise ScoreInputError(f"{path} has no weight rows")
     expected = set(range(1, max(weights) + 1))
     missing = sorted(expected - set(weights))
     if missing:
-        raise SystemExit(f"{PROGRAM}: {path} weights are not contiguous from 1 — "
+        raise ScoreInputError(f"{path} weights are not contiguous from 1 — "
                          f"missing {missing}")
     return weights
 
 
 def read_defect_list_declined_entries(path: pathlib.Path) -> set:
     """Return the U-numbers of the declined table; empty when the list has none."""
-    section = read_section(path.read_text(encoding="utf-8"), DECLINED_SECTION_HEADING)
+    section = read_section(read_score_input(path), DECLINED_SECTION_HEADING)
     if section is None:
         return set()
     return {cells[0] for cells in table_rows(section)
@@ -115,7 +122,7 @@ def normalise_whitespace(text: str) -> str:
 
 def read_defect_list_sentences_with_no_defect(path: pathlib.Path):
     """Return {id: sentence} from the sentences-with-no-defect table, or None when the list has none."""
-    section = read_section(path.read_text(encoding="utf-8"),
+    section = read_section(read_score_input(path),
                            CLEAN_SENTENCES_SECTION_HEADING)
     if section is None:
         return None
@@ -158,7 +165,7 @@ def classify_placement(placement: str, source: str, finding_id: str,
             rows.add(int(match.group(2)))
         for row in rows:
             if not 1 <= row <= row_total:
-                raise PlacementParseError(
+                raise ScoreInputError(
                     f"{source}: finding {finding_id} placed on row {row}, "
                     f"outside 1-{row_total}")
         return rows, "HIT"
@@ -166,7 +173,7 @@ def classify_placement(placement: str, source: str, finding_id: str,
     if match:
         if match.group(1) not in declined:
             held = ", ".join(sorted(declined, key=lambda u: int(u[1:])))
-            raise PlacementParseError(
+            raise ScoreInputError(
                 f"{source}: finding {finding_id} is placed `UNFIXED {match.group(1)}`, "
                 f"but "
                 + (f"the defect list's declined table, its '## Table 2' section, "
@@ -197,7 +204,7 @@ def classify_placement(placement: str, source: str, finding_id: str,
         return set(), "TRUE_ONLY_OF_READER_CHECKOUT_NOT_OF_DRAFT"
     if placement == "FALSE":
         return set(), "FALSE"
-    raise PlacementParseError(
+    raise ScoreInputError(
         f"{source}: finding {finding_id} has unparseable placement {placement!r}")
 
 
@@ -207,7 +214,7 @@ def parse_one_placement_file(path: pathlib.Path, row_total: int, declined: set):
     reviewer = reviewer_name_from_placement_file_name(path)
     findings, anomalies = [], []
     seen_header = False
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in read_score_input(path).splitlines():
         line = raw_line.strip()
         if not line.startswith("|"):
             continue
@@ -237,9 +244,9 @@ def parse_one_placement_file(path: pathlib.Path, row_total: int, declined: set):
             "confidence": confidence.strip("`* ").lower(), "reason": reason,
         })
     if not findings:
-        raise PlacementParseError(f"{path}: no placement rows parsed")
+        raise ScoreInputError(f"{path}: no placement rows parsed")
     self_reported = SELF_REPORTED_TOTAL_PATTERN.search(
-        path.read_text(encoding="utf-8"))
+        read_score_input(path))
     if self_reported and int(self_reported.group(1)) != len(findings):
         anomalies.append(
             f"the placer's own total says {self_reported.group(1)} findings, "
@@ -481,7 +488,8 @@ def print_hand_check(all_findings, summaries, weights, depth):
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog=PROGRAM,
-        description="Score reviewers against a defect list, flat and weighted.")
+        description="Score reviewers against a defect list, flat and weighted.",
+        epilog="Exits 0 when scores are produced and 2 for invalid arguments or placement input.")
     parser.add_argument("--placements", required=True, type=pathlib.Path,
                         help="directory of placement tables, one per reviewer, "
                              "named <reviewer>--placement.md, or "
@@ -512,10 +520,16 @@ def main() -> int:
         print(f"{PROGRAM}: --union-sizes takes comma-separated integers, not "
               f"{arguments.union_sizes!r}", file=sys.stderr)
         return EXIT_BAD_INVOCATION
+    if any(size <= 0 for size in sizes):
+        parser.error("--union-sizes takes positive roster sizes")
 
-    weights = read_severity_weights(arguments.defect_list)
-    declined = read_defect_list_declined_entries(arguments.defect_list)
-    clean_sentences = read_defect_list_sentences_with_no_defect(arguments.defect_list)
+    try:
+        weights = read_severity_weights(arguments.defect_list)
+        declined = read_defect_list_declined_entries(arguments.defect_list)
+        clean_sentences = read_defect_list_sentences_with_no_defect(arguments.defect_list)
+    except ScoreInputError as error:
+        print(f"{PROGRAM}: {error}", file=sys.stderr)
+        return EXIT_BAD_INVOCATION
     total_weight = sum(weights.values())
     row_total = max(weights)
 
@@ -532,7 +546,7 @@ def main() -> int:
         try:
             reviewer, findings, anomalies = parse_one_placement_file(
                 path, row_total, declined)
-        except PlacementParseError as problem:
+        except ScoreInputError as problem:
             print(f"{PROGRAM}: {problem}\nDefect list: {arguments.defect_list}\n"
                   f"Scorer command: {rerun_command}", file=sys.stderr)
             return EXIT_BAD_INVOCATION

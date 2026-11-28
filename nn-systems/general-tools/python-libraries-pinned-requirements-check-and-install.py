@@ -9,6 +9,7 @@ the whole pinned file per user, as the shell reader does, and checks again.
 It prints one line and exits 0 when nothing is left missing, naming what it
 installed. Otherwise it prints what is still missing, what the install
 printed, and the command that installs the libraries by hand, and exits 1.
+If the installed versions could not be checked, it reports the cause on stderr and exits 2.
 
 Run: python3 nn-systems/general-tools/python-libraries-pinned-requirements-check-and-install.py
 """
@@ -54,7 +55,10 @@ def pinned_versions(requirements_file=python_libraries_pinned_requirements_insta
         name, separator, version = line.partition("==")
         if not separator or not name.strip() or not version.strip():
             raise ValueError(f"{requirements_file}: not a `name==version` line: {line!r}")
-        pins[name.strip()] = version.strip()
+        name, version = name.strip(), version.strip()
+        if name in pins and pins[name] != version:
+            raise ValueError(f"{requirements_file}: {name} is pinned to both {pins[name]} and {version}")
+        pins[name] = version
     return pins
 
 
@@ -114,13 +118,14 @@ def by_hand_install_line(host, requirements_file, python_version=None):
 
 def main(arguments=None):
     argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
-                            epilog="Exits 0 when nothing is left missing, 1 otherwise.").parse_args(arguments)
+                            epilog="Exits 0 when all pins are installed, 1 when some are still missing, "
+                                   "2 when the check could not run.").parse_args(arguments)
     host = socket.gethostname().split(".")[0]
     try:
         status, lines = check_and_install(host)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        print(f"{host}: the pinned Python libraries could not be checked: {error}")
-        return 1
+        print(f"{host}: the pinned Python libraries could not be checked: {error}", file=sys.stderr)
+        return 2
     print("\n".join(lines))
     return status
 

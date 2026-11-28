@@ -223,7 +223,7 @@ def removals_in_scratch_root(command, installed_rule_text=None):
 
 
 if shutil.which("systemd-tmpfiles") is None:
-    print("SKIP  the real systemd-tmpfiles cases: it is not installed here")
+    print("SKIP  [this machine cannot run it] the real systemd-tmpfiles cases: it is not installed here")
 else:
     removed = removals_in_scratch_root(dry_run_command)
     check("dry run, replayed: another file's `x /tmp/tmux-*` keeps the tmux folder, "
