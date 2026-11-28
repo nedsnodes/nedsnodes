@@ -141,8 +141,6 @@ PROMISE_AFTER_EVENT = fields.PROMISE_AFTER_EVENT
 STANDING_RULE = fields.STANDING_RULE
 HOLD = fields.HOLD
 CONDITIONAL_ON_USER = fields.CONDITIONAL_ON_USER
-NEGATIVE = fields.NEGATIVE
-NOT_RAISED_KINDS = (CONDITIONAL_ON_USER, NEGATIVE)
 
 PROMISE_PHRASES = (
     (CONDITIONAL_ON_USER, re.compile(r"\bsay the word,? and I'?ll\b", re.I)),
@@ -216,17 +214,6 @@ RX_CONDITIONAL_ON_EVENT = re.compile(
     r"|\bas\s+(?:each\b|(?:it|they)\s+(?!(?:(?:\w+ly|always|now|still|already|often|never)\s+)?"
     r"(?:is|are|was|were|be|should|would|could|can|may|might|must|will|does|did|do|has|had|have|"
     r"says?|said|stands?|seems?|looks?|goes|went|happens|turns|\w+ed)\b)[a-z])", re.I)
-RX_NEGATED_ACTION = re.compile(
-    r"\b(?:without|instead of|rather than|not yet|never|no longer|don't|won't|can't)\s+"
-    r"(?:\w+\s+){0,2}?(?:push|pushing|commit|committing|dispatch|dispatching|fork|forking|file|"
-    r"filing|open|opening|send|sending|message|messaging|start|starting|spawn|spawning)\b"
-    # A negated object declines the action too, as in "I'm starting nothing else for now"; but
-    # "nothing but the test" names what is done, and "no more than five" sets a limit.
-    r"|\b(?:" + _VERBS + "|" + _GERUNDS + r")\s+(?:nothing|none|no\s+(?:more|other|new|further))\b"
-    r"(?!\s+(?:else\s+)?(?:but|than)\b)",
-    re.I)
-# Coordinated clauses share the sentence's subject: "I'll push no further changes and merge it now".
-RX_CLAUSE_BREAK = re.compile(r",\s*(?:and\s+)?then\s+|\s+and\s+(?:then\s+)?|;\s*", re.I)
 
 
 def clean_text(text):
@@ -271,26 +258,24 @@ def _announces(sentence):
     return bool(match and _gerund_announces(sentence, match))
 
 
-def _declines_every_action(sentence):
-    """Whether a clause declines an action and no other clause announces one."""
-    clauses = RX_CLAUSE_BREAK.split(sentence)
-    if not any(RX_NEGATED_ACTION.search(clause) for clause in clauses):
-        return False
-    return not any(not RX_NEGATED_ACTION.search(clause)
-                   and (_announces(clause) or _announces("I'll " + clause))
-                   for clause in clauses)
+def promise_phrase_kind(sentence):
+    """Return the kind of the first promise phrase the sentence matches, or None."""
+    return next((kind for kind, pattern in PROMISE_PHRASES if pattern.search(sentence)), None)
 
 
 def sentence_kind(sentence):
-    """Return the kind of a sentence the phrase lists match, or None for a sentence they miss."""
+    """Return the kind of a sentence the phrase lists match, or None for a sentence they miss.
+
+    When neither a user condition nor a promise phrase sets the kind, an event word anywhere in the
+    sentence makes it a promise to act after an event, and so sets the wording of its reminder, even
+    when the word qualifies another action, as in "I'll merge it now without pushing the tag until
+    tomorrow".
+    """
     if sentence.endswith("?"):
         return None
-    kind = next((kind for kind, pattern in PROMISE_PHRASES if pattern.search(sentence)), None)
-    if kind is None:
-        if not _announces(sentence):
-            return None
-        if _declines_every_action(sentence):
-            return NEGATIVE
+    kind = promise_phrase_kind(sentence)
+    if kind is None and not _announces(sentence):
+        return None
     # The user has the next move whatever else the sentence promises.
     if RX_CONDITIONAL_ON_USER.search(sentence):
         return CONDITIONAL_ON_USER
@@ -789,12 +774,15 @@ def sets_prerequisites_or_blocked_by(task_tool_input):
                 or task_tool_input.get("addBlockedBy"))
 
 
-def code_reading_of_sentence(kind, turn_started_at, task_tool_calls, open_waiting_tasks):
+def code_reading_of_sentence(sentence, kind, turn_started_at, task_tool_calls, open_waiting_tasks):
     """What code settles about one matched sentence: not_raised, unbacked, or judge.
 
     A task created or updated in the sentence's turn or after it may back the sentence, and so may
-    any open task that waits on something, however old."""
-    if kind in NOT_RAISED_KINDS:
+    any open task that waits on something, however old. Code settles a sentence unbacked only when
+    a promise phrase matched it: one that the announced-action phrases matched beside a word such as
+    "tomorrow" may only decline an action, as "I'll open no more pull requests today or tomorrow."
+    does, and whether it declines is the judge's to decide."""
+    if kind == CONDITIONAL_ON_USER:
         return fields.NOT_RAISED
     if kind in (PROMISE_AFTER_EVENT, HOLD):
         if open_waiting_tasks:
@@ -802,7 +790,9 @@ def code_reading_of_sentence(kind, turn_started_at, task_tool_calls, open_waitin
         backing_candidates = [call for call in task_tool_calls
                               if call[0] and turn_started_at and call[0] >= turn_started_at
                               and sets_prerequisites_or_blocked_by(call[2])]
-        return fields.JUDGE if backing_candidates else fields.UNBACKED
+        if backing_candidates or promise_phrase_kind(sentence) is None:
+            return fields.JUDGE
+        return fields.UNBACKED
     return fields.JUDGE
 
 
@@ -821,7 +811,7 @@ def matched_sentences(facts, since, open_waiting_tasks):
             found.append({"record_uuid": record.get("uuid"), "time": iso(moment),
                           "sentence": sentence, "kind": kind,
                           "code_reading": code_reading_of_sentence(
-                              kind, turn_started_at or moment, facts.task_tool_calls,
+                              sentence, kind, turn_started_at or moment, facts.task_tool_calls,
                               open_waiting_tasks)})
     return found
 

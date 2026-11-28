@@ -422,7 +422,6 @@ try:
         ("Unless you object, I'll add that as one clause to the item's new text.",
          "promise_after_event"),
         ("If you haven't, I'll hold it.", "hold"),
-        # A clause that declines does not hide an action another clause announces.
         ("I'm starting nothing else until the tests finish, then I'll merge PR 4001.",
          "promise_after_event"),
         ("I'll push no further changes and merge it now.", "announced_action"),
@@ -454,14 +453,31 @@ try:
                      "I'll open no more pull requests today.",
                      "I'll push no other branches.",
                      "I'm starting no new reviews for now and the load is high.",
-                     "I'll file no further issues today."):
+                     "I'll file no further issues today.",
+                     "I'll open no new issues and pull requests",
+                     "I'll push no further changes, but I'll merge it now."):
         machine = Machine()
         machine.seat("alpha", [user("go"), assistant(sentence), turn_end()])
         _, verdicts, _ = machine.run()
-        check(f"a negative sentence is not raised, and rules 3 to 5 decide: {sentence!r}",
+        check(f"a sentence that declines goes to the judge: {sentence!r}",
               [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
-              == [("negative", "not_raised")] and verdicts["alpha"].get("rule") == 4,
+              == [("announced_action", "judge")] and verdicts["alpha"].get("rule") == 2,
               verdicts["alpha"])
+    for sentence in ("I'm starting nothing else until the load drops.",
+                     "I'll open no more pull requests today or tomorrow."):
+        machine = Machine()
+        machine.seat("alpha", [user("go"), assistant(sentence), turn_end()])
+        _, verdicts, _ = machine.run()
+        check(f"a sentence that declines until an event goes to the judge, with no task: {sentence!r}",
+              [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
+              == [("promise_after_event", "judge")] and verdicts["alpha"].get("rule") == 2,
+              verdicts["alpha"])
+    machine = Machine()
+    machine.seat("alpha", [user("go"), assistant("I'll report when PR 927 merges."), turn_end()])
+    _, verdicts, _ = machine.run()
+    check("a promise phrase with no task that could back it is unbacked without the judge",
+          [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
+          == [("promise_after_event", "unbacked")], verdicts["alpha"])
     machine = Machine()
     machine.seat("alpha", [user("go"),
                            assistant("Here is the diff.\n```\n-old\n+new\n```\nI'll push it now."),
