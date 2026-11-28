@@ -2424,7 +2424,7 @@ check("every relative path with a / is made absolute, ./ and a plain "
       == "/x/seat/.claude/settings.local.json"
       and program.resolve_query("CLAUDE.local.md", cwd="/x/seat")
       == "CLAUDE.local.md")
-# ".." climbs from the directory a symlink leads to, as the system does (GHI 5296).
+# ".." climbs from the directory a symlink leads to, as the system does.
 with scratch() as directory:
     base = pathlib.Path(os.path.realpath(directory))
     (base / "real" / "deep").mkdir(parents=True)
