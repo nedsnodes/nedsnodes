@@ -24,7 +24,7 @@ The text explains something or tells its reader what to do. Find the gaps within
 
 Sentences the edit added or changed: {CHANGED_SENTENCE_IDS}. Text the edit removed or replaced, which {TARGET_PATH} no longer holds: {REMOVED_TEXT}. When either of these names something, {TARGET_PATH} is an edit of a document on main. Begin each item in Questions 2 and 3 with one label. `#edit`: the item is about a sentence the edit added or changed, a conflict between such a sentence and the rest of the document, or a gap that the removed or replaced text leaves. `#kept_text`: the item is about sentences the edit did not change, and the edit did not cause it; end the item by saying whether the document already records the problem, citing where, such as "open question 6", or with "not recorded". When both say none, {TARGET_PATH} is not an edit: give no labels.
 
-Number the items of Questions 2 and 3 separately, ORDERED MOST IMPORTANT FIRST — the problem most likely to stop the reader the text is written for leads its section. If a question has none, say "No issues".
+Number the items of Questions 2 and 3 separately, ORDERED MOST IMPORTANT FIRST — the problem most likely to stop the reader the text is written for leads its section. If a question has none, say "#cold_read_no_findings# No issues".
 
 ## Words with a meaning of their own
 
