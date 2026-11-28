@@ -511,18 +511,17 @@ def approval_walk_sub_step_no_decision_closing_line_page_link_or_none(line):
 
 
 def approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
-        text, parser, waiting_units, numbers, all_units=None):
+        text, parser, chosen, numbers, all_units=None):
     """The set of numbers that are sub-steps asking for no decision, as the module docstring's CLOSING LINES says, of
-    the walk-document text; waiting_units are waiting_item_units' units for numbers, and all_units item_unit_spans'
-    units of text when the caller has them already."""
+    the walk-document text; chosen is approval_walk_waiting_item_heading_span_choose_for_each_item_number's {number: unit} for numbers, and
+    all_units item_unit_spans' units of text when the caller has them already."""
     sub_steps = [number for number in numbers if "." in number]
     if not sub_steps:
         return set()
     all_units = item_unit_spans(text, parser) if all_units is None else all_units
     found = set()
     for number in sub_steps:
-        unit = next(unit for unit in waiting_units if number in unit[0])
-        shown = approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number)
+        shown = approval_walk_item_text_as_shown_to_user(text, parser, all_units, chosen[number], number)
         lines = [line for line in prose_lines(shown, parser) if line.strip()]
         if (approval_walk_sub_step_no_decision_closing_line_page_link_or_none(lines[-1]) is not None
                 and approval_walk_item_last_recommendation_text_from_item_lines(lines) is None):
@@ -958,8 +957,22 @@ def approval_walk_next_unnumbered_item_number(units):
 
 
 def waiting_item_units(document, value, numbers, total, parser, all_units=None):
-    """Return (M to show, the units of item_unit_spans that hold the waiting items) for the item numbers and
-    total that parse_items read from the `#next_to_present` value, total None when it gives none. M to show is
+    """Return (M to show, the units of item_unit_spans that hold the waiting items), the units in walk-document
+    order, as approval_walk_waiting_item_heading_span_choose_for_each_item_number chooses them."""
+    shown_total, chosen = approval_walk_waiting_item_heading_span_choose_for_each_item_number(document, value, numbers, total, parser,
+                                                                        all_units)
+    if all_units is None:
+        all_units = item_unit_spans(document.read_text(encoding="utf-8"), parser)
+    return shown_total, [unit for unit in all_units if unit in chosen.values()]
+
+
+def approval_walk_waiting_item_heading_span_choose_for_each_item_number(document, value, numbers, total, parser,
+                                                                       all_units=None):
+    """Return the pair (M to show, {waiting item number: the unit of item_unit_spans chosen for it}) for the item numbers and
+    total that parse_items read from the `#next_to_present` value, total None when it gives none. A unit that
+    names several items can be chosen for one of them and not another, as when `## Item 2 of 8: keep it` is chosen
+    for item 2 and a later `## Items 2 and 4 of 9: remove it` for item 4, so a caller reads each item's text from the
+    unit chosen for it, never from every chosen unit that names it. M to show is
     total, which the close step writes as approval_walk_item_total_shown_and_waiting_counted_from_walk_document counted it, or, when the value gives none,
     approval_walk_item_total_shown_and_waiting_counted_from_walk_document's.
 
@@ -981,7 +994,7 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
             f"minutes name: add the count to the heading of the item that the minutes' last "
             f"`#next_to_present` line names: for `#next_to_present item 3 of 9`, write "
             f"`## Item 3 of 9: <the point>`.")
-    chosen, missing, repeated = [], [], []
+    chosen, missing, repeated = {}, [], []
     for number in numbers:
         naming = [unit for unit in all_units if number in unit[0]]
         picked = [unit for unit in naming if unit[1] == total]
@@ -992,7 +1005,7 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
         elif len(naming) > 1:
             repeated.append(number)
         else:
-            chosen.append(naming[0])
+            chosen[number] = naming[0]
     problems = []
     if missing:
         named = ", ".join(f"`Item {number}`" for number in missing)
@@ -1015,4 +1028,4 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
     if problems:
         raise UnusableRange("its walk-document has " + "; and it has ".join(problems) + ".")
     shown_total = total if total is not None else approval_walk_item_total_shown_and_waiting_counted_from_walk_document(all_units)
-    return shown_total, [unit for unit in all_units if unit in chosen]
+    return shown_total, chosen

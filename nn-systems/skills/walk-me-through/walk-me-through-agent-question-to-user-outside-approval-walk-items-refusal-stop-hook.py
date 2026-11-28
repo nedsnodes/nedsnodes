@@ -703,16 +703,16 @@ def log_model_line_verdicts(environment, payload, walk, judged):
          "reason": reason, "failure": failure} for entry, ask, reason, failure in judged])
 
 
-def closing_lines(pages, name, document_text, units, waiting_units, parser, numbers, new_total):
+def closing_lines(pages, name, document_text, units, chosen, parser, numbers, new_total):
     """(each waiting item's closing line, once the walk's count M is new_total, built by the answer
     hook's closing_line with the link of the item's newest `#item_page` line in pages, or NO_PAGE_LINK when the minutes
     record no page for it; the numbers of the items the minutes record no page for)."""
     pages = dict(pages)
     without_page = [number for number in numbers if number not in pages]
     pages.update(dict.fromkeys(without_page, NO_PAGE_LINK))
-    points = answer_hook.heading_points(document_text.split("\n"), waiting_units, parser)
+    points = answer_hook.approval_walk_waiting_item_chosen_heading_point_text_read_for_each_item_number(document_text.split("\n"), chosen, parser)
     no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
-        document_text, parser, waiting_units, numbers, units)
+        document_text, parser, chosen, numbers, units)
     walk = answer_hook.WalkState(name, None, numbers, new_total, {}, None, pages=pages, points=points,
                                  no_decision_numbers=no_decision_numbers)
     return [answer_hook.closing_line(number, walk) for number in numbers], without_page
@@ -795,8 +795,8 @@ def output_for(payload, environment, model=model_judgement):
         numbers, total = walk_finder.parse_items(value)
         document_text = document.read_text(encoding="utf-8") if document.is_file() else ""
         units = walk_finder.item_unit_spans(document_text, parser)
-        total, waiting_units = walk_finder.waiting_item_units(document, value, numbers, total, parser,
-                                                              all_units=units)
+        total, chosen = walk_finder.approval_walk_waiting_item_heading_span_choose_for_each_item_number(document, value, numbers, total,
+                                                                                  parser, all_units=units)
     except walk_finder.UnusableRange:
         return None
     pages = walk_finder.newest_item_page_link_per_item_from_walk_minutes(minutes.read_text(encoding="utf-8"), parser)
@@ -807,7 +807,7 @@ def output_for(payload, environment, model=model_judgement):
         return None
     document_lines = document_text.split("\n")
     waiting_items_text = "\n\n".join("\n".join(document_lines[first:end]).strip()
-                                     for _, _, _, first, end in waiting_units)
+                                     for _, _, _, first, end in [unit for unit in units if unit in chosen.values()])
     turn_started_by, turn_start_text = turn_opening(records)
     flagged, failure, judged = model(lines, question_like, waiting_items_text, turn_started_by, turn_start_text)
     verdicts_problem = log_model_line_verdicts(environment, payload, name, judged)
@@ -827,10 +827,10 @@ def output_for(payload, environment, model=model_judgement):
     # Loaded only here, on the way to a refusal, so a reply that passes does not pay for it.
     check_and_close = load_module("walk_me_through_answer_added_texts_cold_read_fast_read_check_and_close",
                                   WALK_CHECK_PROGRAM)
-    closing, without_page = closing_lines(pages, name, document_text, units, waiting_units, parser, numbers,
+    closing, without_page = closing_lines(pages, name, document_text, units, chosen, parser, numbers,
                                           new_total)
     # No item is added when the flagged text asks nothing, so that branch's closing line keeps the walk's count.
-    closing_no_item_added, _ = closing_lines(pages, name, document_text, units, waiting_units, parser, numbers,
+    closing_no_item_added, _ = closing_lines(pages, name, document_text, units, chosen, parser, numbers,
                                              total)
     values = {"walk": name, "waiting_whole_item": waiting.split(".")[0], "sentence": sentence, "decided": decided,
               "waiting": waiting_label,
