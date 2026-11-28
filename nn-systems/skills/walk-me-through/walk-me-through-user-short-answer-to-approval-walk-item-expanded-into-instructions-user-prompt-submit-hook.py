@@ -44,7 +44,7 @@ the hook does not expand, counts as a reply in his own words. A reply in his own
 words gets WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and nothing else
 but the lines A REPLY IN HIS OWN WORDS IS RECORDED, below, adds when recording it fails.
 Both get the line only when he typed the prompt in an agent-session he attends,
-as the pending-user-alerts hook's typed_by_user and
+as the pending-user-alerts hook's typed_by_user_and_transcript_read_error and
 agent-session-unattended-by-user-check-common.py decide. With no item waiting,
 an empty prompt, or a prompt he did not type, a reply in his own words prints
 nothing. When reading the approval-walk state fails, the reply gets
@@ -1283,14 +1283,8 @@ def agent_session_unattended():
 
 
 def prompt_typed_by_user_and_transcript_read_error(payload):
-    """(whether the user typed the prompt, the error reading the transcript or None). After a failed read, a prompt
-    that opens as a program's or another agent-seat's message is not his, and any other counts as typed."""
     alerts_hook = load_module_by_path("walk_me_through_pending_user_alerts_hook", PENDING_USER_ALERTS_HOOK_FILE)
-    try:
-        return alerts_hook.typed_by_user(payload), None
-    # AttributeError: a record whose message is not an object, which counts as a failed read.
-    except (OSError, ValueError, AttributeError) as error:
-        return not payload["prompt"].lstrip().startswith(alerts_hook.NOT_TYPED_PROMPT_OPENINGS), error
+    return alerts_hook.typed_by_user_and_transcript_read_error(payload)
 
 
 WALK_NOT_READ = object()

@@ -2730,7 +2730,7 @@ def test_settled_line_a_transcript_record_whose_message_is_a_string_counts_as_a_
     lines = context_lines(result)
     check("a reply in his own words with that record names the failed transcript read and exits 0",
           result.returncode == 0 and len(lines) == 3 and "could not tell who wrote this prompt" in lines[1]
-          and "AttributeError" in lines[1] and lines[2] == SETTLED_LINE,
+          and "is a str, not an object" in lines[1] and lines[2] == SETTLED_LINE,
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 
