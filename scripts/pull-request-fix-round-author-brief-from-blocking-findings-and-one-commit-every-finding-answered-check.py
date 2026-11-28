@@ -71,8 +71,9 @@ changes or untracked files, ignored files apart, or its HEAD is not the frozen-h
 commit on top of the frozen-head and the answers file, written after the round's review was submitted,
 has an entry for every finding, the refusal says to finish the round with --check. Refuse too when HEAD is
 the frozen-head and that answers file has an entry for every finding: the refusal says to finish the round
-with --check, or, when the answers describe fixes, whose commit was reset away, to delete the answers file
-and run this again; this program cannot tell the two apart. Otherwise write the answers file with a line
+with --check, or, when the answers describe fixes, whose commit was reset away, to move the answers file
+into the round's kept-copies directory and run this again, so that the brief names that copy; this program
+cannot tell the two apart. Otherwise write the answers file with a line
 "<n>. " per finding, replacing any file there, and print the brief:
 the frozen-head, ADVISOR_FIX_ROUND_INSTRUCTION when the round's number is ADVISOR_FIX_ROUND_NUMBER and on
 no other, each blocking finding word for word, then each nit word for word, numbered on from the blocking
@@ -955,7 +956,7 @@ def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copie
 
 
 def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, finding_count, review_submitted_at,
-                                  merge_lane):
+                                  round_review_id, merge_lane):
     """The pull request's topic-worktree, made when this clone has none; refuse unless it is clean at frozen_head,
     and say how to finish the round when a stopped fix-round subagent left every answer, with its commit or none."""
     worktree = topic_worktree_of_branch(branch) or topic_worktree_made_by_creator(branch)
@@ -996,12 +997,22 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
     answers = worktree / answers_name
     if head == frozen_head:
         if answers_file_answers_every_finding_of_round(answers, finding_count, review_submitted_at):
+            kept_copies_directory = (
+                pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
+                    worktree, number, round_review_id))
+            # Named by the file's modification time, so that a second move in the same round cannot overwrite the
+            # first; .md, so that answers_kept_copies_oldest_first lists it.
+            moved = kept_copies_directory / f"{answers.stem}-moved-{answers.stat().st_mtime_ns}.md"
             raise Refused(f"Pull request {number}'s topic-worktree {worktree} is at the frozen-head "
                           f"{frozen_head[:12]} with no fix-round commit, and its answers file {answers} answers "
                           "every finding of this round, so a fix-round subagent wrote every answer.\n"
                           "If that subagent is still working there, wait for it to finish.\n"
                           "If the answers describe fixes, which means the fix-round commit was reset away, or if you "
-                          f"mean to start the round again: delete {answers}, then run this command:\n"
+                          "mean to start the round again: move the answers file into this round's kept-copies "
+                          "directory with this command, then run the command after it, whose brief names the moved "
+                          "copy for the next subagent to read:\n"
+                          f"mkdir -p {shlex.quote(str(kept_copies_directory))} && "
+                          f"mv {shlex.quote(str(answers))} {shlex.quote(str(moved))}\n"
                           f"{rerun}\n" + finish)
         return worktree
     if (git([*in_worktree, "rev-list", "--parents", "-n", "1", head]).split()[1:] == [frozen_head]
@@ -1051,7 +1062,7 @@ def print_brief(number, reviewer_login):
                          REPLACE_INSTEAD_OF_ROUND_INSTRUCTION.format(number=number, merge_lane=merge_lane)]))
         return
     worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, len(findings) + len(nits),
-                                             review_submitted_at, merge_lane)
+                                             review_submitted_at, round_review_id, merge_lane)
     answers_path = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
     kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
         worktree, number, round_review_id
@@ -1076,9 +1087,10 @@ def print_brief(number, reviewer_login):
         f"The round's reviews: {review_link}",
     ]
     for kept_answers in kept_copies:
-        lines.append(f"The answers file held text, which may be numbered for another round, so this program copied it "
-                     f"unchanged to {kept_answers} and wrote a new answers file. Read that copy, and copy into the "
-                     "new file each answer that still answers a finding below, under that finding's number.")
+        lines.append(f"The answers file held text, now kept unchanged at {kept_answers}, which may be numbered for "
+                     "another round; this program wrote a new answers file. Read that copy, and copy into the new "
+                     "file each answer that still answers a finding below, under that finding's number. An answer "
+                     "that describes a fix answers its finding only when that fix is in the topic-worktree.")
     # A copies directory named by another review on this frozen-head: one an earlier version of this program
     # named by the round's latest changes-requested review, or one named by a first review since dismissed.
     for kept_answers in other_reviews_kept_copies:
