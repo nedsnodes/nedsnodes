@@ -1271,3 +1271,16 @@ The claim check's evidence:
 > - A Grep for slice, weight, nice or systemd in that merge program found nothing, and no Grep found an after-merge slice or weight.
 > - The rest is supported: `recover-crashed-seats.py:138-147`, `:830-853`.
 State: open
+
+## E109 — possible problem: an assertion of the overview is contradicted
+
+Claim: At a session-handoff it ends the agent-session, removes finished worktrees, restarts itself on main's code, runs the extractor (`scripts/handoff-extract-conversation.py`) and launches the successor, with the exceptions Invariants gives; before it runs the extractor it stores, as the agent-seat's Remote Control name, a new title the user gave the outgoing agent-session in claude.ai that the agent-session's transcript holds and the rename hook, below, did not store, and then adds to the successor's initial-agent-instructions the instruction to tell the other agent-seats the new name; the restart program, below, restarts onto main's code a handoff-supervisor that did not restart itself.
+Found by: the overview claim check of 2026-11-28 against commit a44d35a54806ee73827fb5e802eab22c1054afde; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/fc81d06bac2f9e5fdec1437fe71baf37d1567a17-2026-11-28T06-56-22-875151Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The sentence ties the instruction to the title the handoff-supervisor stores itself. The code adds it whenever the name changed during the agent-session, a name the rename hook already stored included:
+> - nn-systems/handoff/handoff-supervisor.py:2587-2588 "Store a rename the launched agent-session's last turn end did not, and, when the name changed during that agent-session, add the instruction to tell the other agent-seats."
+> - nn-systems/handoff/handoff-supervisor.py:2621 "the Stop hook may have stored a name the agent-session handed off before announcing."; :2622-2625 `heard_names = ([launched_remote_control_name] ...) + recorded_names + ...`; `old_names = [name for ... if name != stored_name ...]`
+> - The rest holds: :3009, :3027, :3032-3035, :3039-3043 (rename step before `carry_over_to_successor`), and nn-systems/handoff/handoff-supervisor-restart-onto-main-code-by-relaunch-from-reference-checkout.py:2 "Restart an agent-seat's old handoff-supervisor onto main's code".
+State: open
