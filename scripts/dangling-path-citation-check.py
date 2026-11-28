@@ -134,7 +134,7 @@ def changed_lines_by_file(merge_base: str, repository_root: pathlib.Path) -> dic
     """Return {repository-relative path: added or altered line numbers}."""
     diff = subprocess.run(
         ["git", "diff", "--unified=0", "--no-color", "--no-ext-diff", f"{merge_base}..HEAD"],
-        cwd=repository_root, capture_output=True, text=True, check=False)
+        cwd=repository_root, capture_output=True, text=True, errors="surrogateescape", check=False)
     if diff.returncode != 0:
         fail_bad_invocation(f"git diff against {merge_base} failed: "
                             f"{diff.stderr.strip() or diff.returncode}")
@@ -230,7 +230,7 @@ def is_project_test_file(path: pathlib.Path, repository_root: pathlib.Path, lint
             or PROJECT_TEST_DIRECTORY_NAME in relative.parts[:-1])
 
 
-def findings_for_file(path: pathlib.Path, changed: set, lint, root_directories: tuple):
+def findings_for_file(path: pathlib.Path, changed: set, lint, root_directories: tuple, unchecked):
     """Yield (line number, problem) for changed lines."""
     if lint.in_frozen_measured_data(path, REPOSITORY_ROOT):
         return
@@ -238,13 +238,12 @@ def findings_for_file(path: pathlib.Path, changed: set, lint, root_directories: 
     if is_project_test_file(path, REPOSITORY_ROOT, lint):
         return
     if path.suffix == ".md":
-        for line_number, problem in lint.lint_markdown(path, REPOSITORY_ROOT):
+        for line_number, problem in lint.lint_markdown(path, REPOSITORY_ROOT, unchecked=unchecked):
             if line_number in changed and ("does not exist" in problem):
                 yield line_number, problem
         return
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    text = lint.read_text_for_check(path, unchecked, skip_binary=True)
+    if text is None:
         return
     for line_number, line in enumerate(text.splitlines(), 1):
         if line_number not in changed:
@@ -408,6 +407,7 @@ def run_check(argv) -> int:
         changed = {name: lines for name, lines in changed.items() if name in wanted}
 
     findings = []
+    unchecked = {}
     name_status_rows = name_status_rows_against_merge_base(merge_base, REPOSITORY_ROOT)
     removed_files = paths_this_change_removed(name_status_rows, REPOSITORY_ROOT)
     removed = removed_files + directories_this_change_emptied(removed_files, REPOSITORY_ROOT)
@@ -420,7 +420,7 @@ def run_check(argv) -> int:
         if not path.is_file():
             continue
         base_cited_paths = None
-        for line_number, problem in findings_for_file(path, changed[name], lint, root_directories):
+        for line_number, problem in findings_for_file(path, changed[name], lint, root_directories, unchecked):
             # A changed line can retain old citations; compare with the file's merge-base text under its old name.
             if base_cited_paths is None:
                 base_name = merge_base_name_of_renamed_file.get(name, name)
@@ -437,6 +437,9 @@ def run_check(argv) -> int:
           f"{len(changed)} changed file(s) touch, and what still cites the "
           f"{len(removed)} path(s) this change removed, against {arguments.base}.",
           file=sys.stderr)
+    if unchecked:
+        lint.report_unchecked_files(unchecked)
+        return 2
     return EXIT_FINDINGS if findings else 0
 
 

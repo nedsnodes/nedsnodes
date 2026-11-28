@@ -259,9 +259,14 @@ def check_dates(line: str):
             yield f"impossible date {match.group(0)}"
 
 
-def read_text_for_check(path: Path, unchecked):
+def read_text_for_check(path: Path, unchecked, *, skip_binary=False):
     """Read a UTF-8 source, recording a failed read once per path when a collector is given."""
     try:
+        if skip_binary:
+            data = path.read_bytes()
+            if b"\0" in data[:8000]:
+                return None
+            return data.decode("utf-8")
         return path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as error:
         if unchecked is None:
