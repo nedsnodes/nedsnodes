@@ -15,6 +15,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -308,6 +309,7 @@ for files in RECORD_LINE_CASES:
         REFUSAL_TEXTS += [
             guard.CLOSE_WITH_COMMENT_REFUSAL.format(close_lines=guard.close_lines(files)),
             guard.DELETE_REFUSAL.format(close_lines=guard.close_lines(files))]
+REFUSAL_TEXTS.append(guard.edit_title_refusal(["docs/issues/46-a.md"], "A heading", 46))
 OPENING_WORDS = ("Do not", "Put", "If", "Write", "Edit", "To change", "Close",
                  "Run", "Record", "Change", "This", "The", "Otherwise")
 for text in REFUSAL_TEXTS:
@@ -323,13 +325,18 @@ for text in REFUSAL_TEXTS:
 # edit-GHI retitles only an issue with one filed GHI-MD, and only when the
 # edit changes its heading, so the title refusal sends the agent to the user
 # in the other cases, and says so before it says what to change.
-check("the title refusal, files unknown: the stop line comes before the change line",
-      EDIT_TITLE_FALLBACK.splitlines()[2] ==
-      "If the issue has no file or two or more files, counting files named "
-      "docs/issues/<number>-*.md and designs in a system's docs/ directory, or the "
-      "first heading of the issue's GHI-MD already reads the title you want, stop "
-      "and tell the user."
-      and EDIT_TITLE_FALLBACK.splitlines()[3].startswith("Otherwise change the first heading"),
+check("the title refusal, files unknown: the lookup failure, the stop line and the "
+      "rerun line come before the change line",
+      EDIT_TITLE_FALLBACK.splitlines()[2:5] == [
+          "This guard could not look up the issue's files on main.",
+          "If the issue has no file or two or more files, counting files named "
+          "docs/issues/<number>-*.md and designs in a system's docs/ directory, stop and "
+          "tell the user.",
+          "If the first heading of the issue's GHI-MD already reads the title you want, run "
+          "the command again once git can read origin/main; this guard lets a title through "
+          "that is exactly that heading. If it is refused the same way, stop and tell the "
+          "user."]
+      and EDIT_TITLE_FALLBACK.splitlines()[5].startswith("Otherwise change the first heading"),
       EDIT_TITLE_FALLBACK)
 for name, text in (("comment", COMMENT_FALLBACK), ("body", EDIT_BODY_FALLBACK),
                    ("title", EDIT_TITLE_FALLBACK)):
@@ -361,6 +368,27 @@ for command, should_refuse in (("gh issue comment 46 -b x", True),
           result.returncode == 0 and refused == should_refuse,
           f"{result.returncode} {result.stdout} {result.stderr}")
 
+# A cwd that exists outside any git checkout fails the lookup at its first git
+# call, an exit the missing cwd above never reaches. Run end to end, because a
+# crash there fails open: the write goes ahead with only a crash notice.
+with tempfile.TemporaryDirectory() as outside_any_checkout:
+    environment = dict(os.environ,
+                       GIT_CEILING_DIRECTORIES=str(Path(outside_any_checkout).parent))
+    for command, expected in (("gh issue comment 46 -b x", COMMENT_FALLBACK),
+                              ("gh issue edit 46 --title New", EDIT_TITLE_FALLBACK)):
+        result = subprocess.run(
+            [sys.executable, str(HOOK_SCRIPT)],
+            input=json.dumps({"tool_name": "Bash", "cwd": outside_any_checkout,
+                              "tool_input": {"command": command}}),
+            capture_output=True, text=True, check=False, env=environment)
+        try:
+            reason = json.loads(result.stdout)["hookSpecificOutput"].get(
+                "permissionDecisionReason")
+        except (ValueError, KeyError):
+            reason = None
+        check(f"a cwd outside any checkout: {command!r} gets the lookup-failed refusal",
+              reason == expected, f"{result.returncode} {result.stdout} {result.stderr}")
+
 # The record line names the issue's files on main, looked up in the session's
 # checkout as the GHI write tool lists them.
 with tempfile.TemporaryDirectory() as temporary_directory:
@@ -379,6 +407,10 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                      "docs/issues/47-supporting-notes.md", "docs/issues/9-unrelated.md"):
         (origin / relative).parent.mkdir(parents=True, exist_ok=True)
         (origin / relative).write_text("# A file\n", encoding="utf-8")
+    for relative, text in (("docs/issues/50-no-heading.md", "No heading here.\n"),
+                           ("docs/issues/51-unreadable-on-main.md", "# Unreadable\n"),
+                           ("docs/issues/52-another-heading.md", "# Other\n")):
+        (origin / relative).write_text(text, encoding="utf-8")
     git(["add", "-A"], origin)
     git(["commit", "-q", "-m", "issue files"], origin)
     session_checkout = root / "session-checkout"
@@ -472,8 +504,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "Do not set this project's issue bodies with gh issue edit: an issue's body is "
         "the links to its files on main, and scripts/ghi-issue-write.py writes it from "
         "those files.",
-        "To change only labels, assignees or the milestone, run gh issue edit without "
-        "--title, --body, --body-file and --attach; that needs no file.",
+        "To change only labels, assignees or the milestone, run gh issue edit with only "
+        "those flags; that needs no file.",
         "If the command also set the title, run gh issue edit <number> --title alone "
         "afterwards for the title's instructions."]
     refusal = refusal_in_checkout('gh issue edit 46 --body "links"')
@@ -498,18 +530,19 @@ with tempfile.TemporaryDirectory() as temporary_directory:
 
     TITLE_FIRST_LINES = [
         "[rule bash-guard-gh-issue-body-or-title-set-by-hand] "
-        "Do not set this project's issue titles with gh issue edit: "
-        "scripts/ghi-issue-write.py sets an issue's title from the first heading of the "
-        "issue's GHI-MD, when the issue has one file on main and an edit changes that "
-        "heading.",
-        "To change only labels, assignees or the milestone, run gh issue edit without "
-        "--title, --body, --body-file and --attach; that needs no file."]
+        "Do not set this project's issue titles with gh issue edit to anything but the "
+        "first heading of the issue's GHI-MD on main: scripts/ghi-issue-write.py sets an "
+        "issue's title from that heading, when the issue has one file on main and an edit "
+        "changes the heading.",
+        "To change only labels, assignees or the milestone, run gh issue edit with only "
+        "those flags; that needs no file."]
     refusal = refusal_in_checkout('gh issue edit 46 --title "New title"')
-    check("title: an issue with one file on main: stop if the heading already reads it, "
-          "otherwise change it, then rerun",
+    check("title: an issue with one file on main, a title other than its heading: set the "
+          "heading as the title if it already reads it, otherwise change it, then rerun",
           refusal is not None and refusal.split("\n") == TITLE_FIRST_LINES + [
-              f"If the first heading of {ONE_FILE} already reads the title you want, stop "
-              "and tell the user.",
+              f"If the first heading of {ONE_FILE} on main already reads the title you "
+              "want, set the title to exactly that heading, which this guard lets through: "
+              "gh issue edit 46 --title 'A file'",
               "Otherwise change that heading to the title you want, then open the edit's "
               f"pull request with: python3 scripts/ghi-issue-write.py edit {ONE_FILE}",
               RERUN], refusal)
@@ -526,6 +559,60 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     refusal = refusal_in_checkout("gh issue edit 46 --add-label draft")
     check("an edit changing only a label still passes in a checkout", refusal is None,
           refusal)
+
+    # gh retitles every issue named, and 52's heading is not the title.
+    refusal = refusal_in_checkout("gh issue edit 46 52 --title 'A file'")
+    check("title: a title edit naming two issues is refused, though it matches the first "
+          "one's heading", refusal is not None, refusal)
+
+    refusal = refusal_in_checkout("gh issue edit 46 --title 'A file'")
+    check("title: a title that is exactly the first heading of the issue's one GHI-MD "
+          "on main passes", refusal is None, refusal)
+    # Tested behaviour: a label flag sets no title or body, so it does not stop the
+    # title edit passing.
+    refusal = refusal_in_checkout("gh issue edit 46 --title 'A file' --add-label draft")
+    check("title: the heading's title with --add-label passes", refusal is None, refusal)
+    refusal = refusal_in_checkout("gh issue edit 47 --title 'A file'")
+    check("title: the heading's title on an issue with two GHI-MDs on main is refused",
+          refusal is not None and refusal.split("\n") == TITLE_FIRST_LINES + [
+              f"The issue's files on main are: {SEVERAL_FILES}. scripts/ghi-issue-write.py "
+              "changes the title only of an issue with one file, so stop and tell the "
+              "user."], refusal)
+    refusal = refusal_in_checkout("gh issue edit 48 --title 'A file'")
+    check("title: a title on an issue with no GHI-MD on main is refused",
+          refusal is not None and refusal.split("\n") == TITLE_FIRST_LINES + [NO_FILE_LINE],
+          refusal)
+    for body_flag in ("--body links", "--body-file body.md", "--attach shot.png"):
+        refusal = refusal_in_checkout(f"gh issue edit 46 --title 'A file' {body_flag}")
+        check(f"title: the heading's title with {body_flag.split()[0]} gets the body refusal",
+              refusal is not None and refusal.split("\n")[:3] == BODY_FIRST_LINES, refusal)
+
+    def heading_unread_lines(path):
+        return [
+            f"This guard could not read a first heading from {path} on main, so it cannot "
+            "tell whether the title is that file's first heading. If that file on main has "
+            "a first heading that already reads the title you want, run the command again; "
+            "if it is refused the same way, stop and tell the user.",
+            "Otherwise make the title you want the first heading of that file, then open "
+            f"the edit's pull request with: python3 scripts/ghi-issue-write.py edit {path}"]
+
+    refusal = refusal_in_checkout("gh issue edit 50 --title 'No heading here.'")
+    check("title: an issue whose one GHI-MD on main has no heading is refused",
+          refusal is not None and refusal.split("\n") == TITLE_FIRST_LINES
+          + heading_unread_lines("docs/issues/50-no-heading.md") + [RERUN], refusal)
+
+    # Last, because it damages the session checkout: with the blob's loose object
+    # gone, ls-tree still lists the file but git show cannot read it.
+    blob = git(["rev-parse", "HEAD:docs/issues/51-unreadable-on-main.md"],
+               session_checkout).stdout.strip()
+    loose_object = session_checkout / ".git" / "objects" / blob[:2] / blob[2:]
+    check("fixture: main's copy of issue 51's file is a loose object in the checkout",
+          loose_object.is_file(), str(loose_object))
+    loose_object.unlink(missing_ok=True)
+    refusal = refusal_in_checkout("gh issue edit 51 --title Unreadable")
+    check("title: the heading's title is refused when main's copy cannot be read",
+          refusal is not None and refusal.split("\n") == TITLE_FIRST_LINES
+          + heading_unread_lines("docs/issues/51-unreadable-on-main.md") + [RERUN], refusal)
 
 print()
 if failures:

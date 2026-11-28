@@ -9,8 +9,8 @@ WHAT IT REFUSES, all on this project's repository only:
 - `gh issue edit` carrying `--body`, `--body-file` or `--attach`, the flags
   that change an issue's body;
 - `gh issue edit` carrying `--title`, the flag that changes an issue's title,
-  unless the title is exactly the first heading of the issue's one GHI-MD
-  on origin/main;
+  unless the edit names one issue and the title is exactly the first heading
+  of that issue's one GHI-MD on origin/main;
 - `gh issue delete`.
 Everything else passes: `view`, `list`, `status`, `close` and `reopen`
 without a comment, and `edit` changing only labels, assignees, milestones,
@@ -68,8 +68,8 @@ DECISIONS, and where they depart from the design of record:
   agent there. A title edit that also carries a body flag gets the body
   refusal, which tells the agent to run the title edit alone afterwards for
   the title's instructions.
-- A title edit that sets the title to exactly the first heading of the
-  issue's one GHI-MD on origin/main passes. It keeps the title one source,
+- A title edit that names one issue and sets the title to exactly the first
+  heading of that issue's one GHI-MD on origin/main passes. It keeps the title one source,
   and it is the only way to fix a title that is stale while its heading is
   right: edit-GHI retitles only when an edit changes the heading, so it
   never fixes that case. When main's copy cannot be read, the edit is
@@ -215,8 +215,8 @@ RERUN_LINE = (
     "python3 scripts/ghi-issue-write.py edit command again; the rerun updates the issue."
 )
 LABELS_ONLY_LINE = (
-    "To change only labels, assignees or the milestone, run gh issue edit without "
-    "--title, --body, --body-file and --attach; that needs no file."
+    "To change only labels, assignees or the milestone, run gh issue edit with only "
+    "those flags; that needs no file."
 )
 COMMENT_REFUSAL = NO_COMMENTS_LINE + "\n{record_line}"
 # Close and delete send the agent to the close operation, which runs the edit
@@ -270,10 +270,10 @@ EDIT_BODY_REFUSAL = (
 # and the edit changes that file's first heading, so {title_line} stops the
 # agent wherever the tool could not retitle.
 EDIT_TITLE_REFUSAL = (
-    "[rule bash-guard-gh-issue-body-or-title-set-by-hand] Do not set this project's issue titles with gh issue edit: "
-    "scripts/ghi-issue-write.py sets an issue's title from the first heading of the "
-    "issue's GHI-MD, when the issue has one file on main and an edit changes that "
-    "heading.\n"
+    "[rule bash-guard-gh-issue-body-or-title-set-by-hand] Do not set this project's issue titles with gh issue edit "
+    "to anything but the first heading of the issue's GHI-MD on main: "
+    "scripts/ghi-issue-write.py sets an issue's title from that heading, when the issue "
+    "has one file on main and an edit changes the heading.\n"
     + LABELS_ONLY_LINE + "\n"
     "{title_line}"
 )
@@ -284,24 +284,26 @@ TITLE_LINES_ONE_FILE = (
     "request with: python3 scripts/ghi-issue-write.py edit {path}"
 )
 TITLE_LINES_ONE_FILE_HEADING_UNREAD = (
-    "This guard could not read main's copy of {path}, so it cannot tell whether the "
-    "title is that file's first heading. If the first heading already reads the title "
-    "you want, run the command again; if it is refused the same way, stop and tell the "
-    "user.\n"
-    "Otherwise change that heading to the title you want, then open the edit's pull "
-    "request with: python3 scripts/ghi-issue-write.py edit {path}"
+    "This guard could not read a first heading from {path} on main, so it cannot tell "
+    "whether the title is that file's first heading. If that file on main has a first "
+    "heading that already reads the title you want, run the command again; if it is "
+    "refused the same way, stop and tell the user.\n"
+    "Otherwise make the title you want the first heading of that file, then open the "
+    "edit's pull request with: python3 scripts/ghi-issue-write.py edit {path}"
 )
 TITLE_LINE_SEVERAL_FILES = (
     "The issue's files on main are: {paths}. scripts/ghi-issue-write.py changes the "
     "title only of an issue with one file, so stop and tell the user."
 )
 TITLE_LINES_LOOKUP_FAILED = (
+    "This guard could not look up the issue's files on main.\n"
     "If the issue has no file or two or more files, counting files named "
     "docs/issues/<number>-*.md and designs in a system's docs/ directory, stop and tell "
     "the user.\n"
     "If the first heading of the issue's GHI-MD already reads the title you want, run "
     "the command again once git can read origin/main; this guard lets a title through "
-    "that is exactly that heading.\n"
+    "that is exactly that heading. If it is refused the same way, stop and tell the "
+    "user.\n"
     "Otherwise change the first heading of the issue's GHI-MD to the title you want, "
     "then open the edit's pull request with: python3 scripts/ghi-issue-write.py edit "
     "<path>"
@@ -470,7 +472,7 @@ def issue_files_and_single_file_heading_on_main(number, working_directory):
             capture_output=True, text=True, check=False,
             timeout=ISSUE_FILE_LOOKUP_TIMEOUT_SECONDS)
         if toplevel.returncode != 0 or not toplevel.stdout.strip():
-            return None
+            return None, None
         tool_path = _REPOSITORY_ROOT / "scripts" / "ghi-issue-write.py"
         tool_spec = importlib.util.spec_from_file_location("ghi_issue_write", tool_path)
         tool = importlib.util.module_from_spec(tool_spec)
@@ -592,8 +594,10 @@ def refusal_for(subcommand, arguments, repository_from_environment,
         files, heading = issue_files_and_single_file_heading_on_main(number, working_directory)
         if EDIT_BODY_FLAGS & set(flags):
             return edit_body_refusal(files)
-        # gh sets the last --title given.
-        if heading is not None and flags["--title"][-1] == heading:
+        # gh sets the last --title given, on every issue named; the heading is
+        # only the first one's.
+        if (heading is not None and len(positionals) == 1
+                and flags["--title"][-1] == heading):
             return None
         return edit_title_refusal(files, heading, number)
     if subcommand == "delete":
