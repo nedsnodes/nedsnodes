@@ -365,12 +365,9 @@ FAST_READ_ATTEMPTS = 2
 # They count only on a line agy opens with its error prefix: the launcher's
 # output also carries the model's own text, which can quote them.
 GEMINI_MONTHLY_SPENDING_CAP_TEXT = "exceeded its monthly spending cap"
-AGY_ERROR_LINE_PREFIX = "AGY_ERROR:"
 GEMINI_SPENDING_CAP_PAGE = "https://ai.studio/spend"
-# Gemini's words when the Ultra sign-in's quota is used up, and the reset time
-# it gives after them, as in `Resets in 2h27m27s.`; counted on agy's error line
-# only, as the cap's words are. A retry fails the same way until the reset.
-GEMINI_ULTRA_QUOTA_TEXT = "Individual quota reached"
+# The reset time Gemini gives after its quota words, agy_cell.common's
+# GEMINI_ULTRA_QUOTA_TEXT, as in `Resets in 2h27m27s.`.
 GEMINI_ULTRA_QUOTA_RESET = re.compile(r"Resets in (?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
 ULTRA_QUOTA_LINE_OPENING = "Ultra quota used up; Sonnet read this;"
 ULTRA_QUOTA_RELAY_INSTRUCTION = (
@@ -1553,17 +1550,8 @@ def gemini_monthly_spending_cap_reached(launcher: pathlib.Path, output: str) -> 
     `AGY_ERROR:`, with the cap's words in it. False for any launcher other
     than the agy launcher, whatever its output holds."""
     return launcher == AGY_CELL_LAUNCHER and any(
-        line.startswith(AGY_ERROR_LINE_PREFIX) and GEMINI_MONTHLY_SPENDING_CAP_TEXT in line
+        line.startswith(agy_cell.common.AGY_ERROR_LINE_PREFIX) and GEMINI_MONTHLY_SPENDING_CAP_TEXT in line
         for line in output.splitlines())
-
-
-def gemini_ultra_quota_error_line(launcher: pathlib.Path, output: str) -> str:
-    """agy's own error line, opening `AGY_ERROR:`, when it names the Ultra
-    sign-in's quota, else "". Always "" for a launcher other than agy's."""
-    if launcher != AGY_CELL_LAUNCHER:
-        return ""
-    return next((line for line in output.splitlines()
-                 if line.startswith(AGY_ERROR_LINE_PREFIX) and GEMINI_ULTRA_QUOTA_TEXT in line), "")
 
 
 def gemini_ultra_quota_reset_time(error_line: str) -> str:
@@ -1582,7 +1570,7 @@ def gemini_quota_refusal(error_line: str) -> str:
     """Gemini's quota refusal in its own words, with the reset time it gave, so
     the reader needs no term of ours for the sign-in whose quota ran out."""
     reset = gemini_ultra_quota_reset_time(error_line)
-    return (f'Gemini refused with "{GEMINI_ULTRA_QUOTA_TEXT}"; '
+    return (f'Gemini refused with "{agy_cell.common.GEMINI_ULTRA_QUOTA_TEXT}"; '
             + (f"the quota resets in {reset}" if reset else "Gemini gave no reset time"))
 
 
@@ -1611,7 +1599,8 @@ def cold_read_cell_reviewer_launcher_failure_cause_line(
     if gemini_monthly_spending_cap_reached(launcher, output):
         return (f"exit {exit_code}: Gemini's monthly spending cap is reached; the "
                 f"user can raise it at {GEMINI_SPENDING_CAP_PAGE}")
-    quota_line = gemini_ultra_quota_error_line(launcher, output)
+    quota_line = (agy_cell.common.gemini_ultra_quota_error_line(output)
+                  if launcher == AGY_CELL_LAUNCHER else "")
     if quota_line:
         return f"exit {exit_code}: {gemini_quota_refusal(quota_line)}"
     cause_prefix = f"{launcher.stem}: {agy_cell.common.CAUSE_PHRASE} "
@@ -2049,7 +2038,7 @@ def main() -> int:
                           "retried, because a retry cannot pass a monthly cap.",
                           file=sys.stderr)
                     break
-                quota_error_line = gemini_ultra_quota_error_line(AGY_CELL_LAUNCHER, output)
+                quota_error_line = agy_cell.common.gemini_ultra_quota_error_line(output)
                 if quota_error_line:
                     print(f"{PROGRAM}: {gemini_quota_not_retried_message(quota_error_line)}",
                           file=sys.stderr)
