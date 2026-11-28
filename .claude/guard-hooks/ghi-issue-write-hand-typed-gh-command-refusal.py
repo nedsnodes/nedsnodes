@@ -8,7 +8,9 @@ WHAT IT REFUSES, all on this project's repository only:
 - `gh issue create` and its alias `gh issue new`;
 - `gh issue edit` carrying `--body`, `--body-file` or `--attach`, the flags
   that change an issue's body;
-- `gh issue edit` carrying `--title`, the flag that changes an issue's title;
+- `gh issue edit` carrying `--title`, the flag that changes an issue's title,
+  unless the title is exactly the first heading of the issue's one GHI-MD
+  on origin/main;
 - `gh issue delete`.
 Everything else passes: `view`, `list`, `status`, `close` and `reopen`
 without a comment, and `edit` changing only labels, assignees, milestones,
@@ -66,6 +68,12 @@ DECISIONS, and where they depart from the design of record:
   agent there. A title edit that also carries a body flag gets the body
   refusal, which tells the agent to run the title edit alone afterwards for
   the title's instructions.
+- A title edit that sets the title to exactly the first heading of the
+  issue's one GHI-MD on origin/main passes. It keeps the title one source,
+  and it is the only way to fix a title that is stale while its heading is
+  right: edit-GHI retitles only when an edit changes the heading, so it
+  never fixes that case. When main's copy cannot be read, the edit is
+  refused, as an unknown title is.
 - `gh issue comment --delete-last` passes: it removes a comment, which is
   the direction the ruling wants, and refusing it defends against nothing.
 - Another repository passes. `-R`/`--repo`, `GH_REPO=` in front of the
@@ -108,6 +116,7 @@ read them: one reader, reviewed once.
 import importlib.util
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -269,8 +278,16 @@ EDIT_TITLE_REFUSAL = (
     "{title_line}"
 )
 TITLE_LINES_ONE_FILE = (
-    "If the first heading of {path} already reads the title you want, stop and tell "
-    "the user.\n"
+    "If the first heading of {path} on main already reads the title you want, set the "
+    "title to exactly that heading, which this guard lets through: {command}\n"
+    "Otherwise change that heading to the title you want, then open the edit's pull "
+    "request with: python3 scripts/ghi-issue-write.py edit {path}"
+)
+TITLE_LINES_ONE_FILE_HEADING_UNREAD = (
+    "This guard could not read main's copy of {path}, so it cannot tell whether the "
+    "title is that file's first heading. If the first heading already reads the title "
+    "you want, run the command again; if it is refused the same way, stop and tell the "
+    "user.\n"
     "Otherwise change that heading to the title you want, then open the edit's pull "
     "request with: python3 scripts/ghi-issue-write.py edit {path}"
 )
@@ -280,9 +297,11 @@ TITLE_LINE_SEVERAL_FILES = (
 )
 TITLE_LINES_LOOKUP_FAILED = (
     "If the issue has no file or two or more files, counting files named "
-    "docs/issues/<number>-*.md and designs in a system's docs/ directory, or the first "
-    "heading of the issue's GHI-MD already reads the title you want, stop and tell the "
-    "user.\n"
+    "docs/issues/<number>-*.md and designs in a system's docs/ directory, stop and tell "
+    "the user.\n"
+    "If the first heading of the issue's GHI-MD already reads the title you want, run "
+    "the command again once git can read origin/main; this guard lets a title through "
+    "that is exactly that heading.\n"
     "Otherwise change the first heading of the issue's GHI-MD to the title you want, "
     "then open the edit's pull request with: python3 scripts/ghi-issue-write.py edit "
     "<path>"
@@ -435,8 +454,16 @@ def issue_number_named(positionals):
 def issue_files_on_main(number, working_directory):
     """The issue's files on origin/main, as the GHI write tool lists them, or None
     when they cannot be looked up: no number, no checkout, or a git failure."""
+    return issue_files_and_single_file_heading_on_main(number, working_directory)[0]
+
+
+def issue_files_and_single_file_heading_on_main(number, working_directory):
+    """(files, heading): the issue's files on origin/main as issue_files_on_main
+    gives them, and, when there is exactly one, its first heading as the GHI
+    write tool reads it, from the same commit. The heading is None when there
+    is not exactly one file or main's copy cannot be read."""
     if number is None or not working_directory:
-        return None
+        return None, None
     try:
         toplevel = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"], cwd=working_directory,
@@ -452,9 +479,20 @@ def issue_files_on_main(number, working_directory):
         def runner(arguments, cwd=None):
             return tool.run(arguments, timeout=ISSUE_FILE_LOOKUP_TIMEOUT_SECONDS, cwd=cwd)
 
-        return tool.ghi_md_paths_for_issue(number, Path(toplevel.stdout.strip()), runner)
+        repository_root = Path(toplevel.stdout.strip())
+        revision = runner(["git", "rev-parse", "origin/main"],
+                          cwd=str(repository_root)).stdout.strip()
+        files = tool.ghi_md_paths_for_issue(number, repository_root, runner,
+                                            revision=revision)
     except Exception:
-        return None
+        return None, None
+    if len(files) != 1:
+        return files, None
+    try:
+        shown = runner(["git", "show", f"{revision}:{files[0]}"], cwd=str(repository_root))
+        return files, tool.first_heading(shown.stdout) or None
+    except Exception:
+        return files, None
 
 
 def record_line(outcome, files):
@@ -480,13 +518,17 @@ def close_lines(files):
             + CLOSE_LINES.format(path="<that path>"))
 
 
-def title_line(files):
+def title_line(files, heading=None, number=None):
     if files is None:
         return TITLE_LINES_LOOKUP_FAILED
     if not files:
         return RECORD_LINE_NO_FILE
     if len(files) == 1:
-        return TITLE_LINES_ONE_FILE.format(path=files[0])
+        if heading is None:
+            return TITLE_LINES_ONE_FILE_HEADING_UNREAD.format(path=files[0])
+        command = (f"gh issue edit {number if number is not None else '<number>'} "
+                   f"--title {shlex.quote(heading)}")
+        return TITLE_LINES_ONE_FILE.format(path=files[0], command=command)
     return TITLE_LINE_SEVERAL_FILES.format(paths=", ".join(files))
 
 
@@ -508,9 +550,9 @@ def edit_body_refusal(files):
         files != [])
 
 
-def edit_title_refusal(files):
+def edit_title_refusal(files, heading=None, number=None):
     return with_rerun_line(
-        EDIT_TITLE_REFUSAL.format(title_line=title_line(files)),
+        EDIT_TITLE_REFUSAL.format(title_line=title_line(files, heading, number)),
         files is None or len(files) == 1)
 
 
@@ -546,10 +588,14 @@ def refusal_for(subcommand, arguments, repository_from_environment,
     if subcommand == "edit":
         if not (EDIT_BODY_FLAGS & set(flags)) and "--title" not in flags:
             return None
-        files = issue_files_on_main(issue_number_named(positionals), working_directory)
+        number = issue_number_named(positionals)
+        files, heading = issue_files_and_single_file_heading_on_main(number, working_directory)
         if EDIT_BODY_FLAGS & set(flags):
             return edit_body_refusal(files)
-        return edit_title_refusal(files)
+        # gh sets the last --title given.
+        if heading is not None and flags["--title"][-1] == heading:
+            return None
+        return edit_title_refusal(files, heading, number)
     if subcommand == "delete":
         files = issue_files_on_main(issue_number_named(positionals), working_directory)
         if files == []:
