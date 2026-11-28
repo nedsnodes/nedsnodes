@@ -360,6 +360,12 @@
     "productivity@claude-plugins-official": false
   },
   "skillOverrides": {
+    "anthropic-skills:artifact-emulator": "off",
+    "anthropic-skills:built-in-browser": "off",
+    "anthropic-skills:chrome-browser": "off",
+    "anthropic-skills:computer-use": "off",
+    "anthropic-skills:deep-research": "off",
+    "anthropic-skills:import-memory": "off",
     "engineering:code-review": "off",
     "engineering:testing-strategy": "off",
     "engineering:architecture": "off",
