@@ -336,7 +336,7 @@ def files_that_might_name_a_removed_path(removed: list, repository_root: pathlib
     return candidates
 
 
-def citations_of_removed_paths(removed: list, repository_root: pathlib.Path, lint) -> list:
+def citations_of_removed_paths(removed: list, repository_root: pathlib.Path, lint, unchecked) -> list:
     """Yield (file, line number, problem) for citations of removed paths."""
     wanted = set(removed)
     findings = []
@@ -348,9 +348,8 @@ def citations_of_removed_paths(removed: list, repository_root: pathlib.Path, lin
         if any(fnmatch.fnmatchcase(citing, pattern)
                for pattern in CITING_FILES_THAT_KEEP_REMOVED_PATHS_ON_PURPOSE):
             continue
-        try:
-            text = citing_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        text = lint.read_text_for_check(citing_path, unchecked, skip_binary=True)
+        if text is None:
             continue
         for number, line in enumerate(text.splitlines(), 1):
             # History markers denote deliberately absent paths; fences alone do not, since examples can go stale.
@@ -413,7 +412,7 @@ def run_check(argv) -> int:
     removed = removed_files + directories_this_change_emptied(removed_files, REPOSITORY_ROOT)
     merge_base_name_of_renamed_file = merge_base_names_of_renamed_files(name_status_rows)
     for citing, line_number, problem in citations_of_removed_paths(
-            removed, REPOSITORY_ROOT, lint):
+            removed, REPOSITORY_ROOT, lint, unchecked):
         findings.append(f"{citing}:{line_number}: {problem}")
     for name in sorted(changed):
         path = REPOSITORY_ROOT / name
