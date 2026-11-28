@@ -282,7 +282,7 @@ def run_creation_failure_case(scratch):
 
 def main() -> int:
     if shutil.which("tmux") is None:
-        print("SKIP  two copies at once: tmux is not installed, so the suite has no tmux cases to collide")
+        print("SKIP  [this machine cannot run it] two copies at once: tmux is not installed, so the suite has no tmux cases to collide")
         return 0
     with tempfile.TemporaryDirectory(prefix="resupervise-two-copies-") as scratch_name:
         scratch = Path(scratch_name)
