@@ -572,6 +572,10 @@ def main(argv=None, runner=None):
             prefix="seat-task-list-read-hack-") as scratch:
         locations, problems, machines_read = read_task_lists(
             machines, store, Path(scratch), runner)
+        if not locations and not problems and (arguments.seats or arguments.every_task_list):
+            print("No task lists.")
+            print(machines_read_line(machines_read))
+            return EXIT_EVERYTHING_ASKED_FOR_WAS_READ
         try:
             task_lists = task_lists_or_refuse(locations, machines_read)
 

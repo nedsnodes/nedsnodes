@@ -312,6 +312,17 @@ with tempfile.TemporaryDirectory() as root:
     check("and the refusal says how to choose: --machine",
           "--machine" in ambiguous_message, ambiguous_message)
 
+with tempfile.TemporaryDirectory() as root:
+    store = build_store(root, {})
+    for option in ("--seats", "--every-task-list"):
+        output, message, code = run_and_code([option, "--store", str(store)])
+        check(f"{option} succeeds for a readable store holding no lists",
+              code == 0 and "No task lists" in output and not message,
+              (code, output, message))
+    _, message, code = run_and_code(["--seat", "absent", "--store", str(store)])
+    check("looking up a specific seat in an empty store still fails",
+          code == 1 and "No task lists" in message, (code, message))
+
 # --- a missing store is not an empty list ----------------------------------
 
 with tempfile.TemporaryDirectory() as root:
