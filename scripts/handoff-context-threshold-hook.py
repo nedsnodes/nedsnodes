@@ -4,7 +4,7 @@
 It counts the context used plus the tokens the session's compactions dropped, and asks for the
 /handoff skill once that count reaches --threshold-used-percentage of the context window.
 Below --ceiling-used-percentage, by the same count, it defers instead, saving the work it waits for in
-<session>-handoff-deferred in ~/.claude/handoffs/, while Claude Code's background_tasks list
+<session>-handoff-deferred in ~/.claude/handoffs/session-marker-files/, while Claude Code's background_tasks list
 shows a running subagent, workflow or background shell task younger than its kind's wait-limit,
 from BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND, or while a
 transcript it reads launch records from cannot be read, since it then cannot tell what runs.
@@ -82,14 +82,16 @@ HANDOFF_ASKED_MARKER_SUFFIX = "-handoff-asked"
 
 def handoff_asked_marker_path(session_id: str) -> Path:
     # Read HANDOFF_DIRECTORY at call time so tests can redirect marker writes.
-    return HANDOFF_DIRECTORY / f"{session_id}{HANDOFF_ASKED_MARKER_SUFFIX}"
+    return handoff_deferred_marker_and_refused_commands_files_common.handoff_session_marker_file_path_return_after_moving_any_left_in_handoff_directory(
+        HANDOFF_DIRECTORY, session_id, HANDOFF_ASKED_MARKER_SUFFIX)
 
 
 HANDOFF_GET_READY_NOTICE_SENT_MARKER_SUFFIX = "-handoff-get-ready-notice-sent"
 
 
 def handoff_get_ready_notice_sent_marker_path(session_id: str) -> Path:
-    return HANDOFF_DIRECTORY / f"{session_id}{HANDOFF_GET_READY_NOTICE_SENT_MARKER_SUFFIX}"
+    return handoff_deferred_marker_and_refused_commands_files_common.handoff_session_marker_file_path_return_after_moving_any_left_in_handoff_directory(
+        HANDOFF_DIRECTORY, session_id, HANDOFF_GET_READY_NOTICE_SENT_MARKER_SUFFIX)
 
 
 def deferred_marker_path(session_id: str) -> Path:
@@ -1080,7 +1082,7 @@ def send_handoff_get_ready_notice(session_id, used, share, arguments) -> int:
                                              get_ready=arguments.get_ready_used_percentage)]
     record = handoff_get_ready_notice_sent_marker_path(session_id)
     try:
-        HANDOFF_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        record.parent.mkdir(parents=True, exist_ok=True)
         record.write_text(f"{used:.1f}\n", encoding="utf-8")
     except OSError as problem:
         lines.append(HANDOFF_GET_READY_NOTICE_NOT_RECORDED_LINE.format(
@@ -1176,7 +1178,7 @@ def main(argv=None) -> int:
 
     try:
         # A failed marker write would repeat the handoff request every turn.
-        HANDOFF_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        fired_marker.parent.mkdir(parents=True, exist_ok=True)
         fired_marker.write_text(f"{used:.1f}\n", encoding="utf-8")
     except OSError:
         pass

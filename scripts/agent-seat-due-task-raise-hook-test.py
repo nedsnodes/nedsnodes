@@ -1020,11 +1020,11 @@ check("next-action: silent while two approval-walks are unclosed", silent(seat.s
 
 seat = IdleSeat()
 handoffs = seat.home / ".claude" / "handoffs"
-handoffs.mkdir(parents=True)
-(handoffs / "idle-session-handoff-asked").write_text("40.0\n")
+(handoffs / "session-marker-files").mkdir(parents=True)
+(handoffs / "session-marker-files" / "idle-session-handoff-asked").write_text("40.0\n")
 check("next-action: silent once a handoff is asked for", silent(seat.stop()))
-(handoffs / "idle-session-handoff-asked").unlink()
-(handoffs / "idle-session-handoff-deferred").write_text("40.0\n")
+(handoffs / "session-marker-files" / "idle-session-handoff-asked").unlink()
+(handoffs / "session-marker-files" / "idle-session-handoff-deferred").write_text("40.0\n")
 check("next-action: silent while a handoff is deferred", silent(seat.stop()))
 
 
