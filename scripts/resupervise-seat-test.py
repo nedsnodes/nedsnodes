@@ -442,7 +442,7 @@ def run_end_to_end_case(workspace: Path):
     hides.
     """
     if shutil.which("tmux") is None:
-        print("SKIP  end-to-end: tmux is not installed")
+        print("SKIP  [this machine cannot run it] end-to-end: tmux is not installed")
         return
 
     isolated = workspace / "isolated"
@@ -532,7 +532,7 @@ def run_per_seat_server_end_to_end_case(workspace: Path):
     must name that socket in its record.
     """
     if shutil.which("tmux") is None:
-        print("SKIP  per-seat end-to-end: tmux is not installed")
+        print("SKIP  [this machine cannot run it] per-seat end-to-end: tmux is not installed")
         return
 
     isolated = workspace / "isolated"
