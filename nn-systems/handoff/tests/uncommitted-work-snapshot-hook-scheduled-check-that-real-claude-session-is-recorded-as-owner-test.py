@@ -49,6 +49,10 @@ FAKE_CLAUDE = SCRATCH / "fake-claude.py"
 FAKE_CLAUDE.write_text(r'''#!/usr/bin/env python3
 import importlib.util, json, os, subprocess, sys, time
 from pathlib import Path
+def write_whole(path, text):
+    # A reader that sees the file must also see its text.
+    Path(path + ".partial").write_text(text)
+    os.replace(path + ".partial", path)
 mode = os.environ["FAKE_CLAUDE_MODE"]
 session = "11111111-2222-3333-4444-555555555555"
 if mode == "hook" and "FAKE_CLAUDE_RUNNING_AS_CLAUDE" not in os.environ:
@@ -59,9 +63,10 @@ if mode == "login-lapsed":
     print("Invalid API key · Please run /login", file=sys.stderr)
     sys.exit(1)
 if mode == "hang":
+    time.sleep(float(os.environ.get("FAKE_CLAUDE_START_DELAY_SECONDS", "0")))
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
-    Path(os.environ["FAKE_CLAUDE_CHILD_PROCESS_ID_FILE"]).write_text(str(child.pid))
-    Path(os.environ["FAKE_CLAUDE_PROCESS_ID_FILE"]).write_text(str(os.getpid()))
+    write_whole(os.environ["FAKE_CLAUDE_CHILD_PROCESS_ID_FILE"], str(child.pid))
+    write_whole(os.environ["FAKE_CLAUDE_PROCESS_ID_FILE"], str(os.getpid()))
     time.sleep(600)
 if mode == "error-result":
     print(json.dumps({"is_error": True, "result": "API Error: Connection error.",
@@ -223,24 +228,58 @@ def process_is_running(process_id, wait_seconds=5):
         time.sleep(0.1)
 
 
+def fake_claude_process_ids_once_both_are_written(process):
+    """The fake claude's and its child's process ids, or None if process exits before both are written."""
+    while not (FAKE_CLAUDE_PROCESS_ID_FILE.exists() and FAKE_CLAUDE_CHILD_PROCESS_ID_FILE.exists()):
+        if process.poll() is not None:
+            return None
+        time.sleep(0.1)
+    return (int(FAKE_CLAUDE_PROCESS_ID_FILE.read_text()),
+            int(FAKE_CLAUDE_CHILD_PROCESS_ID_FILE.read_text()))
+
+
 def test_claude_that_cannot_start_or_finish_fails():
     completed, record = run_check("pass", claude_program=SCRATCH / "no-such-claude")
     check(completed.returncode == 1 and "could not be started" in record,
           "a claude program that cannot be started fails the check", record or completed.stderr)
+    # The check's deadline starts only once the fake claude has written both process ids, so a
+    # loaded machine that starts the fake slowly cannot kill it before the test can find them;
+    # the fake's start delay, longer than the deadline, makes every run such a slow start.
+    for stale in (FAKE_CLAUDE_PROCESS_ID_FILE, FAKE_CLAUDE_CHILD_PROCESS_ID_FILE):
+        stale.unlink(missing_ok=True)
+    started = []
+    real_wait_for_claude = owner_check.wait_for_claude
+
+    def wait_for_claude_once_it_has_started(process, timeout_seconds):
+        started.append(fake_claude_process_ids_once_both_are_written(process))
+        return real_wait_for_claude(process, timeout_seconds)
+
+    records = SCRATCH / "records-claude-that-does-not-finish"
+    real_environment = dict(os.environ)
     try:
-        completed, record = run_check("hang", "--timeout-seconds", "1", timeout=30)
-    except subprocess.TimeoutExpired:
-        completed, record = None, "the check itself did not finish within 30 s"
-    still_running = [process_id for process_id in (
-        int(FAKE_CLAUDE_PROCESS_ID_FILE.read_text()),
-        int(FAKE_CLAUDE_CHILD_PROCESS_ID_FILE.read_text())) if process_is_running(process_id)]
+        os.environ.update(FAKE_CLAUDE_MODE="hang", FAKE_CLAUDE_START_DELAY_SECONDS="2")
+        owner_check.wait_for_claude = wait_for_claude_once_it_has_started
+        with contextlib.redirect_stdout(io.StringIO()):
+            exit_code = owner_check.main(
+                ["--claude-program", str(FAKE_CLAUDE), "--record-directory", str(records),
+                 "--timeout-seconds", "1"])
+    finally:
+        owner_check.wait_for_claude = real_wait_for_claude
+        os.environ.clear()
+        os.environ.update(real_environment)
+    written = list(records.glob("*.txt")) if records.is_dir() else []
+    record = written[0].read_text() if written else ""
+    if not (started and started[0]):
+        check(False, "a claude that does not finish in time is killed with its child process "
+              "and fails the check", f"the fake claude never wrote both process ids; {record}")
+        return
+    still_running = [process_id for process_id in started[0] if process_is_running(process_id)]
     for process_id in still_running:
         os.kill(process_id, signal.SIGKILL)
-    check(completed is not None and completed.returncode == 1
-          and "did not finish within 1.0 s" in record and not still_running,
+    check(exit_code == 1 and "did not finish within 1.0 s" in record and not still_running,
           "a claude that does not finish in time is killed with its child process "
           "and fails the check",
-          f"still running: {still_running}; {record or (completed and completed.stderr)}")
+          f"exit {exit_code}; still running: {still_running}; {record}")
 
 
 def test_an_interrupted_check_kills_claude_and_removes_its_scratch_clone():
@@ -258,23 +297,19 @@ def test_an_interrupted_check_kills_claude_and_removes_its_scratch_clone():
         # A Python started with SIGINT ignored keeps ignoring it, and this suite may be started
         # that way, as by a shell's background job.
         preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
-    deadline = time.monotonic() + 30
-    while not (FAKE_CLAUDE_PROCESS_ID_FILE.exists() and FAKE_CLAUDE_CHILD_PROCESS_ID_FILE.exists()):
-        if time.monotonic() > deadline or check_process.poll() is not None:
-            check_process.kill()
-            check(False, "an interrupted check kills claude and its child process",
-                  "the fake claude never started its child: " + check_process.communicate()[1])
-            return
-        time.sleep(0.1)
+    # The check's own timeout bounds this wait: it kills a fake claude that has not started.
+    process_ids = fake_claude_process_ids_once_both_are_written(check_process)
+    if process_ids is None:
+        check(False, "an interrupted check kills claude and its child process",
+              "the fake claude never started its child: " + check_process.communicate()[1])
+        return
     os.kill(check_process.pid, signal.SIGINT)
     try:
         _, stderr = check_process.communicate(timeout=30)
     except subprocess.TimeoutExpired:
         check_process.kill()
         _, stderr = check_process.communicate()
-    still_running = [process_id for process_id in (
-        int(FAKE_CLAUDE_PROCESS_ID_FILE.read_text()),
-        int(FAKE_CLAUDE_CHILD_PROCESS_ID_FILE.read_text())) if process_is_running(process_id)]
+    still_running = [process_id for process_id in process_ids if process_is_running(process_id)]
     for process_id in still_running:
         os.kill(process_id, signal.SIGKILL)
     check(not still_running and "KeyboardInterrupt" in stderr,
