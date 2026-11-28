@@ -454,19 +454,37 @@ with tempfile.TemporaryDirectory() as scratch:
                          f"run this in {after_merge.REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME[after_merge.NED_BOX]} "
                          f"on ned-box or {after_merge.REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME[after_merge.MAC]} "
                          "on the Mac.\n", (code, printed, errors))
-    stale_git_directory = scratch / "stale-git-directory"
-    code, printed, errors = run_outside(
-        [outcome], extra_environment={"GIT_DIR": str(stale_git_directory)})
-    check("--print-outcome with a stale GIT_DIR prints git's error, not the rerun advice",
+    code, printed, errors = run_outside([outcome], extra_environment={"GIT_TRACE": "1"})
+    check("--print-outcome outside any git checkout with git tracing on still gives the rerun "
+          "advice",
           code == 0 and not installer_log.exists() and errors == ""
-          and printed.startswith("git rev-parse --show-toplevel exited ")
-          and str(stale_git_directory) in printed and "run this in" not in printed,
+          and printed.startswith("The current directory is not in a Git checkout"),
           (code, printed, errors))
+    stale_git_directory = scratch / "stale-git-directory"
+    for argv in ([], [outcome]):
+        code, printed, errors = run_outside(
+            argv, extra_environment={"GIT_DIR": str(stale_git_directory)})
+        check(f"a stale GIT_DIR, argv {argv}: FAILED with git's error on stderr, exit 1, "
+              f"nothing run",
+              code == 1 and not installer_log.exists() and printed == ""
+              and errors.startswith(f"{after_merge.PROGRAM}: FAILED — `git rev-parse "
+                                    f"--show-toplevel` exited 128")
+              and f"git said: fatal: not a git repository: '{stale_git_directory}'\n" in errors
+              and "run this in" not in errors, (code, printed, errors))
+    code, printed, errors = run_outside(
+        [], extra_environment={"GIT_DIR": str(stale_git_directory), "GIT_TRACE": "1"})
+    said = next((line for line in errors.splitlines() if "git said:" in line), "")
+    check("a stale GIT_DIR with git tracing on: git's error is one line, with no trace lines",
+          code == 1 and said.endswith(f"git said: fatal: not a git repository: "
+                                      f"'{stale_git_directory}'")
+          and "trace:" not in errors, (code, errors))
     removed = scratch / "removed-directory"
     removed.mkdir()
     code, printed, errors = run_outside([], directory=removed)
-    check("a hook run from a removed directory does nothing, prints nothing and exits 0",
-          code == 0 and not installer_log.exists() and printed == errors == "",
+    check("a hook run from a removed directory runs nothing, and reports git's error as FAILED "
+          "with exit 1",
+          code == 1 and not installer_log.exists() and printed == ""
+          and "FAILED" in errors and "Unable to read current working directory" in errors,
           (code, printed, errors))
 
     reset()

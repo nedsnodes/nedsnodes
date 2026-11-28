@@ -321,11 +321,12 @@ def run_git(directory, arguments, *, accepted_exit_codes=(0,),
 
 
 # git exits 128 both for "not a repository" and for other fatal errors, and
-# its message, read with LC_ALL=C, is the one way to tell them apart. A
-# worktree whose .git file names a git directory that is missing or is not a
-# git directory: git 2.53 writes the first words, git 2.56 the second. The
-# first begins like the no-repository words, so it is checked first.
-OUTSIDE_A_REPOSITORY_MESSAGE = "not a git repository"
+# its message, read with LC_ALL=C, is the one way to tell them apart. Only a
+# line that starts with git's own no-repository words counts, because another
+# error can quote those words, as in a bad config value. A worktree whose .git
+# file names a git directory that is missing or is not a git directory: git
+# 2.53 writes the first words, git 2.56 the second.
+OUTSIDE_A_REPOSITORY_LINE_START = "fatal: not a git repository (or any"
 WORKTREE_GIT_DIRECTORY_UNUSABLE_MESSAGES = (
     "not a git repository: ", "gitfile does not point to a valid repository")
 
@@ -338,8 +339,8 @@ def git_stderr_says_worktree_git_directory_unusable(stderr):
 
 def git_stderr_says_outside_a_repository(stderr):
     """True when git's LC_ALL=C stderr says the directory is in no repository."""
-    return (OUTSIDE_A_REPOSITORY_MESSAGE in stderr
-            and not git_stderr_says_worktree_git_directory_unusable(stderr))
+    return any(line.startswith(OUTSIDE_A_REPOSITORY_LINE_START)
+               for line in stderr.splitlines())
 
 
 GIT_ERROR_LINE_PREFIXES = ("fatal:", "error:")
