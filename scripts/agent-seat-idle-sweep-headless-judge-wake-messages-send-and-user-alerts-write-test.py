@@ -119,6 +119,17 @@ def user(text, when=LONG_AGO):
     return {"type": "user", "timestamp": when, "message": {"role": "user", "content": text}}
 
 
+def typed_by_the_user(text, when):
+    return {**user(text, when), "origin": {"kind": "human"}}
+
+
+def the_user_typed_and_it_answered_in_text(machine, minutes, seat="alpha"):
+    """The user types and the agent-seat answers in text alone, which keeps the open wait and lets
+    the escalation of a wait no rule 2 message was sent on come due."""
+    machine.append(seat, typed_by_the_user("Any news?", at(minutes)),
+                   assistant("Not yet.", when=at(minutes)), turn_end(at(minutes)))
+
+
 def task_result(tool_id, text, when=LONG_AGO):
     """A task call's result as Claude Code writes it, with no is_error: a success text such as
     "Task #1 created successfully: <subject>", or "Task not found"."""
@@ -469,6 +480,7 @@ machine.seat("alpha", [user("go"), assistant(tool=("Bash", {"command": "ls"})), 
 machine.handoff_put_off()
 machine.script(sent_ok())
 machine.run(0)
+the_user_typed_and_it_answered_in_text(machine, 3)
 machine.script()
 machine.run(16)
 check("a tool call made before the nudge does not end the wait: the escalation is sent",
@@ -2201,6 +2213,7 @@ code, _ = machine.run(2)
 check("the text sent found in the agent-seat's transcript: no user-alert",
       [event["found"] for event in machine.events("delivery_checked")] == [True]
       and not machine.alerts(), (machine.events("delivery_checked"), machine.alerts()))
+the_user_typed_and_it_answered_in_text(machine, 5)
 machine.script({"sends": [DROPPED], "answer": {"sent": True, "reason": "r"}})
 machine.run(17)
 check("a second difference while the task is open: logged, and no second task",
@@ -3048,6 +3061,7 @@ machine.seat("alpha", DONE_TURN)
 machine.handoff_put_off()
 machine.script(sent_ok())
 machine.run(0)
+the_user_typed_and_it_answered_in_text(machine, 3)
 machine.script(sent_ok())
 machine.run(16)
 machine.script()
@@ -3373,6 +3387,7 @@ machine.handoff_put_off()
 machine.script(sent_ok())
 machine.run(0)
 wake_texts += [("rule 3 nudge", text) for text in sender_texts(machine)]
+the_user_typed_and_it_answered_in_text(machine, 3)
 machine.script(sent_ok())
 machine.run(16)
 wake_texts += [("escalation", text) for text in sender_texts(machine)]
@@ -3702,6 +3717,7 @@ machine.task(EVENTS_SEAT, "5")
 machine.script(judged(True, 'Your task "task 5" is open and nothing holds it.', raised=["5"]),
                sent_ok(EVENTS_SEAT))
 machine.run(0)
+the_user_typed_and_it_answered_in_text(machine, 3, EVENTS_SEAT)
 machine.script(sent_ok(EVENTS_SEAT))
 machine.run(16)
 machine.script()
@@ -3724,6 +3740,7 @@ machine.script(sent_ok(EVENTS_SEAT))
 machine.run(0)
 machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
                assistant("Still waiting.", when=at(1)), turn_end(at(1)))
+the_user_typed_and_it_answered_in_text(machine, 3, EVENTS_SEAT)
 machine.script(sent_ok(EVENTS_SEAT))
 machine.run(16)
 machine.script()
@@ -3842,6 +3859,7 @@ machine.script(sent_ok(EVENTS_SEAT))
 machine.run(0)
 machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
                assistant("Still waiting.", when=at(1)), turn_end(at(1)))
+the_user_typed_and_it_answered_in_text(machine, 3, EVENTS_SEAT)
 machine.script(sent_ok(EVENTS_SEAT))
 machine.run(16)
 machine.script()
@@ -3867,6 +3885,7 @@ machine.script(sent_ok(EVENTS_SEAT))
 machine.run(0)
 machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
                assistant("Still waiting.", when=at(1)), turn_end(at(1)))
+the_user_typed_and_it_answered_in_text(machine, 3, EVENTS_SEAT)
 machine.script(sent_ok(EVENTS_SEAT))
 machine.run(16)
 machine.script()
@@ -3970,10 +3989,6 @@ check("no wait open, an unbacked promise and an events task open: rule 2 comes f
 
 
 # --- no reminder of a wait on the user, and no repeat until the user types ----------------------
-def typed_by_the_user(text, when):
-    return {**user(text, when), "origin": {"kind": "human"}}
-
-
 def queued_by_the_user(text, when):
     return {"type": "attachment", "timestamp": when, "attachment": {
         "type": "queued_command", "prompt": text, "origin": {"kind": "human"}}}
@@ -4166,6 +4181,7 @@ machine.script(judged(True, "You have open tasks.", raised=["1", "2"]),
 machine.run(0)
 machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
                assistant("Waiting.", when=at(0.6)), turn_end(at(0.7)))
+the_user_typed_and_it_answered_in_text(machine, 3)
 machine.script(sent_ok())
 machine.run(16)
 check("rule 5: an escalation quoting the nudge's listing records the task the nudge's sender dropped",
@@ -4231,6 +4247,7 @@ machine.run(40)
 check("rule 3: once the user has typed, the put-off handoff is raised again",
       len(machine.events("message_sent")) == 2, machine.events("message_sent"))
 
+# --- an escalation only for a promise, or once the user has typed since the nudge ---------------
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
 machine.task("alpha", "1")
@@ -4238,14 +4255,142 @@ machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]), sent_o
 machine.run(0)
 machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
                assistant("Done.", when=at(1)), turn_end(at(1)))
+machine.script()
+machine.run(16)
+machine.run(32)
+machine.run(60)
+check("rule 5: a nudge answered in text alone, the user not having typed since: no escalation and "
+      "no step after it, and the wait stays open",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+      and len(machine.events("message_sent")) == 1 and not machine.claude_calls()[2:]
+      and not machine.events("wait_ended") and not machine.alerts(),
+      (machine.events("wait_step"), machine.events("message_sent"), machine.alerts()))
+machine.append("alpha", typed_by_the_user("Any news?", at(61)), assistant("Not yet.", when=at(61)),
+               turn_end(at(61)))
 machine.script(sent_ok())
+machine.run(67)
+machine.script()
+machine.run(83)
+check("rule 5: once the user has typed since the nudge, the escalation and the step after it, with "
+      "no user-alert",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
+      and machine.events("message_sent")[-1]["step"] == "escalate" and not machine.alerts(),
+      (machine.events("wait_step"), machine.alerts()))
+
+machine = Machine()
+machine.seat("alpha", [typed_by_the_user("go", LONG_AGO), assistant("Done."), turn_end()])
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]), sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant("Done.", when=at(1)), turn_end(at(1)))
+machine.script()
+machine.run(16)
+check("rule 5: the user having typed only before the nudge: no escalation",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge"], machine.events("wait_step"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant("Done.", when=at(1)), turn_end(at(1)))
+machine.script()
+machine.run(16)
+machine.run(32)
+check("rule 3: a nudge the user has not typed since: no escalation",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+      and not machine.claude_calls()[1:], machine.events("wait_step"))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.script(rechecked(False), sent_ok())
 machine.run(16)
 machine.script()
 machine.run(32)
-check("a reminder already sent still goes on to its escalation and the step after it, with no "
-      "user-alert",
+check("rule 2: an unrecorded promise, the user not having typed: the escalation and the step after "
+      "it, as before",
       [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
-      and not machine.alerts(), (machine.events("wait_step"), machine.alerts()))
+      and machine.events("message_sent")[-1]["step"] == "escalate",
+      machine.events("wait_step"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]), sent_ok())
+machine.run(0)
+machine.append("alpha", assistant(PROMISE, when=at(1)), turn_end(at(1)))
+machine.script(sent_ok())
+machine.run(7)
+machine.script(rechecked(False), sent_ok())
+machine.run(16)
+check("a rule 5 wait a rule 2 message was then sent on, the user not having typed: the escalation",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate"],
+      (machine.events("wait_step"), [event["event"] for event in machine.events()][-8:]))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]),
+               {"sends": [send_to("alpha", is_error=True)], "answer": {"sent": False, "reason": "r"}})
+machine.run(0)
+machine.script(sent_ok())
+machine.run(16)
+check("rule 5: a nudge whose send failed, the user not having typed: the escalation, its only delivery",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate"]
+      and machine.events("message_sent")[-1]["step"] == "escalate", machine.events("wait_step"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]), sent_ok())
+machine.run(0)
+machine.script()
+machine.run(2)
+not_found = [event["found"] for event in machine.events("delivery_checked")] == [False]
+machine.script(sent_ok())
+machine.run(16)
+check("rule 5: a nudge the delivery check did not find, the user not having typed: the escalation",
+      not_found and [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate"],
+      (machine.events("delivery_checked"), machine.events("wait_step")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script({"sends": [send_to(EVENTS_SEAT, is_error=True)], "answer": {"sent": False, "reason": "r"}})
+machine.run(0)
+first_calls = len(machine.claude_calls())
+machine.script()
+later_calls = []
+for minutes in (1, 2, 3):
+    machine.run(minutes)
+    later_calls += machine.claude_calls()
+check("an events task's wake whose send failed is not sent again at each run before its escalation",
+      first_calls == 1 and not later_calls, (first_calls, later_calls))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+machine.task(EVENTS_SEAT, "5")
+machine.script(judged(True, 'Your task "task 5" is open and nothing holds it.', raised=["5"]),
+               sent_ok(EVENTS_SEAT))
+machine.run(0)
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant("Done.", when=at(1)), turn_end(at(1)))
+machine.script()
+machine.run(16)
+held = [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(18)
+check("an events task opened on a wait whose escalation waits for the user to type ends that wait "
+      "and wakes merge-lane-2 in code",
+      held and machine.events("wait_ended")[-1]["why"]
+      == "a new pull-request events task opened after the user was told"
+      and machine.events("message_sent")[-1]["text"].startswith("Task 1 on your task list"),
+      (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
 
 machine = one_reminder_of_task_1()
 machine.append("alpha", assistant("I'll report when PR 927 merges.", when=at(11)), turn_end(at(11)))
