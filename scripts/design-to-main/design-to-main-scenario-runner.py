@@ -410,12 +410,9 @@ def main(argv):
         return EXIT_MALFORMED_SCENARIO
     path = pathlib.Path(argv[1])
     try:
-        scenario = parse_scenario_text(path.read_text())
+        scenario = parse_scenario_text(path.read_text(encoding="utf-8"))
         played = play_scenario(scenario)
-    except OSError as error:
-        sys.stderr.write("%s: %s\n" % (path, error))
-        return EXIT_MALFORMED_SCENARIO
-    except MalformedScenario as error:
+    except (OSError, UnicodeDecodeError, MalformedScenario) as error:
         sys.stderr.write("%s: %s\n" % (path, error))
         return EXIT_MALFORMED_SCENARIO
     print(format_trace(played))
