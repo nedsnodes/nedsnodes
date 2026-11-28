@@ -6,6 +6,7 @@ Usage:
                                  [-j N] [--log-dir DIR] [--lock-file PATH]
                                  [--wait-for-lock-seconds N]
                                  [--only-suites-whose-recorded-inputs-changed-since COMMIT]
+                                 [--every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since COMMIT]
                                  [--recorded-inputs-directory DIR]
                                  [--save-recorded-inputs-to-directory DIR]
                                  [--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout DIR]
@@ -44,7 +45,9 @@ Usage:
                 Given more than once, a suite runs only when the
                 comparison with every COMMIT selects it, except that
                 every suite runs when this program differs from the
-                first COMMIT, since a head test run runs main's copy,
+                first COMMIT, unless given
+                --every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since,
+                since a head test run runs main's copy,
                 and one in
                 SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or
                 SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the first
@@ -57,6 +60,22 @@ Usage:
                 change edits a file that suite reads, and leaves out every
                 other such suite it selects; see SUITES LEFT OUT OF A
                 SELECTIVE RUN below
+  --every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since COMMIT
+                with --only-suites-whose-recorded-inputs-changed-since,
+                every suite runs only when a file in
+                EVERY_SUITE_RUNS_WHEN_THESE_CHANGE differs between COMMIT
+                and the checkout's files, judged by that comparison alone;
+                such a file that differs only since a COMMIT given to
+                --only-suites-whose-recorded-inputs-changed-since is
+                compared as any other input. merge-lane-2's after-merge
+                test run gives the merge commit's first parent, so only
+                the merged pull request's own change to such a file runs
+                every suite. Without it, such a file that differs since
+                the first COMMIT given to
+                --only-suites-whose-recorded-inputs-changed-since runs
+                every suite. Without
+                --only-suites-whose-recorded-inputs-changed-since it has
+                no effect
   --recorded-inputs-directory
                 where each suite's recorded inputs are kept; default
                 ~/.cache/nedsnodes-test-suite-recorded-inputs
@@ -4432,12 +4451,12 @@ def suites_longest_recorded_first(suites, recordings):
     return sorted(suites, key=starting_order)
 
 
-def resolved_commit(top, given):
+def resolved_commit(top, given, option="--only-suites-whose-recorded-inputs-changed-since"):
     answer = git(top, "rev-parse", "--verify", "--quiet", f"{given}^{{commit}}")
     if answer.returncode != 0 or not answer.stdout.strip():
         raise CouldNotRun(
             f"{PROGRAM}: not run — git cannot resolve {given} to a commit in {top}.\n"
-            f"Pass --only-suites-whose-recorded-inputs-changed-since a commit this "
+            f"Pass {option} a commit this "
             f"checkout has, such as the output of `git merge-base HEAD origin/main`.")
     return answer.stdout.strip()
 
@@ -4741,19 +4760,26 @@ def adopt_passing_recordings_that_match_the_checkout(top, into_given, from_given
     return adopted
 
 
+def first_differing_path_that_runs_every_suite_or_none(differ):
+    """The first path of differ, in sorted order, in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE; None
+    when there is none."""
+    return next((path for path in sorted(differ)
+                 if any(path == prefix or (prefix.endswith("/") and path.startswith(prefix))
+                        for prefix in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE)), None)
+
+
 def suites_selected_since(top, suites, recordings, commit, differ, files_only_strace_saw_by_suite,
-                          read_only_recordings, read_only_directory):
+                          read_only_recordings, read_only_directory, differ_can_run_every_suite=True):
     """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's.
 
     A suite its recording in recordings selects is left out when its recording in
     read_only_recordings, read from read_only_directory, would leave it out, unless its
     recording in recordings shows an input the change differs in; read_only_recordings never
-    select a suite."""
-    everything = [path for path in sorted(differ)
-                  if any(path == prefix or (prefix.endswith("/") and path.startswith(prefix))
-                         for prefix in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE)]
-    if everything:
-        return [(suite, True, f"{everything[0]} differs, and every suite runs under it")
+    select a suite. Without differ_can_run_every_suite, a path in
+    EVERY_SUITE_RUNS_WHEN_THESE_CHANGE is compared as any other input."""
+    everything = first_differing_path_that_runs_every_suite_or_none(differ) if differ_can_run_every_suite else None
+    if everything is not None:
+        return [(suite, True, f"{everything} differs, and every suite runs under it")
                 for suite in suites]
     checkout = CheckoutComparedWithCommit(top, commit, differ,
                                           [recordings.get(suite) for suite in suites])
@@ -4782,22 +4808,36 @@ def suites_selected_since(top, suites, recordings, commit, differ, files_only_st
 
 def suites_selected_since_every_commit(top, suites, recordings, commits, differs,
                                        files_only_strace_saw_by_suite, read_only_recordings,
-                                       read_only_directory):
+                                       read_only_directory, every_suite_runs_judged_since=None):
     """[(suite, selected, why)] for every suite, in order: suites_selected_since's answer for
     each of commits, with differs[i] for commits[i], and a suite selected only when the
     comparison with every commit selects it, except that every suite is selected when this
     program differs from the first commit, and a suite in
     SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the
-    first commit alone."""
+    first commit alone.
+
+    Given every_suite_runs_judged_since, (a commit, files_that_differ_since's answer for it),
+    only that answer runs every suite, when it holds a path in
+    EVERY_SUITE_RUNS_WHEN_THESE_CHANGE, and no comparison is made; otherwise such a path
+    differing since one of commits, this program included, is compared as any other input."""
+    if every_suite_runs_judged_since is not None:
+        judged_since, judged_differ = every_suite_runs_judged_since
+        everything = first_differing_path_that_runs_every_suite_or_none(judged_differ)
+        if everything is not None:
+            return [(suite, True, f"{everything} differs since {judged_since[:12]}, the commit "
+                                  f"given to --every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since, and every suite runs under it")
+                    for suite in suites]
+
     def selected_since(commit, differ):
         return suites_selected_since(top, suites, recordings, commit, differ,
                                      files_only_strace_saw_by_suite, read_only_recordings,
-                                     read_only_directory)
+                                     read_only_directory,
+                                     differ_can_run_every_suite=every_suite_runs_judged_since is None)
 
     first = selected_since(commits[0], differs[0])
     if len(commits) == 1:
         return first
-    if PROGRAM in differs[0]:
+    if every_suite_runs_judged_since is None and PROGRAM in differs[0]:
         # A pull request head test run runs main's copy of this program, never the pull
         # request's, so no suite has run under a changed copy before the after-merge test run.
         # The later comparisons are not made, so a later commit they could not read stops
@@ -5065,6 +5105,8 @@ def parse_arguments(argv):
     parser.add_argument("--wait-for-lock-seconds", type=float, default=0)
     parser.add_argument("--only-suites-whose-recorded-inputs-changed-since",
                         dest="changed_since", metavar="COMMIT", action="append")
+    parser.add_argument("--every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since",
+                        dest="every_suite_runs_judged_since", metavar="COMMIT")
     parser.add_argument("--recorded-inputs-directory",
                         default=str(DEFAULT_RECORDED_INPUTS_DIRECTORY))
     parser.add_argument("--save-recorded-inputs-to-directory")
@@ -5232,10 +5274,17 @@ def main(argv=None, platform=None):
             differs = None
             if changed_since is not None:
                 differs = [files_that_differ_since(top, commit) for commit in changed_since]
+                every_suite_runs_judged_since = None
+                if arguments.every_suite_runs_judged_since is not None:
+                    judged_since = resolved_commit(
+                        top, arguments.every_suite_runs_judged_since,
+                        "--every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since")
+                    every_suite_runs_judged_since = (
+                        judged_since, files_that_differ_since(top, judged_since))
                 selection = suites_selected_since_every_commit(
                     top, suites, recordings, changed_since, differs,
                     files_only_strace_saw_by_suite, read_only_recordings,
-                    read_only_recordings_dir)
+                    read_only_recordings_dir, every_suite_runs_judged_since)
             else:
                 selection = [(suite, True, "every suite runs without "
                               "--only-suites-whose-recorded-inputs-changed-since")

@@ -67,7 +67,12 @@ selects more suites, never fewer, takes its place as the first commit; so with
 neither known, the program compares with the nn-head-commit alone, and with no
 head test run's commit, with the first commit alone; the program prints which.
 When the test runner at the merge commit predates comparing with several
-commits, the program compares with the first commit alone and says so. The page
+commits, the program compares with the first commit alone and says so. It also
+gives the runner --every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since
+with the merge commit's first parent, so every suite runs only when the merged
+pull request's own change adds, changes, renames or deletes a file the
+runner's EVERY_SUITE_RUNS_WHEN_THESE_CHANGE names; when the runner at the
+merge commit predates that option, it leaves it out and says so. The page
 docs/nedsnodes-wiki/nedsnodes-how-the-test-runner-selects-which-nn-test-suites-a-test-run-runs.md
 says why both comparisons are made. The run's suite logs and test-run-report.txt go in
 <merge-lane-worktrees-and-outputs-directory>/pr<n>-after-merge-test-run-logs-<the
@@ -1355,6 +1360,11 @@ def after_merge_test_run_suite_selection_main_commit_written(merge_commit, git):
 # the last --only-suites-whose-recorded-inputs-changed-since alone.
 TEST_RUNNER_SOURCE_LINE_WHOSE_PRESENCE_SHOWS_THE_RUNNER_SELECTS_SUITES_SINCE_EVERY_COMMIT_GIVEN = (
     "def suites_selected_since_every_commit(")
+EVERY_SUITE_RUNS_ONLY_WHEN_OPTION = (
+    "--every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since")
+# A test runner without the option, such as one on a branch cut before it, refuses it with exit 2.
+TEST_RUNNER_SOURCE_TEXT_WHOSE_PRESENCE_SHOWS_THE_RUNNER_ACCEPTS_THE_EVERY_SUITE_RUNS_ONLY_WHEN_OPTION = (
+    f'"{EVERY_SUITE_RUNS_ONLY_WHEN_OPTION}"')
 
 
 def after_merge_test_run_suite_selection_commits_choose(suite_selection_main_commit, head_tested,
@@ -1367,9 +1377,14 @@ def after_merge_test_run_suite_selection_commits_choose(suite_selection_main_com
     return [first] if head_tested is None else [first, head_tested]
 
 
-def after_merge_test_run_command_build(compared_with):
+def after_merge_test_run_command_build(compared_with, merge_commit_first_parent):
+    """The test run's command; merge_commit_first_parent, when not None, is given to
+    EVERY_SUITE_RUNS_ONLY_WHEN_OPTION, so only the merged pull request's own change can run every
+    suite."""
     return "python3 scripts/run-all-test-suites.py " + " ".join(
-        f"--only-suites-whose-recorded-inputs-changed-since {commit}" for commit in compared_with)
+        [f"--only-suites-whose-recorded-inputs-changed-since {commit}" for commit in compared_with]
+        + ([] if merge_commit_first_parent is None
+           else [f"{EVERY_SUITE_RUNS_ONLY_WHEN_OPTION} {merge_commit_first_parent}"]))
 
 
 def after_merge_test_run_by_hand_command(head_tested, head_commit, merge_commit_text):
@@ -1377,8 +1392,10 @@ def after_merge_test_run_by_hand_command(head_tested, head_commit, merge_commit_
     program could check whether the recorded suite selection main commit is an ancestor of the merge
     commit: the command makes that check,
     because a recovery printed before the merge commit is fetched cannot."""
+    first_parent = f"{merge_commit_text}^1"
     without_it = after_merge_test_run_command_build(
-        after_merge_test_run_suite_selection_commits_choose(None, head_tested, head_commit))
+        after_merge_test_run_suite_selection_commits_choose(None, head_tested, head_commit),
+        first_parent)
     path = after_merge_test_run_suite_selection_main_commit_file()
     try:
         commit = path.read_text(encoding="utf-8").strip()
@@ -1387,7 +1404,8 @@ def after_merge_test_run_by_hand_command(head_tested, head_commit, merge_commit_
     if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
         return without_it
     with_it = after_merge_test_run_command_build(
-        after_merge_test_run_suite_selection_commits_choose(commit, head_tested, head_commit))
+        after_merge_test_run_suite_selection_commits_choose(commit, head_tested, head_commit),
+        first_parent)
     return (f"if git merge-base --is-ancestor {commit} {merge_commit_text}; then "
             f"{with_it}; else {without_it}; fi")
 
@@ -1490,7 +1508,21 @@ def after_merge_test_run(arguments, merge_commit, base_branch, steps_before_the_
               f"merge commit predates comparing with several commits, and would keep only the "
               f"last one given, {compared_with[-1][:12]}")
         compared_with = compared_with[:1]
-    by_hand = after_merge_test_run_command_build(compared_with)
+    # The merge is made with gh pr merge --merge, so the first parent is the branch before it.
+    first_parent = f"{merge_commit}^1"
+    if (worktree_runner_text is not None
+            and TEST_RUNNER_SOURCE_TEXT_WHOSE_PRESENCE_SHOWS_THE_RUNNER_ACCEPTS_THE_EVERY_SUITE_RUNS_ONLY_WHEN_OPTION
+            not in worktree_runner_text):
+        print(f"not giving {EVERY_SUITE_RUNS_ONLY_WHEN_OPTION}: the test runner at the merge "
+              f"commit predates it, so a change to the test runner, a guard hook or "
+              f".claude/settings.json since {compared_with[0][:12]}, another pull request's "
+              f"included, runs every suite")
+        first_parent = None
+    else:
+        print(f"every suite runs only when this pull request's own change, since the merge "
+              f"commit's first parent, adds, changes, renames or deletes the test runner, a "
+              f"guard hook or .claude/settings.json")
+    by_hand = after_merge_test_run_command_build(compared_with, first_parent)
 
     runner = common.run_all_test_suites
     store = common.merge_lane_head_test_run_recorded_inputs_store_directory(arguments)
@@ -1533,6 +1565,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch, steps_before_the_
         [sys.executable, str(worktree / "scripts" / "run-all-test-suites.py"),
          *[argument for commit in compared_with
            for argument in ("--only-suites-whose-recorded-inputs-changed-since", commit)],
+         *(() if first_parent is None else (EVERY_SUITE_RUNS_ONLY_WHEN_OPTION, first_parent)),
          "--log-dir", str(log_dir)],
         cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         env=environment, stdin=subprocess.DEVNULL)
