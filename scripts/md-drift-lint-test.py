@@ -472,6 +472,33 @@ with tempfile.TemporaryDirectory() as workspace:
     check("a semicolon inside a backtick span does not end the sentence",
           findings == ["number 9999 not found in real-script.py"], str(findings))
 
+    # A suffixless file can disappear between the directory scan and reading its shebang.
+    vanished = root / "vanished-program"
+    unchecked = {}
+    check("a shebang that cannot be read leaves the candidate unchecked and unclassified",
+          not lint.is_program(vanished, unchecked) and bool(unchecked.get(vanished)), unchecked)
+    try:
+        lint.is_program(vanished, None)
+    except FileNotFoundError as error:
+        check("a caller without a collector receives the shebang read error for the vanished file",
+              error.filename == str(vanished), error)
+    else:
+        check("a caller without a collector receives the shebang read error", False)
+    unreadable = root / "scripts" / "unreadable.py"
+    unreadable.write_bytes(b"\xff")
+    claims = root / "claims.md"
+    claims.write_text("Run `scripts/unreadable.py --mode`.\n"
+                      "The limit in `scripts/unreadable.py` is `38`.\n"
+                      "Published on 2026-02-30.\n", encoding="utf-8")
+    for damaged in (root / "damaged.md", root / "damaged.json"):
+        damaged.write_bytes(b"\xff")
+        run = subprocess.run([sys.executable, str(LINT_SCRIPT), str(damaged), str(claims)],
+                             capture_output=True, text=True)
+        check(f"invalid UTF-8 in {damaged.suffix} and a cited source preserves independent findings",
+              run.returncode == 2 and "2026-02-30" in run.stdout
+              and str(damaged) in run.stderr and run.stderr.count(str(unreadable)) == 1
+              and "Traceback" not in run.stderr, (run.returncode, run.stdout, run.stderr))
+
     # --- JSON duplicate keys ----------------------------------------------
     good_json = root / "good.json"
     good_json.write_text('{"a": 1, "b": {"c": 2}}', encoding="utf-8")
