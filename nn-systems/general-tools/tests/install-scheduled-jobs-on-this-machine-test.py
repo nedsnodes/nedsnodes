@@ -137,7 +137,7 @@ MAC_REMOTE_CONTROL_RECONNECT_WATCHER_LINE = (
     "* * * * * /opt/homebrew/bin/python3 /Users/el/Projects/nedsnodes/nn-systems/handoff/"
     "handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher.py >> "
     "/Users/el/.claude/handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher.log 2>&1")
-# The prune of the guarded-file hook's copies of committed versions or of removed checkouts, last in the table.
+# The prune of the guarded-file hook's copies of committed versions or of removed checkouts.
 NED_BOX_GUARDED_FILE_PRUNE_LINE = (
     "0 7 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/general-tools/"
     "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py >> "
