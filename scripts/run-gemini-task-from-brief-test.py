@@ -230,7 +230,7 @@ class GeminiTaskTests(unittest.TestCase):
         self.fail(f"process {pid} still not dead after {timeout}s; last state {last!r}")
 
     def test_bad_arguments(self):
-        for extra in (("--deadline-minutes", "nan"), ("--deadline-minutes", "0"),
+        for extra in (("--deadline-minutes", "1e308"), ("--deadline-minutes", "nan"), ("--deadline-minutes", "0"),
                       ("--sandbox", "invalid"), ("--writable-root", str(self.base)),
                       ("-C", str(self.base / "absent")),
                       ("--run-log", str(self.brief)), ("-o", str(self.brief)),

@@ -827,6 +827,14 @@ try:
           main_error is not None and "could not start Codex" not in captured.getvalue(),
           f"error {main_error!r}, exit {main_exit}, stderr {captured.getvalue()!r}")
 
+    for invalid_deadline in ("0", "-1", "nan", "inf", "1e308"):
+        existing_report = scratch / "report-report.md"
+        existing_report.write_text("previous report")
+        completed, _, _ = run("report", "--deadline-minutes", invalid_deadline)
+        check(f"deadline {invalid_deadline} is refused before an existing report is touched",
+              completed.returncode == 2 and "--deadline-minutes" in completed.stderr
+              and existing_report.read_text() == "previous report", completed.stderr)
+
     empty_brief = scratch / "empty.md"
     empty_brief.write_text("  \n")
     bad_encoding = scratch / "bad-encoding.md"

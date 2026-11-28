@@ -72,6 +72,7 @@ it can run as a background task.
 
 import argparse
 import importlib.util
+import math
 import os
 import pathlib
 import re
@@ -118,6 +119,13 @@ PREFETCH_API_ACCEPTED_OPTIONS_TEXT = (
 PREFETCH_FILE_NAME_WORDS_MAX_CHARACTERS = 80
 
 
+def positive_deadline_minutes(value: str) -> float:
+    minutes = float(value)
+    if not math.isfinite(minutes * 60) or minutes <= 0:
+        raise argparse.ArgumentTypeError("use a positive deadline that is finite in seconds")
+    return minutes
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="scripts/run-codex-task-from-brief.py",
@@ -143,7 +151,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
                         help="let -C name a folder that is not a git checkout")
     parser.add_argument("--web-search", action="store_true",
                         help="give Codex its live web search tool")
-    parser.add_argument("--deadline-minutes", type=float,
+    parser.add_argument("--deadline-minutes", type=positive_deadline_minutes,
                         default=DEFAULT_DEADLINE_MINUTES,
                         help="stop the run, the --prefetch-github commands and Codex "
                              f"together, after this many minutes (default {DEFAULT_DEADLINE_MINUTES})")

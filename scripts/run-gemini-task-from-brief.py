@@ -81,7 +81,7 @@ def _parser():
     parser.add_argument("--effort")
     parser.add_argument("--writable-root", action="append", default=[])
     parser.add_argument("--network", action="store_true")
-    parser.add_argument("--deadline-minutes", type=float, default=60)
+    parser.add_argument("--deadline-minutes", type=codex_task.positive_deadline_minutes, default=60)
     parser.add_argument("--run-log")
     return parser
 
@@ -101,8 +101,6 @@ def _run(command, checkout, log, deadline, environment):
 def main(argv=None):
     parser = _parser()
     args = parser.parse_args(argv)
-    if not math.isfinite(args.deadline_minutes) or args.deadline_minutes <= 0:
-        parser.error("--deadline-minutes must be finite and greater than zero")
     if args.writable_root and args.sandbox != "workspace-write":
         parser.error("--writable-root requires --sandbox workspace-write")
     checkout = pathlib.Path(args.checkout).resolve()
