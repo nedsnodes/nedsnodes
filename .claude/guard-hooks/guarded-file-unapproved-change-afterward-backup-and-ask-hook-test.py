@@ -9,10 +9,14 @@ Run: python3 .claude/guard-hooks/guarded-file-unapproved-change-afterward-backup
 Prints one line per case and exits 1 if any case fails.
 """
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
+import math
 import os
+import pickle
 import re
 import resource
 import shutil
@@ -1513,9 +1517,9 @@ def cases(scratch):
     hook = load_hook_in_this_process()
     original_with_store = hook.with_store
 
-    def write_between_scan_and_store(machine, work):
+    def write_between_scan_and_store(machine, work, *run_limit):
         settings_local.write_text('{"a": 2}\n')
-        return original_with_store(machine, work)
+        return original_with_store(machine, work, *run_limit)
 
     hook.with_store = write_between_scan_and_store
     run_hook_in_this_process(world, hook, "session-a", "owner-a", directory=Path(scratch))
@@ -1558,6 +1562,8 @@ def cases(scratch):
 
     # -- the Mac's store over a stand-in mount
     mac_cases(scratch)
+    store_answer_deadline_and_long_run_cases(scratch)
+    origin_main_version_not_copied_cases(scratch)
     durable_ref_cases(scratch)
     reflog_copy_and_saved_state_cases(scratch)
 
@@ -2743,12 +2749,232 @@ def mac_cases(scratch):
     claude.write_text("project v5 while the store hangs\n")
     message = world.run()
     # The FIFO has no writer, so its read blocks for good and only the store deadline, 3 s here,
-    # ends it. The bound is the hook's own 30 s timeout in .claude/settings.json, the limit the
-    # deadline exists to beat, not the 3 s, which a loaded machine stretches.
+    # ends it. The bound, 30 s, is far below the hook's timeout in .claude/settings.json, not the
+    # 3 s, which a loaded machine stretches.
     check("with a store whose reads block, the failure is reported when the store deadline passes, "
           "before the hook's timeout",
           "did not run" in message and "the store did not answer within 3.0 seconds" in message
           and world.last_seconds < 30, (message, world.last_seconds))
+
+
+HOOK_FILE_NAME = "guarded-file-unapproved-change-afterward-backup-and-ask-hook.py"
+LONG_RUN = "--back-up-and-check-every-changed-guarded-file-in-one-long-run"
+RUN_LIMIT_MESSAGE = (
+    "The guarded-file backup ran 90 seconds with ned-box answering and did not finish. Run it "
+    "yourself once in this checkout, as a Bash call with a 15-minute timeout: python3 "
+    f".claude/guard-hooks/{HOOK_FILE_NAME} {LONG_RUN}")
+
+
+def mac_world(scratch, name):
+    """A fresh world on the Mac, its stand-in store mounted, with a store deadline of 3 s."""
+    world = fresh(scratch, name, machine="mac")
+    mount_point = Path(scratch) / name / "store"
+    table = Path(scratch) / name / "mount-table"
+    world.extra_environment = {"GUARDED_FILE_VERSIONS_MOUNT_POINT": str(mount_point),
+                               "GUARDED_FILE_VERSIONS_MOUNT_TABLE": str(table),
+                               "GUARDED_FILE_VERSIONS_DEADLINE_SECONDS": "3"}
+    table.write_text(f"//nedlern@ned-box._smb._tcp.local/nedlern on {mount_point} "
+                     "(smbfs, nodev, nosuid, mounted by nedlern)\n")
+    world.run()
+    return world
+
+
+def wait_scripted(hook, steps, run_limit_seconds):
+    """(what wait_for_store_answers returned or raised, the seconds it ran) on a fake clock, with
+    a store deadline of 15 s. Each step is (seconds until the child writes, the bytes it writes),
+    b"" closing the pipe; a step longer than the wait asked for times that wait out instead."""
+    read_end, write_end = os.pipe()
+    now, pending, open_ends = [0.0], list(steps), [write_end]
+
+    def readable(fd, seconds):
+        after, data = pending[0]
+        if after > seconds:
+            now[0] += seconds
+            pending[0] = (after - seconds, data)
+            return False
+        now[0] += after
+        pending.pop(0)
+        if data:
+            os.write(write_end, data)
+        else:
+            os.close(open_ends.pop())
+        return True
+
+    try:
+        outcome = hook.wait_for_backup_store_child_process_answers_until_silent_or_run_limit(read_end, 15.0, run_limit_seconds,
+                                              clock=lambda: now[0], readable=readable)
+    except Exception as error:
+        outcome = error
+    finally:
+        for fd in [read_end] + open_ends:
+            os.close(fd)
+    return outcome, now[0]
+
+
+def main_in_this_process(world, hook, arguments, stdin=""):
+    """(exit code, standard output) of the loaded hook module's main, run in the world's
+    repository."""
+    saved_environment, saved_directory, saved_stdin = dict(os.environ), os.getcwd(), sys.stdin
+    output = io.StringIO()
+    try:
+        os.environ.update(world.environment())
+        os.chdir(world.repo)
+        sys.stdin = io.StringIO(stdin)
+        with contextlib.redirect_stdout(output):
+            code = hook.main(arguments)
+    finally:
+        sys.stdin = saved_stdin
+        os.chdir(saved_directory)
+        os.environ.clear()
+        os.environ.update(saved_environment)
+    return code, output.getvalue()
+
+
+def store_answer_deadline_and_long_run_cases(scratch):
+    hook = load_hook_in_this_process()
+    result = b"=" + pickle.dumps(("ok", 7))
+    answer = (1.0, b".")
+    outcome, seconds = wait_scripted(hook, [answer] * 40 + [(0.5, result), (0.0, b"")], 90.0)
+    check("a store that answers each second is waited for past the 15-second deadline, here for "
+          "40.5 seconds, until its work ends",
+          outcome == b"." * 40 + result and seconds == 40.5, (outcome, seconds))
+    for limit, limit_name in ((90.0, "90-second"), (math.inf, "no")):
+        outcome, seconds = wait_scripted(hook, [answer, (20.0, b".")], limit)
+        check(f"with a {limit_name} run limit, a store that stops answering is given up 15 seconds "
+              "after its last answer",
+              isinstance(outcome, hook.StoreUnreachable)
+              and str(outcome) == "the store did not answer within 15.0 seconds"
+              and seconds == 16.0, (outcome, seconds))
+    outcome, seconds = wait_scripted(hook, [answer] * 100, 90.0)
+    check("a store that keeps answering is stopped when the run reaches 90 seconds",
+          isinstance(outcome, hook.GuardedFileBackupStoreOperationsTotalSecondsLimitReached) and seconds == 90.0, (outcome, seconds))
+    outcome, seconds = wait_scripted(hook, [answer] * 200 + [(0.5, result), (0.0, b"")], math.inf)
+    check("with no run limit, a store that keeps answering is waited for until its work ends, here "
+          "200.5 seconds",
+          outcome == b"." * 200 + result and seconds == 200.5, (outcome, seconds))
+    check("run_with_deadline returns the child's result after the answers the child marked",
+          hook.run_with_deadline(lambda: [hook.write_backup_store_operation_done_mark_to_parent_pipe() for _ in range(3)] and 7, 3.0) == 7)
+
+    world = fresh(scratch, "store-read-answers")
+    path = str(world.repo / "CLAUDE.md")
+    read_end, write_end = os.pipe()
+    saved_environment = dict(os.environ)
+    marks = []
+    try:
+        os.environ.update(world.environment())
+        hook.answer_pipe = write_end
+        store = hook.Store(world.machine)
+        store.path_directory(path, create=False)
+        marks.append(os.read(read_end, 1024))
+        store.read(path, "approved")
+        marks.append(os.read(read_end, 1024))
+    finally:
+        hook.answer_pipe = None
+        os.environ.clear()
+        os.environ.update(saved_environment)
+        os.close(write_end)
+        os.close(read_end)
+    # read opens the directory through path_directory, so it marks once for each.
+    check("a Store directory open marks one answer for the parent, and a Store read one more",
+          marks == [b".", b".."], marks)
+
+    world = mac_world(scratch, "mac-child-answers")
+    (world.repo / "CLAUDE.md").write_text("project v2, its store work answered from a child\n")
+    hook = load_hook_in_this_process()
+    original_wait = hook.wait_for_backup_store_child_process_answers_until_silent_or_run_limit
+    received = []
+
+    def wait_and_keep(*arguments, **keywords):
+        received.append(original_wait(*arguments, **keywords))
+        return received[-1]
+
+    hook.wait_for_backup_store_child_process_answers_until_silent_or_run_limit = wait_and_keep
+    run_hook_in_this_process(world, hook, "session-a", "owner-a")
+    check("on the Mac the hook's child sends the parent an answer mark for each store operation, "
+          "before its result",
+          len(received) == 1 and received[0].partition(b"=")[0].count(b".") >= 3, received)
+
+    world = mac_world(scratch, "mac-run-limit")
+    claude = world.repo / "CLAUDE.md"
+    claude.write_text("project v2, from a merge that changed many guarded files\n")
+    key = world.key(claude)
+    hook = load_hook_in_this_process()
+    # Every run is past a limit of 0 when its store work starts; the message names the real 90.
+    hook.GUARDED_FILE_BACKUP_STORE_OPERATIONS_TOTAL_LIMIT_SECONDS_PER_HOOK_RUN_ON_THE_MAC = 0
+    payload = {"session_id": "session-a", "hook_event_name": "PostToolUse", "tool_name": "Bash",
+               "cwd": str(world.repo), "tool_input": {"command": "x"}}
+    code, output = main_in_this_process(world, hook, [], json.dumps(payload))
+    message = json.loads(output)["hookSpecificOutput"]["additionalContext"] if output else ""
+    check("a hook run whose store work reaches the run limit while the store answers gives the "
+          "agent the long-run message, and nothing else",
+          code == 0 and message == RUN_LIMIT_MESSAGE, (code, output))
+    world.extra_environment["CLAUDE_CODE_SESSION_ID"] = "session-long"
+    code, output = main_in_this_process(world, hook, [LONG_RUN])
+    check("the long run has no run limit: it does the same work, copying the version and asking "
+          "about it, and exits 0",
+          code == 0 and key in world.versions(claude) and str(claude) in output
+          and "has not approved" in output, (code, output))
+    check("the long run logs its ask under the session that CLAUDE_CODE_SESSION_ID names",
+          "\tsession-long\t" in world.store_file(claude, "log"), world.store_file(claude, "log"))
+
+    result = world.command(LONG_RUN)
+    check("a long run that finds nothing new to settle prints only its reminders and exits 0",
+          result.returncode == 0 and str(claude) in result.stdout, (result.returncode, result.stdout))
+    directory = world.store / str(claude).lstrip("/")
+    (directory / "approved").unlink()
+    os.mkfifo(directory / "approved")
+    claude.write_text("project v3 while the store hangs\n")
+    result = world.command(LONG_RUN)
+    check("the long run keeps the store deadline: with a store whose reads block, it reports the "
+          "backup did not run once the store has not answered for 3 s, and exits 1",
+          result.returncode == 1 and "did not run" in result.stdout
+          and "the store did not answer within 3.0 seconds" in result.stdout,
+          (result.returncode, result.stdout))
+
+    world = fresh(scratch, "long-run-nothing-changed")
+    result = world.command(LONG_RUN)
+    check("a long run with nothing to report says every changed guarded file was checked, and exits 0",
+          result.returncode == 0 and result.stdout.strip() == hook.BACK_UP_AND_CHECK_LONG_RUN_FOUND_NOTHING_TO_ASK_MESSAGE,
+          (result.returncode, result.stdout))
+    result = world.command(LONG_RUN, "extra")
+    check("the long run given an argument too prints the usage and exits 64",
+          result.returncode == 64 and LONG_RUN in result.stderr, (result.returncode, result.stderr))
+
+    settings = json.loads(SETTINGS.read_text())
+    timeouts = {event: [entry.get("timeout") for group in settings["hooks"].get(event, [])
+                        for entry in group["hooks"]
+                        if entry.get("command", "").endswith(HOOK_FILE_NAME)]
+                for event in ("PostToolUse", "PostToolUseFailure")}
+    check("the hook's PostToolUse and PostToolUseFailure entries in .claude/settings.json each have "
+          "a timeout above the 90-second run limit, so the hook gives its message before Claude "
+          "Code kills it",
+          all(values and all(isinstance(value, (int, float)) and value > 90 for value in values)
+              for values in timeouts.values()), timeouts)
+
+
+def origin_main_version_not_copied_cases(scratch):
+    world = fresh(scratch, "origin-main-version-not-copied")
+    claude = world.repo / "CLAUDE.md"
+    world.git("checkout", "-q", "-b", "merged-on-main")
+    claude.write_text("project v2, merged on main\n")
+    world.git("commit", "-qam", "v2")
+    world.git("update-ref", "refs/remotes/origin/main", "HEAD")
+    world.git("checkout", "-q", "main")
+    world.git("branch", "-q", "-D", "merged-on-main")
+    world.run()
+    claude.write_text("project v2, merged on main\n")
+    key = world.key(claude)
+    message = world.run()
+    check("a version origin/main holds at the same path is approved with no copy in the store, "
+          "though the branch HEAD does not hold it",
+          key not in world.versions(claude) and key in world.store_file(claude, "approved")
+          and "has not approved" not in message, (world.versions(claude), message))
+    claude.write_text("project v3, not approved\n")
+    world.run()
+    result = world.command("--restore", claude, world.key(claude))
+    check("--restore of a later declined version puts back origin/main's version, read from git",
+          result.returncode == 0 and claude.read_text() == "project v2, merged on main\n",
+          (result.returncode, result.stdout, result.stderr))
 
 
 if __name__ == "__main__":
