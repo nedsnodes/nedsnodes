@@ -127,7 +127,7 @@ SHARE_WITH_COMPACTION_DROPPED = (
 )
 
 HANDOFF_INSTRUCTION = (
-    "[rule handoff-context-threshold-reached-run-handoff] This session has used {share} of its context window, which has "
+    "[rule handoff-context-threshold-reached-run-handoff] #handoff_now# This session has used {share} of its context window, which has "
     "reached the reincarnation threshold. Run the /handoff skill now."
 )
 
@@ -212,7 +212,7 @@ WAIT_LIMIT_TABLE_LOCATION = (
 WAIT_LIMIT_TABLE_SENTENCE = f"Each kind's wait-limit is in {WAIT_LIMIT_TABLE_LOCATION}."
 
 HANDOFF_DEFERRED_NOTICE = (
-    "[rule handoff-context-threshold-deferred-while-work-runs] Context at {share} — handoff deferred while {running} run, because a "
+    "[rule handoff-context-threshold-deferred-while-work-runs] #handoff_deferred# Context at {share} — handoff deferred while {running} run, because a "
     "handoff now would stop them.\n"
     "Do not run the /handoff skill now; carry on with your work, and a later "
     "system message will tell you when to run it. That message comes once "
@@ -226,7 +226,7 @@ HANDOFF_DEFERRED_NOTICE = (
 )
 
 HANDOFF_DEFERRED_UNKNOWN_COUNT_NOTICE = (
-    "[rule handoff-context-threshold-deferred-while-work-runs] Context at {share} — handoff deferred: the transcript could not be fully "
+    "[rule handoff-context-threshold-deferred-while-work-runs] #handoff_deferred# Context at {share} — handoff deferred: the transcript could not be fully "
     "read, so what is running is unknown, and a handoff now could stop it.\n"
     "Do not run the /handoff skill now; carry on with your work, and a later "
     "system message will tell you when to run it. That message comes once "

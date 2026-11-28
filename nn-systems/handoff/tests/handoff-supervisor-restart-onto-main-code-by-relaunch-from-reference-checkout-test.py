@@ -485,7 +485,7 @@ def foreground_cases():
     state = json.loads(started[0].read_text()) if started else {}
     check("foreground: the handoff-supervisor is frozen and the agent-seat told to write its session-handoff",
           status == 0 and program.process_is_stopped(supervisor_id)
-          and "write your session-handoff now" in output and program.HANDOFF_SUPERVISOR_RESTART_RESULT_FILE_NAME in output, output + errors)
+          and "\n#handoff_now# If you are the agent-seat " in output and "write your session-handoff now" in output and program.HANDOFF_SUPERVISOR_RESTART_RESULT_FILE_NAME in output, output + errors)
     check("foreground: the state for the second half names both processes and the agent-home's processes",
           state.get("supervisor_id") == supervisor_id and state.get("claude_id") == claude_id
           and str(claude_id) in state.get("agent_home_processes", {}), state)

@@ -2,6 +2,7 @@
 
 Terms that belong to the handoff-system alone, for agents working on its files, which are under `nn-systems/handoff/` and `scripts/`. The parts these entries name, such as the threshold-hook, its ceiling and the writer script, are described in `nn-systems/handoff/handoff.system.design.md` and in the handoff-system's nn-architecture-overview, `docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md`. Project-terms, such as session-handoff and reincarnate-seat, are in the project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`.
 
+- **get-ready-notice** — the notice the threshold-hook sends once per agent-session, opening `[rule handoff-context-threshold-get-ready-no-new-subagents-or-10-plus-minute-work]`, as the agent-session nears the reincarnation threshold: from then on it starts no new subagent and no background Bash task that usually runs 10 minutes or longer, may run the /handoff skill at a good stopping point once nothing of its own is running, and runs it when only work for its successor is left.
 - **handoff-deferral** — the threshold-hook's postponing of a reincarnate-seat while a subagent or a recent background Bash task of the agent-session is still running, up to the ceiling.
 - **spawned-subagent-roster** — the `spawned-subagent-N` fields the writer script writes into a session-handoff, one for each subagent still working, and the sentence the handoff-supervisor gives the successor naming them.
 - **threshold-hook** — the hook that asks an agent-session for a session-handoff once its context reaches the reincarnation threshold.

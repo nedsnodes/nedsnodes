@@ -419,7 +419,7 @@ def foreground(seat: str, start_second_half=start_second_half, sleep=time.sleep)
           f"for a new session-handoff, then ends this agent-session and starts a new "
           f"handoff-supervisor from {REFERENCE_CHECKOUT}; the second half writes what it prints to "
           f"{log_directory / HANDOFF_SUPERVISOR_RESTART_DETACHED_SECOND_HALF_OUTPUT_FILE_NAME}.\n"
-          f"If you are the agent-seat {seat}: write your session-handoff now with the /handoff skill, "
+          f"#handoff_now# If you are the agent-seat {seat}: write your session-handoff now with the /handoff skill, "
           f"without --ask-user-before-restart, because that flag makes the new handoff-supervisor wait for an "
           f"answer on the terminal. Add this sentence to the session-handoff's next step, keeping "
           f"what the next step already says: \"Read {result_path} and tell the user the restart's "
