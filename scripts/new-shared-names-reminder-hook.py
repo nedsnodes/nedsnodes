@@ -436,7 +436,13 @@ def main() -> int:
     names = []
     try:
         lister = load_lister()
-        names = lister.new_shared_names(checkout, already_reported=frozenset(reported), file_cache=file_cache)
+        unchecked = {}
+        names = lister.new_shared_names(checkout, already_reported=frozenset(reported),
+                                       file_cache=file_cache, unchecked=unchecked)
+        if unchecked:
+            state["worktree_fingerprint"] = ""  # Retry a read that may have failed transiently.
+            for path, reason in unchecked.items():
+                tell_notice_once(f"Could not search {path}: {reason}")
     except Exception as failure:
         failure_text = failure_report_once(state, str(failure) or type(failure).__name__)
         if failure_text:
