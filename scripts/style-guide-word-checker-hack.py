@@ -122,7 +122,8 @@ INDENTED_LINE_PATTERN = re.compile(r"^(?: {4}|[ ]{0,3}\t)")
 
 # Blank with equal-length spaces to preserve offsets; code spans must hide embedded quotes and slashes.
 # Mask link targets before slash tokens so adjacent link text remains searchable.
-INLINE_CODE_SPAN_PATTERN = re.compile(r"(`+).+?\1")
+# A code span opens and closes with whole backtick runs of equal length.
+INLINE_CODE_SPAN_PATTERN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
 LINK_TARGET_PATTERN = re.compile(r"\]\([^)]*\)")
 # Anchor at token starts to avoid retrying the pattern at every character of long lines.
 SLASH_TOKEN_PATTERN = re.compile(r"(?<!\S)\S*/\S*")

@@ -138,6 +138,12 @@ check("a fence opened on a list item's marker line is code, and prose after it i
 
 forms = file_hit_forms("Run `git\nswitch seat --quiet` now.\n")
 check("a code span that wraps across a line break is code on both lines", forms == [], forms)
+forms = file_hit_forms("Run ``a ` b\nseat c`` now.\n")
+check("a single backtick inside a wrapped double-backtick span is code", forms == [], forms)
+text = "Run ``a ``` b\nseat c`` then check the seat.\n"
+hits = checker.find_style_guide_word_hits_in_markdown(text, checker.APPLIES_TO_FILES)
+check("only prose after the matching double-backtick closer is flagged",
+      [(hit.form, hit.offset) for hit in hits] == [("seat", text.rindex("seat"))], hits)
 forms = file_hit_forms("Run `git\nswitch seat` now, then the seat moves.\n")
 check("prose after a wrapped code span closes is still read", forms == ["seat"], forms)
 forms = file_hit_forms("A lone ` backtick.\nThe seat is free.\n")
