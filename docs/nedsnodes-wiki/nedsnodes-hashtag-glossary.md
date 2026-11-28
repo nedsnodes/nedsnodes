@@ -36,6 +36,8 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#follow_up#` — on a `#root_cause_not_fixed#` line of a pull request's description, marks the link to the GHI or pull request that will fix the root cause.
 - `#follow_up_request#` — the line `#follow_up_request pull request <number>` that opens merge-lane-2's list of non-blocking findings for the author to follow up after a merge.
 - `#frozen_copy_changed_during_run#` — the line a cold-read program prints when the frozen-copy the reviewers read changed during the run.
+- `#handoff_deferred#` — marks the threshold-hook's notice that an agent-session's handoff waits for work still running; unless the user asks for a handoff, the agent does not run the /handoff skill until a message holding `#handoff_now#` comes.
+- `#handoff_now#` — marks the instruction that tells an agent-session to run the /handoff skill now, from the threshold-hook or from `nn-systems/handoff/handoff-supervisor-restart-onto-main-code-by-relaunch-from-reference-checkout.py`.
 - `#held_on_ruling#` — the pull request review line `#held_on_ruling <walk name> item <number>` that holds the pull request until the user rules on that approval-walk item.
 - `#item_page#` — the walk-minutes line `#item_page item N of M <link>`, or `#item_page item N of M publish failed: <reason>`, that records the published page of an approval-walk item or that its publish failed.
 - `#kept_text#` — a cold-read-fast-read finding tag: the finding is about sentences the edit did not change and did not cause.

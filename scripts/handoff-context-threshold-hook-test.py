@@ -68,7 +68,7 @@ def check(case_name, condition, detail=""):
 
 
 HANDOFF_INSTRUCTION_PATTERN = re.compile(
-    r"\[rule handoff-context-threshold-reached-run-handoff\] This session has used \d+% of its context window, which has reached the "
+    r"\[rule handoff-context-threshold-reached-run-handoff\] #handoff_now# This session has used \d+% of its context window, which has reached the "
     r"reincarnation threshold\. Run the /handoff skill now\.")
 
 
@@ -78,6 +78,9 @@ DO_NOT_RUN_HANDOFF_SKILL_YET_INSTRUCTION = (
 
 
 for notice in (hook.HANDOFF_DEFERRED_NOTICE, hook.HANDOFF_DEFERRED_UNKNOWN_COUNT_NOTICE):
+    check("the deferral opens with #handoff_deferred# right after its rule ID",
+          notice.startswith("[rule handoff-context-threshold-deferred-while-work-runs] #handoff_deferred# "),
+          notice[:120])
     check("the deferral timeout counts a task as finished without stopping the task",
           "even if it still runs" in notice,
           notice)
@@ -110,7 +113,7 @@ def is_handoff_instruction(stderr):
 
 
 COMPACTED_HANDOFF_INSTRUCTION_PATTERN = re.compile(
-    r"\[rule handoff-context-threshold-reached-run-handoff\] This session has used \d+% \(\d+% counting the tokens its compactions dropped, "
+    r"\[rule handoff-context-threshold-reached-run-handoff\] #handoff_now# This session has used \d+% \(\d+% counting the tokens its compactions dropped, "
     r"the figure compared with the threshold and the ceiling\) "
     r"of its context window, which has reached the reincarnation threshold\. "
     r"Run the /handoff skill now\.")
@@ -1447,12 +1450,12 @@ with tempfile.TemporaryDirectory() as workspace:
         check("hook says only to run the skill",
               is_handoff_instruction(result.stderr), result.stderr[:160])
         check("hook gives the context share that reached the threshold",
-              result.stderr.strip().startswith("[rule handoff-context-threshold-reached-run-handoff] This session has used ")
+              result.stderr.strip().startswith("[rule handoff-context-threshold-reached-run-handoff] #handoff_now# This session has used ")
               and "% of its context window" in result.stderr, result.stderr[:160])
         loud_share = hook.context_used_percentage_from_transcript(str(loud))
         check("the share it gives is the share the transcript reached",
               loud_share is not None and result.stderr.strip().startswith(
-                  f"[rule handoff-context-threshold-reached-run-handoff] This session has used {loud_share:.0f}% of its context window"),
+                  f"[rule handoff-context-threshold-reached-run-handoff] #handoff_now# This session has used {loud_share:.0f}% of its context window"),
               (loud_share, result.stderr[:160]))
 
         result = run_hook({"session_id": PROBE_SESSION_ID, "transcript_path": str(loud)})
@@ -2702,7 +2705,7 @@ with tempfile.TemporaryDirectory() as workspace:
                               background_tasks_list_is_missing=True)
             check("a deferral in progress hands off at the next Stop whose input lacks the list",
                   result.returncode == 2 and result.stderr.startswith(
-                      "[rule handoff-context-threshold-reached-run-handoff] This session has used ")
+                      "[rule handoff-context-threshold-reached-run-handoff] #handoff_now# This session has used ")
                   and "Claude Code sent no background_tasks list" in result.stderr
                   and list_fired_marker_file.exists(),
                   f"code {result.returncode}, stderr {result.stderr[:300]}")

@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: 'Use when a system message says the reincarnation threshold is reached or says to run the handoff skill now, or when the get-ready notice allows it, or when the user asks for a handoff or to restart this agent-session; not when a message says the handoff is deferred. Writes the session-handoff your successor starts from, and the handoff-system supplies the rest; you write its first action and anything open it cannot see.'
+description: 'Use when a hook''s or a program''s message holds `#handoff_now#`, or when the get-ready notice allows it, or when the user asks for a handoff or to restart this agent-session; not while the last such message holds `#handoff_deferred#`. Writes the session-handoff your successor starts from, and the handoff-system supplies the rest; you write its first action and anything open it cannot see.'
 ---
 
 # handoff
