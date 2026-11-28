@@ -2049,6 +2049,37 @@ with tempfile.TemporaryDirectory() as scratch:
           result.returncode == 0 and received_prompt != ""
           and "is a frozen copy of" not in received_prompt,
           f"exit {result.returncode}; {received_prompt[-300:]!r}")
+    rewritten_link_note_opening = "each link target listed below starts /home/nedlern/"
+    check("without a rewritten link target the prompt carries no rewrite note",
+          received_prompt != "" and rewritten_link_note_opening not in received_prompt,
+          repr(received_prompt[-300:]))
+
+    # A rewritten link target: the cold-read-fast-read and the cold-read-grid name
+    # each one, and the reviewer must be told that the original has it in the
+    # Mac form, or it reports the link as a bare ned-box path.
+    shutil.rmtree(repository)
+    repository = build_scratch_repository(scratch)
+    report = report_path_for(repository, "rewritten-link-target", "claude")
+    received_prompt_path = scratch / "rewritten-link-target-received.txt"
+    rewritten_link_target_option = (
+        "--mac-mount-of-ned-box-home-file-link-target-rewritten-as-ned-box-home-path")
+    result = run_claude_cell(
+        repository, stubs,
+        {"*": {"report": "STUB REVIEW: one finding\n",
+               "dump_prompt": str(received_prompt_path)}},
+        report, f"{rewritten_link_target_option}=/home/nedlern/a/b.md",
+        f"{rewritten_link_target_option}=/home/nedlern/c d.md",
+    )
+    received_prompt = (received_prompt_path.read_text(encoding="utf-8")
+                       if received_prompt_path.is_file() else "")
+    check("a cell given rewritten link targets says they were file:///Volumes/nedhome/ in the "
+          "original, lists each one, and says not to report them for their form",
+          result.returncode == 0
+          and rewritten_link_note_opening in received_prompt
+          and "starts file:///Volumes/nedhome/ in the original document" in received_prompt
+          and "\n- /home/nedlern/a/b.md\n- /home/nedlern/c d.md\n" in received_prompt
+          and "Do not report a link to one of these targets for its form" in received_prompt,
+          f"exit {result.returncode}; {received_prompt[-900:]!r}")
 
     # Without the flag the cell reads its own template and stamps no
     # prompt_file= field: an absent field reads as "the pinned prompt", which

@@ -259,26 +259,42 @@ def text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_pat
     This is the rewrite on every machine; a program that compares a frozen copy with its
     document applies it whichever machine made the copy.
     """
+    return text_with_mac_mount_of_ned_box_home_file_links_rewritten_and_the_rewritten_link_targets(text)[0]
+
+
+def text_with_mac_mount_of_ned_box_home_file_links_rewritten_and_the_rewritten_link_targets(
+        text: str) -> tuple:
+    """Return text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths(text),
+    and the distinct link targets it rewrote, in their rewritten /home/nedlern/ form, in the order
+    they first appear; the list is empty when nothing was rewritten."""
+    targets = []
+
     def rewritten(match: re.Match) -> str:
         if match.group("code") is not None:
             return match.group("code")
+        # A target in <...> may hold spaces and ends at >; any other ends at a space or ).
+        rest = re.match(r"[^>\n]*" if match.group("target_start").endswith("<") else r"[^\s)]*",
+                        text[match.end():]).group()
+        if NED_BOX_HOME_PATH_PREFIX + rest not in targets:
+            targets.append(NED_BOX_HOME_PATH_PREFIX + rest)
         return match.group("target_start") + NED_BOX_HOME_PATH_PREFIX
-    return _CODE_OR_MAC_MOUNT_LINK_TARGET_PATTERN.sub(rewritten, text)
+    return _CODE_OR_MAC_MOUNT_LINK_TARGET_PATTERN.sub(rewritten, text), targets
 
 
 def cold_read_reviewer_copy_text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths_where_mac_mount_absent(
-        text: str) -> str:
-    """Return the text a reviewer on this machine reads, for a cold read run here.
+        text: str) -> tuple:
+    """Return the text a reviewer on this machine reads, for a cold read run here, and the
+    link targets rewritten in it, which the caller names to the reviewer.
 
     Reviewers run on the machine that runs the cold read. Where the Mac's mount
     of ned-box's home is not a directory, as on ned-box, a file:///Volumes/nedhome/
     link target does not open, so it is rewritten to the /home/nedlern/ path that does,
     as text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths says;
-    where the mount is a directory, as on the Mac, the text is returned unchanged.
+    where the mount is a directory, as on the Mac, the text is returned unchanged, with no targets.
     Apply it only to the copy a reviewer reads, never to the user's document.
     """
     mount = (os.environ.get(MAC_MOUNT_OF_NED_BOX_HOME_OVERRIDE_VARIABLE)
              or MAC_MOUNT_OF_NED_BOX_HOME_DIRECTORY)
     if pathlib.Path(mount).is_dir():
-        return text
-    return text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths(text)
+        return text, []
+    return text_with_mac_mount_of_ned_box_home_file_links_rewritten_and_the_rewritten_link_targets(text)

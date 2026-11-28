@@ -690,24 +690,26 @@ def reference_integrity_pre_pass(target: pathlib.Path, record_dir: pathlib.Path)
         "\n".join(lines) + "\n", encoding="utf-8")
 
 
-def freeze_target(target: pathlib.Path, record_dir: pathlib.Path) -> str:
-    """Copy the target and return its SHA-256, or an empty string when unreadable."""
+def freeze_target(target: pathlib.Path, record_dir: pathlib.Path) -> tuple:
+    """Copy the target and return its SHA-256, or an empty string when unreadable, and the
+    link targets rewritten in the copy."""
     # Read once so copy and digest agree; read-only mode protects a copy git status cannot see.
     try:
         content = target.read_bytes()
     except OSError:
-        return ""
+        return "", []
     frozen = record_names.frozen_target_path(target, record_dir)
     frozen.parent.mkdir(parents=True, exist_ok=True)
     # The reader's copy differs from the original only by this rewrite; the digest returned is the original's.
+    rewritten_link_targets = []
     try:
-        reader_text = record_names.cold_read_reviewer_copy_text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths_where_mac_mount_absent(
+        reader_text, rewritten_link_targets = record_names.cold_read_reviewer_copy_text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths_where_mac_mount_absent(
             content.decode("utf-8"))
         frozen.write_bytes(reader_text.encode("utf-8"))
     except UnicodeDecodeError:
         frozen.write_bytes(content)
     frozen.chmod(0o444)
-    return hashlib.sha256(content).hexdigest()
+    return hashlib.sha256(content).hexdigest(), rewritten_link_targets
 
 
 def ship_record(record_dir: pathlib.Path) -> str:
@@ -925,7 +927,7 @@ def start_attempt(command: list, report_path: pathlib.Path, attempt: int,
 
 
 def launch_cells(target: pathlib.Path, record_dir: pathlib.Path,
-                 target_origin: pathlib.Path) -> dict:
+                 target_origin: pathlib.Path, rewritten_link_targets: typing.Sequence = ()) -> dict:
     """Return {report_path: CellAttempt} for reviewers of the frozen target."""
     running = {}
     for cell in GRID_CELLS:
@@ -938,6 +940,7 @@ def launch_cells(target: pathlib.Path, record_dir: pathlib.Path,
                    "--target", str(target),
                    "--target-origin", str(target_origin),
                    "--report", str(report_path)]
+        command += cell_common.rewritten_link_target_options(rewritten_link_targets)
         # An explicit model or effort bypasses the launcher's tier-map default.
         if cell.model:
             command += ["--model", cell.model]
@@ -952,7 +955,7 @@ def launch_cells(target: pathlib.Path, record_dir: pathlib.Path,
 
 def launch_what_should_be_code_question_cell(
     target: pathlib.Path, record_dir: pathlib.Path, target_origin: pathlib.Path,
-    prompt_file: pathlib.Path,
+    prompt_file: pathlib.Path, rewritten_link_targets: typing.Sequence = (),
 ) -> dict:
     """Return {report_path: CellAttempt} for the one cell that asks Question 4
     of the frozen target, with the prompt the cold-read-fast-read uses."""
@@ -969,6 +972,7 @@ def launch_what_should_be_code_question_cell(
                "--target-origin", str(target_origin),
                "--report", str(report_path),
                "--prompt-file", str(prompt_file)]
+    command += cell_common.rewritten_link_target_options(rewritten_link_targets)
     stderr_path = record_dir / (report_path.name + ".stderr.log")
     return {report_path: start_attempt(command, report_path, 1, stderr_path)}
 
@@ -1420,7 +1424,7 @@ def main() -> int:
     reference_integrity_pre_pass(target, record_dir)
 
     # All reviewers read the frozen bytes so live edits cannot split the review across versions.
-    target_before = freeze_target(target, record_dir)
+    target_before, rewritten_link_targets = freeze_target(target, record_dir)
     frozen_target = record_names.frozen_target_path(target, record_dir)
     frozen_before = target_content_fingerprint(frozen_target)
     if not target_before or not frozen_target.is_file():
@@ -1449,10 +1453,11 @@ def main() -> int:
     # not part of the record, and the claude launcher needs it as a file.
     working_tree_baseline, working_tree_baseline_failure_reason = working_tree_snapshot_or_failure_reason()
     with tempfile.TemporaryDirectory(prefix="cold-read-grid-") as scratch:
-        running = launch_cells(frozen_target, record_dir, target)
+        running = launch_cells(frozen_target, record_dir, target, rewritten_link_targets)
         running.update(launch_what_should_be_code_question_cell(
             frozen_target, record_dir, target,
-            pathlib.Path(scratch) / WHAT_SHOULD_BE_CODE_QUESTION_PROMPT_FILE_NAME))
+            pathlib.Path(scratch) / WHAT_SHOULD_BE_CODE_QUESTION_PROMPT_FILE_NAME,
+            rewritten_link_targets))
         outcome = wait_for_cells(
             running,
             lambda: moved_frozen_copy(frozen_target, frozen_before),

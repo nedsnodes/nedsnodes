@@ -1835,28 +1835,43 @@ with tempfile.TemporaryDirectory() as scratch:
                       .MAC_MOUNT_OF_NED_BOX_HOME_OVERRIDE_VARIABLE)
     import shutil
     # Each machine's read gets a document of its own: a second read of one name would take the -2 record.
+    link_prompt = scratch / "mac-link-received-prompt.txt"
+    rewritten_link_note_opening = "each link target listed below starts /home/nedlern/"
     for machine, link_stem, mount, rewritten in (
             ("ned-box", "a-mac-link-on-ned-box", scratch / "no-mac-mount-here", True),
             ("the Mac", "a-mac-link-on-the-mac", scratch, False)):
         link_relative = f"docs/drafts/{link_stem}.md"
         (repository / link_relative).write_text(
-            "See [the log](file:///Volumes/nedhome/agents/x/log.md) for it.\n", encoding="utf-8")
+            "See [the log](file:///Volumes/nedhome/agents/x/log.md) for it, "
+            "and [the bare one](/home/nedlern/agents/y/bare.md).\n", encoding="utf-8")
         link_report = (repository / "cold-read-records" / f"{link_stem}-{record_stamp}"
                        / "cold-read-fast-read.md")
         link_marked = (link_report.parent
                        / (link_stem + script_under_test_module().SENTENCE_ID_MARKED_COPY_SUFFIX))
-        run_fast_read(repository, stubs, {"*": {"report": "STUB FAST READ: of the link\n"}},
+        link_prompt.unlink(missing_ok=True)
+        run_fast_read(repository, stubs,
+                      {"*": {"report": "STUB FAST READ: of the link\n", "dump_prompt": str(link_prompt)}},
                       link_report, link_relative, counter,
                       environment_overrides={mount_override: str(mount)})
         link_marked_text = link_marked.read_text(encoding="utf-8") if link_marked.is_file() else ""
+        link_prompt_text = link_prompt.read_text(encoding="utf-8") if link_prompt.is_file() else ""
         if rewritten:
             check("on ned-box the reviewer's copy holds the link as a /home/nedlern/ path and no /Volumes path",
                   "(/home/nedlern/agents/x/log.md)" in link_marked_text
                   and "/Volumes/" not in link_marked_text, repr(link_marked_text))
+            check("on ned-box the reviewer's prompt names the rewritten link target, "
+                  "and not the link the document itself writes as a /home/nedlern/ path",
+                  rewritten_link_note_opening in link_prompt_text
+                  and "\n- /home/nedlern/agents/x/log.md\n" in link_prompt_text
+                  and "- /home/nedlern/agents/y/bare.md" not in link_prompt_text,
+                  repr(link_prompt_text[-900:]))
         else:
             check("on the Mac the reviewer's copy keeps the file:///Volumes/nedhome/ link",
                   "(file:///Volumes/nedhome/agents/x/log.md)" in link_marked_text,
                   repr(link_marked_text))
+            check("on the Mac, where nothing was rewritten, the reviewer's prompt has no rewrite note",
+                  bool(link_prompt_text) and rewritten_link_note_opening not in link_prompt_text,
+                  repr(link_prompt_text[-900:]))
         check(f"on {machine} the document keeps its file:///Volumes/nedhome/ link",
               "file:///Volumes/nedhome/agents/x/log.md" in (repository / link_relative).read_text(
                   encoding="utf-8"))

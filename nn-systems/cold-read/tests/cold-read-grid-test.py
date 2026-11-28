@@ -3311,7 +3311,12 @@ try:
     saved_mount_override = os.environ.get(mount_override)
     os.environ.update(no_mount)
     try:
-        link_digest = grid_module.freeze_target(link_original, link_record)
+        link_digest, link_targets = grid_module.freeze_target(link_original, link_record)
+        plain_original = link_directory / "plain.md"
+        plain_original.write_text("No Mac link, and a bare [one](/home/nedlern/a.md).\n", encoding="utf-8")
+        plain_record = link_directory / "plain-record"
+        plain_record.mkdir()
+        plain_digest, plain_targets = grid_module.freeze_target(plain_original, plain_record)
     finally:
         if saved_mount_override is None:
             os.environ.pop(mount_override, None)
@@ -3325,6 +3330,33 @@ try:
     check("the document keeps its link and the digest returned is the document's",
           "file:///Volumes/nedhome/" in link_original.read_text(encoding="utf-8")
           and link_digest == hashlib.sha256(link_original.read_bytes()).hexdigest())
+    check("freezing returns the link target it rewrote, and none for a document with no Mac link",
+          link_targets == ["/home/nedlern/agents/x/log.md"] and plain_targets == []
+          and plain_digest == hashlib.sha256(plain_original.read_bytes()).hexdigest(),
+          repr((link_targets, plain_targets)))
+
+    # Every reviewer of the frozen copy, the Question 4 cell's included, is told which targets were rewritten.
+    rewritten_link_target_option = grid_module.cell_common.REWRITTEN_LINK_TARGET_OPTION
+    for targets, told in ((["/home/nedlern/agents/x/log.md"], True), ([], False)):
+        launched_commands = {}
+        with mock.patch.object(grid_module, "start_attempt",
+                               lambda command, report_path, *rest: launched_commands.setdefault(
+                                   report_path.name, command)):
+            grid_module.launch_cells(link_frozen, link_record, link_original, targets)
+            grid_module.launch_what_should_be_code_question_cell(
+                link_frozen, link_record, link_original, link_directory / "q4-prompt.md", targets)
+        told_commands = [name for name, command in launched_commands.items()
+                         if f"{rewritten_link_target_option}=/home/nedlern/agents/x/log.md" in command]
+        untold_commands = [name for name, command in launched_commands.items()
+                           if not any(argument.startswith(rewritten_link_target_option) for argument in command)]
+        if told:
+            check("with a rewritten link target, every grid cell and the Question 4 cell is passed it",
+                  len(launched_commands) == len(grid_module.GRID_CELLS) + 1
+                  and len(told_commands) == len(launched_commands), repr(launched_commands))
+        else:
+            check("with no rewritten link target, no grid cell is passed the option",
+                  len(launched_commands) == len(grid_module.GRID_CELLS) + 1
+                  and len(untold_commands) == len(launched_commands), repr(launched_commands))
 
     # A whole run on such a document: the copy differs from the original from
     # the start, and is still, so nothing may call it changed.
