@@ -24,7 +24,6 @@ import os
 import re
 import shlex
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -4495,24 +4494,18 @@ with tempfile.TemporaryDirectory() as tmp:
           code == 0 and (spaced / "k.md").read_bytes() == content
           and not (tmp / "repo ending in a space").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
 
-# --restore refuses a <path> that is the copy itself, and a failed write leaves the file already there as it was.
+# --restore says on stderr what a failed put-back left at the path; the put-back itself is tested in
+# nn-systems/general-tools/tests/saved-copy-put-back-at-path-staged-beside-and-swapped-in-whole-common-test.py.
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     content = b"the only copy\n"
     copy = tmp / "found" / "only.md"
     copy.parent.mkdir()
     copy.write_bytes(content)
-    symlink = tmp / "symlink.md"
-    symlink.symlink_to(copy)
-    hard_link = tmp / "hard-link.md"
-    os.link(copy, hard_link)
-    for name, destination in (("the same path", copy), ("a symlink to the copy", symlink),
-                              ("a hard link to the copy", hard_link)):
-        code, out, errors, calls = run_restore([str(destination), "--restore", str(copy)])
-        check("--restore to %s exits 1, says the two are the same file, and leaves the copy whole" % name,
-              code == 1 and "same file" in errors and "could NOT restore" in errors and out == ""
-              and copy.read_bytes() == content,
-              "exit=%s size=%s\n%s\n%s" % (code, copy.stat().st_size, out, errors))
+    code, out, errors, calls = run_restore([str(copy), "--restore", str(copy)])
+    check("--restore to the copy itself exits 1, says it could not restore, and leaves the copy whole",
+          code == 1 and "SameFileError" in errors and "could NOT restore" in errors and out == ""
+          and copy.read_bytes() == content, "exit=%s\n%s\n%s" % (code, out, errors))
 
     existing = tmp / "kept" / "e.md"
     existing.parent.mkdir()
@@ -4541,20 +4534,6 @@ with tempfile.TemporaryDirectory() as tmp:
           fresh_code == 1 and not fresh.exists() and "nothing was written there" in fresh_errors
           and sorted(p.name for p in existing.parent.iterdir()) == ["e.md"],
           "exit=%s\n%s" % (fresh_code, fresh_errors))
-
-    restored = tmp / "kept" / "made.md"
-    code, out, errors, calls = run_restore([str(restored), "--restore", str(copy)])
-    umask = os.umask(0)
-    os.umask(umask)
-    check("--restore to a new path gives the file the mode open() would, not mkstemp's 0600",
-          code == 0 and restored.read_bytes() == content
-          and stat.S_IMODE(restored.stat().st_mode) == 0o666 & ~umask,
-          "exit=%s mode=%o\n%s" % (code, stat.S_IMODE(restored.stat().st_mode), errors))
-    existing.chmod(0o640)
-    code, out, errors, calls = run_restore([str(existing), "--restore", str(copy)])
-    check("--restore over a file already there keeps that file's mode",
-          code == 0 and existing.read_bytes() == content and stat.S_IMODE(existing.stat().st_mode) == 0o640,
-          "exit=%s mode=%o\n%s" % (code, stat.S_IMODE(existing.stat().st_mode), errors))
 
 # A copy of this suite whose finder raises on import, as an unhandled error or a Ctrl-C would, still removes
 # its found-copies scratch folder.

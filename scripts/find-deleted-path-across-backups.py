@@ -356,7 +356,6 @@ import importlib.util
 import os
 import re
 import shlex
-import shutil
 import socket
 import subprocess
 import sys
@@ -387,6 +386,13 @@ _transcript_mirror_spec = importlib.util.spec_from_file_location(
     "transcript_mirror_to_log_store", Path(__file__).with_name("transcript-mirror-to-log-store.py"))
 transcript_mirror = importlib.util.module_from_spec(_transcript_mirror_spec)
 _transcript_mirror_spec.loader.exec_module(transcript_mirror)
+
+_saved_copy_put_back_spec = importlib.util.spec_from_file_location(
+    "saved_copy_put_back_at_path_staged_beside_and_swapped_in_whole_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "saved-copy-put-back-at-path-staged-beside-and-swapped-in-whole-common.py")
+saved_copy_put_back = importlib.util.module_from_spec(_saved_copy_put_back_spec)
+_saved_copy_put_back_spec.loader.exec_module(saved_copy_put_back)
 
 FOUND = "FOUND"
 NOT_FOUND = "NOT FOUND"
@@ -2614,7 +2620,7 @@ def main(argv=None, runner=run_command):
             destination = os.path.join(top_level or os.path.realpath(args.repo), named)
         destination_existed = os.path.lexists(destination)
         try:
-            restore_copy(args.restore, destination)
+            saved_copy_put_back.saved_copy_put_back_at_path(args.restore, destination)
         except OSError as error:
             print("%s: could NOT restore %s to %s — %s: %s; %s"
                   % (THIS_SCRIPT_NAME, args.restore, destination, type(error).__name__, error,
@@ -2665,39 +2671,6 @@ def main(argv=None, runner=run_command):
     )
     print(render_summary(reports), flush=True)
     return exit_status(reports)
-
-
-def restore_copy(copy, destination):
-    """Copy the file copy to destination, creating its missing parent directories; raise OSError when it
-    cannot, with any file already at destination left as it was."""
-    # Opened first, so a copy that cannot be read leaves no new directories behind.
-    with open(copy, "rb") as source:
-        if os.path.exists(destination) and os.path.samefile(copy, destination):
-            raise shutil.SameFileError("%s and %s are the same file, so there is nothing to restore"
-                                       % (copy, destination))
-        directory = os.path.dirname(destination) or "."
-        os.makedirs(directory, exist_ok=True)
-        # Staged beside destination, so a write that fails partway never touches the file already there,
-        # and os.replace swaps the whole file in at once.
-        descriptor, staged = tempfile.mkstemp(dir=directory, prefix=".%s." % os.path.basename(destination),
-                                              suffix=".restoring")
-        try:
-            with os.fdopen(descriptor, "wb") as target:
-                shutil.copyfileobj(source, target)
-            if os.path.exists(destination):
-                shutil.copymode(destination, staged)
-            else:
-                # mkstemp makes the file 0600; a file open() creates gets 0666 less the umask.
-                umask = os.umask(0)
-                os.umask(umask)
-                os.chmod(staged, 0o666 & ~umask)
-            os.replace(staged, destination)
-        except BaseException:
-            try:
-                os.unlink(staged)
-            except OSError:
-                pass
-            raise
 
 
 def exit_status(reports):

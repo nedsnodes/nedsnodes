@@ -222,10 +222,10 @@ RESTORE_INCOMPLETE = ("{program_name} --restore: not every file was put back; th
                       "command printed to standard output say what was done to each. A file that "
                       "failed is in one of two states. Either it is unchanged, still holding the "
                       "version the user declined; or it was put back, or deleted when it has no "
-                      "approved version, but no line in the store's log records that it was. A "
-                      "failed write may also leave, in the same directory, a file whose name "
-                      "begins with the file's name and ends in .restore. Tell the user which "
-                      "files failed and why, giving the error on each file's Failed on line.\n"
+                      "approved version, but no line in the store's log records that it was. When "
+                      "a failed write could not remove its temporary file, that file's Failed on "
+                      "line names the temporary file; delete the temporary file with rm. Tell the "
+                      "user which files failed and why, giving the error on each file's Failed on line.\n"
                       "For a file that failed, do not run git commit --only -m \"Put back the "
                       "approved <file name>\" -- <path>, the command this hook's message asking "
                       "about the change gave for a declined version in a commit: the file may "
@@ -298,6 +298,12 @@ def guard():
 def snapshots():
     return loaded("uncommitted_work_snapshots",
                   CLONE_ROOT / "nn-systems" / "handoff" / "uncommitted-work-snapshots.py")
+
+
+def saved_copy_put_back():
+    return loaded("saved_copy_put_back_at_path_staged_beside_and_swapped_in_whole_common",
+                  CLONE_ROOT / "nn-systems" / "general-tools"
+                  / "saved-copy-put-back-at-path-staged-beside-and-swapped-in-whole-common.py")
 
 
 # ---------------------------------------------------------------- hashes and checked lines
@@ -1721,7 +1727,7 @@ def restore(pairs):
                         store.approve(path, DELETED)
                     message = f"Deleted {path}: it has no approved version."
                 else:
-                    put_back(path, content)
+                    saved_copy_put_back().saved_copy_put_back_at_path(content, path, follow_symlink=False)
                     restored = newest[0]
                     message = f"Put back the approved version {restored} of {path}."
                 log_line(store, path, "restored", "command-line", "", key, restored)
@@ -1758,19 +1764,6 @@ def restore(pairs):
     if failed:
         raise RestoreIncomplete(lines)
     return lines
-
-
-def put_back(path, content: bytes):
-    # A declined deletion may have taken the file's folder with it.
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    temporary = f"{path}.{os.getpid()}.restore"
-    mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else 0o644
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
-    try:
-        write_all(descriptor, content)
-    finally:
-        os.close(descriptor)
-    os.replace(temporary, path)
 
 
 def run_command_work(work):
