@@ -1510,18 +1510,28 @@ def after_merge_test_run(arguments, merge_commit, base_branch, steps_before_the_
         compared_with = compared_with[:1]
     # The merge is made with gh pr merge --merge, so the first parent is the branch before it.
     first_parent = f"{merge_commit}^1"
+    *others, last = [f"a file under {path}" if path.endswith("/") else path
+                     for path in common.run_all_test_suites.EVERY_SUITE_RUNS_WHEN_THESE_CHANGE]
+    files_that_run_every_suite = f"{', '.join(others)} or {last}" if others else last
     if (worktree_runner_text is not None
             and TEST_RUNNER_SOURCE_TEXT_WHOSE_PRESENCE_SHOWS_THE_RUNNER_ACCEPTS_THE_EVERY_SUITE_RUNS_ONLY_WHEN_OPTION
             not in worktree_runner_text):
         print(f"not giving {EVERY_SUITE_RUNS_ONLY_WHEN_OPTION}: the test runner at the merge "
-              f"commit predates it, so a change to the test runner, a guard hook or "
-              f".claude/settings.json since {compared_with[0][:12]}, another pull request's "
-              f"included, runs every suite")
+              f"commit {merge_commit[:12]} predates it, so a change since {compared_with[0][:12]} "
+              f"to {files_that_run_every_suite}, another pull request's included, runs every "
+              f"nn-test-suite. Nothing to do: this run tests more suites than it needs, never "
+              f"fewer")
         first_parent = None
     else:
-        print(f"every suite runs only when this pull request's own change, since the merge "
-              f"commit's first parent, adds, changes, renames or deletes the test runner, a "
-              f"guard hook or .claude/settings.json")
+        print(f"the after-merge test run of the merge commit {merge_commit[:12]} runs every "
+              f"nn-test-suite only when this pull request's own change, the merge commit "
+              f"against its first parent, adds, changes, renames or deletes "
+              f"{files_that_run_every_suite}; otherwise it runs only the suites the test runner "
+              f"selects by their recorded inputs against "
+              f"{' and '.join(commit[:12] for commit in compared_with)}, a suite with no "
+              f"recording included, even where another pull request merged before this one "
+              f"changed one of those files. Nothing to do: this line says how the run below selects its "
+              f"suites")
     by_hand = after_merge_test_run_command_build(compared_with, first_parent)
 
     runner = common.run_all_test_suites

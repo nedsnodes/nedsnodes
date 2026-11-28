@@ -731,9 +731,15 @@ def suite_selection_main_commit_cases(scratch):
           "test runner, a guard hook or the settings runs every suite, and says so",
           exit_code == 0 and len(calls) == 1
           and calls[0]["argv"][4:6] == [EVERY_SUITE_RUNS_ONLY_WHEN, f"{merge_commit}^1"]
-          and "every suite runs only when this pull request's own change, since the merge "
-              "commit's first parent, adds, changes, renames or deletes the test runner, a guard "
-              "hook or .claude/settings.json" in output,
+          and f"the after-merge test run of the merge commit {merge_commit[:12]} runs every "
+              f"nn-test-suite only when this pull request's own change, the merge commit against "
+              f"its first parent, adds, changes, renames or deletes "
+              f"scripts/run-all-test-suites.py, a file under .claude/guard-hooks/ or "
+              f".claude/settings.json; otherwise it runs only the suites the test runner selects "
+              f"by their recorded inputs against {parent[:12]} and "
+              f"{merged_commit(scratch, 'no-test-failing-at-parent-and-runner-takes-the-merge-commits-first-parent')[:12]}, "
+              f"a suite with no recording included, even where another pull request merged "
+              f"before this one changed one of those files. Nothing to do: " in output,
           f"exit {exit_code}\n{output}\n{calls}")
 
     name = "no-test-failing-at-parent-and-runner-predates-the-every-suite-option"
@@ -751,9 +757,10 @@ def suite_selection_main_commit_cases(scratch):
                                        "--only-suites-whose-recorded-inputs-changed-since",
                                        merged_commit(scratch, name)]
           and f"not giving {EVERY_SUITE_RUNS_ONLY_WHEN}: the test runner at the merge commit "
-              f"predates it, so a change to the test runner, a guard hook or "
-              f".claude/settings.json since {parent[:12]}, another pull request's included, runs "
-              f"every suite" in output,
+              f"{merge_commit[:12]} predates it, so a change since {parent[:12]} to "
+              f"scripts/run-all-test-suites.py, a file under .claude/guard-hooks/ or "
+              f".claude/settings.json, another pull request's included, runs every "
+              f"nn-test-suite. Nothing to do: " in output,
           f"exit {exit_code}\n{output}\n{calls}")
 
     # The merge commit's runner exists but cannot be read, as when its permissions deny reading.
