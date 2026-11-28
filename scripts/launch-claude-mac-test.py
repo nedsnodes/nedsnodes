@@ -1205,6 +1205,16 @@ def main() -> int:
               (sandbox.agent_home_git_directory / "agent-home-marker").is_file(),
               list(sandbox.agent_home_git_directory.iterdir()))
 
+        sandbox = MacLaunchSandbox(root / "new-agent-home-worktree-failed")
+        write_stub(sandbox.stubs, "git",
+                   'case "$*" in *"rev-parse --show-toplevel"*) exit 1;; '
+                   '*"worktree add"*) echo "checkout failure" >&2; exit 128;; esac\n')
+        result = sandbox.run("~/agents", seat_name="seat-j")
+        check("a failed worktree add stops the launch with the git error and agent-home",
+              result.returncode == 1 and "checkout failure" in result.stderr
+              and str(sandbox.home / "agents" / "seat-j") in result.stderr
+              and "new-session" not in sandbox.tmux_argv(), (result.returncode, result.stderr))
+
         sandbox = MacLaunchSandbox(root / "new-agent-home-marker-not-written")
         sandbox.agent_home_is_a_checkout = False
         sandbox.agent_home_git_directory_unreadable = True

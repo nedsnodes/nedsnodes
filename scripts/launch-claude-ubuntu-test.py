@@ -774,6 +774,17 @@ def main() -> int:
               (harness.agent_home_git_directory / "agent-home-marker").is_file(),
               list(harness.agent_home_git_directory.iterdir()))
 
+        harness = LaunchHarness(root / "new-agent-home-worktree-failed")
+        write_stub(harness.stubs, "git",
+                   'case "$*" in *"rev-parse --show-toplevel"*) exit 1;; '
+                   '*"worktree add"*) echo "checkout failure" >&2; exit 128;; esac\n')
+        result = harness.run(["seat-j", "--no-attach"])
+        replay = result["replay"]
+        check("a failed worktree add stops the remote launch with the git error and agent-home",
+              replay.returncode == 1 and "checkout failure" in replay.stderr
+              and str(harness.home / "agents" / "seat-j") in replay.stderr
+              and "new-session" not in result["tmux_argv"], (replay.returncode, replay.stderr))
+
         harness = LaunchHarness(root / "new-agent-home-marker-not-written")
         harness.agent_home_is_a_checkout = False
         harness.agent_home_git_directory_unreadable = True

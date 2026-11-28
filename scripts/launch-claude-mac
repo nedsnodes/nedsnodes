@@ -276,7 +276,8 @@ if ! git -C "$AGENT_DIRECTORY" rev-parse --show-toplevel >/dev/null 2>&1; then
             && touch "$AGENT_HOME_GIT_DIRECTORY/agent-home-marker" \
             || echo "launch-claude-mac: could not write agent-home-marker into the git directory of $AGENT_DIRECTORY, so git does not refuse commits made there; git's or touch's error is just above this line. Tell the user this line." >&2
     else
-        echo "launch-claude-mac: could not make $AGENT_DIRECTORY a checkout; the agent will start without project settings" >&2
+        echo "launch-claude-mac: could not make $AGENT_DIRECTORY a checkout; see the git error above" >&2
+        exit 1
     fi
 fi
 
