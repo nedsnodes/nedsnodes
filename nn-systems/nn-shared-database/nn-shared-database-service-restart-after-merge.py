@@ -28,7 +28,10 @@ Exit codes: 0 outside any Git checkout, not ned-box's reference-checkout,
 nothing to restart, or the restart succeeded; 1 `git rev-parse --show-toplevel`
 failed for another reason, such as a GIT_DIR naming a missing directory, git
 could not list the merge's changes, or the restart failed, with git's or
-systemctl's error on standard error. After either git failure in ned-box's
+systemctl's error on standard error. When systemctl says the unit was not
+found, the message says the unit's install step has not run; otherwise it
+also carries journalctl's last JOURNAL_LINES lines for the unit, or says why
+journalctl gave none. After either git failure in ned-box's
 reference-checkout, told without git by the current directory, the checkout's
 top directory that git runs this program in, the service is restarted anyway
 and the exit code is still 1.
@@ -37,6 +40,7 @@ and the exit code is still 1.
 import argparse
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -44,6 +48,8 @@ from pathlib import Path
 PROGRAM = "nn-systems/nn-shared-database/nn-shared-database-service-restart-after-merge.py"
 UNIT_NAME = "nn-shared-database-service.service"
 NN_SHARED_DATABASE_SERVICE_RESTART_AFTER_MERGE_TRIGGER_FILES = ("nn-systems/nn-shared-database/nn-shared-database-service.py",)
+JOURNAL_LINES = 50
+JOURNALCTL_TIMEOUT_SECONDS = 30
 EXIT_DONE = 0
 EXIT_FAILED = 1
 
@@ -60,6 +66,16 @@ _git_output_spec = importlib.util.spec_from_file_location(
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
+
+_wording_spec = importlib.util.spec_from_file_location(
+    "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
+    Path(__file__).resolve().parents[1] / "general-tools"
+    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+wording = importlib.util.module_from_spec(_wording_spec)
+_wording_spec.loader.exec_module(wording)
+
+# systemctl's form: "Failed to restart <unit>: Unit <unit> not found."
+UNIT_NOT_FOUND = re.compile(rf"\bUnit {re.escape(UNIT_NAME)} not found\.")
 
 NED_BOX_REFERENCE_CHECKOUT = f"{ned_box_paths.NED_BOX_HOME}/Projects/nedsnodes"
 
@@ -78,27 +94,51 @@ def in_reference_checkout_without_git(reference_checkout):
     return os.path.realpath(current) == os.path.realpath(reference_checkout)
 
 
+def unit_journal_last_lines_or_why_not(environment):
+    """journalctl's last lines for the unit, indented, or a sentence saying why it gave none."""
+    command = ["journalctl", "--user", "-u", UNIT_NAME, "-n", str(JOURNAL_LINES), "--no-pager"]
+    shown = f"`{' '.join(command)}`"
+    try:
+        journal = subprocess.run(command, capture_output=True, text=True, env=environment,
+                                 timeout=JOURNALCTL_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return f"{shown} did not finish within {JOURNALCTL_TIMEOUT_SECONDS} seconds, so its lines are not shown."
+    except OSError as error:
+        return f"{shown} could not be run, so its lines are not shown: {error}"
+    if journal.returncode != 0:
+        return (f"{shown} exited {journal.returncode}, so its lines are not shown. "
+                f"journalctl said: {journal.stderr.strip() or 'nothing'}")
+    lines = journal.stdout.rstrip("\n").splitlines()
+    if not lines:
+        return f"{shown} printed no lines."
+    return f"{shown} printed:\n" + "\n".join(f"  {line}" for line in lines)
+
+
 def restart_service(merge_changed_it):
     """Restart the unit, print its outcome, and return the exit code it earns."""
     # An agent's Stop hook can run this merge without XDG_RUNTIME_DIR, and
     # systemctl --user then cannot find the user bus, which lives there.
-    environment = {**os.environ}
+    # LC_ALL=C keeps systemctl's message in English, so the unit-not-found case can be told apart.
+    environment = {**os.environ, "LC_ALL": "C"}
     environment.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
     restarted = subprocess.run(["systemctl", "--user", "restart", UNIT_NAME],
                                capture_output=True, text=True, env=environment)
     if restarted.returncode != 0:
         reason = "the merge changed the nn-shared-database service, and " if merge_changed_it else ""
-        print(f"{PROGRAM}: FAILED — {reason}"
-              f"`systemctl --user restart {UNIT_NAME}` exited {restarted.returncode}, so the "
-              f"service may still run the code from before the merge, or not run at all. "
-              f"systemctl said: {restarted.stderr.strip()}\n"
-              f"If systemctl said the unit was not found, the unit's install step has not "
-              f"run on ned-box yet; it is the user's, so do nothing.\n"
-              f"Otherwise run `journalctl --user -u {UNIT_NAME} -n 50` on ned-box and tell the "
-              f"user that the nn-shared-database service failed to restart after a merge, "
-              f"quoting systemctl's line above and journalctl's last lines. If you are a "
-              f"subagent, tell the agent that dispatched you instead, with the same quotes.",
-              file=sys.stderr)
+        systemctl_said = restarted.stderr.strip()
+        failed = (f"{PROGRAM}: FAILED — {reason}"
+                  f"`systemctl --user restart {UNIT_NAME}` exited {restarted.returncode}")
+        if UNIT_NOT_FOUND.search(systemctl_said):
+            print(f"{failed}, because ned-box's systemd has no unit of that name: the unit's "
+                  f"install step has not run on ned-box yet. systemctl said: {systemctl_said}\n"
+                  f"Do nothing about it: the install step is the user's to run.", file=sys.stderr)
+            return EXIT_FAILED
+        print(f"{failed}, so the service may still run the code from before the merge, or not "
+              f"run at all. systemctl said: {systemctl_said}\n"
+              f"{unit_journal_last_lines_or_why_not(environment)}\n"
+              f"Tell {wording.REPORT_RECIPIENT_PHRASE_USER_OR_DISPATCHING_AGENT} that the "
+              f"nn-shared-database service failed to restart after a merge, quoting this whole "
+              f"message.", file=sys.stderr)
         return EXIT_FAILED
     if merge_changed_it:
         print(f"{PROGRAM}: restarted {UNIT_NAME}, since the merge changed the service")

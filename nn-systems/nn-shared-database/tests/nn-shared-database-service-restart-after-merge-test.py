@@ -3,10 +3,14 @@
 and scripts/git-client-side-hooks/post-merge, which runs it.
 
 Each case fast-forwards a temporary repository and runs the program in it, with
-a fake `systemctl` on PATH that records its arguments and succeeds or fails on
-request: a merge that changes the service restarts the unit, one that does not
-leaves it, a failed restart prints systemctl's error and exits 1, and a
-checkout that is not the reference-checkout is left alone. When git fails to
+a fake `systemctl` on PATH that records its arguments and succeeds, fails with
+systemd's unit-not-found error, or fails otherwise, on request, and a fake
+`journalctl` that prints lines, prints none, fails or hangs, on request: a
+merge that changes the service restarts the unit, one that does not leaves it,
+and a checkout that is not the reference-checkout is left alone. A failed
+restart exits 1; its message is checked word for word, in the unit-not-found
+form, and otherwise with journalctl's lines or with each way journalctl can
+give none, its absence from PATH included. When git fails to
 list the merge's changes, or to find the checkout for a reason other than
 being outside one, the program exits 1 and, in the reference-checkout only,
 restarts the unit anyway; each such message is checked word for word, with
@@ -62,10 +66,26 @@ if [ -z "$XDG_RUNTIME_DIR" ]; then
 fi
 echo "$@" >> "$FAKE_SYSTEMCTL_LOG"
 echo "$XDG_RUNTIME_DIR" >> "$FAKE_SYSTEMCTL_LOG.runtime"
-if [ -n "$FAKE_SYSTEMCTL_FAIL" ]; then
+if [ "$FAKE_SYSTEMCTL_FAIL" = not-found ]; then
   echo "Failed to restart nn-shared-database-service.service: Unit nn-shared-database-service.service not found." >&2
   exit 5
 fi
+if [ "$FAKE_SYSTEMCTL_FAIL" = other ]; then
+  echo "Job for nn-shared-database-service.service failed because the control process exited with error code." >&2
+  exit 1
+fi
+"""
+
+FAKE_JOURNALCTL = """#!/bin/sh
+echo "$@" >> "$FAKE_JOURNALCTL_LOG"
+echo "$XDG_RUNTIME_DIR" >> "$FAKE_JOURNALCTL_LOG.runtime"
+case "$FAKE_JOURNALCTL_MODE" in
+  fail) echo "Failed to open journal: Permission denied" >&2; exit 1 ;;
+  hang) exec sleep 10 ;;
+  empty) exit 0 ;;
+esac
+echo "Nov 27 10:00:00 ned-box python3[123]: Traceback (most recent call last):"
+echo "Nov 27 10:00:01 ned-box systemd[1]: nn-shared-database-service.service: Failed with result 'exit-code'."
 """
 
 with tempfile.TemporaryDirectory() as scratch:
@@ -74,9 +94,13 @@ with tempfile.TemporaryDirectory() as scratch:
     bin_directory.mkdir()
     (bin_directory / "systemctl").write_text(FAKE_SYSTEMCTL, encoding="utf-8")
     (bin_directory / "systemctl").chmod(0o755)
+    (bin_directory / "journalctl").write_text(FAKE_JOURNALCTL, encoding="utf-8")
+    (bin_directory / "journalctl").chmod(0o755)
     systemctl_log = scratch / "systemctl.log"
+    journalctl_log = scratch / "journalctl.log"
     os.environ.update(PATH=f"{bin_directory}:{os.environ['PATH']}",
-                      FAKE_SYSTEMCTL_LOG=str(systemctl_log), GIT_AUTHOR_NAME="test",
+                      FAKE_SYSTEMCTL_LOG=str(systemctl_log),
+                      FAKE_JOURNALCTL_LOG=str(journalctl_log), GIT_AUTHOR_NAME="test",
                       GIT_AUTHOR_EMAIL="test@test.invalid", GIT_COMMITTER_NAME="test",
                       GIT_COMMITTER_EMAIL="test@test.invalid", GIT_CONFIG_GLOBAL="/dev/null",
                       GIT_CONFIG_NOSYSTEM="1")
@@ -95,10 +119,12 @@ with tempfile.TemporaryDirectory() as scratch:
         git("commit", "-q", "-m", f"change {path}")
         git("checkout", "-q", "main")
 
-    def run(reference=None, fail=False, directory=None, environment=None):
-        if systemctl_log.exists():
-            systemctl_log.unlink()
-        os.environ["FAKE_SYSTEMCTL_FAIL"] = "1" if fail else ""
+    def run(reference=None, fail="", directory=None, environment=None, journal=""):
+        for log in (systemctl_log, journalctl_log, Path(f"{journalctl_log}.runtime")):
+            if log.exists():
+                log.unlink()
+        os.environ["FAKE_SYSTEMCTL_FAIL"] = fail
+        os.environ["FAKE_JOURNALCTL_MODE"] = journal
         os.environ.update(environment or {})
         printed, errors = io.StringIO(), io.StringIO()
         before = os.getcwd()
@@ -124,21 +150,28 @@ with tempfile.TemporaryDirectory() as scratch:
         "If you cannot put it right, tell the user, quoting this whole message.\n")
     restarted_either_way = (f"{program}: restarted nn-shared-database-service.service, which is "
                             f"safe whether or not the merge changed it\n")
-    restart_failure_rest = (
-        "`systemctl --user restart nn-shared-database-service.service` exited 5, so the service "
-        "may still run the code from before the merge, or not run at all. systemctl said: "
-        "Failed to restart nn-shared-database-service.service: Unit "
-        "nn-shared-database-service.service not found.\n"
-        "If systemctl said the unit was not found, the unit's install step has not run on "
-        "ned-box yet; it is the user's, so do nothing.\n"
-        "Otherwise run `journalctl --user -u nn-shared-database-service.service -n 50` on ned-box "
-        "and tell the user that the nn-shared-database service failed to restart after a merge, ")
-    restart_failed_after_a_git_failure = f"{program}: FAILED — {restart_failure_rest}"
+    journal_command = ("`journalctl --user -u nn-shared-database-service.service -n 50 "
+                       "--no-pager`")
+    journal_lines = (
+        f"{journal_command} printed:\n"
+        "  Nov 27 10:00:00 ned-box python3[123]: Traceback (most recent call last):\n"
+        "  Nov 27 10:00:01 ned-box systemd[1]: nn-shared-database-service.service: Failed with "
+        "result 'exit-code'.\n")
+    journal_call = ["--user -u nn-shared-database-service.service -n 50 --no-pager"]
 
-    # The report line's end is the shared report wording, which the wording-copy scan keeps out
-    # of tests; ending in its last words shows the restart's outcome printed last.
-    def starts_with_and_ends_with_the_report_line(errors, expected_start):
-        return errors.startswith(expected_start) and errors.endswith(", with the same quotes.\n")
+    def restart_failed(merge_changed_it, journal_text=journal_lines):
+        """The other-failure message; the report line takes its recipient from the shared module."""
+        reason = "the merge changed the nn-shared-database service, and " if merge_changed_it else ""
+        return (f"{program}: FAILED — {reason}`systemctl --user restart "
+                f"nn-shared-database-service.service` exited 1, so the service may still run the "
+                f"code from before the merge, or not run at all. systemctl said: Job for "
+                f"nn-shared-database-service.service failed because the control process exited "
+                f"with error code.\n"
+                f"{journal_text}"
+                f"Tell {restarter.wording.REPORT_RECIPIENT_PHRASE_USER_OR_DISPATCHING_AGENT} that "
+                f"the nn-shared-database service failed to restart after a merge, quoting this "
+                f"whole message.\n")
+    restart_failed_after_a_git_failure = restart_failed(merge_changed_it=False)
 
     git_diff_failed = (
         f"{program}: FAILED — `git diff --name-only ORIG_HEAD HEAD` in {repository} exited 128, "
@@ -151,11 +184,11 @@ with tempfile.TemporaryDirectory() as scratch:
           "word for word, then the restart, and its success line",
           code == 1 and calls == restart_call and errors == git_diff_failed
           and printed == restarted_either_way, (code, calls, printed, errors))
-    code, calls, printed, errors = run(fail=True)
+    code, calls, printed, errors = run(fail="other")
     check("git failing to list the merge's changes, and the restart failing: exit 1, the FAILED "
           "message, then the restart failure that does not say the merge changed the service",
           code == 1 and calls == restart_call
-          and starts_with_and_ends_with_the_report_line(errors, git_diff_failed + restart_failed_after_a_git_failure)
+          and errors == git_diff_failed + restart_failed_after_a_git_failure
           and printed == "",
           (code, calls, printed, errors))
 
@@ -197,12 +230,69 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a caller's own XDG_RUNTIME_DIR is passed to systemctl unchanged",
           code == 0 and runtime_log.read_text().splitlines()[-1] == str(scratch / "runtime"),
           (code, errors))
-    code, calls, printed, errors = run(fail=True)
-    check("after a merge that changed the service, a failed restart exits 1 with the message "
-          "that says the merge changed it",
-          code == 1 and starts_with_and_ends_with_the_report_line(errors, f"{program}: FAILED — the merge changed the "
-                                                f"nn-shared-database service, and "
-                                                f"{restart_failure_rest}"), (code, errors))
+    code, calls, printed, errors = run(fail="not-found")
+    check("after a merge that changed the service, systemctl saying the unit was not found: exit 1, "
+          "the unit-not-found message word for word, and journalctl not run",
+          code == 1 and calls == restart_call and not journalctl_log.exists()
+          and errors == (f"{program}: FAILED — the merge changed the nn-shared-database service, "
+                         f"and `systemctl --user restart nn-shared-database-service.service` "
+                         f"exited 5, because ned-box's systemd has no unit of that name: the "
+                         f"unit's install step has not run on ned-box yet. systemctl said: Failed "
+                         f"to restart nn-shared-database-service.service: Unit "
+                         f"nn-shared-database-service.service not found.\n"
+                         f"Do nothing about it: the install step is the user's to run.\n"),
+          (code, errors))
+    saved_runtime_directory = os.environ.pop("XDG_RUNTIME_DIR", None)
+    try:
+        code, calls, printed, errors = run(fail="other")
+    finally:
+        if saved_runtime_directory is not None:
+            os.environ["XDG_RUNTIME_DIR"] = saved_runtime_directory
+    journal_runtime_log = Path(f"{journalctl_log}.runtime")
+    check("after a merge that changed the service, a restart failing otherwise: exit 1, the "
+          "message word for word with journalctl's last lines indented, and journalctl given "
+          "/run/user/<uid> when the caller has no XDG_RUNTIME_DIR",
+          code == 1 and errors == restart_failed(merge_changed_it=True)
+          and journalctl_log.read_text().splitlines() == journal_call
+          and journal_runtime_log.read_text().splitlines() == [f"/run/user/{os.getuid()}"],
+          (code, errors))
+    code, calls, printed, errors = run(fail="other", journal="fail")
+    check("journalctl failing: exit 1, and the message says so in place of its lines",
+          code == 1 and errors == restart_failed(
+              True, f"{journal_command} exited 1, so its lines are not shown. journalctl said: "
+                    f"Failed to open journal: Permission denied\n"), (code, errors))
+    code, calls, printed, errors = run(fail="other", journal="empty")
+    check("journalctl printing nothing: exit 1, and the message says it printed no lines",
+          code == 1 and errors == restart_failed(True, f"{journal_command} printed no lines.\n"),
+          (code, errors))
+    saved_timeout = restarter.JOURNALCTL_TIMEOUT_SECONDS
+    restarter.JOURNALCTL_TIMEOUT_SECONDS = 1
+    try:
+        code, calls, printed, errors = run(fail="other", journal="hang")
+    finally:
+        restarter.JOURNALCTL_TIMEOUT_SECONDS = saved_timeout
+    check("journalctl not finishing within its timeout: exit 1, and the message says so",
+          code == 1 and errors == restart_failed(
+              True, f"{journal_command} did not finish within 1 seconds, so its lines are not "
+                    f"shown.\n"), (code, errors))
+    # Only the fake systemctl's directory on PATH, so no journalctl is found anywhere.
+    hidden_journalctl = scratch / "journalctl-hidden"
+    (bin_directory / "journalctl").rename(hidden_journalctl)
+    saved_path = os.environ["PATH"]
+    os.environ.update(PATH=str(bin_directory), FAKE_SYSTEMCTL_FAIL="other")
+    errors = io.StringIO()
+    try:
+        with redirect_stderr(errors):
+            code = restarter.restart_service(merge_changed_it=True)
+    finally:
+        os.environ["PATH"] = saved_path
+        hidden_journalctl.rename(bin_directory / "journalctl")
+    errors = errors.getvalue()
+    check("journalctl not on PATH: exit 1, and the message says it could not be run, with the "
+          "operating system's error",
+          code == 1 and errors == restart_failed(
+              True, f"{journal_command} could not be run, so its lines are not shown: [Errno 2] "
+                    f"No such file or directory: 'journalctl'\n"), (code, errors))
 
     outside = scratch / "not-a-repository"
     outside.mkdir()
@@ -227,12 +317,12 @@ with tempfile.TemporaryDirectory() as scratch:
           "then the restart, and its success line",
           code == 1 and calls == restart_call and errors == in_reference
           and printed == restarted_either_way, (code, calls, printed, errors))
-    code, calls, printed, errors = run(environment=stale, fail=True)
+    code, calls, printed, errors = run(environment=stale, fail="other")
     check("a stale GIT_DIR in the reference-checkout, and the restart failing: exit 1, the "
           "FAILED message, then the restart failure that does not say the merge changed the "
           "service",
           code == 1 and calls == restart_call
-          and starts_with_and_ends_with_the_report_line(errors, in_reference + restart_failed_after_a_git_failure)
+          and errors == in_reference + restart_failed_after_a_git_failure
           and printed == "",
           (code, calls, printed, errors))
 
