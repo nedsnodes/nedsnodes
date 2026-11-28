@@ -17,6 +17,12 @@ check() {
 
 WORKSPACE=$(mktemp -d)
 trap 'rm -rf "$WORKSPACE"' EXIT
+HOME="$WORKSPACE/negative-timeout-home" python3 "$SCRIPT_DIRECTORY/agent-binary-update-under-lock.py" \
+    --program-name test --timeout-seconds -1 -- /usr/bin/true 2>"$WORKSPACE/negative-timeout.err"
+update_status=$?
+[ "$update_status" -eq 2 ] && [ ! -e "$WORKSPACE/negative-timeout-home" ] && grep -q -- '--timeout-seconds' "$WORKSPACE/negative-timeout.err"
+check "a negative timeout is refused before the update lock is created" "$?"
+
 STUBS="$WORKSPACE/stubs"
 mkdir -p "$STUBS" "$WORKSPACE/home/Projects" "$WORKSPACE/agents"
 # The Mac launcher runs the handoff-supervisor of ~/Projects/nedsnodes and
