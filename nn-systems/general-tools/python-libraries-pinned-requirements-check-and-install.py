@@ -55,7 +55,10 @@ def pinned_versions(requirements_file=python_libraries_pinned_requirements_insta
         name, separator, version = line.partition("==")
         if not separator or not name.strip() or not version.strip():
             raise ValueError(f"{requirements_file}: not a `name==version` line: {line!r}")
-        pins[name.strip()] = version.strip()
+        name, version = name.strip(), version.strip()
+        if name in pins and pins[name] != version:
+            raise ValueError(f"{requirements_file}: {name} is pinned to both {pins[name]} and {version}")
+        pins[name] = version
     return pins
 
 
