@@ -83,6 +83,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     (".claude/guard-hooks/git-worktree-remove-cold-read-record-and-sanity-check-record-ship-to-log-store-first-guard-hook.py", "WORKTREE_LISTING_FAILED_NOTICE"): HOOK_FAILED,
     (".claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-ask-hook.py", "ASK_INSTRUCTIONS"): LATER_PART,
     (".claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-ask-hook.py", "GUARDED_FILE_WITH_NO_APPROVED_VERSION_DELETE_WITHOUT_ASKING_INSTRUCTIONS"): LATER_PART,
+    (".claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-ask-hook.py", "PRE_APPROVED_INSTRUCTIONS"): LATER_PART,
     (".claude/guard-hooks/hand-typed-codex-exec-command-refusal-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
     (".claude/guard-hooks/hand-typed-codex-exec-command-refusal-hook.py", "USAGE_LINE"): LATER_PART,
     (".claude/guard-hooks/handoff-deferral-cold-read-full-run-launch-refusal-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_TEMPLATE"): HOOK_FAILED,
