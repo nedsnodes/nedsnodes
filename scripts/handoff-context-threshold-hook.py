@@ -82,7 +82,7 @@ HANDOFF_ASKED_MARKER_SUFFIX = "-handoff-asked"
 
 def handoff_asked_marker_path(session_id: str) -> Path:
     # Read HANDOFF_DIRECTORY at call time so tests can redirect marker writes.
-    return handoff_deferred_marker_and_refused_commands_files_common.session_marker_file_path(
+    return handoff_deferred_marker_and_refused_commands_files_common.handoff_session_marker_file_path_return_after_moving_any_left_in_handoff_directory(
         HANDOFF_DIRECTORY, session_id, HANDOFF_ASKED_MARKER_SUFFIX)
 
 
@@ -90,7 +90,7 @@ HANDOFF_GET_READY_NOTICE_SENT_MARKER_SUFFIX = "-handoff-get-ready-notice-sent"
 
 
 def handoff_get_ready_notice_sent_marker_path(session_id: str) -> Path:
-    return handoff_deferred_marker_and_refused_commands_files_common.session_marker_file_path(
+    return handoff_deferred_marker_and_refused_commands_files_common.handoff_session_marker_file_path_return_after_moving_any_left_in_handoff_directory(
         HANDOFF_DIRECTORY, session_id, HANDOFF_GET_READY_NOTICE_SENT_MARKER_SUFFIX)
 
 

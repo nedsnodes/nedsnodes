@@ -15,7 +15,7 @@ when no marker file exists.
 Both files are named by the Claude Code session id, which a hook running inside a subagent also
 receives, as the id of the agent-session that started it. The marker files live in the handoff
 directory's session-marker-files/ directory, as do the threshold hook's other per-session marker
-files, whose paths it builds with session_marker_file_path; the file of refused commands lives in
+files, whose paths it builds with handoff_session_marker_file_path_return_after_moving_any_left_in_handoff_directory; the file of refused commands lives in
 the handoff directory itself.
 
 handoff_deferred_marker_read raises HandoffDeferredMarkerUnreadable for a marker file that
@@ -34,7 +34,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-SESSION_MARKER_FILES_DIRECTORY_NAME = "session-marker-files"
+HANDOFF_SESSION_MARKER_FILES_DIRECTORY_NAME = "session-marker-files"
 HANDOFF_DEFERRED_MARKER_SUFFIX = "-handoff-deferred"
 HANDOFF_DEFERRED_MARKER_MOVED_AT_FIRE_SUFFIX = "-handoff-deferred-fired"
 COLD_READ_FULL_RUN_COMMANDS_REFUSED_DURING_HANDOFF_DEFERRAL_SUFFIX = "-cold-read-full-run-commands-refused-during-handoff-deferral.jsonl"
@@ -72,7 +72,7 @@ class HandoffDeferredMarker:
         self.awaited_workflow_ids = list(awaited_workflow_ids)
 
 
-def session_marker_file_path(handoff_directory: Path, session_id: str, suffix: str) -> Path:
+def handoff_session_marker_file_path_return_after_moving_any_left_in_handoff_directory(handoff_directory: Path, session_id: str, suffix: str) -> Path:
     """Return the path of a session's marker file in session-marker-files/.
 
     A marker file of the same name in the handoff directory itself, where an older checkout
@@ -80,7 +80,7 @@ def session_marker_file_path(handoff_directory: Path, session_id: str, suffix: s
     hand off again. Raises OSError when that file exists and cannot be moved.
     """
     name = f"{session_id}{suffix}"
-    path = Path(handoff_directory) / SESSION_MARKER_FILES_DIRECTORY_NAME / name
+    path = Path(handoff_directory) / HANDOFF_SESSION_MARKER_FILES_DIRECTORY_NAME / name
     old_place = Path(handoff_directory) / name
     if old_place.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,11 +89,11 @@ def session_marker_file_path(handoff_directory: Path, session_id: str, suffix: s
 
 
 def handoff_deferred_marker_path(handoff_directory: Path, session_id: str) -> Path:
-    return session_marker_file_path(handoff_directory, session_id, HANDOFF_DEFERRED_MARKER_SUFFIX)
+    return handoff_session_marker_file_path_return_after_moving_any_left_in_handoff_directory(handoff_directory, session_id, HANDOFF_DEFERRED_MARKER_SUFFIX)
 
 
 def handoff_deferred_marker_moved_at_fire_path(handoff_directory: Path, session_id: str) -> Path:
-    return session_marker_file_path(
+    return handoff_session_marker_file_path_return_after_moving_any_left_in_handoff_directory(
         handoff_directory, session_id, HANDOFF_DEFERRED_MARKER_MOVED_AT_FIRE_SUFFIX)
 
 
