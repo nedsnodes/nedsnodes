@@ -24,6 +24,7 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#case_against_weak#` — written in the walk-minutes beside the user's answer when the item's case against was rated weak.
 - `#code#` — a project glossary label: the term of the entry it ends covers code.
 - `#cold_read_fast_read_sonnet_backup_ran#` — the line a cold-read-fast-read report carries when the Sonnet backup wrote it in place of the first model, with the reason.
+- `#cold_read_grid_incomplete_set#` — opens the HTML comment line `<!-- #cold_read_grid_incomplete_set# <n> of <m> reports absent — <each absent cold-read-cell and its cause> -->` that `nn-systems/cold-read/cold-read-grid.py` writes when a cold-read-full-run's report is absent, into each report that was saved and the reference-check file, after the provenance stamp when the file has one and as the first line otherwise.
 - `#cold_read_target_changed_during_run#` — the line a cold-read program prints when the document changed while the reviewer read it, so the report is triaged against the copy the reviewer was given.
 - `#data#` — a project glossary label: the term of the entry it ends covers data.
 - `#declined_because#` — the cold-read approval-walk item line that gives the reason a finding was declined, opening with `cost` when cost is the only reason.
