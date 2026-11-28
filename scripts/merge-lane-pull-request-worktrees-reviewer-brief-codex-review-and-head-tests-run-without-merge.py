@@ -6,10 +6,17 @@ Usage:
       <pull request number> <brief specifications file> [--head-commit-reviewed-before COMMIT]
       [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
-Before any step runs, git in --review-tools-worktree-at-main fetches main and
+When --review-tools-worktree-at-main does not exist, it is first made as a
+detached worktree of the repository this program is in, so a run need not be
+started again for it. Before any step runs, git in
+--review-tools-worktree-at-main fetches main and
 refs/pull/<n>/head from origin and reads the two commits once. The Codex
 review's base is the merge base of those two commits, or, for a fix-round,
-the commit given as --head-commit-reviewed-before.
+the commit given as --head-commit-reviewed-before; but a fix-round whose
+first-parent commits since that commit hold a merge commit, as when the author
+merged main, or whose head does not descend from it, is reviewed from the
+merge base, whole, as pull-request-review-plan.py reviews such a round, so
+Codex does not review main's changes as the pull request's.
 
 The brief specifications file holds merge-lane-2's judgments in exactly one
 entry, for this pull request: tag, number, title, author, tests, hazards and
@@ -38,7 +45,9 @@ the pull request's, with those commits and all three directory options:
   1. merge-lane-pull-request-head-and-merged-worktrees-rebuild.py <n> <head> <main>
   2. merge-lane-pull-request-reviewer-brief-compose-with-facts.py <the filled-in copy>
   3. merge-lane-code-review-codex-cell-run-on-pull-request-head.py <n> <base>
-  4. merge-lane-pull-request-head-test-run-on-merged-worktree.py <n>
+     --expected-head-commit <head> --main-commit <main>
+  4. merge-lane-pull-request-head-test-run-on-merged-worktree.py <n> --head-commit <head>
+     --main-commit <main>
   5. merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py <n> <tag> <head>,
      which runs the Claude reviewer and posts its review, only when the entry's
      claude_reviewer is true; when it is false, step 5 is skipped and the output
@@ -52,7 +61,8 @@ is, and each line of steps 3 to 5 prefixed with its step's number, as in
 "step 4 of 5 | ", because their lines interleave. When one of steps 3 to 5
 fails, the output names each step that failed with its exit code, says what
 each other step did, and gives each failed step's own command, with the same
-commits, for running that step alone: running this program again would run
+commits, for running that step
+alone: running this program again would run
 the other steps again, and post a second Claude review. If this program is
 interrupted while steps run, it stops them: steps 3 and 4 get SIGKILL, and step
 5 gets SIGTERM, so that it stops the Claude reviewer before any review is
@@ -69,7 +79,8 @@ Exit codes: 0 every step that ran exited 0; 1 a step exited nonzero, named on
 stdout: when it was step 1 or 2, no later step ran, and when it was one of
 steps 3 to 5, the others ran to their end; also 1 when this program's own
 output could not be written while steps 3 to 5 ran, named on stderr; 2 refused before any step ran: a step script
-is missing, git could not fetch, read or check out a commit, the brief
+is missing, the missing review tools worktree could not be made, git could
+not fetch, read or check out a commit, the brief
 specifications file is unreadable, lacks a field, has a claude_reviewer that
 is not true or false, or disagrees with the
 commits, or the filled-in copy could not be written, named on stdout.
@@ -140,7 +151,8 @@ class OutputCouldNotBeWritten(Exception):
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(
-        description="Move the review tools worktree to main, then rebuild a pull request's "
+        description="Make the review tools worktree when it is missing and move it to "
+                    "main, then rebuild a pull request's "
                     "worktrees, compose its reviewer brief, run the Codex review, run the "
                     "head tests and, when the entry asks for one, run the Claude reviewer "
                     "and post its review; the last three run at the same time. Does not "
@@ -156,7 +168,8 @@ def parse_arguments(argv):
                              "must be origin's commit for that field")
     parser.add_argument("--head-commit-reviewed-before",
                         help="for a fix-round, the nn-head-commit reviewed before; the Codex "
-                             "review runs from it instead of from the merge base")
+                             "review runs from it instead of from the merge base, unless a "
+                             "merge commit follows it or the head does not descend from it")
     common.add_directory_options(parser, "briefs/, cx/, hr/, claude-reviews/ and tripwire-bin/")
     return common.resolve_path_options(parser.parse_args(argv))
 
@@ -330,9 +343,9 @@ def main(argv=None):
         / FILLED_IN_BRIEF_SPECIFICATIONS_FILE_NAME.format(number=number))
     try:
         if not checkout.is_dir():
-            raise RefusedBeforeAnyStep(
-                common.review_tool_missing_message(arguments, Path("scripts") / STEPS[0]),
-                instruction=None)
+            # Any commit will do: the worktree is checked out at origin's main below.
+            git(common.REPOSITORY_ROOT, "worktree", "add", "-q", "--detach", str(checkout),
+                "HEAD")
         main_commit = fetched_commit(checkout, "refs/heads/main")
         head_commit = fetched_commit(checkout, f"refs/pull/{number}/head")
         head_reviewed_before = None
@@ -348,6 +361,11 @@ def main(argv=None):
                                 f"--head-commit-reviewed-before set to the nn-head-commit that "
                                 f"was reviewed before.")
             base, base_kind = head_reviewed_before, "nn-head-commit reviewed before"
+            reviewed_whole_because = common.fix_round_reviewed_whole_because(
+                git, checkout, head_reviewed_before, head_commit)
+            if reviewed_whole_because:
+                base = git(checkout, "merge-base", main_commit, head_commit)
+                base_kind = f"merge base, because {reviewed_whole_because}"
         else:
             base, base_kind = git(checkout, "merge-base", main_commit, head_commit), "merge base"
         try:
@@ -402,8 +420,10 @@ def main(argv=None):
           f"({base_kind})", flush=True)
     steps = ((WORKTREES_REBUILD_STEP, [str(number), head_commit, main_commit]),
              (REVIEWER_BRIEF_STEP, [str(filled_in_specifications_file)]),
-             (CODEX_REVIEW_STEP, [str(number), base]),
-             (HEAD_TEST_RUN_STEP, [str(number)]),
+             (CODEX_REVIEW_STEP, [str(number), base, "--expected-head-commit", head_commit,
+                                 "--main-commit", main_commit]),
+             (HEAD_TEST_RUN_STEP, [str(number), "--head-commit", head_commit,
+                                  "--main-commit", main_commit]),
              (CLAUDE_REVIEWER_STEP, [str(number), str(specifications[0]["tag"]), head_commit]))
     claude_reviewer = specifications[0]["claude_reviewer"]
     for position, (step, step_arguments) in enumerate(steps[:2], start=1):

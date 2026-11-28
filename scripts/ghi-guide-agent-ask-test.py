@@ -110,6 +110,38 @@ def fake_claude_queue(responses):
     return calls
 
 
+DESIGN_PATH = (Path(__file__).resolve().parent.parent / "docs" / "issues"
+               / "46-ghi-guide-agent.system.design.md")
+
+
+def design_prompt_lines(section):
+    """The non-blank lines of the quoted prompt under `### <section>` of the
+    design's § Prompts, with the Markdown escapes of `<` and `>` removed."""
+    lines = DESIGN_PATH.read_text(encoding="utf-8").splitlines()
+    start = next(index for index, line in enumerate(lines)
+                 if line.startswith(f"### {section}"))
+    quoted = []
+    for line in lines[start + 1:]:
+        if line.startswith("#"):
+            break
+        if line.startswith(">") and line[1:].strip():
+            quoted.append(line[1:].strip().replace("\\<", "<").replace("\\>", ">"))
+    return quoted
+
+
+@contextlib.contextmanager
+def patch_environment(name, value):
+    earlier = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        yield
+    finally:
+        if earlier is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = earlier
+
+
 def reading_list(*numbers, notes=()):
     """ghi-guide-agent's structured_output for a reading list."""
     return {"kind": "reading-list", "issues": list(numbers), "notes": list(notes)}
@@ -188,93 +220,43 @@ with tempfile.TemporaryDirectory() as temporary:
                   "after the question",
                   "what covers Q?\n\n" + reuse in composed, composed)
 
-    # --- each request form's ask opens with its own sentence from the design ---
-    # docs/issues/46-ghi-guide-agent.system.design.md: § Resume ask prompt for a
-    # reading list, § Adjudication request for a draft verdict.
-    reading_list_opening = "You are asked for a reading list."
-    draft_verdict_opening = ("You are shown a draft issue — its title and its "
-                             "GHI-MD — and asked whether the corpus already "
-                             "covers it.")
-    for request_form, structured_output, opening, other_opening in (
-            ("reading-list", reading_list(5), reading_list_opening, draft_verdict_opening),
-            ("draft-verdict", {"kind": "verdict", "verdict": "unrelated", "issues": []},
-             draft_verdict_opening, reading_list_opening)):
-        for is_resume in (False, True):
-            seat_opening = root / f"seat-opening-{request_form}-resume-{is_resume}"
-            seat_opening.mkdir()
-            if is_resume:
-                ghi_ask.save_state(seat_opening / ghi_ask.STATE_FILE_NAME,
-                                   {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-O",
-                                    "closes_since_birth": 0, "recent_matches": []})
-                fake_refresh_queue([([5], {"5": issue(5)}, None)])
-                opening_calls = fake_claude_queue([
-                    ({"session_id": "sess-O", "structured_output": structured_output}, None)])
-            else:
-                fake_refresh_queue([([], {}, None)])
-                opening_calls = fake_claude_queue([
-                    ({"session_id": "sess-O", "result": "(ack)"}, None),
-                    ({"session_id": "sess-O", "structured_output": structured_output}, None)])
-            answer, closed_on, error = ghi_ask.ask("the asker's question", False, seat_opening,
-                                                   "x/y", request_form=request_form)
-            ask_prompt = opening_calls[-1][0]
-            check(f"a {request_form} ask (resume={is_resume}) opens with its own "
-                  "sentence from the design, the asker's question right after it, "
-                  "and not the other form's",
-                  error is None
-                  and opening + " the asker's question" in ask_prompt
-                  and other_opening not in ask_prompt
-                  and (ask_prompt.startswith(opening) or "\n\n" + opening in ask_prompt),
-                  (error, ask_prompt))
-
     # --- each request form's whole ask prompt is its design section's text ---
-    # docs/issues/46-ghi-guide-agent.system.design.md: § Resume ask prompt for a
-    # reading list, § Adjudication request for a draft verdict, whose
-    # changed-entries line has no issues-closed.md clause and which has no
-    # plan-reuse sentence.
+    # Read from § Prompts of the design, so that a change to the design's text
+    # fails here until the script follows it. The intended differences are left
+    # out: a draft-verdict ask relays the asker's question where the design
+    # lists the draft's title, GHI-MD and reply line, because the reply's shape
+    # is the JSON schema's, not a text line.
+    question = "the asker's question"
+
+    def design_slots_filled(line, mirror_path="", question_files_path=""):
+        line = re.sub(r"^<only on resume, and only when the refresh changed entries:> ", "", line)
+        line = line.replace("#<n>, #<m>", "#5")
+        line = re.sub(r"<the asker's question[^>]*>", question, line)
+        return (line.replace("<mirror-path>", mirror_path)
+                .replace("<question-files-path>", question_files_path))
+
+    resume_ask = design_prompt_lines("Resume ask prompt")
+    adjudication = design_prompt_lines("Adjudication request")
+    reading_list_opening, plan_reuse = resume_ask[1], resume_ask[2]
     whole_ask_prompt_each_request_form_and_resume = {
-        ("reading-list", True):
-            "Since your last request, these mirror entries changed: #5. Re-read "
-            "them in the mirror before answering — an entry may have moved to "
-            "issues-closed.md.\n\n"
-            "You are asked for a reading list. the asker's question\n\n"
-            "If the question describes a plan, also name any issue whose design "
-            "built something the plan should reuse instead of building its own.",
-        ("reading-list", False):
-            "You are asked for a reading list. the asker's question\n\n"
-            "If the question describes a plan, also name any issue whose design "
-            "built something the plan should reuse instead of building its own.",
-        ("draft-verdict", True):
-            "Since your last request, these mirror entries changed: #5. Re-read "
-            "them in the mirror before answering.\n\n"
-            "You are shown a draft issue — its title and its GHI-MD — and asked "
-            "whether the corpus already covers it. the asker's question",
-        ("draft-verdict", False):
-            "You are shown a draft issue — its title and its GHI-MD — and asked "
-            "whether the corpus already covers it. the asker's question",
+        ("reading-list", True): "\n\n".join(
+            design_slots_filled(line) for line in (resume_ask[0], reading_list_opening, plan_reuse)),
+        ("reading-list", False): "\n\n".join(
+            design_slots_filled(line) for line in (reading_list_opening, plan_reuse)),
+        ("draft-verdict", True): design_slots_filled(adjudication[0]) + "\n\n"
+            + adjudication[1] + " " + question,
+        ("draft-verdict", False): adjudication[1] + " " + question,
     }
-    # § Cold-start prompt, with <mirror-path> and <question-files-path> filled.
-    cold_start_design_sentences = (
-        "You run inside a checkout of the project repository, which a script "
-        "tries to bring up to date with its main branch before every request; "
-        "when it cannot, the checkout may hold older text. Your knowledge is "
-        "the local mirror in it at {mirror_path}, regenerated by script and "
-        "refreshed before every request, the files its open issues link to, "
-        "and your earlier questions:",
-        "- issues-open.md — every open issue: number, title, labels, updated "
-        "time, body, comments. An issue's body is the links to its files. Read "
-        "this file whole now, before anything else; then read, from this "
-        "checkout, each file an open issue's body links to. Read a file of at "
-        "most 16,000 characters whole; of a longer one, read up to its first "
-        "second-level heading and its headings, and the rest when a request "
-        "needs it. Do not follow a link found inside one of those files.",
-        "- /home/nedlern/nedsnodes-logs/ghi-guide-agent-proposed-improvements-or-changes"
-        " — the questions you raised earlier about the user's rulings, each in "
-        "a file named for the GHI-MD it is about. Read the files about an issue "
-        "before you answer a request about that issue.",
+    cold_start = design_prompt_lines("Cold-start prompt")
+    # Lines of § Cold-start prompt the cold-start turn carries whole, and parts
+    # of lines whose rest the JSON replies change.
+    cold_start_whole_line_openings = (
+        "You run inside a checkout", "- issues-open.md", "- <question-files-path>")
+    cold_start_line_parts = (
         "Answer from these files only: never read issue state from GitHub",
         "2. **You are shown a draft issue** — its title and its GHI-MD — and "
-        "asked whether the corpus already covers it.",
-    )
+        "asked whether the corpus already covers it.")
+    question_files_directory = str(root / "question-files")
     for request_form, structured_output in (
             ("reading-list", reading_list(5)),
             ("draft-verdict", {"kind": "verdict", "verdict": "unrelated", "issues": []})):
@@ -293,8 +275,11 @@ with tempfile.TemporaryDirectory() as temporary:
                 whole_calls = fake_claude_queue([
                     ({"session_id": "sess-W", "result": "(ack)"}, None),
                     ({"session_id": "sess-W", "structured_output": structured_output}, None)])
-            answer, closed_on, error = ghi_ask.ask("the asker's question", False, seat_whole,
-                                                   "x/y", request_form=request_form)
+            with patch_environment(
+                    ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE,
+                    question_files_directory):
+                answer, closed_on, error = ghi_ask.ask(question, False, seat_whole,
+                                                       "x/y", request_form=request_form)
             expected = whole_ask_prompt_each_request_form_and_resume[(request_form, is_resume)]
             check(f"a {request_form} ask's whole prompt (resume={is_resume}) is "
                   "its design section's text",
@@ -303,16 +288,23 @@ with tempfile.TemporaryDirectory() as temporary:
             if not is_resume:
                 cold_start_prompt = whole_calls[0][0]
                 mirror_path = str(seat_whole / ghi_ask.mirror_refresh.DEFAULT_MIRROR_DIR)
-                missing = [sentence.format(mirror_path=mirror_path)
-                           for sentence in cold_start_design_sentences
-                           if sentence.format(mirror_path=mirror_path) not in cold_start_prompt]
+                filled = [design_slots_filled(line, mirror_path, question_files_directory)
+                          for line in cold_start]
+                openings = tuple(design_slots_filled(opening, mirror_path, question_files_directory)
+                                 for opening in cold_start_whole_line_openings)
+                wanted = [line for line in filled if line.startswith(openings)]
+                wanted += [part for part in cold_start_line_parts
+                           if any(part in line for line in filled)]
+                missing = [line for line in wanted if line not in cold_start_prompt]
                 check(f"a {request_form} ask's cold-start turn carries § Cold-start "
-                      "prompt's mirror paragraph, linked-file reading, 16,000-character "
-                      "rule, question-files bullet and form 2 opening, with both "
-                      "slots filled",
-                      not missing and "{" not in cold_start_prompt
+                      "prompt's mirror paragraph, issues-open.md bullet and "
+                      "question-files bullet whole, its GitHub sentence and form 2 "
+                      "opening, with both slots filled, the question files' slot "
+                      "with the directory the write tool's log-store resolver gives",
+                      len(wanted) == len(cold_start_whole_line_openings) + len(cold_start_line_parts)
+                      and not missing and "{" not in cold_start_prompt
                       and "-path>" not in cold_start_prompt,
-                      (missing, cold_start_prompt[:3000]))
+                      (wanted, missing, cold_start_prompt[:3000]))
 
     # --- reincarnation: closes-since-birth over threshold forces a cold start ----
     seat3 = root / "seat3"
@@ -374,13 +366,18 @@ with tempfile.TemporaryDirectory() as temporary:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     held_handle = open(lock_path, "a+")
     fcntl.flock(held_handle.fileno(), fcntl.LOCK_EX)
+    contended_stderr = io.StringIO()
     try:
-        answer, closed_on, error = ghi_ask.ask("q", False, seat4, "x/y")
+        with contextlib.redirect_stderr(contended_stderr):
+            answer, closed_on, error = ghi_ask.ask("q", False, seat4, "x/y")
     finally:
         fcntl.flock(held_handle.fileno(), fcntl.LOCK_UN)
         held_handle.close()
     check("a contended lock still returns an answer (a throwaway session)",
           answer == reading_list(9), (answer, error))
+    check("a contended ask says on stderr that it cold-starts because another ask holds the lock",
+          "another ask holds the state lock" in contended_stderr.getvalue(),
+          contended_stderr.getvalue())
     check("a contended lock cold-starts (never resumes the held session)",
           claude_calls[0][1] is None, claude_calls)
     check("a contended lock never writes the state file",
@@ -415,8 +412,10 @@ with tempfile.TemporaryDirectory() as temporary:
     answer, closed_on, error = ghi_ask.ask("q", False, seat5, "x/y")
     check("a closed pointer (not --include-closed) triggers a third claude call",
           len(claude_calls) == 3, claude_calls)
-    check("the drift notice names the issue and its close date",
-          "#13" in claude_calls[2][0] and "2026-08-08" in claude_calls[2][0], claude_calls)
+    check("the drift notice after a reading list is design 46's, naming the issue and its close date",
+          claude_calls[2][0] == "#13 closed on 2026-08-08 — the mirror is current; re-read its "
+          "entry in issues-closed.md, including any Superseded-by: link, and give a corrected "
+          "reading list.", claude_calls)
     check("the corrected answer from the recheck is the final answer",
           answer == reading_list(24) and closed_on == {}, (answer, closed_on))
     state5 = json.loads((seat5 / ghi_ask.STATE_FILE_NAME).read_text(encoding="utf-8"))
@@ -554,9 +553,19 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
                                             closed_at="2026-08-08T00:00:00Z")}, None)])
     budgets = []
+    # Each turn takes a known time on a fake clock, so each later turn's
+    # budget is exact: the ask's whole budget less what earlier turns spent.
+    fake_clock = {"now": 1000.0}
+
+    class FakeTime:
+        @staticmethod
+        def monotonic():
+            return fake_clock["now"]
+    seconds_each_turn_takes = [600, 50, 0]
 
     def recording_run_claude(prompt, resume_session_id, seat_dir, timeout_seconds, json_schema):
         budgets.append(timeout_seconds)
+        fake_clock["now"] += seconds_each_turn_takes[len(budgets) - 1]
         replies = [
             {"session_id": "sess-T", "result": "(ack)"},
             {"session_id": "sess-T", "structured_output": reading_list(13)},   # cites a closed issue
@@ -564,18 +573,52 @@ with tempfile.TemporaryDirectory() as temporary:
         ]
         return replies[len(budgets) - 1], None
     patch("run_claude", recording_run_claude)
-    answer, closed_on, error = ghi_ask.ask("q", False, seat11, "x/y", timeout_seconds=300)
-    check("all three turns of one ask draw on a single budget",
-          len(budgets) == 3, budgets)
-    check("each turn is handed only what the ask has left, never the full budget again",
-          budgets == sorted(budgets, reverse=True) and budgets[0] <= 300
-          and budgets[-1] < budgets[0],
+    real_time = ghi_ask.time
+    patch("time", FakeTime)
+    try:
+        answer, closed_on, error = ghi_ask.ask("q", False, seat11, "x/y", timeout_seconds=300)
+    finally:
+        patch("time", real_time)
+    whole_budget = 300 + ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
+    check("the cold-start turn gets the ask's budget plus GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS, and "
+          "each later turn exactly what the ask has left",
+          budgets == [whole_budget, whole_budget - 600, whole_budget - 650],
           budgets)
 
+    # A cold start that leaves the question turn too little time is still
+    # saved, so the next ask resumes it rather than cold-starting again.
+    seat11b = root / "seat11b"
+    seat11b.mkdir()
+    fake_refresh_queue([([], {}, None)])
+    fake_clock["now"] = 1000.0
+    cold_start_spends_everything = []
+
+    def cold_start_spends_whole_budget(prompt, resume_session_id, seat_dir, timeout_seconds, json_schema):
+        cold_start_spends_everything.append(timeout_seconds)
+        fake_clock["now"] += timeout_seconds
+        return {"session_id": "sess-SLOW-COLD", "result": "(ack)"}, None
+    patch("run_claude", cold_start_spends_whole_budget)
+    patch("time", FakeTime)
+    try:
+        answer, closed_on, error = ghi_ask.ask("q", False, seat11b, "x/y", timeout_seconds=300)
+    finally:
+        patch("time", real_time)
+    saved = ghi_ask.load_state(seat11b / ghi_ask.STATE_FILE_NAME)
+    check("a cold start whose question turn finds the budget spent still saves its session id",
+          answer is None and len(cold_start_spends_everything) == 1
+          and saved.get(ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY) == "sess-SLOW-COLD",
+          (error, saved))
+    check("a cold-starting ask that runs out names the budget it actually had, not timeout_seconds",
+          error is not None and f"{whole_budget}s budget" in error, error)
+
     # An ask whose budget is already gone fails saying so, rather than
-    # starting a turn it cannot afford.
+    # starting a turn it cannot afford. A resumed session, since a cold
+    # start adds time of its own.
     seat12 = root / "seat12"
     seat12.mkdir()
+    ghi_ask.save_state(seat12 / ghi_ask.STATE_FILE_NAME,
+                       {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-S",
+                        "closes_since_birth": 0, "recent_matches": []})
     fake_refresh_queue([([1], {"1": issue(1)}, None)])
     spent_calls = fake_claude_queue([])
     answer, closed_on, error = ghi_ask.ask("q", False, seat12, "x/y", timeout_seconds=0)
@@ -1004,6 +1047,17 @@ try:
           all(f"kind `{kind}`" in ghi_ask.COLD_START_PROMPT_TEMPLATE
               for kind in ghi_ask.GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES["kind"]["enum"]),
           ghi_ask.COLD_START_PROMPT_TEMPLATE[-1500:])
+    # The answer check refuses a reading list with no issue and no note, so
+    # the prompt asks for the note.
+    check("the cold-start prompt asks for a note when no issue bears on the topic",
+          "; when no issue bears on the topic, `issues` is empty and a note says so."
+          in ghi_ask.COLD_START_PROMPT_TEMPLATE, ghi_ask.COLD_START_PROMPT_TEMPLATE[-2500:])
+    check("the cold-start prompt answers a correction with the kind of the reply it corrects",
+          "and answer with the corrected reply the notice asks for."
+          in ghi_ask.COLD_START_PROMPT_TEMPLATE
+          and "the kind the notice asks for in form 3"
+          in ghi_ask.GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES["kind"]["description"],
+          ghi_ask.COLD_START_PROMPT_TEMPLATE[-2500:])
     check("the start-up prompt allows gh only for a link repair's issue edit, takes the issue's text from the mirror, and "
           "sends document changes through ghi-issue-write.py's pull request, never a push to main",
           "The one time you run gh is to make the issue edit a link repair (form 4) needs; "
@@ -1346,7 +1400,10 @@ with tempfile.TemporaryDirectory() as temporary:
              "kind 'repair' is none the schema allows"),
             ("a field no kind of the request form uses fails the ask",
              {"kind": "reading-list", "issues": [1], "verdict": "related"},
-             "fields the schema does not: verdict"),
+             'fields the schema does not: "verdict"'),
+            ("a field name holding a newline is quoted, so the message stays on one line",
+             {"kind": "not-about-issues", "re\nason": "x"},
+             'fields the schema does not: "re\\nason"'),
             ("a kind outside the schema fails the ask",
              {"kind": "escalate"}, "kind 'escalate' is none the schema allows"),
             ("a kind that is not text fails the ask",
@@ -1354,13 +1411,13 @@ with tempfile.TemporaryDirectory() as temporary:
             ("an answer with no kind fails the ask",
              {"issues": [3]}, "kind None is none the schema allows"),
             ("a field the schema does not have fails the ask",
-             {"kind": "not-about-issues", "reason": "x"}, "fields the schema does not: reason"),
+             {"kind": "not-about-issues", "reason": "x"}, 'fields the schema does not: "reason"'),
             ("issue numbers given as text fail the ask",
              {"kind": "reading-list", "issues": ["#3"]}, "issues is not a list of integers"),
             ("a ruling issue given as text fails the ask",
              {"kind": "ask-user-about-ruling", "ruling_issue": "#3", "sentence": "s"},
              "ruling_issue is not of the schema's type integer"),
-            ("a reading list with no issue and no note fails the ask",
+            ("a reading list with no issue and no note, which the cold-start prompt asks for when no issue bears on the topic, fails the ask",
              reading_list(), "names no issue and gives no note"),
             ("a reading list with no issue and only blank notes fails the ask",
              reading_list(notes=[" ", ""]), "names no issue and gives no note"),
@@ -1431,13 +1488,18 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_refresh_queue([([13], {"13": issue(13, state="CLOSED", closed_at="2026-08-08T00:00:00Z"),
                                 "14": issue(14)}, None)])
     corrected_verdict = {"kind": "verdict", "verdict": "too-similar", "issues": [14]}
-    fake_claude_queue([
+    verdict_corrected_calls = fake_claude_queue([
         ({"session_id": "sess-X", "result": "(ack)"}, None),
         ({"session_id": "sess-X", "structured_output": first_verdict}, None),
         ({"session_id": "sess-X", "structured_output": corrected_verdict}, None),
     ])
     answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_corrected, "x/y",
                                            request_form="draft-verdict")
+    # The draft-verdict schema allows no reading list, so a notice asking for
+    # one leaves the recheck no answer it can give.
+    check("the drift notice after a verdict asks for a corrected verdict, not a reading list",
+          verdict_corrected_calls[2][0].endswith("Superseded-by: link, and give a corrected verdict that cites no closed GHI.")
+          and "reading list" not in verdict_corrected_calls[2][0], verdict_corrected_calls)
     check("a drift recheck after a verdict that cites only open GHIs is the final answer",
           answer == corrected_verdict and closed_on == {} and error is None,
           (answer, closed_on, error))

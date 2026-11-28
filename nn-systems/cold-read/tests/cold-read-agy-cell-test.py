@@ -5,9 +5,8 @@ called.
 
 WHAT IS PINNED HERE.
 
-  - The fast tier's pin (user-ruled 2026-09-07): --tier fast runs
-    gemini-3.8-flash-medium at effort medium (the 2026-09-07 ruling after
-    measurements, superseding low), and the stamp says so, with
+  - The fast tier's pin (user-ruled 2026-11-25): --tier fast runs
+    gemini-4-neon-low at effort low, and the stamp says so, with
     runtime=agy. The other tiers are refused by this launcher before agy
     runs: it pins no model for them, and a Gemini review under a `deep`- or
     `second-strongest-model`-tier stamp would be a tier the roster never measured it on.
@@ -29,6 +28,14 @@ WHAT IS PINNED HERE.
     result whose status is not SUCCESS fails the cell at once with agy's
     `AGY_ERROR:` line still on stderr; and an agy that exits by itself after
     its result line is judged by its own exit code.
+
+  - A cell stopped by SIGTERM stops agy too, though agy runs in a session
+    of its own, even when the SIGTERM lands while the cell is still starting
+    agy: injected just after the fork, it leaves no agy running and the cell
+    exits 128 plus SIGTERM's number. When agy cannot be started, a SIGTERM
+    that came during that start still ends the cell with that exit, and with
+    none the start error reaches the caller with SIGTERM's handler back in
+    place.
 
   - The chat-instead-of-file quirk. The campaign measured gemini-3.8-flash
     sometimes answering the whole review in chat rather than writing the
@@ -129,7 +136,7 @@ STDOUT_RECOVERY_PHRASE = cell_common.STDOUT_RECOVERY_PHRASE
 REAL_AGY_STREAM_JSON_OUTPUT = (
     SYSTEM_DIRECTORY / "tests"
     / "cold-read-agy-cell-test-real-agy-stream-json-output-of-one-read.jsonl")
-# The cell's deadline in these cases is agy's 30 minutes; a read ended by the
+# The cell's deadline in these cases is agy's 15 minutes; a read ended by the
 # result line ends long before this.
 RESULT_LINE_ENDS_READ_WITHIN_SECONDS = 20
 KILLED_AFTER_RESULT_LINE_WORDS = cell_common.AGENT_BINARY_KILLED_AFTER_FINAL_RESULT_LINE_PHRASE
@@ -152,8 +159,8 @@ SHORT_CHAT_REMARK = "I have written the report to the path you gave me.\n"
 # "near_miss" writes the report one directory away from where it was asked,
 # "stdout" is the model's chat text, "dump_argv" and "dump_prompt" are paths
 # to record what the stub was launched with, "dump_key" is a path to record
-# GEMINI_API_KEY as agy received it (null when absent), "dump_github_tokens" is a path to
-# record GH_TOKEN and GITHUB_TOKEN as agy received them, "hang_writing_child_pid_to" is a path
+# whether agy received GEMINI_API_KEY, "dump_github_tokens" is a path to
+# record which of GH_TOKEN and GITHUB_TOKEN agy received, by name, "hang_writing_child_pid_to" is a path
 # to append the pid of a child the stub starts before both sleep past any
 # deadline a case sets, "exit_leaving_child_writing_pid_to" is a path to
 # append the pid of a child the stub starts, which keeps the stub's stdout
@@ -213,10 +220,10 @@ if "read_paths" in step:
     pathlib.Path(step["dump_reads"]).write_text(json.dumps(reads), encoding="utf-8")
 if "dump_key" in step:
     pathlib.Path(step["dump_key"]).write_text(
-        json.dumps(os.environ.get("GEMINI_API_KEY")), encoding="utf-8")
+        json.dumps("GEMINI_API_KEY" in os.environ), encoding="utf-8")
 if "dump_github_tokens" in step:
     pathlib.Path(step["dump_github_tokens"]).write_text(json.dumps(
-        [os.environ.get("GH_TOKEN"), os.environ.get("GITHUB_TOKEN")]), encoding="utf-8")
+        [name for name in ("GH_TOKEN", "GITHUB_TOKEN") if name in os.environ]), encoding="utf-8")
 if "dump_record_directory_descriptor_count" in step:
     record_directory = os.stat(report_path.parent)
     count = 0
@@ -405,7 +412,7 @@ def agy_cell_copy_killing_agy_after_seconds(repository, timeout_seconds, margin_
     copied_cell = repository / "nn-systems" / "cold-read" / "cold-read-agy-cell.py"
     cell_text = copied_cell.read_text(encoding="utf-8")
     for constant_line, value in (
-            ("COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n", timeout_seconds),
+            ("COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 15 * 60\n", timeout_seconds),
             ("COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS = 60\n", margin_seconds)):
         if cell_text.count(constant_line) != 1:
             raise AssertionError(f"the agy cell no longer holds {constant_line!r} once")
@@ -569,9 +576,9 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a fast-tier cell whose agy writes the report exits 0",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     stamp = provenance_stamp_of(report)
-    check("the fast tier is pinned to gemini-3.8-flash-medium at medium, stamped runtime=agy",
-          stamp.startswith("<!-- provenance: runtime=agy model=gemini-3.8-flash-medium "
-                           "effort=medium cell=fast-clarify tier=fast "),
+    check("the fast tier is pinned to gemini-4-neon-low at low, stamped runtime=agy",
+          stamp.startswith("<!-- provenance: runtime=agy model=gemini-4-neon-low "
+                           "effort=low cell=fast-clarify tier=fast "),
           repr(stamp))
     check("the stamp carries duration_s and no tokens field",
           re.search(r"\bduration_s=\d+\b", stamp) is not None and "tokens=" not in stamp,
@@ -585,9 +592,9 @@ with tempfile.TemporaryDirectory() as scratch:
     check("agy is told to skip permission prompts",
           "--dangerously-skip-permissions" in argv, repr(argv))
     check("the model, effort, print timeout and stream-json output are on the command line",
-          argv[argv.index("--model") + 1] == "gemini-3.8-flash-medium"
-          and argv[argv.index("--effort") + 1] == "medium"
-          and argv[argv.index("--print-timeout") + 1] == "30m"
+          argv[argv.index("--model") + 1] == "gemini-4-neon-low"
+          and argv[argv.index("--effort") + 1] == "low"
+          and argv[argv.index("--print-timeout") + 1] == "15m"
           and argv[argv.index("--output-format") + 1] == "stream-json",
           repr(argv))
     received_prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else ""
@@ -605,7 +612,7 @@ with tempfile.TemporaryDirectory() as scratch:
     repository = build_scratch_repository(scratch)
     copied_cell = repository / "nn-systems" / "cold-read" / "cold-read-agy-cell.py"
     cell_text = copied_cell.read_text(encoding="utf-8")
-    constant_line = "COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60\n"
+    constant_line = "COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 15 * 60\n"
     check("the agy cell sets its per-model time limit on one line this suite can change",
           cell_text.count(constant_line) == 1, repr(constant_line))
     copied_cell.write_text(cell_text.replace(
@@ -621,6 +628,22 @@ with tempfile.TemporaryDirectory() as scratch:
     check("agy's --print-timeout follows the cell's per-model time limit",
           result.returncode == 0 and "--print-timeout" in argv
           and argv[argv.index("--print-timeout") + 1] == "45m",
+          f"exit {result.returncode}; argv={argv!r}; stderr={result.stderr!r}")
+
+    # The cold-read-grid gives its Gemini defect-hunt cell a longer limit than
+    # the fast read's, through --per-model-run-timeout-seconds.
+    repository = build_scratch_repository(scratch)
+    report = report_path_for(repository, "print-timeout-follows-option")
+    argv_dump = scratch / "print-timeout-follows-option-argv.json"
+    result = run_agy_cell(
+        repository, stubs,
+        {"*": {"report": "STUB AGY REVIEW\n", "dump_argv": str(argv_dump)}}, report,
+        "--per-model-run-timeout-seconds", "2400",
+    )
+    argv = json.loads(argv_dump.read_text(encoding="utf-8")) if argv_dump.is_file() else []
+    check("agy's --print-timeout follows --per-model-run-timeout-seconds",
+          result.returncode == 0 and "--print-timeout" in argv
+          and argv[argv.index("--print-timeout") + 1] == "40m",
           f"exit {result.returncode}; argv={argv!r}; stderr={result.stderr!r}")
 
     # --- The other tiers are refused before agy runs ----------------------
@@ -648,7 +671,7 @@ with tempfile.TemporaryDirectory() as scratch:
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     report_text = report.read_text(encoding="utf-8") if report.is_file() else ""
     check("its stdout is the report, under a stamp",
-          report_text.startswith("<!-- provenance: runtime=agy model=gemini-3.8-flash-medium ")
+          report_text.startswith("<!-- provenance: runtime=agy model=gemini-4-neon-low ")
           and LONG_CHAT_REVIEW.strip() in report_text,
           repr(report_text[:200]))
     check("the recovery is announced on stderr under the pinned phrase",
@@ -732,7 +755,7 @@ with tempfile.TemporaryDirectory() as scratch:
     gemini_api_key_file.parent.mkdir(parents=True, exist_ok=True)
     gemini_api_key_file.write_text("test-key-from-file\n", encoding="utf-8")
 
-    def received_key(dump):
+    def key_received(dump):
         return json.loads(dump.read_text(encoding="utf-8")) if dump.is_file() else "NOT RUN"
 
     for case_slug, caller_key in (("key-from-caller", "test-key-from-caller"),
@@ -744,8 +767,8 @@ with tempfile.TemporaryDirectory() as scratch:
                               {"*": {"report": "STUB AGY REVIEW\n", "dump_key": str(key_dump)}},
                               report, gemini_api_key=caller_key)
         check(f"{case_slug}: the cell exits 0 and agy is given no GEMINI_API_KEY",
-              result.returncode == 0 and received_key(key_dump) is None,
-              f"exit {result.returncode}; key={received_key(key_dump)!r}; "
+              result.returncode == 0 and key_received(key_dump) is False,
+              f"exit {result.returncode}; key received={key_received(key_dump)!r}; "
               f"stderr={result.stderr!r}")
     gemini_api_key_file.unlink()
 
@@ -756,11 +779,12 @@ with tempfile.TemporaryDirectory() as scratch:
                           {"*": {"report": "STUB AGY REVIEW\n",
                                  "dump_github_tokens": str(tokens_dump)}},
                           report, github_token="test-github-token-from-caller")
-    received_tokens = (json.loads(tokens_dump.read_text(encoding="utf-8"))
-                       if tokens_dump.is_file() else "NOT RUN")
+    received_token_names = (json.loads(tokens_dump.read_text(encoding="utf-8"))
+                            if tokens_dump.is_file() else "NOT RUN")
     check("github-token-from-caller: the cell exits 0 and agy is given no GH_TOKEN or GITHUB_TOKEN",
-          result.returncode == 0 and received_tokens == [None, None],
-          f"exit {result.returncode}; tokens={received_tokens!r}; stderr={result.stderr!r}")
+          result.returncode == 0 and received_token_names == [],
+          f"exit {result.returncode}; token names={received_token_names!r}; "
+          f"stderr={result.stderr!r}")
 
     # What the real agy 1.4.7 printed on ned-box with ~/.gemini hidden; the URL is shortened.
     agy_logged_out_stderr = (
@@ -801,13 +825,32 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the cell reports the attempt as timed out, on the cause line callers read",
           "cold-read-agy-cell: cause: timed-out — no result within 2 seconds"
           in result.stderr.splitlines()
-          and "gemini-3.8-flash-medium(timed-out)" in result.stderr,
+          and "gemini-4-neon-low(timed-out)" in result.stderr,
           repr(result.stderr))
     check("what agy printed before it was killed is on the cell's stderr",
           "stub agy: words before the hang" in result.stderr, repr(result.stderr))
     check("the process agy started is killed with agy",
           len(child_pids) == 1 and all(process_gone_within(pid, 10) for pid in child_pids),
           repr(child_pids))
+    kill_left_over_processes(child_pids)
+
+    # --- --per-model-run-timeout-seconds moves the kill with agy's deadline ---
+    repository = build_scratch_repository(scratch)
+    agy_cell_copy_killing_agy_after_seconds(repository, 15 * 60, 1)
+    report = report_path_for(repository, "agy-past-the-deadline-the-option-gives")
+    pid_file = scratch / "agy-past-the-deadline-the-option-gives-child-pids"
+    started = time.monotonic()
+    result = run_agy_cell(repository, stubs,
+                          {"*": {"hang_writing_child_pid_to": str(pid_file)}}, report,
+                          "--per-model-run-timeout-seconds", "1")
+    elapsed = time.monotonic() - started
+    child_pids = pids_written_to(pid_file)
+    check("with --per-model-run-timeout-seconds 1, the cell kills agy 1 second plus the "
+          "kill margin after it started, not at the default limit",
+          result.returncode == 1 and not report.exists() and elapsed < 60
+          and "cold-read-agy-cell: cause: timed-out — no result within 2 seconds"
+          in result.stderr.splitlines(),
+          f"exit {result.returncode}; {elapsed:.0f} s; stderr={result.stderr!r}")
     kill_left_over_processes(child_pids)
 
     # --- agy's result line ends the run, though agy hangs after it --------
@@ -831,7 +874,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and "written before the result line" in report_text,
           f"exit {result.returncode}; {elapsed:.0f} s; stderr={result.stderr!r}")
     check("the cell says it killed agy after its result line, and reports no time-out",
-          f"gemini-3.8-flash-medium {KILLED_AFTER_RESULT_LINE_WORDS}" in result.stderr
+          f"gemini-4-neon-low {KILLED_AFTER_RESULT_LINE_WORDS}" in result.stderr
           and "timed-out" not in result.stderr, repr(result.stderr))
     check("the process agy started is killed with agy, though both ignore SIGTERM",
           len(child_pids) == 1 and all(process_gone_within(pid, 10) for pid in child_pids),
@@ -940,7 +983,7 @@ with tempfile.TemporaryDirectory() as scratch:
     check("an ERROR result followed by a hang fails the cell with exit 1 within seconds",
           result.returncode == 1 and not report.exists()
           and elapsed < RESULT_LINE_ENDS_READ_WITHIN_SECONDS
-          and "gemini-3.8-flash-medium(exit1)" in result.stderr,
+          and "gemini-4-neon-low(exit1)" in result.stderr,
           f"exit {result.returncode}; {elapsed:.0f} s; stderr={result.stderr!r}")
     check("agy's AGY_ERROR line reaches the cell's stderr whole, for the fast read to parse",
           agy_error_line in result.stderr.splitlines(), repr(result.stderr))
@@ -953,7 +996,7 @@ with tempfile.TemporaryDirectory() as scratch:
                           {"*": {"stdout": agy_result_line("SUCCESS", SHORT_CHAT_REMARK),
                                  "exit": 3}}, report)
     check("an agy that prints a SUCCESS result and then exits 3 by itself fails with exit 3",
-          result.returncode == 1 and "gemini-3.8-flash-medium(exit3)" in result.stderr
+          result.returncode == 1 and "gemini-4-neon-low(exit3)" in result.stderr
           and KILLED_AFTER_RESULT_LINE_WORDS not in result.stderr,
           f"exit {result.returncode}; stderr={result.stderr!r}")
 
@@ -1005,6 +1048,55 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a cell stopped after agy exited exits 128 plus SIGTERM's number",
           launcher.returncode == 128 + signal.SIGTERM, repr(launcher.returncode))
     kill_left_over_processes(child_pids)
+
+    # --- A SIGTERM that lands while the cell starts agy --------------------
+    # Python runs a signal handler at the next bytecode, which can be inside
+    # Popen after the fork; the wrapper below sends SIGTERM at that point.
+    def run_reviewer_with_sigterm_during_launch(mode, pid_file):
+        return subprocess.run([sys.executable, "-c", (
+            "import importlib.util, os, signal, subprocess, sys\n"
+            "spec = importlib.util.spec_from_file_location('cell_common', sys.argv[1])\n"
+            "cell_common = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(cell_common)\n"
+            "mode, pid_file = sys.argv[2], sys.argv[3]\n"
+            "real_init = subprocess.Popen.__init__\n"
+            "def init_with_sigterm(self, *arguments, **keywords):\n"
+            "    if mode == 'sigterm-after-start':\n"
+            "        real_init(self, *arguments, **keywords)\n"
+            "        open(pid_file, 'w').write('%d\\n' % self.pid)\n"
+            "    if mode != 'start-fails':\n"
+            "        os.kill(os.getpid(), signal.SIGTERM)\n"
+            "    if mode != 'sigterm-after-start':\n"
+            "        raise OSError('injected start failure')\n"
+            "subprocess.Popen.__init__ = init_with_sigterm\n"
+            "try:\n"
+            "    cell_common.run_reviewer_program_in_own_process_group_until_timeout(\n"
+            "        [sys.executable, '-c', 'import time; time.sleep(60)'], None, None, 60.0,\n"
+            "        lambda line: None)\n"
+            "except OSError as error:\n"
+            "    print(error, signal.getsignal(signal.SIGTERM) is cell_common.exit_on_sigterm)\n"),
+            str(SYSTEM_DIRECTORY / "cold-read-cell-common.py"), mode, str(pid_file)],
+            capture_output=True, text=True, check=False, timeout=60)
+
+    pid_file = scratch / "sigterm-during-launch-agy-pid"
+    result = run_reviewer_with_sigterm_during_launch("sigterm-after-start", pid_file)
+    agy_pids = pids_written_to(pid_file)
+    check("a SIGTERM that lands while the cell is still starting agy leaves no agy running",
+          len(agy_pids) == 1 and all(process_gone_within(pid, 10) for pid in agy_pids),
+          f"{agy_pids}; exit {result.returncode}; stderr={result.stderr!r}")
+    check("a cell given SIGTERM while starting agy exits 128 plus SIGTERM's number",
+          result.returncode == 128 + signal.SIGTERM,
+          f"exit {result.returncode}; stderr={result.stderr!r}")
+    kill_left_over_processes(agy_pids)
+    result = run_reviewer_with_sigterm_during_launch("sigterm-then-start-fails", pid_file)
+    check("a SIGTERM that came while agy failed to start still ends the cell with 128 plus "
+          "SIGTERM's number",
+          result.returncode == 128 + signal.SIGTERM,
+          f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
+    result = run_reviewer_with_sigterm_during_launch("start-fails", pid_file)
+    check("with no SIGTERM, agy's start error reaches the caller and SIGTERM ends the cell again",
+          result.returncode == 0 and result.stdout == "injected start failure True\n",
+          f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
 
     # --- The being-written lock reaches agy on the timeout path ------------
     # The agy cell always runs its reviewer under a per-model timeout, a launch path apart from

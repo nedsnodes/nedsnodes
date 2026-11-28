@@ -35,6 +35,16 @@
         ]
       }
     ],
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -94,6 +104,11 @@
           },
           {
             "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py",
+            "timeout": 180
+          },
+          {
+            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/checkout-freshness-changed-skill-invoke-again-refusal-stop-hook.py",
             "timeout": 30
           },
@@ -101,6 +116,11 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/scripts/agent-seat-due-task-raise-hook.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook.py",
+            "timeout": 10
           },
           {
             "type": "command",
@@ -158,11 +178,6 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/synthetic-keystroke-guard-hook.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py",
             "timeout": 30
           },
           {
@@ -345,6 +360,12 @@
     "productivity@claude-plugins-official": false
   },
   "skillOverrides": {
+    "anthropic-skills:artifact-emulator": "off",
+    "anthropic-skills:built-in-browser": "off",
+    "anthropic-skills:chrome-browser": "off",
+    "anthropic-skills:computer-use": "off",
+    "anthropic-skills:deep-research": "off",
+    "anthropic-skills:import-memory": "off",
     "engineering:code-review": "off",
     "engineering:testing-strategy": "off",
     "engineering:architecture": "off",

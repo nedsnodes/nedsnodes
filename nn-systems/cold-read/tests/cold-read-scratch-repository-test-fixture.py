@@ -35,6 +35,7 @@ keeps its own.
 import importlib.util
 import os
 import shutil
+import site
 import subprocess
 import sys
 from pathlib import Path
@@ -67,6 +68,9 @@ GIT_REDIRECTING_ENVIRONMENT_VARIABLES = git_redirecting_removal.GIT_REDIRECTING_
 # cold-read-grid.py reads ned-box's home and the Mac's mount of it from this module.
 NED_BOX_HOME_MODULE = (
     SYSTEM_DIRECTORY.parent / "general-tools" / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+# cold-read-fast-read.py reads the glossaries through this program's functions.
+NEW_SHARED_NAMES_LIST_PROGRAM = (
+    SYSTEM_DIRECTORY.parent.parent / "scripts" / "new-shared-names-in-changed-files-list.py")
 # cold-read-claude-cell.py starts its claude command line from this module.
 CLAUDE_CODE_COMMAND_LINE_PREFIX_MODULE = (
     SYSTEM_DIRECTORY.parent / "general-tools"
@@ -105,6 +109,8 @@ def commit_seeded_cold_read_scratch_repository(repository):
     shutil.copy2(GIT_REDIRECTING_REMOVAL_MODULE, repository / "nn-systems" / "general-tools")
     shutil.copy2(NED_BOX_HOME_MODULE, repository / "nn-systems" / "general-tools")
     shutil.copy2(CLAUDE_CODE_COMMAND_LINE_PREFIX_MODULE, repository / "nn-systems" / "general-tools")
+    (repository / "scripts").mkdir(exist_ok=True)
+    shutil.copy2(NEW_SHARED_NAMES_LIST_PROGRAM, repository / "scripts")
     # The records tree is gitignored in the real repository, which is what
     # keeps a reviewer's own report out of the detector's sight.
     (repository / ".gitignore").write_text("cold-read-records/\n", encoding="utf-8")
@@ -162,7 +168,9 @@ def cold_read_fast_read_scratch_repository_whose_stub_agy_answers_in_chat(scratc
     # A scratch HOME, so the agy cell's sandbox masks paths in it, not the real home's.
     home = scratch / "fast-read-scratch-home"
     home.mkdir()
-    environment = dict(os.environ, HOME=str(home),
+    # The per-user site-packages are found from HOME, so a scratch HOME hides the pinned
+    # libraries and the program under test would run a pip install, which can time out.
+    environment = dict(os.environ, HOME=str(home), PYTHONUSERBASE=site.getuserbase(),
                        PATH=f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}",
                        COLD_READ_RECORD_SHIP_DESTINATION=str(ship_destination))
     # A suite run inside an agent-session must not write that session's ID beside the report.

@@ -8,8 +8,7 @@ two suites sharing one copy would see each other's patches.
 Loading it puts in place, for the rest of the process, the sandboxes every
 case relies on: a scratch HOME, so no launch writes the real ~/.claude.json;
 no TMUX or TMUX_PANE, so no supervisor start pipes the calling agent-seat's
-tmux pane, and a scratch terminal captures directory; an ssh first on PATH that never reaches ned-box, an empty
-directory standing in for the overview reminders' marks, and a directory of
+tmux pane, and a scratch terminal captures directory; an ssh first on PATH that never reaches ned-box, and a directory of
 the process's own for the agent-binary update lock.
 
 Not a test file: its name ends `-test-fixture.py` rather than `-test.py`, so
@@ -97,26 +96,6 @@ atexit.register(shutil.rmtree, SSH_THAT_NEVER_REACHES_NED_BOX_DIRECTORY, True)
 (SSH_THAT_NEVER_REACHES_NED_BOX_DIRECTORY / "ssh").chmod(0o755)
 os.environ["PATH"] = (f"{SSH_THAT_NEVER_REACHES_NED_BOX_DIRECTORY}{os.pathsep}"
                       f"{os.environ.get('PATH', '')}")
-
-# No case run in this process may read the real marks of the day's overview
-# reminders either. overview_refresh_due_lines reads them whenever a system's
-# line is still to give, and a read that fails adds a line of its own; so on
-# both machines the read is local, of this directory, which holds nothing and
-# stands in for the log-store's. The once-a-day cases put a marks directory,
-# an ssh and the real choice of machine back in place. A case that launches
-# the real supervisor as a process of its own is outside this: on ned-box that
-# process reads the log-store's real directory, for a fixture system no real
-# mark is ever written for, and it writes nothing; on the Mac the ssh above
-# refuses its read.
-SSH_TARGET_FOR_THIS_MACHINE_UNPATCHED = None
-if hasattr(supervisor, "handoff_architecture_overview_refresh_user_shown_mark"):
-    supervisor.handoff_architecture_overview_refresh_user_shown_mark \
-        .DAILY_OVERVIEW_REFRESH_REMINDER_MARKS_DIRECTORY = str(
-            SSH_THAT_NEVER_REACHES_NED_BOX_DIRECTORY / "no-overview-refresh-reminder-marks")
-    SSH_TARGET_FOR_THIS_MACHINE_UNPATCHED = (
-        supervisor.handoff_architecture_overview_refresh_user_shown_mark.ssh_target_for_this_machine)
-    supervisor.handoff_architecture_overview_refresh_user_shown_mark.ssh_target_for_this_machine = (
-        lambda: None)
 
 # The agent-binary update cases take the machine-wide update lock, so the lock
 # is pointed into a directory of this process's own: a suite run must neither

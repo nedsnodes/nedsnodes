@@ -33,7 +33,7 @@ Why it matters: the design is the specification the design-to-main build, GHI [B
 
 ### Resume routing
 
-12. The design does not give the routing on `resume` when several artifacts are edited, both work-streams' artifacts, a component file together with another file, or an edit together with a named destination; and `resume` routes "the earliest state downstream of what the user changed" without saying how a record-only edit inside the component's record directory, such as a corrected note, is classed. Reports: CHD 24, CHD 30, XHD 14, XHD 15, XHD 16, XHS 6, CHS 24, Q3.1.
+12. The design does not give the routing on `resume` when several artifacts are edited, both work-streams' artifacts, a component file together with another file, or an edit together with a named destination; and `resume` routes "the earliest state downstream of what the user changed" without saying how an edit only to files inside the component's record directory, such as a corrected note, is classed. Reports: CHD 24, CHD 30, XHD 14, XHD 15, XHD 16, XHS 6, CHS 24, Q3.1.
 13. The arbitrator's instructions say "`stop` is how a run ends", but a `resume` toward a redesign at the redesigns ceiling ends the workflow execution (row 73), and so does the main-gatekeeper accepting after `submit-to-PR-gate`. Reports: CHD 14, XHD 6.
 14. "Any document the user edited is re-read" does not say whether scripts and tests count, nor who receives the cold-read reports. Reports: CHD 34, XHD 17.
 
@@ -63,14 +63,22 @@ Why it matters: the design is the specification the design-to-main build, GHI [B
 
 28. The cold-read-fast-read's question 4 proposes code for work the agents now do by hand: running and counting the two cold-read-full-runs of the investigation report (Q4.2); writing the report's header from what the machine holds and checking that each commit it cites exists (Q4.3); refusing a `resume` whose branch was rebased, since the resume's diff starts at the commit the investigation opened at (Q4.4); and checking that each `rulings` entry is the user's words verbatim (Q4.6). The cold-read-fast-read of this GHI-MD added two more: a test pairing each prose list in the design with the constant that holds the same rule in code, as the design's tables are already paired, so the prose cannot drift from the code again; and, once the user has decided the terms of defect 27, a test that fails when a retired word comes back into these files.
 
+### Found later, outside that cold read
+
+29. §4's paragraph "Every writing state that emits prose cold-reads it inside the state before emitting" (line 366 of the design on `main` at commit `553233b9f`) says the cold-read reports return to the writer, "never to a fresh one", and backs it with "a fresh author given the reports resolved 14–17 of 50 known defects; the writer's own revision resolved 42.7". The report it cites, `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/2026-09-03-cold-read-tier-roster-campaign/REPORT.md`, finding 3 below its table of arms, says the 42.7 came from "the author's own 09-02 fix pass", which "had the repository, could measure git's actual behaviour, and worked without a word budget", while the one-pass authors had "no repo access" and were held "within 90 to 96 percent of the original length". So the two numbers differ in repository access and word budget as well as in who revised, and do not show that the writer revises better than a fresh agent. The user has not decided on the rule itself; only its evidence is in question. Agent-seat MD-skills found this on 2026-11-22.
+
 ## The work
 
 Several of these rules are already held in code, so a change to the prose may also change the code and its tests: the required state-exit fields are `STATE_EXIT_JSON_FIELDS_REQUIRED` and the resume routing is `RESUME_DESTINATION_BY_EDITED_DOCUMENT`, both in `scripts/design-to-main/design-to-main-state-tables-common.py`; `refuse_a_write_that_named_no_file` (defect 18) and `refuse_malformed_resume` (defect 10) are in `scripts/design-to-main/design-to-main-state-machine.py`; and tests pair the design's tables with the code in the same file. The design is a file the instruction-file guard protects, by its `.design.md` name; the agent-instructions in `docs/agents/queue/`, which are pending approval, are not.
 
 1. Check each defect against `main` as it then stands, and drop each one `main` has fixed.
-2. Bring the user the remaining defects, each with a proposed change, the term proposals of defect 27 and the programs of defect 28, in one approval-walk. Its first item asks whether this work waits until the design-to-main build resumes.
-3. Carry out what he approves, in as many pull requests cut from `main` as the project's one-topic rule for pull requests requires; each program of defect 28 he approves is its own pull request. Record each defect's outcome in this GHI-MD: a defect he disapproves is marked as left as it is, and one he defers stays listed here. Close this GHI when no defect is left undecided or approved but not carried out.
+2. Bring the user the remaining defects, each with a proposed change, the term proposals of defect 27 and the programs of defect 28, in one approval-walk.
+3. Carry out what he approves, in as many pull requests cut from `main` as `CLAUDE.md` requires, since each pull request merges one nn-topic-branch and holds nothing outside its topic; each program of defect 28 he approves is its own pull request. Record each defect's outcome in this GHI-MD: a defect he disapproves is marked as left as it is, and one he defers stays listed here. Close this GHI when no defect is left undecided or approved but not carried out.
+
+## What is decided
+
+- On 2026-11-22 the user deferred this GHI's defects until he resumes the design-to-main build, and said to coordinate then with the agent-seats Cpc and helper2. His user-ruling is item 36 of `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/ai-native-software-development-objective-page-cleanup-2026-11-17-minutes.md`.
 
 ## Next action
 
-The agent-seat agent-instructions-editor, which makes changes to the files the instruction-file guard protects, does work item 1 and runs the approval-walk of work item 2. The design-to-main build is paused by the user since 2026-09-16, per GHI [Build the design-to-main state machine: the Python machine, its per-state agent-instructions, and the nine items the design defers to the build](https://github.com/nedsnodes/nedsnodes/issues/282).
+None until the user resumes the design-to-main build. Then the agent-seat agent-instructions-editor, which makes changes to the files the instruction-file guard protects, does work item 1 and runs the approval-walk of work item 2. The design-to-main build is paused by the user since 2026-09-16, per GHI [Build the design-to-main state machine: the Python machine, its per-state agent-instructions, and the nine items the design defers to the build](https://github.com/nedsnodes/nedsnodes/issues/282).

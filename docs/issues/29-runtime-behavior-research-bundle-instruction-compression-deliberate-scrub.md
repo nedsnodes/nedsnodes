@@ -6,7 +6,7 @@ issue: "[Runtime-behavior research bundle: instruction compression + deliberate 
 
 ## What this captures
 
-The runtime-behavior research bundle — task-shaped items dispersed from pair GHI [Working ideas and research backlog — capture pair (Decided / Candidate / Research / Reference)](https://github.com/nedsnodes/nedsnodes/issues/10)'s "Claude and Codex runtime research" section (walk item 17 cluster 3, boss-ruled 2026-07-26: task-shaped work gets a GHI, never a doc-only capture). Captured, not scheduled; lean bundle rather than nine micro-issues.
+The runtime-behavior research bundle — task-shaped items dispersed from pair GHI [Working ideas and research backlog — capture pair (Decided / Candidate / Research / Reference)](https://github.com/nedsnodes/nedsnodes/issues/10)'s "Claude Code and Codex research" section (walk item 17 cluster 3, boss-ruled 2026-07-26: task-shaped work gets a GHI, never a doc-only capture). Captured, not scheduled; lean bundle rather than nine micro-issues.
 
 1. Instruction-compression experiments: try smaller CLAUDE.md, AGENTS.md, and wiki files while measuring whether FRESH-AGENT BEHAVIOR loses essential rules. Fewer words alone is not success — behavior is the measure. Feeds the step-2 CLAUDE.md rewrite.
 2. The companion method: scrub instruction files deliberately rather than repeatedly squeezing them — repeated compression passes drop qualifiers and scope conditions invisibly (the legacy over-claiming clause in wiki-page-standards.md documents the mechanism: the unqualified sentence is shorter and reads cleaner, so qualifiers go first).

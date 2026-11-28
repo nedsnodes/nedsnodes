@@ -24,9 +24,14 @@ Git ignores a post-merge hook's exit code; the merge stands either way. Git
 puts this program's output on its own stderr; checkout-freshness-catch-up.py,
 which fast-forwards the reference-checkout, shows the user any FAILED line.
 
-Exit codes: 0 nothing to restart, or the restart succeeded; 1 git could not
-list the merge's changes, or the restart failed, with git's or systemctl's
-error on standard error.
+Exit codes: 0 outside any Git checkout, not ned-box's reference-checkout,
+nothing to restart, or the restart succeeded; 1 `git rev-parse --show-toplevel`
+failed for another reason, such as a GIT_DIR naming a missing directory, git
+could not list the merge's changes, or the restart failed, with git's or
+systemctl's error on standard error. After either git failure in ned-box's
+reference-checkout, told without git by the current directory, the checkout's
+top directory that git runs this program in, the service is restarted anyway
+and the exit code is still 1.
 """
 
 import argparse
@@ -49,45 +54,32 @@ _ned_box_paths_spec = importlib.util.spec_from_file_location(
 ned_box_paths = importlib.util.module_from_spec(_ned_box_paths_spec)
 _ned_box_paths_spec.loader.exec_module(ned_box_paths)
 
+_git_output_spec = importlib.util.spec_from_file_location(
+    "git_machine_readable_output_runner_and_parser_common",
+    Path(__file__).resolve().parents[1] / "general-tools"
+    / "git-machine-readable-output-runner-and-parser-common.py")
+git_output = importlib.util.module_from_spec(_git_output_spec)
+_git_output_spec.loader.exec_module(git_output)
+
 NED_BOX_REFERENCE_CHECKOUT = f"{ned_box_paths.NED_BOX_HOME}/Projects/nedsnodes"
 
+AFTER_A_GIT_FAILURE = (
+    "Put right what git names, such as a GIT_DIR that names a missing directory.\n"
+    "If you are a subagent, give this whole message to the agent that dispatched you.\n"
+    "If you cannot put it right, tell the user, quoting this whole message.")
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--reference-checkout", default=NED_BOX_REFERENCE_CHECKOUT)
-    arguments = parser.parse_args(argv)
-    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
-    if top.returncode != 0 or os.path.realpath(top.stdout.strip()) \
-            != os.path.realpath(arguments.reference_checkout):
-        return EXIT_DONE
-    # Spelled out, not $(id -u): run over ssh from the Mac, $(id -u) expands on the Mac.
-    runtime_directory = f"XDG_RUNTIME_DIR=/run/user/{os.getuid()}"
-    changed = subprocess.run(["git", "diff", "--name-only", "ORIG_HEAD", "HEAD", "--",
-                              *NN_SHARED_DATABASE_SERVICE_RESTART_AFTER_MERGE_TRIGGER_FILES], capture_output=True, text=True)
-    if changed.returncode != 0:
-        print(f"{PROGRAM}: FAILED — `git diff --name-only ORIG_HEAD HEAD` in "
-              f"{arguments.reference_checkout} exited {changed.returncode}, so this merge's "
-              f"changes to the nn-shared-database service are unknown and the service was not "
-              f"restarted: {changed.stderr.strip()}\n"
-              f"Every command below runs on ned-box; from the Mac, run it as "
-              f"ssh nedlern@ned-box '<the command>'.\n"
-              f"Restart the service: `{runtime_directory} systemctl --user restart {UNIT_NAME}`. "
-              f"A restart is safe even if the merge did not change the service.\n"
-              f"If the restart succeeds, you are done; report nothing.\n"
-              f"If what systemctl prints, on either output, includes \"Unit {UNIT_NAME} not "
-              f"found.\", the unit's install step has "
-              f"not run on ned-box yet; that step is the user's, so you are done; report nothing.\n"
-              f"If systemctl fails for any other reason, run "
-              f"`{runtime_directory} journalctl --user -u {UNIT_NAME} -n 50`. Then, if you are a "
-              f"subagent, tell the agent that dispatched you; otherwise tell the user. Say that "
-              f"the nn-shared-database service could not be restarted after a merge, and quote "
-              f"three things: the lines of this message above the line that starts "
-              f"\"Every command below\"; what your restart command printed; and what journalctl "
-              f"printed.",
-              file=sys.stderr)
-        return EXIT_FAILED
-    if not changed.stdout.strip():
-        return EXIT_DONE
+
+def in_reference_checkout_without_git(reference_checkout):
+    """Whether the current directory is the reference-checkout, which git runs this program in."""
+    try:
+        current = os.getcwd()
+    except FileNotFoundError:
+        return False
+    return os.path.realpath(current) == os.path.realpath(reference_checkout)
+
+
+def restart_service(merge_changed_it):
+    """Restart the unit, print its outcome, and return the exit code it earns."""
     # An agent's Stop hook can run this merge without XDG_RUNTIME_DIR, and
     # systemctl --user then cannot find the user bus, which lives there.
     environment = {**os.environ}
@@ -95,7 +87,8 @@ def main(argv=None):
     restarted = subprocess.run(["systemctl", "--user", "restart", UNIT_NAME],
                                capture_output=True, text=True, env=environment)
     if restarted.returncode != 0:
-        print(f"{PROGRAM}: FAILED — the merge changed the nn-shared-database service, and "
+        reason = "the merge changed the nn-shared-database service, and " if merge_changed_it else ""
+        print(f"{PROGRAM}: FAILED — {reason}"
               f"`systemctl --user restart {UNIT_NAME}` exited {restarted.returncode}, so the "
               f"service may still run the code from before the merge, or not run at all. "
               f"systemctl said: {restarted.stderr.strip()}\n"
@@ -107,8 +100,51 @@ def main(argv=None):
               f"subagent, tell the agent that dispatched you instead, with the same quotes.",
               file=sys.stderr)
         return EXIT_FAILED
-    print(f"{PROGRAM}: restarted {UNIT_NAME}, since the merge changed the service")
+    if merge_changed_it:
+        print(f"{PROGRAM}: restarted {UNIT_NAME}, since the merge changed the service")
+    else:
+        print(f"{PROGRAM}: restarted {UNIT_NAME}, which is safe whether or not the merge changed it")
     return EXIT_DONE
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--reference-checkout", default=NED_BOX_REFERENCE_CHECKOUT)
+    arguments = parser.parse_args(argv)
+    # LC_ALL=C keeps git's message in English, so the outside-a-checkout case can be told apart.
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                         env={**os.environ, "LC_ALL": "C"})
+    if top.returncode != 0:
+        if git_output.git_stderr_says_outside_a_repository(top.stderr):
+            return EXIT_DONE
+        failed = (f"{PROGRAM}: FAILED — `git rev-parse --show-toplevel` exited {top.returncode} "
+                  f"for a reason other than the current directory being outside any Git checkout")
+        git_said = git_output.git_stderr_first_error_message_else_last_line(top.stderr)
+        if not in_reference_checkout_without_git(arguments.reference_checkout):
+            print(f"{failed}; this is not ned-box's reference-checkout, so the "
+                  f"nn-shared-database service needs no restart. git said: {git_said}\n"
+                  f"{AFTER_A_GIT_FAILURE}", file=sys.stderr)
+            return EXIT_FAILED
+        print(f"{failed}, so this program could not tell whether this merge changed the "
+              f"nn-shared-database service, and restarts the service below, which is safe "
+              f"either way. git said: {git_said}\n{AFTER_A_GIT_FAILURE}", file=sys.stderr)
+        restart_service(merge_changed_it=False)
+        return EXIT_FAILED
+    if os.path.realpath(top.stdout.strip()) != os.path.realpath(arguments.reference_checkout):
+        return EXIT_DONE
+    changed = subprocess.run(["git", "diff", "--name-only", "ORIG_HEAD", "HEAD", "--",
+                              *NN_SHARED_DATABASE_SERVICE_RESTART_AFTER_MERGE_TRIGGER_FILES], capture_output=True, text=True)
+    if changed.returncode != 0:
+        print(f"{PROGRAM}: FAILED — `git diff --name-only ORIG_HEAD HEAD` in "
+              f"{arguments.reference_checkout} exited {changed.returncode}, so this merge's "
+              f"changes to the nn-shared-database service are unknown, and this program "
+              f"restarts the service below, which is safe either way: {changed.stderr.strip()}\n"
+              f"{AFTER_A_GIT_FAILURE}", file=sys.stderr)
+        restart_service(merge_changed_it=False)
+        return EXIT_FAILED
+    if not changed.stdout.strip():
+        return EXIT_DONE
+    return restart_service(merge_changed_it=True)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,16 @@
       }
     },
     {
+      "name": "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write",
+      "owner": "prime-intellect",
+      "program": "scripts/standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.py",
+      "arguments": ["--failures-only"],
+      "output": ".claude/standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.log",
+      "on": {
+        "ned-box": {"scheduler": "cron", "schedule": "* * * * *"}
+      }
+    },
+    {
       "name": "log-store-session-dialogs-refresh",
       "owner": "cold-read-research",
       "program": "scripts/log-store-session-dialogs-refresh-hack.py",
@@ -59,16 +69,6 @@
       "output": ".claude/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.log",
       "on": {
         "ned-box": {"scheduler": "cron", "schedule": "*/10 * * * *"}
-      }
-    },
-    {
-      "name": "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open",
-      "owner": "fleet-restart-at-login",
-      "program": "scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py",
-      "arguments": [],
-      "output": ".claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log",
-      "on": {
-        "ned-box": {"scheduler": "cron", "schedule": "30 0 * * *"}
       }
     },
     {
@@ -133,15 +133,15 @@
       }
     },
     {
-      "name": "guarded-file-versions-and-approvals-store-removed-checkout-copies-prune",
+      "name": "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune",
       "owner": "reboot-test",
-      "program": "nn-systems/general-tools/guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.py",
+      "program": "nn-systems/general-tools/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py",
       "arguments": [],
-      "output": ".claude/guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.log",
+      "output": ".claude/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.log",
       "on": {
         "mac": {
           "scheduler": "launchd",
-          "label": "com.nedsnodes.guarded-file-versions-and-approvals-store-removed-checkout-copies-prune",
+          "label": "com.nedsnodes.guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune",
           "launchd_keys": {"StartCalendarInterval": {"Hour": 7, "Minute": 0}}
         },
         "ned-box": {"scheduler": "cron", "schedule": "0 7 * * *"}
@@ -234,6 +234,16 @@
           "launchd_keys": {"StartCalendarInterval": {"Hour": 5, "Minute": 45}}
         },
         "ned-box": {"scheduler": "cron", "schedule": "45 5 * * *"}
+      }
+    },
+    {
+      "name": "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job",
+      "owner": "merge-lane-2",
+      "program": "scripts/merge-lane-open-prs-watch-and-reviewer-assign.py",
+      "arguments": ["--poll-once"],
+      "output": ".claude/merge-lane-open-prs-watch-and-reviewer-assign-poll-once.log",
+      "on": {
+        "ned-box": {"scheduler": "cron", "schedule": "* * * * *"}
       }
     }
   ]

@@ -90,6 +90,16 @@ with the design:
      differ is overwritten, and the sha256 of the copy it displaced is
      announced on its own stderr line: a triage shipped three times leaves a
      trace of each displaced version rather than one silent overwrite.
+
+     ONLY BY A NEWER COPY. A stored triage file whose modification time, in
+     whole seconds, is later than the local copy's is left as it is and the
+     record is REFUSED, its one line giving the command that copies the
+     store's triage over the local one and saying to merge instead when the
+     local copy holds changes the store's lacks. rsync -a keeps the local
+     modification time, so a store copy is newer only when it was written
+     after this checkout's copy, as when a line was appended to it in the
+     store or another checkout shipped a later one; replacing it would put
+     back an older copy and lose what was added.
      This is what nn-systems/skills/walk-me-through/walk-files-ship.py already does for a walk's minutes
      and dispositions -- same digest announcement, same stderr form -- ruled by
      the user on 2026-09-18 at item 5 of the walk
@@ -218,6 +228,7 @@ the invocation). A destination with no `host:` prefix is local.
 """
 
 import argparse
+import datetime
 import fcntl
 import hashlib
 import inspect
@@ -341,6 +352,9 @@ in the nedschorus repository, which this machine also clones:
   `scripts/sanity-check-record-ship.py`
 - `walk/` -- approval-walk files, named by the walk-me-through skill, shipped
   by `nn-systems/skills/walk-me-through/walk-files-ship.py`
+- `walk-document-copies/` -- timestamped copies of each open walk's walk-document, the newest
+  20 of each walk, written by
+  `nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py`
 - `agent-session-files-by-machine/` -- each machine's session transcripts, handoffs,
   task lists, seat-briefs and global CLAUDE.md, mirrored by
   `scripts/transcript-mirror-to-log-store.py`
@@ -615,6 +629,11 @@ def failed_log_store_rsync_step_reason_text_build_from_log_store_host_unreachabl
 
 class FirstLineUnreadable(Exception):
     """A file's first line could not be read; the message says why."""
+
+
+def utc_text_of_epoch_seconds(seconds: int) -> str:
+    return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%SZ")
 
 
 def local_first_line(path: pathlib.Path) -> str:
@@ -907,6 +926,9 @@ def place_staged_files_and_read_them_back(request: dict) -> dict:
         was placed.
       stored -- the store's digest of each added file and of a replaced
         triage file, read after placing; a name absent here is not in the store.
+      triage_newer_in_store -- [the store's triage file's modification time,
+        the staged one's], in whole seconds, when the store's copy differs and
+        is the newer, so it was left as it was (rule 4); otherwise None.
     """
     import hashlib
     import os
@@ -933,6 +955,7 @@ def place_staged_files_and_read_them_back(request: dict) -> dict:
                     "stored": {}}
         added = sorted(relative for relative in local if relative not in in_store)
         displaced = None
+        newer = None
         for relative in added:
             target = store / relative
             try:
@@ -952,16 +975,23 @@ def place_staged_files_and_read_them_back(request: dict) -> dict:
             if replaceable in local and triage.is_file():
                 held = digest_of(triage)
                 if held != local[replaceable]:
-                    # A rename within one filesystem: the name holds the old
-                    # file or the new one, never part of either.
-                    os.replace(staging / replaceable, triage)
-                    displaced = held
+                    # Whole seconds, because rsync may keep only the seconds
+                    # of the staged copy's modification time.
+                    store_seconds = int(triage.stat().st_mtime)
+                    staged_seconds = int((staging / replaceable).stat().st_mtime)
+                    if store_seconds > staged_seconds:
+                        newer = [store_seconds, staged_seconds]
+                    else:
+                        # A rename within one filesystem: the name holds the old
+                        # file or the new one, never part of either.
+                        os.replace(staging / replaceable, triage)
+                        displaced = held
         read_back = added + ([replaceable] if displaced is not None
                              and replaceable not in added else [])
         stored = {relative: digest_of(store / relative) for relative in read_back
                   if (store / relative).is_file()}
         return {"differing": [], "added": added, "displaced": displaced,
-                "stored": stored}
+                "stored": stored, "triage_newer_in_store": newer}
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -1475,6 +1505,37 @@ def ship_one(host, records_path: pathlib.PurePosixPath, record_dir: pathlib.Path
     if outcome["differing"]:
         return refuse(outcome["differing"])
     added, stored = outcome["added"], outcome["stored"]
+    if outcome.get("triage_newer_in_store"):
+        store_seconds, local_seconds = outcome["triage_newer_in_store"]
+        stored_triage_path = store_dir / triage_name
+        local_triage_path = record_dir / triage_name
+        compare = (f"ssh {shlex.quote(host)} cat {shlex.quote(str(stored_triage_path))} | "
+                   f"diff {shlex.quote(str(local_triage_path))} -" if host
+                   else shlex.join(["diff", str(local_triage_path), str(stored_triage_path)]))
+        fetch = shlex.join((["scp", f"{host}:{stored_triage_path}"] if host
+                            else ["cp", str(stored_triage_path)]) + [str(local_triage_path)])
+        ship_again = shlex.join([sys.argv[0], str(record_dir)])
+        print(f"REFUSED: {name} — the log-store's {triage_name} in {citation} was modified "
+              f"at {utc_text_of_epoch_seconds(store_seconds)}, after this checkout's "
+              f"{local_triage_path} at {utc_text_of_epoch_seconds(local_seconds)}, and "
+              f"holds other content, so the log-store's copy was kept and not replaced by "
+              f"this older one"
+              f"{'; the other new files were added, and a later shipment finds them already there' if added else ''}. "
+              f"Compare the two with `{compare}`: of its output, lines opening `>` hold "
+              f"text only the log-store's copy has, and lines opening `<` text only this "
+              f"checkout's copy has; its other lines are position headers. If no line opens "
+              f"`<`, replace this checkout's copy with the log-store's with `{fetch}`; "
+              f"nothing else is needed, and shipping again says nothing new. If "
+              f"lines open both `<` and `>`, edit this checkout's copy so it keeps the "
+              f"log-store's `>` text that is still wanted, then ship again with "
+              f"`{ship_again}`: the edited copy is newer, so it replaces the log-store's. "
+              f"If no line opens `>`, or this checkout's copy should replace the "
+              f"log-store's as it is, run `touch {shlex.quote(str(local_triage_path))}` to "
+              f"make it the newer, then ship again. From now on, edit "
+              f"a record's {triage_name} in a checkout and ship it, never in the "
+              f"log-store directly: an edit made only in the log-store leaves every "
+              f"checkout's copy older, and the next shipment from one meets this refusal.")
+        return EXIT_REFUSED
     displaced_triage_digest = outcome["displaced"]
     if displaced_triage_digest is not None and triage_name in added:
         added.remove(triage_name)

@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Before anything runs git: a run started with GIT_DIR set must still build this
@@ -329,12 +330,24 @@ if PARSER_AVAILABLE:
     for case_name, text in CLEAN_CASES:
         check(f"silent: {case_name}", hook.markdown_has_hard_wrapped_paragraph(text) is False)
 
-    large_text = ("One whole paragraph on one line.\n\n" * 50000)
-    import time as _time
-    _started = _time.monotonic()
-    hook.markdown_has_hard_wrapped_paragraph(large_text)
-    check("a 1.6 MB file is judged in under five seconds",
-          _time.monotonic() - _started < 5.0)
+    def detector_cpu_seconds_best_of_three(paragraphs):
+        text = "One whole paragraph on one line.\n\n" * paragraphs
+        runs = []
+        for _ in range(3):
+            # CPU time, because wall-clock time on a loaded machine measures the machine, not the detector.
+            started = time.process_time()
+            hook.markdown_has_hard_wrapped_paragraph(text)
+            runs.append(time.process_time() - started)
+        return min(runs)
+
+    # A cap alone passes a detector whose cost grows with the square of the input while the 1.6 MB text
+    # still fits under it; at four times the text, linear work takes about 4 times as long, quadratic about 16.
+    quarter_cpu_seconds = detector_cpu_seconds_best_of_three(12500)
+    full_cpu_seconds = detector_cpu_seconds_best_of_three(50000)
+    check("a 1.6 MB file is judged in less than 8 times the CPU time of one a quarter its size, and under "
+          "five seconds of CPU time",
+          full_cpu_seconds < 8 * quarter_cpu_seconds and full_cpu_seconds < 5.0,
+          f"{full_cpu_seconds:.3f} CPU seconds for 1.6 MB, {quarter_cpu_seconds:.3f} for a quarter of it")
 else:
     print("the detector's cases were not run: markdown-it-py is missing")
 

@@ -13,7 +13,7 @@ A system in which one human and a small number of AI agents build and improve th
 ## The actors
 
 - **The user** — the human. Reads every checked-in document, admits every rung of automation, owns every judgment only a human can make.
-- **Agent-seats** — the named, long-lived agents that do the work, one subject area each; the seat merge-lane-2 reviews and merges every pull request. Why the work is divided this way: `docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md`.
+- **Agent-seats** — the named, long-lived agents that do the work, one subject area each; the seat merge-lane-2 merges every pull request, and it, merge-lane-1 and merge-lane-3 manage their reviews. Why the work is divided this way: `docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md`.
 
 ## The agent model
 
@@ -31,7 +31,7 @@ Two kinds of agent, each defined in the glossary, `docs/nedsnodes-wiki/nedsnodes
 | `~/.claude/handoffs/` | Session handoffs, one file per agent-seat, on each machine only and never committed. |
 | `nn-queue/` | Notes the user requested in July and August 2026, all walked; takes no new notes |
 | `docs/nedsnodes-wiki/queue/`, `docs/issues/queue/` | Destination-rooted queues: wiki-bound doctrine and GHI-MD-bound documents awaiting the user's drain (promote / edit / demote / drop). |
-| `nn-systems/` | The project's built systems, one directory each with its program, design document and tests: `handoff/` (session reincarnation, the handoff-supervisor and the handoff writer) and `main-gatekeeper/` (the program meant to be the only way a change reaches main, dormant until activated). |
+| `nn-systems/` | The project's built systems, one directory each: `cold-read/` (the programs that run a cold-read-fast-read and a cold-read-full-run), `handoff/` (session reincarnation, the handoff-supervisor and the handoff writer), `main-gatekeeper/` (the program meant to be the only way a change reaches main, dormant until activated), `nn-shared-database/` (the service of the nn-shared-database) and `skills/` (programs that some of the skills run); beside them, `general-tools/`, which is not a system, as the glossary's nn-system entry says. |
 | Issues labeled `queue-drain-candidate` | Issues awaiting the user's drain — same format as every issue, walkable; no work ever waits on one, and nothing requiring the user's admission takes effect without it. |
 
 ## Working in a fresh clone

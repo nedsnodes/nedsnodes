@@ -31,16 +31,45 @@ Then main is tested where the merge changed it: the program fetches the merge
 commit alone from origin into --review-tools-worktree-at-main, which updates no
 remote-tracking branch, makes a detached worktree pr<n>-merge-commit-on-main-worktree
 at the merge commit GitHub reports, and runs that worktree's own
-scripts/run-all-test-suites.py --only-suites-whose-recorded-inputs-changed-since
-<since>, so only the suites whose recorded inputs changed since a tested tree
-run. <since> is the pr<n>-merged commit the head test run passed on: of the
+scripts/run-all-test-suites.py with --only-suites-whose-recorded-inputs-changed-since
+once for each commit it compares with, so only the suites whose recorded inputs
+changed since a tested tree run: a suite runs only when the comparison with every
+such commit selects it, except that the runner judges a suite the head test run
+leaves out by the first commit given alone, so the program gives the suite
+selection main commit below first. Two commits are compared with when both are known. One is
+the suite selection main commit, the newest main commit after whose after-merge test run
+this program exited 0, which the program reads from
+~/.local/state/nedsnodes/merge-lane-after-merge-test-run-suite-selection-main-commit.txt
+and uses when git says it is an ancestor of the merge commit. When the
+program is to exit 0 after a merge into main, as it does when the test run
+failed only tests already on the failed suites record below, it writes the
+merge commit to that file just before its closing message, unless the file
+names the merge commit or a commit descending from it: the suite selection main commit
+moves forward, never back, so when two after-merge test runs overlap and the
+later commit's run finishes first, the earlier commit's run leaves the later
+commit in the file. After any other exit the file stays as it was; a
+merge into another branch leaves both that file and the failed suites record
+as they were. A suite on that record is still run on every later merge, by the
+rerun below, though the suite selection main commit has moved past the commit that first
+failed it. When the file is missing and the file of its former name,
+newest-main-commit-whose-after-merge-test-run-left-no-test-failing.txt, is
+there, the program first renames that file to it. The file is not used when it
+is missing, unreadable, malformed, or names a commit that is not an ancestor,
+which the program prints. The other is the pr<n>-merged commit the head test run passed on: of the
 records pull-request-head-test-run.py filed under hr/pr<n>/log-store in the
 worktrees and outputs directory, one test log per pr<n>-merged commit, named
 by its hash, the program takes each test log whose last record says it tested
 that commit and exited 0, and uses the one started last. When there is no
-such record, or a test log cannot be read, which the program prints, <since>
-is the nn-head-commit, which predates main's newer merges and so selects more
-suites, never fewer; the program prints that it fell back. The run's suite logs and test-run-report.txt go in
+such record, a test log cannot be read, or git cannot read the commit, which
+the program prints, no head test run gives a commit. When the suite selection main commit
+is not known, the nn-head-commit, which predates main's newer merges and so
+selects more suites, never fewer, takes its place as the first commit; so with
+neither known, the program compares with the nn-head-commit alone, and with no
+head test run's commit, with the first commit alone; the program prints which.
+When the test runner at the merge commit predates comparing with several
+commits, the program compares with the first commit alone and says so. The page
+docs/nedsnodes-wiki/nedsnodes-how-the-test-runner-selects-which-nn-test-suites-a-test-run-runs.md
+says why both comparisons are made. The run's suite logs and test-run-report.txt go in
 <merge-lane-worktrees-and-outputs-directory>/pr<n>-after-merge-test-run-logs-<the
 merge commit's first 12 characters>. The program prints the run's SUMMARY line,
 each failed suite's line, and that directory, then removes the worktree.
@@ -57,6 +86,32 @@ not selected again. After the run, it adopts from the runner's default
 directory, where the after-merge test run saved its recordings, into hr/store.
 It prints how many it adopted each time. A failed adoption or removal does not
 stop what follows: the program goes on, and exits 3.
+
+After that run the program keeps failed tests in view, in the record of
+scripts/merge-lane-failed-after-merge-test-suites-on-main-record.py, whose
+notice merge-gate.sh prints. It runs each recorded suite the selective run did
+not run, with --only-suites-named, and reads each test's verdict from the
+runs' junit.xml. A recorded test leaves the record when it passes; when its
+suite ran to the end, at a later commit than the one where the test last
+failed, failed no test, and reported nothing for it, not even a skip; or when git no longer
+lists its suite at the merge commit. It prints the name of each test that
+leaves. Each failed test not yet recorded joins it, and those tests together
+get one repair task, on the task list of the agent-seat that authored the
+merged branch's last commit. When that agent-seat has no task list or no
+checkout, no task is opened and the STOP message says to ask the user. A
+merge whose only failures are tests already recorded, with every suite run
+to the end and every step done, prints a notice and exits 0, because their
+repair task is already open; a new failed test in a recorded suite exits 3.
+A merge into a branch other than main leaves the record as it was, reruns no
+suite and opens no repair task, because the record and its repair tasks cover
+main alone. A failed test counts as main's when the record holds it and the
+merge commit descends from the main commit whose test run first failed it: the
+branch then holds main's failure. Such failures alone, with every suite run to
+the end and every step done, print a notice and exit 0. Any other failed test,
+one the record does not hold or one the branch was cut before main began
+failing, is a STOP, exit 3, that names the branch and tells the pull request's
+author and the user, since only that author can fix it before the branch
+merges into main.
 
 The merge command deletes the pull request's branch, and GitHub closes every
 open pull request whose base branch is deleted. The retarget is here, not in
@@ -79,6 +134,15 @@ refuses the checkout and the program stops. A review whose Codex cell runs
 from the same worktree at the same time may fail when the checkout moves
 files under it; such a review is run again.
 
+One run of this program at a time merges and tests main: each run first takes
+merge-program.lock in --merge-lane-worktrees-and-outputs-directory, waiting for
+it, and holds it until it exits, so no merge starts while another run's
+after-merge test run is still running. When the program exits 3 or 4, it writes
+merge-queue-stopped.txt in that directory, naming the pull request and the exit
+code; the merge queue program starts no merge while that file exists, and this
+program, once it holds the lock, merges nothing and exits 2 while it exists. When
+the lock file cannot be opened, the program merges nothing and exits 2.
+
 Last, once the pull request has merged, the program runs
 merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py,
 beside it, with the merge account's GH_TOKEN, and prints what it printed:
@@ -97,22 +161,31 @@ a code it does not document, or a read or a retarget on GitHub failed, each
 before any merge; 3 merged, but a step after the merge was not done: a review
 worktree or the pr<n>-merge-commit-on-main-worktree worktree could not be removed, the
 pull request's branch could not be read or deleted after a merge command that exited
-nonzero, the after-merge test run did not pass, because a suite failed, the runner gave no
-full verdict, or the merge commit could not be read or its worktree made, or
-recordings could not be adopted, or hr/pr<n>/recorded-inputs could not be removed;
+nonzero, the after-merge test run did not pass, because a test failed that is not main's
+known failure (on main, one not already on the failed suites record; on the branch merged
+into, one the record does not hold or one the record says main first failed at a commit
+the branch does not hold), a suite did not run to the end, the runner gave no full verdict, or the
+merge commit could not be read or its worktree made, or recordings could not be adopted, or
+hr/pr<n>/recorded-inputs could not be removed, or the failed suites record could not be read
+or written, its suites could not be run again, a repair task could not be opened, or the
+merge commit could not be recorded as the suite selection main commit;
 stdout names which; 4 the merge command exited nonzero and the pull request's state
 could not be read, so whether it merged is unknown: read its state before doing
 anything else.
 """
 
 import argparse
+import datetime
+import fcntl
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree
 from pathlib import Path
 
 _common_spec = importlib.util.spec_from_file_location(
@@ -125,6 +198,17 @@ _head_test_run_spec = importlib.util.spec_from_file_location(
         "pull-request-head-test-run.py"))
 head_test_run = importlib.util.module_from_spec(_head_test_run_spec)
 _head_test_run_spec.loader.exec_module(head_test_run)
+_failed_suites_record_spec = importlib.util.spec_from_file_location(
+    "merge_lane_failed_after_merge_test_suites_on_main_record", Path(__file__).resolve().with_name(
+        "merge-lane-failed-after-merge-test-suites-on-main-record.py"))
+failed_suites_record = importlib.util.module_from_spec(_failed_suites_record_spec)
+_failed_suites_record_spec.loader.exec_module(failed_suites_record)
+_task_write_spec = importlib.util.spec_from_file_location(
+    "agent_seat_task_list_new_pending_task_write_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "agent-seat-task-list-new-pending-task-write-common.py")
+task_write = importlib.util.module_from_spec(_task_write_spec)
+_task_write_spec.loader.exec_module(task_write)
 
 REPOSITORY = common.REPOSITORY
 
@@ -153,6 +237,12 @@ EXIT_REFUSED = 1
 EXIT_COULD_NOT_RUN = 2
 EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE = 3
 EXIT_MERGE_OUTCOME_UNKNOWN = 4
+# Outcomes after which main may be failing or untested, so the merge queue must not go on.
+EXITS_THAT_STOP_THE_MERGE_QUEUE = (EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE,
+                                   EXIT_MERGE_OUTCOME_UNKNOWN)
+# Both in --merge-lane-worktrees-and-outputs-directory; the merge queue program reads them.
+MERGE_PROGRAM_RUN_LOCK_FILE_NAME = "merge-program.lock"
+MERGE_QUEUE_STOP_FILE_NAME = "merge-queue-stopped.txt"
 MERGE_GATE_DOCUMENTED_EXITS = (0, 1, 2)
 MERGE_GATE = Path("scripts") / "merge-gate.sh"
 SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM = Path(__file__).resolve().with_name(
@@ -380,6 +470,22 @@ def merged_branch_deleted(branch, environment):
     deletion = run(["gh", "api", f"repos/{REPOSITORY}/git/refs/heads/{branch}",
                     "-X", "DELETE"], environment)
     if deletion.returncode != 0:
+        # GitHub's own deletion for the merge can remove the branch between the read and the
+        # delete; a second read tells that apart from a delete that failed, whatever error
+        # text the delete got.
+        reread = run(["gh", "api", path], environment)
+        if reread.returncode != 0 and "HTTP 404" in reread.stderr:
+            print(f"the branch {branch} is gone from GitHub")
+            return EXIT_MERGED
+        if reread.returncode != 0:
+            print(f"STOP: merged, but the branch {branch} could not be deleted, and whether it "
+                  f"is gone from GitHub could not be read.\n"
+                  f"The deletion's error: {gh_error(deletion)}\n"
+                  f"The read's error: {gh_error(reread)}\n"
+                  f"If it is still there, delete it: {by_hand}\n"
+                  f"If that fails, tell the user this message as printed, from its STOP line "
+                  f"through this line, and the error the deletion command printed.")
+            return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
         print(f"STOP: merged, but the branch {branch} is still on GitHub and could not be "
               f"deleted: {gh_error(deletion)}\n"
               f"Delete it: {by_hand}\n"
@@ -468,29 +574,841 @@ def recordings_matching_the_merge_commit_adopted(worktree, source, which_source,
     return True
 
 
-def after_merge_test_run(arguments, merge_commit):
-    """Run the selective test run in a fresh worktree at merge_commit; return an exit code."""
+def suites_on_runner_lines(lines, prefix):
+    """Each suite on a line opening with prefix, with its log when a line names one."""
+    suites = {}
+    for line in lines:
+        if line.startswith(prefix):
+            words = line[len(prefix):].split()
+            if words:
+                log = line.partition(" — log ")[2].strip() or None
+                suites[words[0]] = log or suites.get(words[0])
+    return suites
+
+
+def merged_branch_last_commit_author_name_read(worktree, merge_commit, environment):
+    """The author name of the merged branch's last commit, or None when git cannot read it."""
+    author = subprocess.run(
+        ["git", "-C", str(worktree), "log", "-1", "--format=%an", f"{merge_commit}^2"],
+        capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+    return author.stdout.strip() or None if author.returncode == 0 else None
+
+
+def test_named(suite, test):
+    """A failed test as a reader sees it; a suite with no case lines is its own one test."""
+    return suite if test == suite else f"{suite}: {test}"
+
+
+def repair_task_opened(arguments, merge_commit, seat, failed_tests):
+    """Open one repair task on seat's list for {suite: {test: log}}; return (seat, id, why none,
+    the writer's error when it raised after writing the task, else None)."""
+    task_list = Path.home() / ".claude" / "tasks" / f"nedsnodes-{seat}-tasks"
+    if not seat or not task_list.is_dir() or not (Path.home() / "agents" / seat).is_dir():
+        return None, None, (f"the merged branch's author, {seat or 'unknown'}, has no task "
+                            f"list or no checkout on this machine"), None
+    named = " ".join(sorted(failed_tests))
+    logs = "\n".join(f"- {test_named(suite, test)}: {log}"
+                     for suite, tests in sorted(failed_tests.items())
+                     for test, log in sorted(tests.items()))
+    count = sum(len(tests) for tests in failed_tests.values())
+    description = (
+        f"The after-merge test run of main at {merge_commit} failed, after pull request "
+        f"{arguments.pull_request} merged. Merges go on while main fails, so this needs a fix "
+        f"on main.\n\nFailed tests and their logs:\n{logs}\n\n"
+        f"Reproduce in a detached worktree at origin/main: python3 scripts/run-all-test-suites.py "
+        f"--only-suites-named {named}\n"
+        f"Open a pull request that fixes the cause. Complete this task once it merges; the next "
+        f"after-merge test run then takes each passing test off the record that "
+        f"scripts/merge-gate.sh shows.")
+    subject = f"Main fails after pull request {arguments.pull_request}: fix {count} failed test(s)"
+    there_before = set(repair_task_written_ids(task_list, subject, description))
+    try:
+        task_id = task_write.agent_seat_task_list_new_pending_task_write(
+            task_list, subject, description)
+    except OSError as error:
+        # The writer can raise after it has linked the task file, as when its .highwatermark
+        # write fails; a task it linked stands on the list, so the record names it.
+        written = [found for found in repair_task_written_ids(task_list, subject, description)
+                   if found not in there_before]
+        if written:
+            return seat, written[-1], None, (task_list, error)
+        return None, None, f"the repair task could not be written to {task_list}: {error}", None
+    return seat, task_id, None, None
+
+
+def repair_task_written_ids(task_list, subject, description):
+    """The ids, lowest first, of the tasks on task_list holding this subject and description."""
+    ids = []
+    for path in task_list.glob("*.json"):
+        try:
+            task = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (isinstance(task, dict) and task.get("subject") == subject
+                and task.get("description") == description and path.stem.isdigit()):
+            ids.append(int(path.stem))
+    return sorted(ids)
+
+
+def repair_task_no_longer_open(seat, task_id):
+    """True when the task is completed or gone; an unreadable task file counts as gone, because
+    a second repair task costs less than a failing test nobody is assigned."""
+    task_file = Path.home() / ".claude" / "tasks" / f"nedsnodes-{seat}-tasks" / f"{task_id}.json"
+    try:
+        return json.loads(task_file.read_text(encoding="utf-8")).get("status") == "completed"
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def run_verdicts_by_suite(lines, junit_file):
+    """{suite: verdict} for each suite the run judged, and what went wrong reading junit_file, or
+    None.
+
+    A verdict holds "failed", {test: log}; "passed", the set of tests that passed; "skipped", the
+    text of each SKIP line; and "ran_to_the_end", whether the suite ended on its own after every
+    case it would run. The runner names each test in junit.xml, a suite that printed no case
+    line being the one test named for the suite; a suite NOT RUN or stopped by the run has no
+    verdict."""
+    logs = suites_on_runner_lines(lines, common.run_all_test_suites.FAILED_SUITE_LINE_PREFIX)
+    try:
+        root = xml.etree.ElementTree.parse(junit_file).getroot()
+    except FileNotFoundError:
+        return {}, f"{junit_file} does not exist"
+    except (OSError, xml.etree.ElementTree.ParseError) as caught:
+        return {}, f"{junit_file} could not be read: {caught}"
+    verdicts = {}
+    for element in root.iter("testsuite"):
+        if element.get("judged") == "false":
+            continue
+        suite = element.get("name")
+        verdict = verdicts.setdefault(suite, {"failed": {}, "passed": set(), "skipped": [],
+                                              "ran_to_the_end": True})
+        verdict["ran_to_the_end"] = (verdict["ran_to_the_end"]
+                                     and element.get("ran_to_the_end") == "true")
+        for case in element.iter("testcase"):
+            if case.find("skipped") is not None:
+                verdict["skipped"].append(case.get("name"))
+            elif case.find("failure") is not None:
+                verdict["failed"][case.get("name")] = logs.get(suite)
+            else:
+                verdict["passed"].add(case.get("name"))
+    for verdict in verdicts.values():
+        verdict["passed"] -= set(verdict["failed"])
+    return verdicts, None
+
+
+def test_skipped(test, verdict):
+    """Whether a SKIP line of the suite names test; its text is the name, then ": " and why."""
+    return any(text == test or text.startswith(test + ": ") for text in verdict["skipped"])
+
+
+TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE = (
+    "Tell the pull request's author, and the user, this message as printed, from its "
+    "STOP line through this line, with the FAIL and NOT RUN suite lines printed above "
+    "it, if any.")
+
+
+def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, environment, lines):
+    """Update the failed suites record from this run and a rerun of the suites it left out.
+
+    Return {"complete": whether every step worked and every suite that gave a verdict ran to the
+    end, "new_tests": the {suite: {test: log}} this merge newly failed, "seat" and "task_id" of
+    their repair task, the task_id None when none was opened, "why_none", and "record_empty":
+    whether the record holds no test once this run has updated it}. Each step that did not work
+    prints its own STOP line."""
+    runner = common.run_all_test_suites
+    kept = {"complete": True, "new_tests": {}, "seat": None, "task_id": None, "why_none": None,
+            "record_empty": True}
+    tell_the_user = (
+        "The merge is done and later merges are not held up, but merge-gate.sh may not show "
+        "tests failing on main until the record works.\n"
+        "If the error names a cause you can fix, fix it; the next after-merge test run then "
+        "records its own failures. This test run's failed suites, listed above, are not on the "
+        "record, so send them to the pull request's author.\n"
+        "Otherwise tell the user: \"The record of test suites failing on main could not be "
+        "updated on ned-box, so the merge gate may not show them. Merges go on.\", followed by "
+        "the error. If you are a subagent, tell the agent that dispatched you instead.")
+    try:
+        recorded = failed_suites_record.failed_after_merge_test_suites_on_main_record_read()
+    except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
+        print(f"STOP: merged, but the failed suites record was not updated: {error}\n"
+              f"{tell_the_user}")
+        kept["complete"] = False
+        return kept
+    if not recorded and not any(line.startswith(runner.FAILED_SUITE_LINE_PREFIX)
+                                for line in lines):
+        return kept
+
+    verdicts, junit_error = run_verdicts_by_suite(lines, log_dir / runner.JUNIT_XML_FILE_NAME)
+    if junit_error:
+        print(f"STOP: merged, but this test run's failed tests could not be named: {junit_error}\n"
+              f"{tell_the_user}")
+        kept["complete"] = False
+    still_to_run = sorted(set(recorded) - set(verdicts))
+    gone = set()
+    if still_to_run:
+        listed = subprocess.run(["git", "-C", str(worktree), "ls-files", "--", *still_to_run],
+                                capture_output=True, text=True, env=environment,
+                                stdin=subprocess.DEVNULL)
+        if listed.returncode != 0:
+            print(f"STOP: merged, but the recorded failed suites were not run again: git "
+                  f"ls-files failed: {git_error(listed)}\n{tell_the_user}")
+            kept["complete"] = False
+            still_to_run = []
+        else:
+            tracked = set(listed.stdout.splitlines())
+            gone = set(still_to_run) - tracked
+            still_to_run = [suite for suite in still_to_run if suite in tracked]
+    if still_to_run:
+        print(f"rerunning the {len(still_to_run)} recorded failed suite(s) that this selective "
+              f"test run left out", flush=True)
+        rerun_log_dir = log_dir.with_name(log_dir.name + "-recorded-failed-suites")
+        rerun = subprocess.run(
+            [sys.executable, str(worktree / "scripts" / "run-all-test-suites.py"),
+             "--only-suites-named", *still_to_run,
+             "--leave-recorded-inputs-and-failure-history-unchanged",
+             "--log-dir", str(rerun_log_dir)],
+            cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            env=environment, stdin=subprocess.DEVNULL)
+        rerun_lines = rerun.stdout.splitlines()
+        rerun_gave_every_verdict = (
+            runner.run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(
+                rerun.returncode, rerun.stdout)
+            or (rerun.returncode == 0
+                and any(line.startswith(runner.SUMMARY_LINE_PREFIX) for line in rerun_lines)))
+        rerun_verdicts, rerun_junit_error = run_verdicts_by_suite(
+            rerun_lines, rerun_log_dir / runner.JUNIT_XML_FILE_NAME)
+        if not rerun_gave_every_verdict:
+            print(f"STOP: merged, but the recorded failed suites could not all be run again: the "
+                  f"runner exited {rerun.returncode}. Each suite it gave no verdict stays on the "
+                  f"record. Its output was:\n{rerun.stdout.rstrip()}\n{tell_the_user}")
+            kept["complete"] = False
+        elif rerun_junit_error:
+            print(f"STOP: merged, but the rerun's failed tests could not be named: "
+                  f"{rerun_junit_error}. They stay on the record.\n{tell_the_user}")
+            kept["complete"] = False
+        verdicts.update({suite: verdict for suite, verdict in rerun_verdicts.items()
+                         if suite in still_to_run})
+    for suite, verdict in sorted(verdicts.items()):
+        if not verdict["ran_to_the_end"]:
+            print(f"STOP: merged, but {suite} did not run to the end: it was killed, passed its "
+                  f"time limit, or stopped after a case line with no verdict, so its later cases "
+                  f"have none.\n{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+            kept["complete"] = False
+
+    opened_again = []
+    could_not_open_again = []
+    removed = []
+    undecided = {}
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    def observed_at(suite, test, fields, strictly_later):
+        # A run of an older commit says nothing about a failure a newer run observed.
+        last = fields["last_failed_commit"]
+        if strictly_later and last == merge_commit:
+            return False
+        ancestor = subprocess.run(
+            ["git", "-C", str(worktree), "merge-base", "--is-ancestor", last, merge_commit],
+            capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+        if ancestor.returncode not in (0, 1):
+            undecided[test_named(suite, test)] = git_error(ancestor)
+        return ancestor.returncode == 0
+
+    def why_it_leaves(suite, test, fields):
+        if suite in gone:
+            return "git no longer lists its suite" if observed_at(suite, test, fields, False) else None
+        verdict = verdicts.get(suite)
+        if verdict is None:
+            return None
+        if test in verdict["passed"]:
+            return "it passed" if observed_at(suite, test, fields, False) else None
+        if test in verdict["failed"]:
+            if observed_at(suite, test, fields, True):
+                fields["last_failed_commit"] = merge_commit
+            return None
+        if test_skipped(test, verdict) or not verdict["ran_to_the_end"]:
+            return None
+        # A failed suite may have stopped before this case, by a crash at import, a shell suite's
+        # set -e or a sys.exit(1), and the runner still counts it as run to the end so that a
+        # suite that only ever reports by its exit code gets no STOP. Only a suite that failed
+        # nothing shows it reached every case.
+        if verdict["failed"]:
+            return None
+        if not observed_at(suite, test, fields, True):
+            return None
+        # One SKIP line can stand for a group of cases, so a test it covered looks unreported.
+        skips = "; ".join(verdict["skipped"])
+        return ("its suite ran to the end and reported nothing for it" + (
+            f", but the suite printed SKIP lines naming other cases ({skips}); if one of them "
+            f"covers this test, the test was not run" if skips else ""))
+
+    to_open = {"new_tests": {}, "again": {}}
+    # What the first save left on each test whose repair task opens after it; the second save
+    # names the task only on an entry still holding that, since another run may have changed it.
+    left_by_first_save = {}
+    closed_task_of_test = {}
+
+    def change(suites):
+        for suite in list(suites):
+            tests = suites[suite]["failed_tests"]
+            for test, fields in list(tests.items()):
+                why = why_it_leaves(suite, test, fields)
+                if why:
+                    del tests[test]
+                    removed.append((suite, test, why))
+            if not tests:
+                del suites[suite]
+
+        new_tests, to_open_again = {}, {}
+        for suite, verdict in verdicts.items():
+            on_record = suites.get(suite, {}).get("failed_tests", {})
+            for test, log in verdict["failed"].items():
+                fields = on_record.get(test)
+                if fields is None:
+                    new_tests.setdefault(suite, {})[test] = log
+                elif (fields["repair_task_id"] is not None and repair_task_no_longer_open(
+                        fields["repair_task_agent_seat"], fields["repair_task_id"])):
+                    to_open_again.setdefault(fields["repair_task_agent_seat"], {}).setdefault(
+                        suite, {})[test] = log
+                    closed_task_of_test[(suite, test)] = (fields["repair_task_agent_seat"],
+                                                          fields["repair_task_id"])
+                    # As for a new test: if the second save fails, the closed task's id must
+                    # not stay, or the next merge opens a second task beside this one.
+                    fields["repair_task_agent_seat"] = fields["repair_task_id"] = None
+                    left_by_first_save[(suite, test)] = (fields["commit"], fields["failed_at"])
+
+        # Repair tasks open only once the record is saved, so a failed write cannot leave a
+        # task whose tests the next merge, finding them unrecorded, gives a second task.
+        for suite, tests in new_tests.items():
+            on_record = suites.setdefault(suite, {"failed_tests": {}})["failed_tests"]
+            for test, log in tests.items():
+                on_record[test] = {"commit": merge_commit, "last_failed_commit": merge_commit,
+                                   "pull_request": arguments.pull_request, "log": log,
+                                   "failed_at": now, "repair_task_agent_seat": None,
+                                   "repair_task_id": None}
+                left_by_first_save[(suite, test)] = (merge_commit, now)
+        to_open.update(new_tests=new_tests, again=to_open_again)
+
+    try:
+        left = failed_suites_record.failed_after_merge_test_suites_on_main_record_change_apply_under_lock(change)
+    except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
+        print(f"STOP: merged, but the failed suites record was not updated: {error}\n"
+              f"{tell_the_user}")
+        kept.update(complete=False, new_tests=to_open["new_tests"],
+                    why_none="the failed suites record could not be written")
+        return kept
+
+    task_of_test = {}
+    writer_failed_after_writing = []
+    for seat, tests_of_seat in sorted(to_open["again"].items()):
+        _, task_id, why_none, writer_error = repair_task_opened(arguments, merge_commit, seat,
+                                                                tests_of_seat)
+        if writer_error:
+            writer_failed_after_writing.append((seat, task_id, writer_error))
+        if task_id is None:
+            could_not_open_again.append((seat, tests_of_seat, why_none))
+            task_of_test.update({(suite, test): closed_task_of_test[(suite, test)]
+                                 for suite, tests in tests_of_seat.items() for test in tests})
+            continue
+        opened_again.append((seat, task_id, tests_of_seat))
+        task_of_test.update({(suite, test): (seat, task_id)
+                             for suite, tests in tests_of_seat.items() for test in tests})
+    if to_open["new_tests"]:
+        author = merged_branch_last_commit_author_name_read(worktree, merge_commit, environment)
+        seat, task_id, why_none, writer_error = repair_task_opened(
+            arguments, merge_commit, author, to_open["new_tests"])
+        if writer_error:
+            writer_failed_after_writing.append((seat, task_id, writer_error))
+        kept.update(new_tests=to_open["new_tests"], seat=seat, task_id=task_id,
+                    why_none=why_none)
+        if task_id is not None:
+            task_of_test.update({(suite, test): (seat, task_id)
+                                 for suite, tests in to_open["new_tests"].items()
+                                 for test in tests})
+
+    changed_since_first_save = {}
+    named_by_second_save = set()
+
+    def tasks_named(suites):
+        changed_since_first_save.clear()
+        named_by_second_save.clear()
+        for (suite, test), (seat, task_id) in task_of_test.items():
+            fields = suites.get(suite, {}).get("failed_tests", {}).get(test)
+            if fields is None:
+                changed_since_first_save[(suite, test)] = (seat, task_id, "took {} off the failed suites record")
+            elif (fields["repair_task_id"] is not None
+                  or (fields["commit"], fields["failed_at"]) != left_by_first_save[(suite, test)]):
+                changed_since_first_save[(suite, test)] = (
+                    seat, task_id,
+                    "recorded {} anew on the failed suites record, or named another repair task on its entry")
+            else:
+                fields["repair_task_agent_seat"], fields["repair_task_id"] = seat, task_id
+                named_by_second_save.add((seat, task_id))
+
+    if task_of_test:
+        try:
+            left = failed_suites_record.failed_after_merge_test_suites_on_main_record_change_apply_under_lock(
+                tasks_named)
+        except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
+            # The first save cleared each closed task's id, so no later merge sees one to reopen.
+            names = "; ".join(f"{test_named(suite, test)} (task #{task_id} on {seat}'s task list)"
+                              for (suite, test), (seat, task_id) in sorted(task_of_test.items()))
+            print(f"STOP: merged, but the second save of the failed suites record failed: "
+                  f"{error}\n"
+                  f"So the record does not name the repair tasks just opened, and merge-gate.sh "
+                  f"shows those tests with no repair task. The record now holds no repair task for these tests, and no later merge "
+                  f"opens one for them, because a merge opens a repair task only for a test new "
+                  f"to the record or one whose recorded task is closed: {names}.\n{tell_the_user}")
+            kept["complete"] = False
+            # The writer runs change() before it writes, so these name what was never saved.
+            changed_since_first_save.clear()
+            named_by_second_save.clear()
+    for (suite, test), (seat, task_id, how) in sorted(changed_since_first_save.items()):
+        if closed_task_of_test.get((suite, test)) == (seat, task_id):
+            continue
+        named = test_named(suite, test)
+        if (seat, task_id) in named_by_second_save:
+            # The task still covers the record's other tests, so nothing needs doing.
+            print(f"Another merge's test run {how.format(named)} after this run saved the "
+                  f"record, so the record does not tie {named} to repair task "
+                  f"#{task_id} on {seat}'s task list. Task #{task_id} stays open, because the "
+                  f"record ties it to other tests.")
+            continue
+        print(f"STOP: merged, but another merge's test run {how.format(named)} after this run "
+              f"saved the record. So repair task #{task_id} on {seat}'s task list, "
+              f"which this run opened for {named}, is tied to no test on the record and is not "
+              f"needed.\n"
+              f"Complete task #{task_id} on {seat}'s task list, with a note that another merge's "
+              f"test run {how.format(named)}. If you are a subagent, tell the agent that "
+              f"dispatched you instead.")
+        kept["complete"] = False
+    for seat, task_id, (task_list, error) in writer_failed_after_writing:
+        on_record = ("The failed suites record names it."
+                     if (seat, task_id) in named_by_second_save else
+                     "The failed suites record does not name it; the lines above say why and "
+                     "what to do about it.")
+        print(f"STOP: merged, but the task writer wrote repair task #{task_id} to {task_list} "
+              f"and then failed: {error}. Task #{task_id} stands on {seat}'s task list. "
+              f"{on_record}\n"
+              f"If the error names a cause you can fix, such as a full disk, fix it; the task "
+              f"writer need not be run again. Otherwise tell the user this message as printed, "
+              f"from its STOP line through this line. If you are a subagent, tell the agent that "
+              f"dispatched you instead.")
+        kept["complete"] = False
+    for name, error in sorted(undecided.items()):
+        print(f"STOP: merged, but {name} stays on the failed suites record: git could not say "
+              f"whether the commit it last failed at is an ancestor of {merge_commit}: {error}\n"
+              f"{tell_the_user}")
+        kept["complete"] = False
+    for suite, test, why in sorted(removed):
+        print(f"{test_named(suite, test)} left the failed suites record: {why}")
+    for seat, task_id, tests_of_seat in opened_again:
+        names = ", ".join(test_named(suite, test) for suite, tests in sorted(tests_of_seat.items())
+                          for test in sorted(tests))
+        print(f"opened repair task #{task_id} on {seat}'s task list, because its earlier repair "
+              f"task is closed and these still fail: {names}")
+    for seat, tests_of_seat, why_none in could_not_open_again:
+        names = ", ".join(test_named(suite, test) for suite, tests in sorted(tests_of_seat.items())
+                          for test in sorted(tests))
+        print(f"STOP: merged, but {names} still fail(s), the repair task on {seat}'s task list is "
+              f"closed, and no new one could be opened: {why_none}.\n"
+              f"Ask the user: \"Main still fails {names}, and no new repair task could go to "
+              f"{seat}. I recommend that merge-lane-2 fixes it. Should it?\" If the user says "
+              f"yes, merge-lane-2 opens a pull request that fixes it; otherwise do what the user "
+              f"says. Merges go on meanwhile. If you are a subagent, ask the agent that "
+              f"dispatched you instead.")
+        kept["complete"] = False
+    kept["record_empty"] = not left
+    notice = failed_suites_record.merge_gate_notice(left)
+    if notice:
+        print(notice)
+    return kept
+
+
+def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, worktree,
+                                          environment, log_dir, lines):
+    """For a merge into base_branch, not main: name this run's failed tests that are not main's,
+    and leave the failed suites record as it was.
+
+    Return a dict of the form failed_suites_kept_in_view returns, with no repair task: the
+    record and its repair tasks cover main alone. A failed test is main's when the record holds
+    it and merge_commit descends from the commit whose run first failed it on main; a branch cut
+    before that commit fails the test for a reason of its own. Each step that did not work
+    prints its own STOP line."""
+    runner = common.run_all_test_suites
+    path = failed_suites_record.failed_suites_record_file()
+
+    held_by_commit = {}
+
+    # Asked once per commit, so that one git fault prints one STOP, not one per test.
+    def branch_holds_mains_first_failing_commit(suite, test, first_failed):
+        if first_failed in held_by_commit:
+            return held_by_commit[first_failed]
+        # Walked from first_failed, not from origin/main, which may hold the merge commit itself
+        # by the time a reader acts on the STOP; along first parents only, so the commit named is
+        # one main's tip once was, not a topic commit main took in through a merge. ^{commit}
+        # makes git refuse a blob or tree, of which rev-list would list nothing, as if held.
+        ancestor = subprocess.run(
+            ["git", "-C", str(worktree), "rev-list", "--first-parent", "--parents",
+             f"{first_failed}^{{commit}}", f"^{merge_commit}"],
+            capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+        if ancestor.returncode != 0:
+            print(f"STOP: pull request {arguments.pull_request} merged into {base_branch!r}, but "
+                  f"git could not say whether {base_branch!r} holds {first_failed[:12]}, the "
+                  f"main commit whose test run first failed {test_named(suite, test)}, so this "
+                  f"program counts the failure of every test first failed there as "
+                  f"{base_branch!r}'s own, not main's; the STOP this program prints last lists "
+                  f"those failures among the ones that are not main's. `git rev-list "
+                  f"--first-parent --parents {first_failed}^{{commit}} ^{merge_commit}`, where "
+                  f"{merge_commit[:12]} is the merge commit on {base_branch!r}, said: "
+                  f"{git_error(ancestor)}\n"
+                  f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+            kept["complete"] = False
+            held_by_commit[first_failed] = False
+            return False
+        # Each line is a commit merge_commit lacks, then its first parent; none means it holds
+        # first_failed, and the last line's parent is where the branch left main's history.
+        lacked = ancestor.stdout.split("\n")[-2].split() if ancestor.stdout.strip() else []
+        held_by_commit[first_failed] = not lacked
+        if len(lacked) > 1:
+            left_main_at[first_failed] = lacked[1]
+        return held_by_commit[first_failed]
+
+    left_main_at = {}
+
+    kept = {"complete": True, "new_tests": {}, "seat": None, "task_id": None,
+            "why_none": (f"pull request {arguments.pull_request} merged into {base_branch!r}, "
+                         f"not main, and this program opens a repair task, a task on the task "
+                         f"list of the author of the merge that broke a test, only for a test "
+                         f"that fails on main"),
+            "record_empty": True,
+            "recorded_tests_first_failed_at_a_commit_the_branch_lacks": []}
+    print(f"the failed suites record, {path}, was left as it was: pull request "
+          f"{arguments.pull_request} merged into {base_branch!r}, not main, and the failed "
+          f"suites record holds main's failures alone. A failed test of this run is main's "
+          f"failure when the failed suites record holds it and {base_branch!r} holds the main "
+          f"commit whose test run first failed it; the last line this program prints says whether any "
+          f"failed test needs action.")
+    if not any(line.startswith(runner.FAILED_SUITE_LINE_PREFIX) for line in lines):
+        return kept
+    verdicts, junit_error = run_verdicts_by_suite(lines, log_dir / runner.JUNIT_XML_FILE_NAME)
+    if junit_error:
+        print(f"STOP: merged into {base_branch!r}, but this test run's failed tests could not "
+              f"be named: {junit_error}\n{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+        kept["complete"] = False
+        return kept
+    try:
+        recorded = failed_suites_record.failed_after_merge_test_suites_on_main_record_read()
+    except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
+        print(f"STOP: merged into {base_branch!r}, but {path} could not be read, so every "
+              f"failed test of this run is taken as failing on {base_branch!r} alone: {error}\n"
+              f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+        kept["complete"] = False
+        recorded = {}
+    for suite, verdict in sorted(verdicts.items()):
+        if not verdict["ran_to_the_end"]:
+            print(f"STOP: merged into {base_branch!r}, but {suite} did not run to the end: it "
+                  f"was killed, passed its time limit, or stopped after a case line with no "
+                  f"verdict, so its later cases have none.\n"
+                  f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+            kept["complete"] = False
+        on_record = recorded.get(suite, {}).get("failed_tests", {})
+        for test, log in verdict["failed"].items():
+            if test in on_record and branch_holds_mains_first_failing_commit(
+                    suite, test, on_record[test]["commit"]):
+                continue
+            kept["new_tests"].setdefault(suite, {})[test] = log
+            if test in on_record and on_record[test]["commit"] in left_main_at:
+                first_failed = on_record[test]["commit"]
+                kept["recorded_tests_first_failed_at_a_commit_the_branch_lacks"].append(
+                    (suite, test, first_failed, left_main_at[first_failed]))
+    kept["record_path"] = path
+    return kept
+
+
+def after_merge_test_run_closing_message_printed_returning_whether_stop(arguments, merge_commit, run_exit_code, summaries,
+                                 failed_suites_were_the_only_problem, kept, every_step_complete,
+                                 by_hand, base_branch):
+    """Print the after-merge test run's closing message; return whether it is a STOP."""
+    runner = common.run_all_test_suites
+    tested = "main" if base_branch == "main" else repr(base_branch)
+    new_tests = kept["new_tests"]
+    if new_tests and base_branch != "main":
+        print(f"STOP: merged, but the test run of {tested} at {merge_commit} exited "
+              f"{run_exit_code} and failed tests that are not main's failures, as the lines "
+              f"above say, so they fail on {tested} for a reason of its own; the failed suites "
+              f"are listed above, each with its log.\n"
+              f"No repair task was opened: {kept['why_none']}. The pull request's author fixes "
+              f"these tests on {tested} before it merges into main.")
+        # The record names the commit whose run recorded the test first; when two runs on main
+        # overlap, an older main commit can fail the test too, so the branch may hold main's
+        # failure after all.
+        for suite, test, commit, left_main in kept.get(
+                "recorded_tests_first_failed_at_a_commit_the_branch_lacks", []):
+            print(f"{test_named(suite, test)} is on the failed suites record, "
+                  f"{kept.get('record_path')}, which keeps the main commit whose test run "
+                  f"recorded it first, {commit}. {tested} does not hold that commit, so this "
+                  f"program counts the failure as {tested}'s own. It may still be main's: when "
+                  f"two of main's after-merge test runs overlap, the later commit's run can "
+                  f"record the test first, though the earlier commit fails it too.\n"
+                  f"Before the author fixes it, run {suite} in a worktree at {left_main}, "
+                  f"the commit where {tested} left main's history before {commit[:12]}.\n"
+                  f"If {test_named(suite, test)} fails there too, the failure is main's: say "
+                  f"so when you tell the author and the user, and nothing on {tested} needs "
+                  f"fixing for it.\n"
+                  f"If that test passes there, {tested} broke it: the author fixes it on "
+                  f"{tested}.\n"
+                  f"If {suite} is not in that commit"
+                  + (f", or does not run {test_named(suite, test)} there"
+                     if test_named(suite, test) != suite else "")
+                  + f", main gained it after {tested} left, so "
+                  f"this check cannot say whose failure it is: say so when you tell the author "
+                  f"and the user.")
+        print(TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE)
+        return True
+    if new_tests:
+        if run_exit_code == 0:
+            print(f"STOP: merged, and the test run of main at {merge_commit} passed, but the "
+                  f"rerun of the recorded failed suites failed tests not on the record; they are "
+                  f"listed above.")
+        else:
+            print(f"STOP: merged, but the test run of main at {merge_commit} exited "
+                  f"{run_exit_code} and failed tests not on the failed suites record; the failed "
+                  f"suites are listed above, each with its log.")
+        if kept["task_id"] is not None and every_step_complete:
+            print(f"Repair task #{kept['task_id']} is on {kept['seat']}'s task list, so nothing "
+                  f"needs sending. Go on with the next merge.")
+        elif kept["task_id"] is not None:
+            print(f"Repair task #{kept['task_id']} on {kept['seat']}'s task list covers only the "
+                  f"newly failed tests; the rest of this test run has no verdict, or a step after "
+                  f"the merge did not work, as the lines above say.\n"
+                  f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+        else:
+            tests_named = ", ".join(test_named(suite, test)
+                                    for suite, tests in sorted(new_tests.items())
+                                    for test in sorted(tests))
+            if not every_step_complete:
+                print(TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE)
+            print(f"No repair task was opened: {kept['why_none']}. Nobody is assigned to fix main.\n"
+                  f"Ask the user: \"Main fails {tests_named} after pull request "
+                  f"{arguments.pull_request}, and no repair task could go to its author. I "
+                  f"recommend that merge-lane-2 fixes it. Should it?\" If the user says yes, "
+                  f"merge-lane-2 opens a pull request that fixes it; otherwise do what the user "
+                  f"says. Merges go on meanwhile. If you are a subagent, ask the agent that "
+                  f"dispatched you instead.")
+        return True
+    if failed_suites_were_the_only_problem and every_step_complete:
+        print(f"the test run of {tested} at {merge_commit} failed only tests already on the "
+              f"failed suites record. The merge into main that first failed each one opened its "
+              f"repair task or said to ask the user, so nothing is needed for them here. Go on "
+              f"with the next merge, if there is one.")
+        return False
+    if run_exit_code != 0:
+        print(f"STOP: merged, but the test run of {tested} at {merge_commit} exited "
+              f"{run_exit_code}, so {tested} may be broken; the failed suites, if any, are "
+              f"listed above, each with its log.\n{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+        return True
+    if not summaries:
+        print(f"STOP: merged, but the test run of {tested} at {merge_commit} exited 0 and "
+              f"printed no {runner.SUMMARY_LINE_PREFIX} line, so it gave no verdict on {tested}.\n"
+              f"In a detached worktree at {merge_commit}, run: {by_hand}\n"
+              f"If that run also prints no {runner.SUMMARY_LINE_PREFIX} line, tell the user "
+              f"this message.")
+        return True
+    return not every_step_complete
+
+
+def after_merge_test_run_suite_selection_main_commit_file():
+    # Read at each call, because a test points HOME at a scratch directory after this loads.
+    return (Path.home() / ".local" / "state" / "nedsnodes"
+            / "merge-lane-after-merge-test-run-suite-selection-main-commit.txt")
+
+
+AFTER_MERGE_TEST_RUN_SUITE_SELECTION_MAIN_COMMIT_FORMER_FILE_NAME = (
+    "newest-main-commit-whose-after-merge-test-run-left-no-test-failing.txt")
+
+
+def after_merge_test_run_suite_selection_main_commit_former_file_renamed():
+    """Rename the record's file from its former name when only that file is there; print what
+    was done or what failed."""
+    path = after_merge_test_run_suite_selection_main_commit_file()
+    former = path.with_name(AFTER_MERGE_TEST_RUN_SUITE_SELECTION_MAIN_COMMIT_FORMER_FILE_NAME)
+    if os.path.lexists(path) or not os.path.lexists(former):
+        return
+    try:
+        os.replace(former, path)
+    except OSError as error:
+        print(f"{former} was not renamed to {path}: {error}. Nothing to do: this after-merge "
+              f"test run compares as though no suite selection main commit were recorded, and the "
+              f"program then records its merge commit in {path} as usual.")
+        return
+    print(f"renamed {former} to {path}")
+
+
+def after_merge_test_run_suite_selection_main_commit_read(git, merge_commit):
+    """Return (the recorded commit, None) when it is an ancestor of merge_commit, or (None, why
+    it is not used)."""
+    path = after_merge_test_run_suite_selection_main_commit_file()
+    try:
+        commit = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None, f"{path} does not exist"
+    except (OSError, UnicodeDecodeError) as error:
+        return None, (f"{path} could not be read: {error}. The next merge the program exits "
+                      f"0 after replaces it")
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        return None, (f"{path} does not hold one commit hash of 40 characters. The next merge "
+                      f"the program exits 0 after replaces it")
+    ancestor = git("merge-base", "--is-ancestor", commit, merge_commit)
+    if ancestor.returncode == 1:
+        return None, f"{commit[:12]}, which {path} names, is not an ancestor of {merge_commit[:12]}"
+    if ancestor.returncode != 0:
+        return None, (f"git could not say whether {commit[:12]}, which {path} names, is an "
+                      f"ancestor of {merge_commit[:12]}: {git_error(ancestor)}")
+    return commit, None
+
+
+def after_merge_test_run_suite_selection_main_commit_file_contents_described(path):
+    """Say what the record at path holds after a failed write, and which commit the next
+    after-merge test run compares with because of it."""
+    no_record = ("so the next after-merge test run compares with its pull request's head commit, "
+                 "or the commit its head test run passed on, and runs more suites than it needs "
+                 "until a merge records its commit there.")
+    try:
+        commit = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return f"{path} does not exist, {no_record}"
+    except (OSError, UnicodeDecodeError) as error:
+        return f"{path} could not be read back ({error}), {no_record}"
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        return f"{path} now holds {commit[:60]!r}, which is not one commit hash, {no_record}"
+    return (f"{path} still holds {commit[:12]}, the commit it held before, so the next "
+            f"after-merge test run compares with that older commit, when it is an ancestor of "
+            f"the merge, and runs more suites than it needs until a merge records its commit "
+            f"there.")
+
+
+def after_merge_test_run_suite_selection_main_commit_written(merge_commit, git):
+    """Record merge_commit as the suite selection main commit, unless the record already names
+    merge_commit or a commit descending from it; print what happened and return False when it
+    could not be written."""
+    path = after_merge_test_run_suite_selection_main_commit_file()
+    # Written beside the record and renamed over it, so that a write failing part way, as on a
+    # full disk, leaves the record as it was instead of truncated.
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Two after-merge test runs can finish at once; the lock keeps one from reading the
+        # record before the other's write and then moving it back.
+        with open(path.with_name(path.name + ".lock"), "a", encoding="utf-8") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                held = path.read_text(encoding="utf-8").strip()
+            except (FileNotFoundError, UnicodeDecodeError, IsADirectoryError):
+                held = ""
+            # Only "merge_commit is an ancestor of the held commit" keeps the record: an
+            # unrelated or unreadable commit is never used, and moving the record back only
+            # makes the next run select more suites.
+            ancestor = None
+            if len(held) == 40 and all(character in "0123456789abcdef" for character in held):
+                ancestor = git("merge-base", "--is-ancestor", merge_commit, held)
+            if ancestor is not None and ancestor.returncode not in (0, 1):
+                print(f"git could not say whether {merge_commit[:12]} is an ancestor of "
+                      f"{held[:12]}, which {path} names: {git_error(ancestor)}. The program "
+                      f"replaces the record with {merge_commit[:12]}; if {held[:12]} was a later "
+                      f"commit of main, the next after-merge test run compares with the older "
+                      f"{merge_commit[:12]} and runs more suites than it needs.")
+            if ancestor is not None and ancestor.returncode == 0:
+                print(f"the merge commit {merge_commit[:12]} was not recorded in {path}: it "
+                      f"names {held[:12]}, which is {merge_commit[:12]} or a later commit of "
+                      f"main whose after-merge test run finished first, and the suite selection main commit "
+                      f"moves only forward. Nothing to do.")
+                return True
+            temporary.write_text(merge_commit + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+    except OSError as error:
+        left_behind = ""
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            left_behind = (f"The temporary file {temporary} could not be removed either: "
+                           f"{cleanup_error}. Nothing reads the temporary file as the record, so "
+                           f"it does no harm. Once the error's cause is fixed, delete the "
+                           f"temporary file: rm {shlex.quote(str(temporary))}\n")
+        print(f"STOP: merged, and nothing in main's test run stops the program exiting 0, but {merge_commit[:12]} "
+              f"was not recorded in {path}: {error}\n"
+              f"{left_behind}"
+              f"{after_merge_test_run_suite_selection_main_commit_file_contents_described(path)} "
+              f"Nothing else waits on this record: the program exits 3.\n"
+              f"If the error names a cause you can fix, such as a permission on a directory, fix "
+              f"that cause only: do not write {path} by hand, and nothing needs to be run again, "
+              f"because the next merge the program exits 0 after writes it. "
+              f"Otherwise, tell the user this message as printed, from its STOP line, which "
+              f"quotes the error, through this line.")
+        return False
+    print(f"recorded the merge commit {merge_commit[:12]} in {path}, so the next after-merge test run selects the "
+          f"suites whose recorded inputs changed since it")
+    return True
+
+
+# Only a test runner with this function compares with every commit given; an older one keeps
+# the last --only-suites-whose-recorded-inputs-changed-since alone.
+TEST_RUNNER_SOURCE_LINE_WHOSE_PRESENCE_SHOWS_THE_RUNNER_SELECTS_SUITES_SINCE_EVERY_COMMIT_GIVEN = (
+    "def suites_selected_since_every_commit(")
+
+
+def after_merge_test_run_suite_selection_commits_choose(suite_selection_main_commit, head_tested,
+                                                        head_commit):
+    """The commits the after-merge test run compares with, first commit first. The first, by
+    which alone the suites a head test run leaves out are judged, is the suite selection main commit,
+    else the nn-head-commit; head_tested,
+    when known, comes second."""
+    first = suite_selection_main_commit or head_commit
+    return [first] if head_tested is None else [first, head_tested]
+
+
+def after_merge_test_run_command_build(compared_with):
+    return "python3 scripts/run-all-test-suites.py " + " ".join(
+        f"--only-suites-whose-recorded-inputs-changed-since {commit}" for commit in compared_with)
+
+
+def after_merge_test_run_by_hand_command(head_tested, head_commit, merge_commit_text):
+    """Return the command that tests main by hand as the after-merge test run would, before the
+    program could check whether the recorded suite selection main commit is an ancestor of the merge
+    commit: the command makes that check,
+    because a recovery printed before the merge commit is fetched cannot."""
+    without_it = after_merge_test_run_command_build(
+        after_merge_test_run_suite_selection_commits_choose(None, head_tested, head_commit))
+    path = after_merge_test_run_suite_selection_main_commit_file()
+    try:
+        commit = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return without_it
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        return without_it
+    with_it = after_merge_test_run_command_build(
+        after_merge_test_run_suite_selection_commits_choose(commit, head_tested, head_commit))
+    return (f"if git merge-base --is-ancestor {commit} {merge_commit_text}; then "
+            f"{with_it}; else {without_it}; fi")
+
+
+def after_merge_test_run(arguments, merge_commit, base_branch, steps_before_the_test_run_done):
+    """Run the selective test run in a fresh worktree at merge_commit, the merge into base_branch;
+    return an exit code. steps_before_the_test_run_done says whether the steps after the merge
+    that ran before it exited 0, since the merge commit is recorded only when the program
+    exits 0."""
+    after_merge_test_run_suite_selection_main_commit_former_file_renamed()
     checkout = arguments.review_tools_worktree_at_main
-    since, why_not = head_test_run_passed_merged_commit(arguments)
-    if since is None:
-        since = arguments.head_commit
-        print(f"selecting the nn-test-suites whose recorded inputs changed since the head "
-              f"commit {since[:12]}, which selects more suites than "
-              f"the merge changed: {why_not}.\n"
-              f"Nothing to do: this run still tests every suite the merge could have changed.")
-    else:
-        print(f"selecting the nn-test-suites whose recorded inputs changed since "
-              f"{since[:12]}, the commit the head test run passed on: "
-              f"pull request {arguments.pull_request}'s head merged with main as main was "
-              f"when that run started")
-    by_hand = (f"python3 scripts/run-all-test-suites.py "
-               f"--only-suites-whose-recorded-inputs-changed-since {since}")
+    head_tested, why_no_head_test_run = head_test_run_passed_merged_commit(arguments)
+    by_hand = after_merge_test_run_by_hand_command(head_tested, arguments.head_commit,
+                                                   merge_commit or "<the merge commit>")
     if not merge_commit:
         print(f"STOP: merged, but the merge commit could not be read, so main was not "
               f"tested.\n"
               f"Read it: gh pr view {arguments.pull_request} --repo {REPOSITORY} "
               f"--json mergeCommit\n"
-              f"Then, in a detached worktree at that commit, run: {by_hand}")
+              f"Then, in a detached worktree at that commit, run, with that commit in place "
+              f"of <the merge commit>: {by_hand}")
         return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
     environment = common.run_all_test_suites.environment_without_git_redirecting_variables()
 
@@ -521,6 +1439,58 @@ def after_merge_test_run(arguments, merge_commit):
               f"could not make the worktree {worktree} at the merge commit {merge_commit}: "
               f"{git_error(add)}\n{next_steps}")
         return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
+
+    if head_tested is not None:
+        # A test log can outlive the pr<n>-merged commit it names, which git prunes once
+        # nothing reaches it, and the runner refuses a commit it cannot read.
+        readable = git("cat-file", "-e", f"{head_tested}^{{commit}}")
+        if readable.returncode != 0:
+            why_no_head_test_run = (f"git cannot read {head_tested[:12]}, the commit the head "
+                                    f"test run passed on, in {checkout}: {git_error(readable)}")
+            head_tested = None
+    suite_selection_main_commit, why_no_suite_selection_main_commit = (
+        after_merge_test_run_suite_selection_main_commit_read(git, merge_commit))
+    compared_with = after_merge_test_run_suite_selection_commits_choose(
+        suite_selection_main_commit, head_tested, arguments.head_commit)
+    if suite_selection_main_commit is None:
+        print(f"no suite selection main commit is used: "
+              f"{why_no_suite_selection_main_commit}.")
+    if head_tested is None and suite_selection_main_commit is None:
+        print(f"selecting the nn-test-suites whose recorded inputs changed since the head "
+              f"commit {arguments.head_commit[:12]}, which selects more suites than "
+              f"the merge changed: {why_no_head_test_run}.\n"
+              f"Nothing to do: this run still tests every suite the merge could have "
+              f"changed.")
+    elif head_tested is None:
+        print(f"selecting the nn-test-suites whose recorded inputs changed since "
+              f"{suite_selection_main_commit[:12]}, the suite selection main commit; not also "
+              f"since a commit a head test run passed on, "
+              f"because {why_no_head_test_run}")
+    elif suite_selection_main_commit is None:
+        print(f"selecting the nn-test-suites whose recorded inputs changed both since the head "
+              f"commit {arguments.head_commit[:12]}, by which alone the suites a head test run "
+              f"leaves out are judged, and since {head_tested[:12]}, the commit the head test "
+              f"run passed on: pull request {arguments.pull_request}'s head merged with main as "
+              f"main was when that run started")
+    else:
+        print(f"selecting the nn-test-suites whose recorded inputs changed both since "
+              f"{suite_selection_main_commit[:12]}, the suite selection main commit, and since "
+              f"{head_tested[:12]}, the commit the head test "
+              f"run passed on, so a suite runs only when both comparisons select it")
+    worktree_runner = worktree / "scripts" / "run-all-test-suites.py"
+    # A runner that is missing or cannot be read is left to the run below, which reports it.
+    try:
+        worktree_runner_text = worktree_runner.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        worktree_runner_text = None
+    if (len(compared_with) > 1 and worktree_runner_text is not None
+            and TEST_RUNNER_SOURCE_LINE_WHOSE_PRESENCE_SHOWS_THE_RUNNER_SELECTS_SUITES_SINCE_EVERY_COMMIT_GIVEN
+            not in worktree_runner_text):
+        print(f"comparing with {compared_with[0][:12]} alone after all: the test runner at the "
+              f"merge commit predates comparing with several commits, and would keep only the "
+              f"last one given, {compared_with[-1][:12]}")
+        compared_with = compared_with[:1]
+    by_hand = after_merge_test_run_command_build(compared_with)
 
     runner = common.run_all_test_suites
     store = common.merge_lane_head_test_run_recorded_inputs_store_directory(arguments)
@@ -555,11 +1525,14 @@ def after_merge_test_run(arguments, merge_commit):
         f"So this after-merge test run selects the suites whose recordings in "
         f"{runner.DEFAULT_RECORDED_INPUTS_DIRECTORY} do not match the merge commit, and so may "
         f"run suites again that a head test run passed on the same files.") and done_before_the_run
-    print(f"testing main at the merge commit {merge_commit[:12]}: the suites whose recorded "
-          f"inputs changed since {since[:12]}", flush=True)
+    print(f"testing {'main' if base_branch == 'main' else repr(base_branch)} at the merge commit "
+          f"{merge_commit[:12]}: the suites whose recorded "
+          f"inputs changed since {' and since '.join(commit[:12] for commit in compared_with)}",
+          flush=True)
     run_all = subprocess.run(
         [sys.executable, str(worktree / "scripts" / "run-all-test-suites.py"),
-         "--only-suites-whose-recorded-inputs-changed-since", since,
+         *[argument for commit in compared_with
+           for argument in ("--only-suites-whose-recorded-inputs-changed-since", commit)],
          "--log-dir", str(log_dir)],
         cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         env=environment, stdin=subprocess.DEVNULL)
@@ -572,27 +1545,23 @@ def after_merge_test_run(arguments, merge_commit):
           else f"the test run printed no {runner.SUMMARY_LINE_PREFIX} line; its output was:\n"
                f"{run_all.stdout.rstrip()}")
     print(f"the test run's logs and test-run-report.txt: {log_dir}")
-    exit_code = EXIT_MERGED if done_before_the_run else EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
-    if run_all.returncode != 0:
-        print(f"STOP: merged, but the test run of main at {merge_commit} exited "
-              f"{run_all.returncode}, so main may be broken; the failed suites, if any, are "
-              f"listed above, each with its log.\n"
-              f"Tell the pull request's author, and the user, this message as printed, from its "
-              f"STOP line through this line, with the FAIL and NOT RUN suite lines printed above "
-              f"it, if any.")
-        exit_code = EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
-    elif not summaries:
-        print(f"STOP: merged, but the test run of main at {merge_commit} exited 0 and printed "
-              f"no {runner.SUMMARY_LINE_PREFIX} line, so it gave no verdict on main.\n"
-              f"In a detached worktree at {merge_commit}, run: {by_hand}\n"
-              f"If that run also prints no {runner.SUMMARY_LINE_PREFIX} line, tell the user "
-              f"this message.")
-        exit_code = EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
-
+    failed_suites_were_the_only_problem = (
+        runner.run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(
+            run_all.returncode, run_all.stdout))
+    # Both records name main's state alone: a run on another branch neither clears main's
+    # failures nor records its merge commit as main's.
+    if base_branch == "main":
+        kept = failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir,
+                                          environment, lines)
+    else:
+        kept = failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, worktree,
+                                                     environment, log_dir, lines)
+    every_step_complete = done_before_the_run and kept["complete"] and (
+        failed_suites_were_the_only_problem or (run_all.returncode == 0 and bool(summaries)))
     if not recordings_matching_the_merge_commit_adopted(
             worktree, runner.DEFAULT_RECORDED_INPUTS_DIRECTORY,
             "where the after-merge test run saved its recordings", store, stale_in_the_store):
-        exit_code = EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
+        every_step_complete = False
 
     removal = git("worktree", "remove", "--force", str(worktree))
     if removal.returncode != 0:
@@ -602,9 +1571,34 @@ def after_merge_test_run(arguments, merge_commit):
               f"git -C {checkout} worktree remove --force {worktree}\n"
               f"Otherwise, tell the user this message as printed, from its STOP line, which "
               f"quotes git's error, through this line.")
-        return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
-    print(f"removed the worktree {worktree}")
-    return exit_code
+        every_step_complete = False
+    else:
+        print(f"removed the worktree {worktree}")
+
+    # The closing message below is a STOP exactly when a test failed that is not a known
+    # failure or a step did not work, so this records the merge commit only when the program
+    # is to exit 0, known failures included.
+    if every_step_complete and steps_before_the_test_run_done and not kept["new_tests"]:
+        # The record names a main commit; another branch's merge commit there would make the
+        # next main merge fall back to comparing with its head commit.
+        if base_branch != "main":
+            print(f"the merge commit {merge_commit[:12]} was not recorded in "
+                  f"{after_merge_test_run_suite_selection_main_commit_file()}: "
+                  f"pull request {arguments.pull_request} merged into {base_branch!r}, not "
+                  f"main, and that file names only main's commits. Nothing to do: the next "
+                  f"merge into main that the program exits 0 after writes its own merge "
+                  f"commit there.")
+        elif not after_merge_test_run_suite_selection_main_commit_written(merge_commit, git):
+            # Its STOP is the closing message: every other step worked, so the closing message
+            # would say to go on.
+            return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
+
+    # Chosen once every step has run, so that "nothing needs sending" never follows a step
+    # that did not work.
+    stop = after_merge_test_run_closing_message_printed_returning_whether_stop(
+        arguments, merge_commit, run_all.returncode, summaries,
+        failed_suites_were_the_only_problem, kept, every_step_complete, by_hand, base_branch)
+    return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE if stop else EXIT_MERGED
 
 
 def surviving_mutant_test_prs_go_ahead_printed(environment):
@@ -625,6 +1619,71 @@ def surviving_mutant_test_prs_go_ahead_printed(environment):
 
 def main(argv=None, wait=time.sleep):
     arguments = parse_arguments(argv)
+    outputs = arguments.merge_lane_worktrees_and_outputs_directory
+    lock_path = outputs / MERGE_PROGRAM_RUN_LOCK_FILE_NAME
+    try:
+        outputs.mkdir(parents=True, exist_ok=True)
+        lock = open(lock_path, "a")
+    except OSError as error:
+        print(f"STOP: not merged: could not open {lock_path}, the lock that lets one merge and "
+              f"its after-merge test run go at a time: {error}\n"
+              f"Tell the user that merges cannot run because {lock_path} cannot be opened: "
+              f"{error}. A subagent tells the agent that dispatched it instead.")
+        return EXIT_COULD_NOT_RUN
+    with lock:
+        # Held through the after-merge test run, so no caller's merge starts while main's
+        # latest test run is still running.
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(f"waiting for {lock_path}: another run of this program is merging or "
+                  f"testing main; this run goes on by itself when that one ends", flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        # Read only once the lock is held, since the run that held it may have just written it.
+        stop_file = outputs / MERGE_QUEUE_STOP_FILE_NAME
+        try:
+            stop_reason = stop_file.read_text().strip()
+        except FileNotFoundError:
+            stop_reason = None
+        except OSError as error:
+            stop_reason = f"it exists but could not be read: {error}"
+        if stop_reason is not None:
+            queue_program = Path(__file__).resolve().with_name(
+                "merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py")
+            print(f"STOP: not merged: the merge queue is stopped, because {stop_file} says: "
+                  f"{stop_reason}\n"
+                  f"No merge may start until main is handled. If you are merge-lane-2, run: "
+                  f"python3 {queue_program} --merge-program-outputs-directory "
+                  f"{shlex.quote(str(outputs))} merge-batch-start\n"
+                  f"and do what its STOPPED line says, which covers a stop with or without a "
+                  f"stopped notice. Otherwise tell merge-lane-2 this message, with Claude Code's "
+                  f"SendMessage tool, naming pull request {arguments.pull_request}.")
+            return EXIT_COULD_NOT_RUN
+        exit_code = merged_and_main_tested(arguments, wait)
+        if exit_code in EXITS_THAT_STOP_THE_MERGE_QUEUE:
+            merge_queue_stopped(outputs / MERGE_QUEUE_STOP_FILE_NAME, arguments.pull_request,
+                                exit_code)
+    return exit_code
+
+
+def merge_queue_stopped(stop_file, pull_request, exit_code):
+    """Write the stop file, which the merge queue program reads before each merge."""
+    reason = (f"pull request {pull_request}'s merge program exited {exit_code}, "
+              f"{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}")
+    try:
+        stop_file.write_text(reason + "\n")
+    except OSError as error:
+        print(f"could not write {stop_file}, so the merge queue does not stop for this outcome: "
+              f"{error}\n"
+              f"Until main is handled, no merge may start: if you are merge-lane-2, append a "
+              f"HOLD- line for each waiting pull request to the merge queue file; otherwise "
+              f"tell merge-lane-2 this, with Claude Code's SendMessage tool, naming pull "
+              f"request {pull_request} and exit {exit_code}.")
+        return
+    print(f"merge queue stopped: {stop_file} says: {reason}")
+
+
+def merged_and_main_tested(arguments, wait):
     try:
         token = common.read_merge_account_token()
     except common.MergeAccountTokenUnusable as unusable:
@@ -678,8 +1737,8 @@ def main(argv=None, wait=time.sleep):
     merge_error = f"the merge command exited {merge.returncode}" + (
         f": {merge.stderr.strip()}" if merge.stderr.strip() else "")
     state = run(["gh", "pr", "view", arguments.pull_request, "--repo", REPOSITORY,
-                 "--json", "state,mergedAt,mergeCommit",
-                 "-q", "{state,mergedAt,mc:.mergeCommit.oid}"], environment)
+                 "--json", "state,mergedAt,mergeCommit,baseRefName",
+                 "-q", "{state,mergedAt,mc:.mergeCommit.oid,base:.baseRefName}"], environment)
     try:
         read = json.loads(state.stdout) if state.returncode == 0 else None
     except ValueError:
@@ -715,7 +1774,8 @@ def main(argv=None, wait=time.sleep):
         print(f"pull request {arguments.pull_request} merged although {merge_error}")
         branch_exit = merged_branch_deleted(branch, environment)
     removal_exit = review_worktrees_remove(arguments)
-    test_exit = after_merge_test_run(arguments, read.get("mc") or "")
+    test_exit = after_merge_test_run(arguments, read.get("mc") or "", read.get("base") or "",
+                                     removal_exit == branch_exit == EXIT_MERGED)
     surviving_mutant_test_prs_go_ahead_printed(environment)
     return next((code for code in (test_exit, removal_exit, branch_exit) if code != EXIT_MERGED),
                 EXIT_MERGED)

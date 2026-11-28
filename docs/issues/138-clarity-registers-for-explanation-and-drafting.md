@@ -1,5 +1,5 @@
 ---
-issue: "[Clarity registers: explanations and drafted instruction text land without the user's repeated corrections](https://github.com/nedschorus/nedschorus/issues/138)"
+issue: "[Clarity registers: explanations and drafted instruction text land without the user's repeated corrections](https://github.com/nedsnodes/nedsnodes/issues/138)"
 ---
 
 # Clarity registers for explanation and drafting — GHI-MD for issue [Clarity registers: explanations and drafted instruction text land without the user's repeated corrections](https://github.com/nedschorus/nedschorus/issues/138)
@@ -42,20 +42,7 @@ Grounding observation (2026-08-22): when the user asks a question, the answering
    paragraph of `.claude/skills/walk-me-through/SKILL.md`, carried by
    PR [walk-me-through: items written for a reader with no history; the fresh reader's restatement revises the draft](https://github.com/nedschorus/nedschorus/pull/155). Actor: the agent presenting a walk, before it shows
    an item that proposes instruction text.*
-5. CLAUDE.md drafting bullet: exact text, and when it lands (now, or pointing at
-   md-write once built).
-   *processed 2026-08-22 → accepted for CLAUDE.md and landed as the drafting bullet in `CLAUDE.md`, carried by PR [Instruction homes: the CLAUDE.md drafting bullet, and AGENTS.md becomes a pointer](https://github.com/nedschorus/nedschorus/pull/157). The
-   AGENTS.md half RULED past the presented options: converted to a pointer at
-   CLAUDE.md with the user's qualifier (Claude references typically apply to
-   Codex unless Claude-specific with no Codex equivalent), on his nedlern
-   precedent — the local nedlern copy carries no AGENTS.md, so the qualifier is
-   as he restated it. The unprobed-pointer risk is an accepted residual in the
-   conversion commit with its reopening trigger (a codex review violating a
-   CLAUDE.md rule). CLAUDE.md's stale same-rule-in-AGENTS.md parenthetical
-   dropped in the same commit. The dissolved duplicate content was verified
-   present in CLAUDE.md first; the bullet-copy half of the recommendation became
-   moot. Actors: any agent drafting instruction text (the bullet); the Codex
-   runtime, which reads AGENTS.md (the pointer).*
+5. CLAUDE.md drafting bullet: exact text, and when it lands (now, or pointing at md-write once built). *processed 2026-08-22 → accepted for CLAUDE.md and landed as the drafting bullet in `CLAUDE.md`, carried by PR [Instruction homes: the CLAUDE.md drafting bullet, and AGENTS.md becomes a pointer](https://github.com/nedschorus/nedschorus/pull/157). The AGENTS.md half RULED past the presented options: converted to a pointer at CLAUDE.md with the user's qualifier (Claude references typically apply to Codex unless Claude-specific with no Codex equivalent), on his nedlern precedent — the local nedlern copy carries no AGENTS.md, so the qualifier is as he restated it. The unprobed-pointer risk is an accepted residual in the conversion commit with its reopening trigger (a codex review violating a CLAUDE.md rule). CLAUDE.md's stale same-rule-in-AGENTS.md parenthetical dropped in the same commit. The dissolved duplicate content was verified present in CLAUDE.md first; the bullet-copy half of the recommendation became moot. Actors: any agent drafting instruction text (the bullet); Codex, which reads AGENTS.md (the pointer).*
 6. Routing: the drafting register into md-write's commissioned build (founding plan
    step 1; ghi-write's unbuilt sibling); "draft-md" rejected as a name collision.
    *processed 2026-08-22 → REVISED by the user, reversing the presented routing:

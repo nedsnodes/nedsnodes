@@ -101,6 +101,7 @@ REPOSITORY_OWNER, REPOSITORY_NAME = "nedsnodes", "nedsnodes"
 MERGE_LANE_ACCOUNT = "ned-review-merge"
 QUIET_QUEUE_MOST_OPEN_PULL_REQUESTS_NOT_SENT_BACK = 10
 MUTANT_TEST_PULL_REQUESTS_OPEN_AT_ONCE_AT_MOST = 5
+HANDOFF_DIRECTORY = Path("~/.claude/handoffs")
 DEFAULT_STATE_DIRECTORY = Path(
     "/home/nedlern/nedsnodes-logs/seats/merge-lane-2/surviving-mutant-test-prs-go-ahead")
 AGENT_SEATS_FILE_NAME = "agent-seats-holding-surviving-mutant-test-tasks-in-go-ahead-order.txt"
@@ -267,10 +268,24 @@ def release_message_send_problems(state_directory, agent_seat, text):
     """Send text to agent_seat as the idle sweep sends its wake messages; return what failed,
     by the idle sweep's own check and by a comparison of each text sent with the release
     message, or [] when the send passed both."""
+    state_path = idle_sweep.verdicts_print.supervisor.supervisor_state_path(HANDOFF_DIRECTORY,
+                                                                             agent_seat)
+    try:
+        ref = (idle_sweep.
+               list_agents_tool_entry_ref_of_agent_seat_last_handoff_supervisor_launched_agent_session_find(
+                   agent_seat, HANDOFF_DIRECTORY))
+    except (OSError, ValueError) as error:
+        return [f"could not read {state_path.expanduser()}, the supervisor state of {agent_seat}: "
+                f"{type(error).__name__}: {error}, so its entry cannot be told from any other"]
+    if ref is None:
+        return [f"no running agent-session of {agent_seat} has the session id its "
+                f"handoff-supervisor launched last, in {state_path}, so its entry cannot be told "
+                f"from any other"]
+    refs = {agent_seat: ref}
     text = f"{text}\n\n{idle_sweep.DO_NOT_REPLY_SENTENCE}"
     prompt = idle_sweep.SENDER_PROMPT.format(
         seat=agent_seat, text=text,
-        find_the_entry=idle_sweep.FIND_THE_ENTRY.format(seat=agent_seat),
+        find_the_entry=idle_sweep.FIND_THE_ENTRY.format(seat=agent_seat, ref=ref),
         keep_the_last_sentence=idle_sweep.KEEP_THE_LAST_SENTENCE)
     outcome = idle_sweep.run_headless(prompt, idle_sweep.SEND_ANSWER_SCHEMA,
                                       idle_sweep.SENDING_TOOLS,
@@ -278,10 +293,9 @@ def release_message_send_problems(state_directory, agent_seat, text):
                                       idle_sweep.HEADLESS_TIMEOUT_SECONDS)
     if outcome.error:
         return [f"the headless agent-session that sends the message failed: {outcome.error}"]
-    return idle_sweep.send_problems(outcome, [agent_seat]) + [
+    return idle_sweep.send_problems(outcome, refs) + [
         f"sent {seat} a text other than the release message: {sent_text!r}"
-        for seat, sent_text in idle_sweep.sent_texts_other_than_code_wrote(
-            outcome, [agent_seat], text)]
+        for seat, sent_text in idle_sweep.sent_texts_other_than_code_wrote(outcome, refs, text)]
 
 
 def counted_sentence(count):

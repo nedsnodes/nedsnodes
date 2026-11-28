@@ -549,6 +549,45 @@ def run_walk_order_cases(root):
           and "Traceback" not in result.stderr and files(checkout) == before, result.stderr)
 
 
+def run_interleaved_append_cases(root):
+    # Claude Code runs the pending-user-alerts hook and the short-answer hook in parallel, so the short-answer hook's
+    # line can land between any read of the walk-minutes and the next write; each read here appends one such line.
+    checkout, home = walk_checkout(root, "interleaved")
+    claimed_alert(home, "alert-i", "an alert while he replies")
+    # Resolved, because the inserter reads the walk through the checkout's resolved path, and the test sandbox puts
+    # the temporary directory behind a symlink.
+    minutes = (checkout / "docs" / "walk" / f"{WALK}-minutes.md").resolve()
+    spec = importlib.util.spec_from_file_location("user_alert_inserter_under_test", PROGRAM)
+    inserter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inserter)
+    injected = []
+    read_text = Path.read_text
+
+    def read_text_then_other_hook_appends(path, *arguments, **keywords):
+        text = read_text(path, *arguments, **keywords)
+        if Path(path).resolve() == minutes:
+            line = f"User (2026-11-25 10:00Z), on item 4 of 9 while it waited, a reply {len(injected)}"
+            injected.append(line)
+            with open(minutes, "a", encoding="utf-8") as file:
+                file.write("\n" + line + "\n")
+        return text
+
+    old_home = os.environ.get("HOME")
+    os.environ["HOME"] = str(home)
+    Path.read_text = read_text_then_other_hook_appends
+    try:
+        inserter.insert(str(checkout), ["alert-i"])
+    finally:
+        Path.read_text = read_text
+        if old_home is None:
+            del os.environ["HOME"]
+        else:
+            os.environ["HOME"] = old_home
+    text = minutes.read_text(encoding="utf-8")
+    check("a line another hook appends to the walk-minutes between the inserter's read and its write is kept",
+          injected and all(line in text for line in injected) and "#user_alert alert-i\n" in text, text)
+
+
 with tempfile.TemporaryDirectory() as temporary_directory:
     scratch = Path(temporary_directory)
     run_one_alert_cases(scratch)
@@ -558,6 +597,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     run_refusal_cases(scratch)
     run_repeated_id_and_title_spanning_two_headings_cases(scratch)
     run_walk_order_cases(scratch)
+    run_interleaved_append_cases(scratch)
 
 if failures:
     print(f"\n{len(failures)} case(s) failed")

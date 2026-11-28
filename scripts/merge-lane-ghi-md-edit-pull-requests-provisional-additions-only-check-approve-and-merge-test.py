@@ -83,7 +83,11 @@ import json, os, sys
 directory = os.environ["GHI_MD_AUTO_MERGE_TEST_DIRECTORY"]
 with open(os.path.join(directory, "merge-calls.log"), "a") as log:
     log.write(json.dumps(sys.argv[1:]) + "\n")
-print("merge line one\nmerge line two\nmerge program last line", flush=True)
+stdout_path = os.path.join(directory, "merge.stdout")
+if os.path.exists(stdout_path):
+    print(open(stdout_path).read(), end="", flush=True)
+else:
+    print("merge line one\nmerge line two\nmerge program last line", flush=True)
 code = int(open(os.path.join(directory, "merge.exit")).read())
 if code < 0:
     os.kill(os.getpid(), -code)
@@ -557,6 +561,37 @@ def main():
                   code == 1 and f"exited {merge_exit}: {outcome}" in message
                   and "merge line one\nmerge line two\nmerge program last line" in message
                   and scratch.record() == {"9": HEAD}, f"exit {code}\n{output}\n{message}")
+
+        scratch = Scratch(root, "merge-stop-longer-than-the-line-limit")
+        (scratch.directory / "merge.exit").write_text("3")
+        stop = ["STOP: merged, but the branch b could not be deleted, and whether it is gone "
+                "from GitHub could not be read."]
+        stop += [f"error line {number}" for number in range(1, program.MERGE_OUTPUT_LINES_IN_MESSAGE + 1)]
+        (scratch.directory / "merge.stdout").write_text(
+            "\n".join(["merge line one", "merge line two", *stop]) + "\n")
+        scratch.routes(routes_for())
+        code, output = scratch.run()
+        message = scratch.message(f"pr9-{HEAD[:12]}.txt")
+        check("a merge program STOP longer than the line limit is reported from its STOP line "
+              "on, exit 1",
+              code == 1 and "\n".join(stop) in message and "merge line two" not in message,
+              f"exit {code}\n{output}\n{message}")
+
+        scratch = Scratch(root, "merge-two-stops-further-apart-than-the-line-limit")
+        (scratch.directory / "merge.exit").write_text("3")
+        first_stop = "STOP: merged, but the branch b could not be deleted."
+        between = [f"between line {number}" for number in range(1, program.MERGE_OUTPUT_LINES_IN_MESSAGE + 2)]
+        last_stop = "STOP: the after-merge test run failed."
+        (scratch.directory / "merge.stdout").write_text(
+            "\n".join(["merge line one", first_stop, *between, last_stop, "last line"]) + "\n")
+        scratch.routes(routes_for())
+        code, output = scratch.run()
+        message = scratch.message(f"pr9-{HEAD[:12]}.txt")
+        check("two merge program STOPs further apart than the line limit are both reported, "
+              "from the first STOP line on, exit 1",
+              code == 1 and first_stop in message and last_stop in message
+              and "merge line one" not in message,
+              f"exit {code}\n{output}\n{message}")
 
         scratch = Scratch(root, "approval-refused-then-next-merged")
         refused, passing = routes_for(review_exit=1), routes_for(number=10, head=NEW_HEAD)

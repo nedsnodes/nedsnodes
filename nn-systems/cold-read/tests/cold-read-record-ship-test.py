@@ -1426,6 +1426,9 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
         if not landed_triage.exists():
             landed_triage.parent.mkdir(parents=True, exist_ok=True)
             landed_triage.write_text(theirs, encoding="utf-8")
+            # Older than ours: a newer store copy is kept, as the case below tests.
+            ours_seconds = (triage_record / "triage.md").stat().st_mtime
+            os.utime(landed_triage, (ours_seconds - 3600, ours_seconds - 3600))
         return answer
 
     racing.store_inventory = inventory_then_land_triage
@@ -1444,6 +1447,57 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
           "REPLACED triage.md" in err
           and hashlib.sha256(theirs.encode()).hexdigest() in err, err)
 
+    # --- A store triage file newer than the local copy is kept, rule 4 ------
+    # A worktree's record shipped on removal carried a triage file older than
+    # the store's, which had gained a line since, and the old copy replaced it.
+    newer_store = scratch / "newer-store" / "cold-read-records"
+    newer_record = make_record(scratch / "newer-records", "newer-2026-11-20",
+                               {"a.md": "# shared\n",
+                                "cold-read-triage.md": "# triage\n\nas triaged\n"})
+    code, out, err = ship_in_process(newer_store, newer_record)
+    newer_stored_triage = newer_store / newer_record.name / "cold-read-triage.md"
+    appended = "# triage\n\nas triaged\nruling: closed by the user's answer\n"
+    newer_stored_triage.write_text(appended, encoding="utf-8")
+    old_seconds = newer_stored_triage.stat().st_mtime - 3600
+    os.utime(newer_record / "cold-read-triage.md", (old_seconds, old_seconds))
+    (newer_record / "b.md").write_text("# a report added later\n", encoding="utf-8")
+    code, out, err = ship_in_process(newer_store, newer_record)
+    check("a store triage file newer than the local copy is not replaced: the "
+          "shipment is REFUSED, the store keeps its copy, nothing is announced as "
+          "replaced, and other new files are still added",
+          code == 2 and out.startswith("REFUSED:") and out.count("\n") == 1
+          and "the log-store's cold-read-triage.md in" in out
+          and "the other new files were added" in out
+          and newer_stored_triage.read_text(encoding="utf-8") == appended
+          and (newer_store / newer_record.name / "b.md").is_file()
+          and "REPLACED" not in err,
+          f"exit {code}: {out}{err}")
+    copy_command = (f"cp {newer_stored_triage} {newer_record / 'cold-read-triage.md'}")
+    compare_command = f"diff {newer_record / 'cold-read-triage.md'} {newer_stored_triage}"
+    check("the refusal gives the command that compares the two copies, the one that "
+          "copies the log-store's over the local one, and says to add the log-store's "
+          "text when the local copy holds text of its own",
+          compare_command in out and copy_command in out
+          and "If no line opens `<`, replace this checkout's copy" in out
+          and "keeps the log-store's `>` text that is still wanted" in out, out)
+    compared = subprocess.run(compare_command.split(), capture_output=True, text=True)
+    check("following the refusal, the comparison shows only lines opening `>`, the "
+          "log-store's appended ruling",
+          compared.returncode == 1
+          and [line for line in compared.stdout.splitlines() if line[:1] in "<>"]
+          == ["> ruling: closed by the user's answer"], compared.stdout)
+    subprocess.run(copy_command.split(), check=True)
+    code, out, err = ship_in_process(newer_store, newer_record)
+    check("after the refusal's copy command, the record ships as nothing new",
+          code == 0 and "nothing new" in out, f"exit {code}: {out}{err}")
+    merged = appended + "a local change\n"
+    (newer_record / "cold-read-triage.md").write_text(merged, encoding="utf-8")
+    code, out, err = ship_in_process(newer_store, newer_record)
+    check("a local triage file merged after the store's copy is newer and replaces it",
+          code == 0 and "cold-read-triage.md replaced" in out
+          and newer_stored_triage.read_text(encoding="utf-8") == merged,
+          f"exit {code}: {out}{err}")
+
     # --- An overlapping replacement of triage.md lands after this one's -----
     # Both shipments replace triage.md; the other's rename lands second, so
     # this shipment's read-back holds the other's triage: never shipped:.
@@ -1453,6 +1507,8 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
     overtaken_triage = overtaken_store / overtaken_record.name / "triage.md"
     overtaken_triage.parent.mkdir(parents=True)
     overtaken_triage.write_text("# triage, the store's\n", encoding="utf-8")
+    overtaken_ours_seconds = (overtaken_record / "triage.md").stat().st_mtime
+    os.utime(overtaken_triage, (overtaken_ours_seconds - 3600, overtaken_ours_seconds - 3600))
     saved_replace = os.replace
 
     def replace_then_the_other_replaces(source, target, *args, **kwargs):

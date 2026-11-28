@@ -48,3 +48,13 @@ released file: {"agent_seat": "mutant-seat", "released_at": "2026-11-21T21:37:31
 ## What to do next
 
 The owner, merge-lane-2, fixes the root cause: a send counts as passed only when the text sent is the text code wrote, the go-ahead with the do-not-reply sentence the program appends, compared as `sent_texts_other_than_code_wrote` compares. Otherwise the program records nothing, prints the text that was sent, and exits as it does for a failed send, so the next merge tries again. The root cause is that a caller of `send_problems` can check where a message went without checking what it said; the owner considers giving `send_problems` the expected text, so that every caller checks both. The fix carries a test with the case above.
+
+## Outcome
+
+The defect is fixed. Pull request [4072](https://github.com/nedsnodes/nedsnodes/pull/4072), commit 69525f4aa, merged on 2026-11-22 at 00:03 UTC, makes the release program record a release only when the text sent is the release message. Pull request [4094](https://github.com/nedsnodes/nedsnodes/pull/4094) only carried that check through a rename of the program, and its description says `#no_defect_fixed`.
+
+On main at commit f863364a1, the program is `scripts/merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py`. Lines 281-284 add the result of `sent_texts_other_than_code_wrote` to the send's problems. On any problem, lines 319-329 record nothing, print the text that was sent and return exit 2, so the next merge tries again. `release_recorded` is reached only at line 330.
+
+The program's `-test.py` suite passes, including its `text-differs` case. The reproduction above, adapted to the renamed count function, gives exit 2 and no released file.
+
+The optional change was not made: `send_problems` was not given the expected text. No further work is needed for this issue, because all three current callers of `send_problems`, the release program and the idle sweep's `send` and account-change notice, also run `sent_texts_other_than_code_wrote`.

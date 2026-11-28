@@ -57,14 +57,7 @@ passing review.
   the credential able to push main belongs to a dedicated system user,
   reached only through the main-gatekeeper, which logs every use). Dormant
   until its credential work lands.
-- **The PR process** — until the gate activates: each pull request
-  merges one atomic nn-topic-branch, and
-  the merge-lane agent-seat reviews and merges every PR (deputization, recorded
-  at R13, is the ruled exception). Recorded in CLAUDE.md's PR-process paragraph.
-  The earlier form — commits accumulating on a seat-branch, cherry-picked
-  onto a fresh branch later — was retired 2026-08-28 after a three-commit
-  topic written on a Tuesday took until Friday to reach main, every
-  cherry-pick re-resolving conflicts against a head that had moved.
+- **The PR process** — until the gate activates: each pull request merges one atomic nn-topic-branch, and merge-lane-2 merges every PR, and it, merge-lane-1 and merge-lane-3 manage their reviews (deputization, recorded at R13, is the ruled exception). Recorded in CLAUDE.md's PR-process paragraph. The earlier form — commits accumulating on a seat-branch, cherry-picked onto a fresh branch later — was retired 2026-08-28 after a three-commit topic written on a Tuesday took until Friday to reach main, every cherry-pick re-resolving conflicts against a head that had moved.
 - **The override markers** — `.walk-approved` (instruction-file guard) and `.location-write-approved` (session-location guard), both gitignored, each by convention holding the user's quoted approval words, consumed by the one guarded call it approves (see Marker honesty); `.walk-approved` holds instead `#pre_approved_change` and the reason for a change that `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md` does not require his approval for.
 - **The launchers** — `scripts/launch-claude-mac` and
   `scripts/launch-claude-ubuntu`.
@@ -188,8 +181,8 @@ the one-turn window.
 
 **R4. Stale base — absorbed (ruled 2026-08-17).** The original rule
 (block first write on a stale base; warn when main moves mid-task; harden
-at push) is superseded by R15's catch-up hook plus the Claude Code
-runtime's own refusal to edit files changed since last read. Residues
+at push) is superseded by R15's catch-up hook plus Claude Code's
+own refusal to edit files changed since last read. Residues
 assigned: starting-stale rides R3's ruling; push-time hardening rides the
 gatekeeper permanently.
 
@@ -314,12 +307,12 @@ clean and conflict-free — an
 agent-seat that lags says so on its status line rather than silently. **Who
 hears it** (ruled 2026-08-17): exactly one state forces an agent turn — a
 conflict whose cleanup failed, leaving the tree mid-merge; routine events
-stay display-plus-stamp. **Known structural finding, candidate fix
-unruled:** the atomic-PR lane reliably produces add/add conflicts on files
+stay display-plus-stamp. **Known structural finding:** the atomic-PR lane reliably produces add/add conflicts on files
 a cherry-picked topic *created*. Manual remedy: `git status` to list,
 `git checkout --theirs <file>` to take main's canonical version, `git
 add`, commit. The candidate launch-reset of fully-merged seat-branches
-stays unruled (cherry-picks break ancestry, so the predicate needs care).
+no longer applies: an agent-home rests on a detached HEAD at `origin/main`
+and has no seat-branch to reset.
 
 **R16. Binary updates at launch, never in background — built-live
 (accreted, no single PR).** Both launchers update the binary at launch,
@@ -410,7 +403,7 @@ real accumulation surfacing — then its first version reports and never
 deletes. Unpromoted work is protected by exactly one net: commit it.
 
 **R23. Agent scratch lives in the scratchpad — satisfied by a Claude Code
-runtime default (ruled 2026-08-17).** The runtime names a per-session
+default (ruled 2026-08-17).** Claude Code names a per-session
 scratchpad outside the repository in every system prompt. A remind-tier
 hook on scratch-shaped writes stays a recorded candidate sharing R26's
 hook-plus-config pattern.
@@ -473,7 +466,7 @@ rulings; listed here to keep the numbering complete.
 | R20 | Handoff preserves structure | default | built, PR [handoff: a multi-line next step survives the channel end to end (R20)](https://github.com/nedsnodes/nedsnodes/pull/108) |
 | R21 | Worktrees reaped when safe | detect + remind | built-live, PR [clean-worktrees: mechanical reaper for finished session worktrees, reporting at every seat launch](https://github.com/nedsnodes/nedsnodes/pull/73); vacancy proven, PR [worktree reaper: prove vacancy before reaping, instead of assuming it](https://github.com/nedsnodes/nedsnodes/pull/100) |
 | R22 | Junk ignored by pattern | default | ruled closed; issue [Worktree file hygiene: classify untracked files so junk is ignored rather than accumulating in search results](https://github.com/nedsnodes/nedsnodes/issues/50) closed |
-| R23 | Scratch lives in the scratchpad | default | satisfied by runtime default |
+| R23 | Scratch lives in the scratchpad | default | satisfied by a Claude Code default |
 | R24 | Surveys fetch before concluding | default + text | mostly encoded: the checkout-freshness Stop hook fetches origin each turn; exact surveys still fetch first |
 | R25 | Dead registrations surfaced | remind (report) | built, PR [clean-worktrees: one report line names dead registrations and the prune command (R25)](https://github.com/nedsnodes/nedsnodes/pull/112) |
 | R26 | New MDs land in canonical locations | remind | ruled-unbuilt, issue [MD-placement guidance as symmetric pre-tool remind hooks on both runtimes (boss-directed design, build deferred)](https://github.com/nedsnodes/nedsnodes/issues/11) |
@@ -519,7 +512,7 @@ pull request.
    `claude update`.) See R16 for the mechanism's history.
 
 Recorded candidates, unruled — an incident or a user pick is the trigger:
-the supervisor launch-reset of fully-merged seat-branches (R15); R24's
+R24's
 logic encoded into R22's future cleanup script; R8's session detector;
 machine-suffixed agent-seat names (rider 5); other-seat-home write blocking
 (R6's recorded-unbuilt half).
