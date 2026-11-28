@@ -153,7 +153,7 @@ ref only keeps more. A task list under ~/.claude/tasks/nedsnodes-*-tasks
 that cannot be read in full, or a ~/.claude/tasks that exists but cannot be
 listed, stops every `-D` deletion, as GitHub out of reach does. GitHub out of
 reach is named on a line of its own outside --only-done, and is no failure.
-A task list not read is named, in every mode, on a line opening `FAILED: `,
+A task list not read is named, in every mode, on a line holding `FAILED: `,
 and the run exits 1. The report modes also name a branch that only a done
 worktree has checked out, which --remove deletes once it has removed that
 worktree.
@@ -239,7 +239,7 @@ fetched, so a stale origin only keeps more open. When the fetch fails or runs
 past RESTORED_BRANCH_TASKS_CLOSE_GIT_FETCH_TIMEOUT_SECONDS, a task list or a
 task file cannot be read, a task file cannot be rewritten, a task has no
 `Restore commit: ` line, or git cannot judge its commit, the task is left as
-it was and a line opening `FAILED: ` says so.
+it was and a line holding `FAILED: ` says so.
 
 Modes:
   (default)    report every worktree, one line each, then the count lines
@@ -302,6 +302,16 @@ Usage:
   scripts/clean-worktrees.py [--only-done | --remove] [--repo PATH]
   scripts/clean-worktrees.py --remove-worktree-and-force-delete-its-branch PATH [--repo PATH]
   scripts/clean-worktrees.py --force-delete-branch NAME [--repo PATH]
+
+OUTCOME HASHTAGS. Each line that names an outcome the handoff-supervisor
+sums up opens with `clean-worktrees: ` and that outcome's hashtags, then the
+words, as in `clean-worktrees: #worktree_removed# x: removed`; a line can
+carry two, as a removal whose branch was deleted does. The hashtags are the
+*_HASHTAG constants below, and outcome_line_hashtags_and_words splits a line
+into its hashtags and its words. Every line holding FAILED carries
+#worktree_cleaner_step_failed#, except the last line of a run that names one
+worktree or branch, which opens `FAILED: ` as the first-prompt list's
+instruction reads it.
 
 Exit codes: 0 ok, 1 a removal, a record's shipment, a branch or work-snapshot
 made before a removal, an owner file written or an unlock before a judgment,
@@ -389,7 +399,6 @@ REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_DIRECTORY = (
 REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_FILE_OVERRIDE_VARIABLE = (
     "CLEAN_WORKTREES_REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_FILE_OVERRIDE")
 REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_WRITE_TIMEOUT_SECONDS = 30
-# nn-systems/handoff/handoff-supervisor.py keeps the lines holding these in its handoff report.
 LOG_OF_REMOVALS_RECORD_BY_HAND_PHRASE = ": to record it, run this once: "
 LOG_OF_REMOVALS_RECORD_BY_HAND_FAILED_PHRASE = (
     ": if that printf command fails too, do not run scripts/clean-worktrees.py again; ")
@@ -436,7 +445,6 @@ FIRST_PROMPT_LIST = (REPO_ROOT / "nn-systems" / "handoff"
                      / "agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py")
 _first_prompt_list = None
 
-# No next-step line may contain FAILED: the handoff-supervisor counts each such line as a failure.
 WORKTREE_KEPT_AFTER_FAILURE_NEXT_REMOVE_RUN_RETRIES_LINE_TEMPLATE = (
     "{name}: do nothing now: the worktree and everything in it are kept, and the next "
     "scripts/clean-worktrees.py --remove, daily or at a handoff, tries again; if it fails the same "
@@ -476,8 +484,41 @@ def run_git(repo, *arguments):
     )
 
 
-FINISHED_WITH_FAILURES_LINE = "clean-worktrees: finished; each failure is named above"
-STOPPED_LINE_START = "clean-worktrees: stopped, because "
+PROGRAM_LINE_START = "clean-worktrees: "
+# The handoff-supervisor sums a --remove run into one line by these hashtags, read with
+# outcome_line_hashtags_and_words; a line may carry more than one.
+WORKTREE_REMOVED_HASHTAG = "#worktree_removed#"
+WORKTREE_BRANCH_DELETED_HASHTAG = "#worktree_branch_deleted#"
+WORKTREE_BRANCH_FORCE_DELETED_HASHTAG = "#worktree_branch_force_deleted#"
+WORKTREE_BRANCH_LEFT_IN_PLACE_HASHTAG = "#worktree_branch_left_in_place#"
+WORKTREE_REMOVAL_WILL_DISCARD_FILES_HASHTAG = "#worktree_removal_will_discard_files#"
+WORKTREE_FILES_DISCARDED_HASHTAG = "#worktree_files_discarded#"
+WORKTREE_KEPT_FOR_RECORDS_HASHTAG = "#worktree_kept_for_records#"
+WORKTREE_KEPT_VACANCY_NOT_CHECKED_HASHTAG = "#worktree_kept_vacancy_not_checked#"
+WORKTREE_CLEANER_STEP_FAILED_HASHTAG = "#worktree_cleaner_step_failed#"
+WORKTREE_REMOVALS_LOG_RECORD_BY_HAND_HASHTAG = "#worktree_removals_log_record_by_hand#"
+WORKTREE_CLEANER_FINISHED_WITH_FAILURES_HASHTAG = "#worktree_cleaner_finished_with_failures#"
+WORKTREE_CLEANER_STOPPED_HASHTAG = "#worktree_cleaner_stopped#"
+OUTCOME_LINE_START = re.compile(r"[a-z0-9-]+: ((?:#[a-z0-9_]+# )+)")
+
+
+def outcome_line(words, *hashtags, program_line_start=PROGRAM_LINE_START):
+    """The line for an outcome the handoff-supervisor counts: the program's name, the outcome's
+    hashtags, then the words a person reads."""
+    return f"{program_line_start}{' '.join(hashtags)} {words}"
+
+
+def outcome_line_hashtags_and_words(line):
+    """Return (the hashtags an outcome line carries, its words), or ((), line) for any other line."""
+    start = OUTCOME_LINE_START.match(line)
+    if start is None:
+        return (), line
+    return tuple(start.group(1).split()), line[start.end():]
+
+
+FINISHED_WITH_FAILURES_LINE = outcome_line("finished; each failure is named above",
+                                           WORKTREE_CLEANER_FINISHED_WITH_FAILURES_HASHTAG)
+STOPPED_LINE_START = outcome_line("stopped, because ", WORKTREE_CLEANER_STOPPED_HASHTAG)
 # Only the listing calls raise, so every removal before the stop has already printed its line on stdout.
 WHAT_A_STOPPED_INVOCATION_REMOVED_WITH_REMOVE = (
     "clean-worktrees removed only the worktrees and branches named on its lines containing "
@@ -632,21 +673,20 @@ def append_removed_worktree_or_deleted_branch_log_lines(events, repo, name):
                                     REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_WRITE_TIMEOUT_SECONDS,
                                     stdin_text=text)
     except mark.DailyMemoryReviewReadOrWriteFailed as error:
-        # No line may contain ": removed", ": deleted" or ": removal FAILED": the handoff-supervisor counts those.
         place = f"{mark.NED_BOX_SSH_TARGET if ssh_target else machine}:{log_file}"
         writer = ([*mark.NED_BOX_SSH_COMMAND, ssh_target, command] if ssh_target
                   else ["/bin/sh", "-c", command])
-        # The handoff-supervisor keeps the two lines after a FAILED line by these phrases.
-        print(f"{name}: log of removals line(s) FAILED to be written to {place} — {error}. "
-              f"The removal or branch deletion named above stands, but no file outside this "
-              f"run's output records it.\n"
-              f"{name}{LOG_OF_REMOVALS_RECORD_BY_HAND_PHRASE}"
-              f"{shlex.join(['printf', PRINTF_EACH_ARGUMENT_ON_ITS_OWN_LINE, *text.splitlines()])} | "
-              f"{shlex.join(writer)}\n"
-              f"{name}{LOG_OF_REMOVALS_RECORD_BY_HAND_FAILED_PHRASE}"
-              f"tell the user that scripts/clean-worktrees.py on {machine} could not write "
-              f"its log of removals at {place}, quoting both the error above and the one the printf "
-              f"command printed; a subagent tells the agent that dispatched it instead.")
+        print(outcome_line(f"{name}: log of removals line(s) FAILED to be written to {place} — {error}. "
+                           f"The removal or branch deletion named above stands, but no file outside this "
+                           f"run's output records it.", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
+        print(outcome_line(f"{name}{LOG_OF_REMOVALS_RECORD_BY_HAND_PHRASE}"
+                           f"{shlex.join(['printf', PRINTF_EACH_ARGUMENT_ON_ITS_OWN_LINE, *text.splitlines()])} | "
+                           f"{shlex.join(writer)}", WORKTREE_REMOVALS_LOG_RECORD_BY_HAND_HASHTAG))
+        print(outcome_line(f"{name}{LOG_OF_REMOVALS_RECORD_BY_HAND_FAILED_PHRASE}"
+                           f"tell the user that scripts/clean-worktrees.py on {machine} could not write "
+                           f"its log of removals at {place}, quoting both the error above and the one the "
+                           f"printf command printed; a subagent tells the agent that dispatched it instead.",
+                           WORKTREE_REMOVALS_LOG_RECORD_BY_HAND_HASHTAG))
         return False
     return True
 
@@ -657,9 +697,9 @@ def delete_orphaned_branch_ref(branch, repo):
     # Keep -d: git's merged-branch check is independent of our containment test.
     deletion = run_git(repo, "branch", "-d", branch)
     if deletion.returncode != 0:
-        print(f"branch {branch}: deletion FAILED — {deletion.stderr.strip()[:120]}")
+        print(outcome_line(f"branch {branch}: deletion FAILED — {deletion.stderr.strip()[:120]}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
         return False
-    print(f"branch {branch}: deleted (no worktree, nothing beyond origin/main)")
+    print(outcome_line(f"branch {branch}: deleted (no worktree, nothing beyond origin/main)", WORKTREE_BRANCH_DELETED_HASHTAG))
     return append_removed_worktree_or_deleted_branch_log_lines(
         [("deleted-branch", {"branch": branch, "commit": commit})], repo, f"branch {branch}")
 
@@ -775,28 +815,28 @@ def force_delete_finished_pull_request_head_branch(branch, tip, pull_request, re
                               capture_output=True, text=True, check=False,
                               env={**os.environ, "LC_ALL": "C"})
     if deletion.returncode != 0:
-        print(f"branch {branch}: deletion FAILED — git branch -D exited {deletion.returncode}: "
-              f"{deletion.stderr.strip()[:120] or 'no error text'}")
+        print(outcome_line(f"branch {branch}: deletion FAILED — git branch -D exited {deletion.returncode}: "
+              f"{deletion.stderr.strip()[:120] or 'no error text'}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
         return False
     was = re.search(r"\(was ([0-9a-f]+)\)", deletion.stdout)
     deleted = was and run_git(repo, "rev-parse", "--verify", "--quiet",
                               f"{was.group(1)}^{{commit}}").stdout.strip()
     if deleted == tip:
-        print(f"branch {branch}: deleted with git branch -D, its last commit {tip} being the head of "
-              f"{pull_request_text(pull_request)}")
+        print(outcome_line(f"branch {branch}: deleted with git branch -D, its last commit {tip} being the head of "
+              f"{pull_request_text(pull_request)}", WORKTREE_BRANCH_FORCE_DELETED_HASHTAG))
         return append_removed_worktree_or_deleted_branch_log_lines(
             [("deleted-branch", {"branch": branch, "commit": tip})], repo, f"branch {branch}")
-    # One line each, so the handoff-supervisor's summary, which keeps FAILED lines, keeps the restore command.
+    # One line each, so the handoff-supervisor's summary, which keeps the step-failed lines, keeps the restore command.
     restore = f"git -C {shlex.quote(str(repo))} branch {shlex.quote(branch)} {deleted or tip}"
     if not deleted:
-        print(f"branch {branch}: deletion FAILED to be confirmed — git branch -D deleted it without "
+        print(outcome_line(f"branch {branch}: deletion FAILED to be confirmed — git branch -D deleted it without "
               f"saying which commit it pointed at, so commits made on it after its tip {tip} was "
               f"checked may have no branch now; restore the checked tip with: {restore}, and look "
-              f"for newer commits with: git -C {shlex.quote(str(repo))} fsck --lost-found")
+              f"for newer commits with: git -C {shlex.quote(str(repo))} fsck --lost-found", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
     else:
-        print(f"branch {branch}: deletion FAILED — it had moved after its check, so git branch -D "
+        print(outcome_line(f"branch {branch}: deletion FAILED — it had moved after its check, so git branch -D "
               f"deleted its commit {deleted}, not the checked tip {tip} of "
-              f"{pull_request_text(pull_request)}; restore it with: {restore}")
+              f"{pull_request_text(pull_request)}; restore it with: {restore}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
     append_removed_worktree_or_deleted_branch_log_lines(
         [("deleted-branch", {"branch": branch, "commit": deleted or "unknown"})], repo,
         f"branch {branch}")
@@ -820,11 +860,23 @@ def in_progress_git_operation_keep_reason(worktree):
     return None
 
 
+LSOF_NOT_INSTALLED_KEEP_REASON = "lsof is not installed, so vacancy cannot be checked"
+VACANCY_CHECK_NOT_TRUSTED_KEEP_REASON_START = "the vacancy check (lsof) "
+
+
+def worktree_kept_line(name, reason):
+    """The line for a worktree kept for reason, marked when the vacancy check could not be trusted."""
+    line = f"{name}: kept — {reason}"
+    if LSOF_NOT_INSTALLED_KEEP_REASON in reason or VACANCY_CHECK_NOT_TRUSTED_KEEP_REASON_START in reason:
+        return outcome_line(line, WORKTREE_KEPT_VACANCY_NOT_CHECKED_HASHTAG)
+    return line
+
+
 def worktree_vacancy_keep_reason(worktree):
     """Return why vacancy is unproven, or None for a provably vacant worktree."""
     # Even a partial listing proves occupancy when it contains a matching cwd.
     if shutil.which("lsof") is None:
-        return "lsof is not installed, so vacancy cannot be checked"
+        return LSOF_NOT_INSTALLED_KEEP_REASON
     try:
         cwd_listing = subprocess.run(
             ["lsof", "-a", "-d", "cwd", "-F", "n"],
@@ -832,7 +884,7 @@ def worktree_vacancy_keep_reason(worktree):
             timeout=VACANCY_CHECK_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return "the vacancy check (lsof) could not be run"
+        return f"{VACANCY_CHECK_NOT_TRUSTED_KEEP_REASON_START}could not be run"
     prefix = str(worktree.resolve())
     reported_paths = 0
     for line in cwd_listing.stdout.splitlines():
@@ -843,10 +895,10 @@ def worktree_vacancy_keep_reason(worktree):
                 return "a live process is rooted inside it"
     # No match proves vacancy only when lsof returned a usable listing.
     if cwd_listing.returncode != 0:
-        return (f"the vacancy check (lsof) failed with exit "
+        return (f"{VACANCY_CHECK_NOT_TRUSTED_KEEP_REASON_START}failed with exit "
                 f"{cwd_listing.returncode}, so vacancy cannot be trusted")
     if reported_paths == 0:
-        return "the vacancy check (lsof) reported no working directories at all"
+        return f"{VACANCY_CHECK_NOT_TRUSTED_KEEP_REASON_START}reported no working directories at all"
     return None
 
 
@@ -959,8 +1011,8 @@ def ship_log_store_records(worktree):
         if shipment.returncode:
             # Printed now, not after the loop: a later shipment can hang until the handoff's timeout kills this run.
             # The shipper's line appears only inside this FAILED line, so a reader counts it once.
-            print(f"{worktree.name}: record shipment FAILED, worktree kept — removing it would delete "
-                  f"a record the log-store does not hold: {record.relative_to(worktree)} ({line})")
+            print(outcome_line(f"{worktree.name}: record shipment FAILED, worktree kept — removing it would delete "
+                  f"a record the log-store does not hold: {record.relative_to(worktree)} ({line})", WORKTREE_KEPT_FOR_RECORDS_HASHTAG))
             unshipped.append((shipper, line))
         else:
             print(f"{worktree.name}: {line}")
@@ -1475,9 +1527,9 @@ def keep_what_removal_would_lose(worktree, repo, verdict, one_named=False):
         else:
             made = run_git(repo, "branch", name, verdict.detached_commit)
         if made is not None and made.returncode != 0:
-            print(f"{worktree.name}: branch for its commits on no branch FAILED, worktree kept — "
+            print(outcome_line(f"{worktree.name}: branch for its commits on no branch FAILED, worktree kept — "
                   f"git branch {name} {verdict.detached_commit} exited {made.returncode}: "
-                  f"{made.stderr.strip()[:160] or 'no error text'}")
+                  f"{made.stderr.strip()[:160] or 'no error text'}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
             print_next_remove_run_line(
                 WORKTREE_KEPT_AFTER_FAILURE_NEXT_REMOVE_RUN_RETRIES_LINE_TEMPLATE.format(name=worktree.name),
                 one_named)
@@ -1500,8 +1552,8 @@ def keep_what_removal_would_lose(worktree, repo, verdict, one_named=False):
                 existing = (work_snapshots.work_snapshot_ref(owner_key, worktree)
                             if outcome in ("written", "unchanged") else None)
         except Exception as error:
-            print(f"{worktree.name}: work-snapshot FAILED, worktree kept — its uncommitted and "
-                  f"untracked files could not be copied: {type(error).__name__}: {error}")
+            print(outcome_line(f"{worktree.name}: work-snapshot FAILED, worktree kept — its uncommitted and "
+                  f"untracked files could not be copied: {type(error).__name__}: {error}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
             print_next_remove_run_line(
                 WORKTREE_KEPT_AFTER_FAILURE_NEXT_REMOVE_RUN_RETRIES_LINE_TEMPLATE.format(name=worktree.name),
                 one_named)
@@ -1536,7 +1588,6 @@ def remove_worktree(worktree, branch, repo, verdict, one_named=False):
             # The run's FAILED line says what to do; the lines below promise a daily retry, which
             # keeps an agent-seat's own worktree while its owner runs.
             return False
-        # No next-step line may contain FAILED: the handoff-supervisor counts each such line as a failure.
         if any(line.startswith("REFUSED:") and shipper != WALK_FILES_SHIPPER
                for shipper, line in unshipped):
             print(f"{worktree.name}: for each record whose line starts REFUSED:, rename its directory "
@@ -1594,8 +1645,8 @@ def remove_worktree(worktree, branch, repo, verdict, one_named=False):
     # Named before the removal too: a removal that fails or is killed partway may already have deleted some.
     discarded = verdict.discarded
     if discarded:
-        print(f"{worktree.name}: removing it will discard {len(discarded)} uncommitted, "
-              f"untracked or ignored file(s): {discarded_files_text(discarded)}")
+        print(outcome_line(f"{worktree.name}: removing it will discard {len(discarded)} uncommitted, "
+              f"untracked or ignored file(s): {discarded_files_text(discarded)}", WORKTREE_REMOVAL_WILL_DISCARD_FILES_HASHTAG))
     head = commit_of(worktree, "HEAD")
     git_directory = os.fsdecode(git_output.run_git(worktree, ["rev-parse", "--absolute-git-dir"]))
     record_file = unfinished_worktree_removal_record_file(repo, worktree)
@@ -1607,9 +1658,9 @@ def remove_worktree(worktree, branch, repo, verdict, one_named=False):
         written.write_text(json.dumps(record), encoding="utf-8")
         os.replace(written, record_file)
     except OSError as error:
-        print(f"{worktree.name}: removal FAILED, worktree kept — scripts/clean-worktrees.py could "
+        print(outcome_line(f"{worktree.name}: removal FAILED, worktree kept — scripts/clean-worktrees.py could "
               f"not write its removal record {record_file}: {error}. It writes that record before "
-              f"every removal, so that a later run can finish a removal stopped partway")
+              f"every removal, so that a later run can finish a removal stopped partway", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
         print_next_remove_run_line(
             WORKTREE_KEPT_AFTER_FAILURE_NEXT_REMOVE_RUN_RETRIES_LINE_TEMPLATE.format(name=worktree.name),
             one_named)
@@ -1618,7 +1669,7 @@ def remove_worktree(worktree, branch, repo, verdict, one_named=False):
     removal = run_git(repo, "worktree", "remove", "--force", str(worktree))
     if removal.returncode != 0:
         # A refusal that deleted nothing leaves a record the next run drops as never begun.
-        print(f"{worktree.name}: removal FAILED — {removal.stderr.strip()[:120]}")
+        print(outcome_line(f"{worktree.name}: removal FAILED — {removal.stderr.strip()[:120]}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
         return False
     record["file"] = record_file
     return report_removal_and_delete_branch_then_delete_unfinished_worktree_removal_record(record, repo, one_named)
@@ -1636,10 +1687,10 @@ def finish_recorded_removal(record, repo, one_named):
         if registration.exists() and registration_points_to_worktree_or_has_no_gitdir_file(registration, worktree):
             shutil.rmtree(registration)
     except OSError as error:
-        print(f"{worktree.name}: removal FAILED — an earlier scripts/clean-worktrees.py --remove "
+        print(outcome_line(f"{worktree.name}: removal FAILED — an earlier scripts/clean-worktrees.py --remove "
               f"was stopped partway through removing this worktree, and deleting what that run "
               f"left of its directory and of its registration directory {registration} "
-              f"failed: {error}")
+              f"failed: {error}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
         print_next_remove_run_line(
             f"{worktree.name}: do nothing now: the next scripts/clean-worktrees.py --remove, daily "
             f"or at a handoff, tries again to finish the removal from its record "
@@ -1653,10 +1704,10 @@ def finish_recorded_removal(record, repo, one_named):
         if lookup.returncode == 1:
             branch = None
         elif lookup.returncode != 0:
-            print(f"{worktree.name}: removal FAILED — an earlier scripts/clean-worktrees.py "
+            print(outcome_line(f"{worktree.name}: removal FAILED — an earlier scripts/clean-worktrees.py "
                   f"--remove was stopped partway through removing this worktree, and git "
                   f"rev-parse could not tell whether its branch {branch} is still there (exit "
-                  f"{lookup.returncode}): {lookup.stderr.strip()[:120]}")
+                  f"{lookup.returncode}): {lookup.stderr.strip()[:120]}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
             print_next_remove_run_line(
                 f"{worktree.name}: do nothing now: the next scripts/clean-worktrees.py --remove, "
                 f"daily or at a handoff, tries again to finish the removal from its record "
@@ -1689,9 +1740,9 @@ def report_removal_and_delete_branch_then_delete_unfinished_worktree_removal_rec
     try:
         record["file"].unlink()
     except OSError as error:
-        print(f"{worktree.name}: deleting its removal record {record['file']} FAILED: {error}; "
+        print(outcome_line(f"{worktree.name}: deleting its removal record {record['file']} FAILED: {error}; "
               f"the next scripts/clean-worktrees.py --remove finds the worktree gone and "
-              f"deletes the record then")
+              f"deletes the record then", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
         return False
     return reported
 
@@ -1703,9 +1754,9 @@ def finish_or_drop_recorded_removals(repo, main_checkout, remove):
     records, unreadable = unfinished_worktree_removal_records(repo)
     failures = 0
     for record_file, error in unreadable:
-        print(f"{record_file.name}: FAILED — scripts/clean-worktrees.py cannot read this removal "
+        print(outcome_line(f"{record_file.name}: FAILED — scripts/clean-worktrees.py cannot read this removal "
               f"record in {record_file.parent}: {error}. Read it; finish the removal it names by "
-              f"hand, or delete the file if it names none")
+              f"hand, or delete the file if it names none", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
         failures += 1
     listed = {Path(worktree).resolve(): record
               for worktree, _, record in list_worktrees(repo, main_checkout)}
@@ -1717,8 +1768,8 @@ def finish_or_drop_recorded_removals(repo, main_checkout, remove):
                 try:
                     record["file"].unlink()
                 except OSError as error:
-                    print(f"{worktree.name}: deleting its removal record {record['file']}, "
-                          f"whose removal never began, FAILED: {error}")
+                    print(outcome_line(f"{worktree.name}: deleting its removal record {record['file']}, "
+                          f"whose removal never began, FAILED: {error}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
                     failures += 1
             continue
         handled.add(worktree.resolve())
@@ -1736,6 +1787,7 @@ def report_removal_and_delete_branch(worktree, branch, repo, head, discarded, on
     say, and write the log of removals, with discarded None when the files deleted with the
     worktree cannot be known; return False when something failed."""
     line = f"{worktree.name}: removed"
+    hashtags = [WORKTREE_REMOVED_HASHTAG]
     branch_deleted = False
     branch_failed = False
     branch_tip = head
@@ -1747,7 +1799,9 @@ def report_removal_and_delete_branch(worktree, branch, repo, head, discarded, on
         branch_failed = not branch_deleted
         if branch_deleted:
             line += f", branch {branch} deleted, its last commit {branch_tip}"
+            hashtags.append(WORKTREE_BRANCH_DELETED_HASHTAG)
         else:
+            hashtags.append(WORKTREE_CLEANER_STEP_FAILED_HASHTAG)
             line += (f", but deleting its branch {branch} FAILED: git branch -D exited "
                      f"{deletion.returncode}: {deletion.stderr.strip()[:120] or 'no error text'}")
     elif branch and branch != MAIN_BRANCH:
@@ -1757,12 +1811,14 @@ def report_removal_and_delete_branch(worktree, branch, repo, head, discarded, on
             branch_deleted = run_git(repo, "branch", "-d", branch).returncode == 0
             if branch_deleted:
                 line += f", branch {branch} deleted"
+                hashtags.append(WORKTREE_BRANCH_DELETED_HASHTAG)
             else:
                 line += f", branch {branch} left in place (git branch -d refused)"
-    print(line)
+                hashtags.append(WORKTREE_BRANCH_LEFT_IN_PLACE_HASHTAG)
+    print(outcome_line(line, *hashtags))
     if discarded:
-        print(f"{worktree.name}: discarded with it {len(discarded)} uncommitted, untracked "
-              f"or ignored file(s): {discarded_files_text(discarded)}")
+        print(outcome_line(f"{worktree.name}: discarded with it {len(discarded)} uncommitted, untracked "
+              f"or ignored file(s): {discarded_files_text(discarded)}", WORKTREE_FILES_DISCARDED_HASHTAG))
     events = [("removed-worktree", {"path": worktree, "branch": branch or "none", "head": head,
                                     "discarded-files": "unknown" if discarded is None
                                     else len(discarded)})]
@@ -1830,7 +1886,7 @@ def clean_worktrees_and_branch_refs(repo, main_checkout, remove, only_done):
             if verdict.done and not remove_worktree(worktree, branch, repo, verdict):
                 failures += 1
             elif not verdict.done:
-                print(f"{worktree.name}: kept — {verdict.reason}")
+                print(worktree_kept_line(worktree.name, verdict.reason))
         elif only_done:
             if verdict.done:
                 print(f"{worktree.name}: done ({verdict.reason}) — remove with "
@@ -1855,10 +1911,10 @@ def clean_worktrees_and_branch_refs(repo, main_checkout, remove, only_done):
     if not_judged and not only_done:
         print(f"branches: none deleted with git branch -D, since {not_judged}")
     if task_lists_unreadable:
-        print(f"FAILED: no branch judged for deletion with git branch -D, since {task_lists_unreadable}; "
+        print(outcome_line(f"FAILED: no branch judged for deletion with git branch -D, since {task_lists_unreadable}; "
               f"every merged or closed pull request's head branch is kept, and the next "
               f"scripts/clean-worktrees.py --remove judges those branches again once every task "
-              f"list can be read in full")
+              f"list can be read in full", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
         failures += 1
     if force_deletable:
         if remove:
@@ -1919,15 +1975,15 @@ def open_restored_branch_tasks(task_lists_directory, out):
         list_directories = agent_seat_task_list_directory_paths_in_claude_code_tasks_directory_collect(
             task_lists_directory)
     except OSError as error:
-        out(f"FAILED: the task lists' directory {task_lists_directory} could not be listed "
-            f"({type(error).__name__}: {error}), so no restored branch's task in it was judged")
+        out(outcome_line(f"FAILED: the task lists' directory {task_lists_directory} could not be listed "
+            f"({type(error).__name__}: {error}), so no restored branch's task in it was judged", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
         return tasks, 1
     for list_directory in list_directories:
         try:
             task_files = sorted(list_directory.iterdir())
         except OSError as error:
-            out(f"FAILED: the task list {list_directory} could not be read ({type(error).__name__}: "
-                f"{error}), so its restored branches' tasks are left as they were")
+            out(outcome_line(f"FAILED: the task list {list_directory} could not be read ({type(error).__name__}: "
+                f"{error}), so its restored branches' tasks are left as they were", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
             failures += 1
             continue
         for task_file in task_files:
@@ -1936,9 +1992,9 @@ def open_restored_branch_tasks(task_lists_directory, out):
             try:
                 task = json.loads(task_file.read_text(encoding="utf-8"))
             except (OSError, ValueError) as error:
-                out(f"FAILED: the task file {task_file} could not be read ({type(error).__name__}: "
+                out(outcome_line(f"FAILED: the task file {task_file} could not be read ({type(error).__name__}: "
                     f"{error}), so whether it is a restored branch's task to close is unknown; "
-                    f"it is left as it was")
+                    f"it is left as it was", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
                 failures += 1
                 continue
             if (isinstance(task, dict) and task.get("status") != "completed"
@@ -1993,22 +2049,22 @@ def close_restored_branch_tasks(repo, remove, only_done, task_lists_directory=No
             fetch_failure = (f"ran past {RESTORED_BRANCH_TASKS_CLOSE_GIT_FETCH_TIMEOUT_SECONDS} "
                              f"seconds")
         if fetch_failure:
-            out(f"FAILED: git fetch --prune origin {fetch_failure}, so the restored branches' "
+            out(outcome_line(f"FAILED: git fetch --prune origin {fetch_failure}, so the restored branches' "
                 f"tasks were not judged and are left as they were: "
-                + ", ".join(str(task_file) for task_file, _task in tasks))
+                + ", ".join(str(task_file) for task_file, _task in tasks), WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
             return failures + 1
     for task_file, task in tasks:
         name = f"task {task_file.parent.name}/{task_file.stem} ({task.get('subject')})"
         commit = restore_commit_of_task(task)
         if commit is None:
-            out(f"FAILED: {name} has no line opening "
+            out(outcome_line(f"FAILED: {name} has no line opening "
                 f"\"{work_snapshots.RESTORED_BRANCH_TASK_DESCRIPTION_RESTORE_COMMIT_LINE_PREFIX}\", "
-                f"so its restore commit is unknown; it is left as it was")
+                f"so its restore commit is unknown; it is left as it was", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
             failures += 1
             continue
         reason, git_failure = restore_commit_done_reason(repo, commit)
         if git_failure:
-            out(f"FAILED: {name} could not be judged ({git_failure}); it is left as it was")
+            out(outcome_line(f"FAILED: {name} could not be judged ({git_failure}); it is left as it was", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
             failures += 1
             continue
         if reason is None:
@@ -2027,8 +2083,8 @@ def close_restored_branch_tasks(repo, remove, only_done, task_lists_directory=No
         try:
             agent_seat_task_list_task_file_rewrite(task_file, task)
         except OSError as error:
-            out(f"FAILED: {name} could not be rewritten as completed ({type(error).__name__}: "
-                f"{error}); it is left as it was")
+            out(outcome_line(f"FAILED: {name} could not be rewritten as completed ({type(error).__name__}: "
+                f"{error}); it is left as it was", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
             failures += 1
         else:
             out(f"{name}: marked completed, as {reason}")
@@ -2187,8 +2243,8 @@ def remove_one_named_worktree(repo, main_checkout, path):
         try:
             record["file"].unlink()
         except OSError as error:
-            print(f"{Path(path).name}: deleting its removal record {record['file']}, whose "
-                  f"removal never began, FAILED: {error}")
+            print(outcome_line(f"{Path(path).name}: deleting its removal record {record['file']}, whose "
+                  f"removal never began, FAILED: {error}", WORKTREE_CLEANER_STEP_FAILED_HASHTAG))
             return False
     found = [(worktree, branch, record)
              for worktree, branch, record in list_worktrees(repo, main_checkout)
@@ -2207,7 +2263,7 @@ def remove_one_named_worktree(repo, main_checkout, path):
     reason, not_a_failure, owner, uncommitted, discarded = one_named_worktree_keep_reason(
         worktree, branch, record, by_head_branch)
     if reason is not None:
-        print(f"{worktree.name}: kept — {reason}")
+        print(worktree_kept_line(worktree.name, reason))
         return not_a_failure
     if branch and branch != MAIN_BRANCH:
         failure = push_branch_unless_origin_holds_its_last_commit_failure(repo, branch)
@@ -2259,7 +2315,7 @@ def delete_one_named_branch(repo, branch):
         print(f"{name}: kept — git branch -D exited {deletion.returncode}: "
               f"{deletion.stderr.strip()[:160] or 'no error text'}")
         return False
-    print(f"{name}: deleted, its last commit {tip}, with {count} commit(s) origin/main lacks")
+    print(outcome_line(f"{name}: deleted, its last commit {tip}, with {count} commit(s) origin/main lacks", WORKTREE_BRANCH_FORCE_DELETED_HASHTAG))
     return append_removed_worktree_or_deleted_branch_log_lines(
         [("deleted-branch", {"branch": branch, "commit": tip,
                              "commits-not-on-origin-main": count})], repo, name)

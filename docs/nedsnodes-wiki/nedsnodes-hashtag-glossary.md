@@ -69,3 +69,18 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#ruling_given#` — the comment `#ruling_given <walk name> item <number> <approved or disapproved>` the walk check program posts on a pull request held on that ruling once the user rules.
 - `#user_alert#` — the walk-minutes line `#user_alert <id>` that records a user-alert inserted into the approval-walk as an item.
 - `#walk_minutes_hand_written_lines_converted#` — the walk-minutes line that `nn-systems/skills/walk-me-through/walk-me-through-open-walk-minutes-hand-written-decision-lines-to-program-lines-one-time-conversion-hack.py` writes after rewriting the hand-written decision lines, so it does not run twice on that file.
+- `#work_snapshot_cleanup_failed#` — on a line of `scripts/clean-worktrees.py --remove`'s output, after `uncommitted-work-snapshots: `: leftover work-snapshots could not be listed, or one could not be checked or deleted.
+- `#work_snapshot_deleted#` — on a line of `scripts/clean-worktrees.py --remove`'s output, after `uncommitted-work-snapshots: `: a leftover work-snapshot listed and not restored for ten days was deleted.
+- `#work_snapshot_duplicate_deleted#` — on a line of `scripts/clean-worktrees.py --remove`'s output, after `uncommitted-work-snapshots: `: a leftover work-snapshot that a newer one duplicates was deleted.
+- `#worktree_branch_deleted#` — on a line `scripts/clean-worktrees.py` prints, after `clean-worktrees: `: a branch was deleted, with its worktree or as a branch with no worktree and nothing beyond main.
+- `#worktree_branch_force_deleted#` — on a line `scripts/clean-worktrees.py` prints, after `clean-worktrees: `: a branch holding commits main lacks was deleted with `git branch -D`, its pull request being finished.
+- `#worktree_branch_left_in_place#` — on a line `scripts/clean-worktrees.py` prints, after `clean-worktrees: `: a removed worktree's branch was kept, because `git branch -d` refused to delete it.
+- `#worktree_cleaner_finished_with_failures#` — the line `scripts/clean-worktrees.py` prints last when its run finished and something in it failed, each failure named on its own line above.
+- `#worktree_cleaner_step_failed#` — on a line `scripts/clean-worktrees.py` prints, after `clean-worktrees: `: a step failed, a removal, a deletion or a log line among them, as the words after it say.
+- `#worktree_cleaner_stopped#` — on the line `scripts/clean-worktrees.py` prints on standard error, after `clean-worktrees: `, when a git command failed and the run stopped before it finished.
+- `#worktree_files_discarded#` — on a line `scripts/clean-worktrees.py` prints, after `clean-worktrees: `: the worktree just removed held uncommitted, untracked or ignored files, which went with it.
+- `#worktree_kept_for_records#` — on a line `scripts/clean-worktrees.py` prints, after `clean-worktrees: `: a worktree was kept, because a record in it did not reach the log-store.
+- `#worktree_kept_vacancy_not_checked#` — on a line `scripts/clean-worktrees.py` prints, after `clean-worktrees: `: a worktree was kept, because the vacancy check could not be run or trusted.
+- `#worktree_removal_will_discard_files#` — on a line `scripts/clean-worktrees.py` prints, after `clean-worktrees: `, before a removal: the files the removal is about to discard, named in case it stops partway.
+- `#worktree_removals_log_record_by_hand#` — on the two lines `scripts/clean-worktrees.py` prints after a log line of its removals could not be written: the command that writes it, and what to do if that command fails.
+- `#worktree_removed#` — on a line `scripts/clean-worktrees.py` prints, after `clean-worktrees: `: a worktree was removed.

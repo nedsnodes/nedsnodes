@@ -1603,10 +1603,18 @@ cleaner = load(REPOSITORY_ROOT / CLEANER_RELATIVE, "clean_worktrees")
 
 
 def close_tasks(main, remove, only_done=False):
+    """Return (the failures counted, each line's words); a FAILED line must carry the cleaner's
+    step-failed hashtag, or its words are returned with a note that it does not."""
     lines = []
+
+    def out(text):
+        hashtags, words = cleaner.outcome_line_hashtags_and_words(text)
+        if "FAILED" in words and cleaner.WORKTREE_CLEANER_STEP_FAILED_HASHTAG not in hashtags:
+            words = f"(no {cleaner.WORKTREE_CLEANER_STEP_FAILED_HASHTAG}) {words}"
+        lines.append(words)
+
     failures_seen = cleaner.close_restored_branch_tasks(
-        main, remove, only_done, task_lists_directory=restore_task_list().parent,
-        out=lambda text: lines.append(text))
+        main, remove, only_done, task_lists_directory=restore_task_list().parent, out=out)
     return failures_seen, lines
 
 

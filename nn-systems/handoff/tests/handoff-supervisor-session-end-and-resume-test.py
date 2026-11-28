@@ -56,6 +56,9 @@ git_in = fixture.git_in
 StubLaunchedSession = fixture.StubLaunchedSession
 supervisor_names_replaced = fixture.supervisor_names_replaced
 REMOVALS_LOG_OVERRIDE_VARIABLE = "CLEAN_WORKTREES_REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_FILE_OVERRIDE"
+# The words clean-worktrees.py prints after a worktree's name when a record did not ship.
+KEPT_FOR_RECORDS_WORDS = (": record shipment FAILED, worktree kept — removing it would delete "
+                          "a record the log-store does not hold: ")
 # The supervisor's stop messages name the launcher of the machine it runs on.
 THIS_MACHINE_LAUNCHER = ("launch-claude-ubuntu"
                          if supervisor.handoff_user_review_of_agent_memory_stores_mark.this_machine_is_ned_box()
@@ -879,12 +882,26 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
     subprocess.run(["rm", "-rf", str(locked)], check=True)
     git_in(["worktree", "prune"], home)
 
+    cleaner, cleaner_not_loaded = supervisor.worktree_cleaner_module_or_why_not()
+    check("WORKTREE CLEANUP: the supervisor loads clean-worktrees.py for its hashtags",
+          cleaner is not None, cleaner_not_loaded)
+    ws = cleaner.work_snapshots
+
+    def summary(*tagged_lines):
+        return supervisor.summarize_worktree_cleanup_output(
+            [line if isinstance(line, str) else cleaner.outcome_line(*line) for line in tagged_lines],
+            cleaner)
+
+    def snapshot_line(hashtag, words):
+        return ws.leftover_cleanup_line(hashtag, words)
+
     # A cleaner stopped by the handoff's timeout partway through a removal
     # leaves the announcement and no confirmation.
     force_deleted_line = ("branch closed-head-branch: deleted with git branch -D, its last commit abc "
                           "being the head of pull request #1 (closed)")
-    force_summary = supervisor.summarize_worktree_cleanup_output([
-        "branch orphaned-branch: deleted", force_deleted_line])
+    force_summary = summary(
+        ("branch orphaned-branch: deleted", cleaner.WORKTREE_BRANCH_DELETED_HASHTAG),
+        (force_deleted_line, cleaner.WORKTREE_BRANCH_FORCE_DELETED_HASHTAG))
     check("WORKTREE CLEANUP: a branch deleted with git branch -D is reported on its own, not among "
           "the branches with nothing beyond main",
           force_summary == ("worktree cleanup: 0 finished worktree(s) removed, "
@@ -893,13 +910,16 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
                             "deleted with git branch -D: " + force_deleted_line),
           force_summary)
 
-    stopped_summary = supervisor.summarize_worktree_cleanup_output([
-        "first-wt: removing it will discard 1 uncommitted, untracked or ignored file(s): one.txt",
-        "first-wt: removed, branch first-branch deleted",
-        "first-wt: discarded with it 1 uncommitted, untracked or ignored file(s): one.txt",
-        "second-wt: removing it will discard 2 uncommitted, untracked or ignored file(s): "
-        "two.txt, three.txt",
-    ])
+    stopped_summary = summary(
+        ("first-wt: removing it will discard 1 uncommitted, untracked or ignored file(s): one.txt",
+         cleaner.WORKTREE_REMOVAL_WILL_DISCARD_FILES_HASHTAG),
+        ("first-wt: removed, branch first-branch deleted",
+         cleaner.WORKTREE_REMOVED_HASHTAG, cleaner.WORKTREE_BRANCH_DELETED_HASHTAG),
+        ("first-wt: discarded with it 1 uncommitted, untracked or ignored file(s): one.txt",
+         cleaner.WORKTREE_FILES_DISCARDED_HASHTAG),
+        ("second-wt: removing it will discard 2 uncommitted, untracked or ignored file(s): "
+         "two.txt, three.txt", cleaner.WORKTREE_REMOVAL_WILL_DISCARD_FILES_HASHTAG),
+    )
     check("WORKTREE CLEANUP: a removal stopped partway is named as possibly gone, "
           "and only a confirmed removal is counted as a discard",
           stopped_summary == (
@@ -912,18 +932,22 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
               "file(s): two.txt, three.txt"),
           stopped_summary)
 
-    snapshot_summary = supervisor.summarize_worktree_cleanup_output([
-        "work-snapshot refs/work-snapshots/k/a: deleted, first listed 2026-09-20 10:00 UTC "
-        "and not restored (agent-seat seat, worktree /w/a, files: A new.txt)",
-        "work-snapshot refs/work-snapshots/k/b: deletion failed: lock exists "
-        "(agent-seat seat, worktree /w/b, files: M x.txt)",
+    snapshot_summary = summary(
+        snapshot_line(ws.WORK_SNAPSHOT_DELETED_HASHTAG,
+                      "work-snapshot refs/work-snapshots/k/a: deleted, first listed 2026-09-20 10:00 UTC "
+                      "and not restored (agent-seat seat, worktree /w/a, files: A new.txt)"),
+        snapshot_line(ws.WORK_SNAPSHOT_CLEANUP_FAILED_HASHTAG,
+                      "work-snapshot refs/work-snapshots/k/b: deletion failed: lock exists "
+                      "(agent-seat seat, worktree /w/b, files: M x.txt)"),
         "work-snapshot refs/work-snapshots/k/c: kept — owner process gone, written 1 day(s) "
         "ago, never listed in a first prompt (agent-seat seat, worktree /w/c, files: M y.txt)",
-        "work-snapshot refs/work-snapshots/k/d: deleted, a duplicate of the newer leftover "
-        "refs/work-snapshots/k/f, same HEAD and same content "
-        "(agent-seat seat, worktree /w/d, files: M z.txt)",
-        "work-snapshot refs/work-snapshots/k/e: could not be checked, kept: git status failed",
-    ])
+        snapshot_line(ws.WORK_SNAPSHOT_DUPLICATE_DELETED_HASHTAG,
+                      "work-snapshot refs/work-snapshots/k/d: deleted, a duplicate of the newer leftover "
+                      "refs/work-snapshots/k/f, same HEAD and same content "
+                      "(agent-seat seat, worktree /w/d, files: M z.txt)"),
+        snapshot_line(ws.WORK_SNAPSHOT_CLEANUP_FAILED_HASHTAG,
+                      "work-snapshot refs/work-snapshots/k/e: could not be checked, kept: git status failed"),
+    )
     check("WORKTREE CLEANUP: the summary names each leftover work-snapshot deleted and "
           "each work-snapshot failure, counts the duplicates deleted, and names no kept one",
           snapshot_summary.endswith(
@@ -937,8 +961,21 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
           and "refs/work-snapshots/k/c" not in snapshot_summary
           and "refs/work-snapshots/k/d" not in snapshot_summary
           and "0 branch ref(s)" in snapshot_summary, snapshot_summary)
-    listing_failure = supervisor.summarize_worktree_cleanup_output([
-        "work-snapshots: could not be listed: WorkSnapshotError: git for-each-ref failed"])
+    listing_failure = summary(snapshot_line(
+        ws.WORK_SNAPSHOT_CLEANUP_FAILED_HASHTAG,
+        "work-snapshots: could not be listed: WorkSnapshotError: git for-each-ref failed"))
+    untagged = summary("old-wt: removed", "branch old-branch: deletion FAILED — locked")
+    check("WORKTREE CLEANUP: a line without the cleaner's hashtags counts as nothing, whatever its words",
+          untagged == "worktree cleanup: 0 finished worktree(s) removed, "
+                      "0 branch ref(s) with nothing beyond main deleted", untagged)
+    with supervisor_names_replaced(CLEAN_WORKTREES_OUTCOME_HASHTAGS_MODULE_PATH=root / "no-such-cleaner.py"):
+        not_loaded = supervisor.worktree_cleanup_output_summary_or_why_not(
+            ["a", "b"], *supervisor.worktree_cleaner_module_or_why_not())
+    check("WORKTREE CLEANUP: a cleaner that cannot be loaded for its hashtags is reported, "
+          "with why, in place of the counts",
+          not_loaded.startswith("worktree cleanup: its 2 line(s) of output could not be summed up, "
+                                "because clean-worktrees.py could not be loaded")
+          and "FileNotFoundError" in not_loaded, not_loaded)
     check("WORKTREE CLEANUP: a failure to list work-snapshots reaches the summary",
           "1 work-snapshot failure(s): work-snapshots: could not be listed" in listing_failure,
           listing_failure)
@@ -1009,22 +1046,23 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
           "record's shipment hangs until the bound stops the cleaner",
           hanging_record_worktree.exists()
           and "1 worktree(s) kept because a record did not reach the log-store: "
-          "hanging-record-worktree" + supervisor.KEPT_FOR_RECORDS_MARKER
+          "hanging-record-worktree" + KEPT_FOR_RECORDS_WORDS
           + "cold-read-records/a-fails-2026-10-19 (FAILED:" in hanging_ship_report
           and "b-hangs-2026-10-19" not in hanging_ship_report
           and "did not finish in 15 s" in hanging_ship_report,
           hanging_ship_report)
     git_in(["worktree", "remove", "--force", str(hanging_record_worktree)], home)
 
-    kept_marker = supervisor.KEPT_FOR_RECORDS_MARKER + "cold-read-records/r-2026-10-19 "
-    kept_summary = supervisor.summarize_worktree_cleanup_output([
-        "failed-ship-wt" + kept_marker + "(FAILED: r-2026-10-19 — nedlern@ned-box unreachable)",
-        "failed-ship-wt" + supervisor.KEPT_FOR_RECORDS_MARKER
-        + "sanity-check-records/s-2026-10-19 (FAILED: s-2026-10-19 — nedlern@ned-box unreachable)",
-        "silent-ship-wt" + kept_marker
-        + "(the shipper printed nothing (exit 1): NotADirectoryError: store)",
-        "locked-wt: removal FAILED — locked",
-    ])
+    kept_marker = KEPT_FOR_RECORDS_WORDS + "cold-read-records/r-2026-10-19 "
+    kept = cleaner.WORKTREE_KEPT_FOR_RECORDS_HASHTAG
+    kept_summary = summary(
+        ("failed-ship-wt" + kept_marker + "(FAILED: r-2026-10-19 — nedlern@ned-box unreachable)", kept),
+        ("failed-ship-wt" + KEPT_FOR_RECORDS_WORDS
+         + "sanity-check-records/s-2026-10-19 (FAILED: s-2026-10-19 — nedlern@ned-box unreachable)", kept),
+        ("silent-ship-wt" + kept_marker
+         + "(the shipper printed nothing (exit 1): NotADirectoryError: store)", kept),
+        ("locked-wt: removal FAILED — locked", cleaner.WORKTREE_CLEANER_STEP_FAILED_HASHTAG),
+    )
     check("WORKTREE CLEANUP: a kept worktree whose shipments FAILED is counted once, among the "
           "kept, with each record named, and a removal failure is still counted among the failures",
           "; 1 failed: locked-wt: removal FAILED — locked;" in kept_summary
@@ -1116,8 +1154,10 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
     partway = root / "partway-cleaner.py"
     partway.write_text(
         "import subprocess, time\n"
-        "print('agent-early: removed, branch worktree-agent-early deleted')\n"
-        "print('branch landed-early: deleted (no worktree, nothing beyond origin/main)')\n"
+        "print('clean-worktrees: #worktree_removed# #worktree_branch_deleted# agent-early: removed, "
+        "branch worktree-agent-early deleted')\n"
+        "print('clean-worktrees: #worktree_branch_deleted# branch landed-early: deleted (no worktree, "
+        "nothing beyond origin/main)')\n"
         "grandchild = subprocess.Popen(['sleep', '30'], stdout=subprocess.DEVNULL,\n"
         "                              stderr=subprocess.DEVNULL)\n"
         f"open({str(grandchild_pid_file)!r}, 'w').write(str(grandchild.pid))\n"
@@ -1154,7 +1194,7 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
           "exited 1" in report and "the cleaner broke" in report, report)
 
     # A printed failure explains a nonzero exit only when the cleaner went on to finish.
-    kept_for_record_line = ("rec-wt" + supervisor.KEPT_FOR_RECORDS_MARKER
+    kept_for_record_line = ("rec-wt" + KEPT_FOR_RECORDS_WORDS
                             + "cold-read-records/r (FAILED: nedlern@ned-box unreachable)")
     for kind, printed in (
             ("worktree kept for an unshipped record", f"print({kept_for_record_line!r})\n"),
@@ -1171,21 +1211,22 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
     stopped = root / "stopped-by-git-failure-cleaner.py"
     stopped.write_text(
         "import sys\n"
-        "print('clean-worktrees: stopped, because git worktree list failed (exit 128: fatal: broken)', file=sys.stderr)\n"
+        "print('clean-worktrees: #worktree_cleaner_stopped# stopped, because git worktree list failed (exit 128: fatal: broken)', file=sys.stderr)\n"
         "print('If the rerun fails a second time, stop and tell the user', file=sys.stderr)\n"
         "sys.exit(2)\n", encoding="utf-8")
     with supervisor_names_replaced(CLEAN_WORKTREES_PATH=stopped):
         report = supervisor.remove_finished_worktrees_at_handoff(home)
     check("WORKTREE CLEANUP: a cleaner stopped by a git failure is reported with its "
           "cause line, not the next-step line printed after it",
-          "exited 2: clean-worktrees: stopped, because git worktree list failed" in report
+          "exited 2: stopped, because git worktree list failed" in report
           and "fails a second time" not in report, report)
 
     finishing = root / "finishing-with-failure-cleaner.py"
     finishing.write_text(
         "import sys\n"
-        "print('locked-wt: removal FAILED — locked')\n"
-        "print('clean-worktrees: finished; each failure is named above')\n"
+        "print('clean-worktrees: #worktree_cleaner_step_failed# locked-wt: removal FAILED — locked')\n"
+        "print('clean-worktrees: #worktree_cleaner_finished_with_failures# finished; each failure is "
+        "named above')\n"
         "print('stderr noise', file=sys.stderr)\n"
         "sys.exit(1)\n", encoding="utf-8")
     with supervisor_names_replaced(CLEAN_WORKTREES_PATH=finishing):
@@ -1197,9 +1238,10 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
 
     unusable = root / "unusable-vacancy-cleaner.py"
     unusable.write_text(
-        "print('agent-x: kept — the vacancy check (lsof) could not be run')\n"
-        "print('done-y: removed, branch done-y-branch left in place "
-        "(git branch -d refused)')\n", encoding="utf-8")
+        "print('clean-worktrees: #worktree_kept_vacancy_not_checked# agent-x: kept — the vacancy check "
+        "(lsof) could not be run')\n"
+        "print('clean-worktrees: #worktree_removed# #worktree_branch_left_in_place# done-y: removed, "
+        "branch done-y-branch left in place (git branch -d refused)')\n", encoding="utf-8")
     with supervisor_names_replaced(CLEAN_WORKTREES_PATH=unusable):
         report = supervisor.remove_finished_worktrees_at_handoff(home)
     check("WORKTREE CLEANUP: a branch left in place and an unusable vacancy check "

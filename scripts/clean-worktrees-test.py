@@ -334,6 +334,18 @@ def load_clean_worktrees_module():
     return module
 
 
+CLEANER = load_clean_worktrees_module()
+
+
+def outcome_words(line):
+    """A line's words without the program's name and the hashtags an outcome line opens with."""
+    return CLEANER.outcome_line_hashtags_and_words(line)[1]
+
+
+def outcome_words_lines(text):
+    return [outcome_words(line) for line in text.splitlines()]
+
+
 with tempfile.TemporaryDirectory() as scratch:
     scratch = Path(scratch)
     checkout = scratch / "checkout"
@@ -643,9 +655,9 @@ with tempfile.TemporaryDirectory() as scratch:
         check("--remove with origin/main missing stops at the branch-ref listing with exit 2, "
               "naming git's error, and reports no finished run",
               no_main_removal.returncode == 2
-              and "clean-worktrees: stopped, because git for-each-ref" in no_main_removal.stderr
+              and f"{CLEANER.STOPPED_LINE_START}git for-each-ref" in no_main_removal.stderr
               and "origin/main" in no_main_removal.stderr
-              and "clean-worktrees: finished" not in no_main_removal.stdout,
+              and CLEANER.FINISHED_WITH_FAILURES_LINE not in no_main_removal.stdout,
               (no_main_removal.returncode, no_main_removal.stdout, no_main_removal.stderr))
         check("--remove stopped after the worktrees were handled says it removed only what its "
               "removed and deleted lines name",
@@ -764,10 +776,11 @@ with tempfile.TemporaryDirectory() as scratch:
               str(removal.returncode))
         check("--remove ends a run with failures on the line saying it finished",
               removal.stdout.splitlines()[-1:] == [
-                  "clean-worktrees: finished; each failure is named above"],
+                  "clean-worktrees: #worktree_cleaner_finished_with_failures# finished; each failure is "
+                  "named above"],
               removal.stdout)
         check("--remove prints the finished line once, after every failure line",
-              removal.stdout.count("clean-worktrees: finished; each failure is named above") == 1,
+              removal.stdout.count(CLEANER.FINISHED_WITH_FAILURES_LINE) == 1,
               removal.stdout)
         git(checkout, "worktree", "unlock", str(locked_wt))
         check("--remove reports the dead registration too",
@@ -1067,7 +1080,7 @@ with tempfile.TemporaryDirectory() as scratch:
                                   capture_output=True, text=True, check=False, env=environment)
 
         def line_of(output, name):
-            return next((line for line in output.splitlines() if line.startswith(f"{name}:")), "")
+            return next((line for line in outcome_words_lines(output) if line.startswith(f"{name}:")), "")
 
         report = run_owner_rules().stdout
         check("a new worktree whose owner runs is kept though its branch has no pull request and "
@@ -1429,7 +1442,8 @@ with tempfile.TemporaryDirectory() as scratch:
           len(confirmed) == 1 and any(": removed" in line for line in seen), "\n".join(seen))
     check("a run stopped mid-removal has already shown what the stopped removal announced",
           len(announced) == 2
-          and confirmed[0].partition(":")[0] != announced[-1].partition(":")[0]
+          and (outcome_words(confirmed[0]).partition(":")[0]
+               != outcome_words(announced[-1]).partition(":")[0])
           if confirmed and announced else False, "\n".join(seen))
 
 # git worktree list without -z ends each attribute at a newline, so a newline
@@ -1503,7 +1517,8 @@ with tempfile.TemporaryDirectory() as scratch:
               failed_listing.returncode == 2
               and failed_listing.stdout == ""
               and stderr_lines[:1] != []
-              and stderr_lines[0].startswith("clean-worktrees: stopped, because git worktree list")
+              and stderr_lines[0].startswith(
+                  "clean-worktrees: #worktree_cleaner_stopped# stopped, because git worktree list")
               and LISTING_FAILURE_TEXT in stderr_lines[0]
               and stderr_lines[0].endswith(
                   'clean-worktrees removed only the worktrees and branches named on its lines '
@@ -1517,7 +1532,7 @@ with tempfile.TemporaryDirectory() as scratch:
               "shared next steps, naming the command that was run",
               stderr_lines[1:] == load_clean_worktrees_module().next_step_lines.git_failure_next_step_lines(
                   rerun, git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=LISTING_FAILURE_TEXT,
-                  text_the_failure_line_contains="clean-worktrees: stopped, because").splitlines(),
+                  text_the_failure_line_contains=CLEANER.STOPPED_LINE_START.strip()).splitlines(),
               failed_listing.stderr)
 
     lock_file = checkout / ".git" / "index.lock"
@@ -1670,7 +1685,7 @@ with tempfile.TemporaryDirectory() as scratch:
     check("--remove prints each failed shipment's line once, inside a record shipment FAILED line "
           "of its own",
           unreachable.stdout.count("FAILED:") == 2
-          and len([line for line in unreachable.stdout.splitlines()
+          and len([line for line in outcome_words_lines(unreachable.stdout)
                    if line.startswith("unreachable-wt: record shipment FAILED")
                    and line.count("FAILED:") == 1]) == 2
           and "unreachable-wt: FAILED" not in unreachable.stdout,
@@ -1683,8 +1698,8 @@ with tempfile.TemporaryDirectory() as scratch:
           in unreachable.stdout
           and "whose line starts REFUSED:" not in unreachable.stdout,
           unreachable.stdout)
-    unreachable_lines = unreachable.stdout.splitlines()
-    finished_line = "clean-worktrees: finished; each failure is named above"
+    unreachable_lines = outcome_words_lines(unreachable.stdout)
+    finished_line = "finished; each failure is named above"
     check("--remove names each unshipped record on a FAILED line before the finished line, "
           "and those are the run's only FAILED lines",
           finished_line in unreachable_lines
@@ -2027,7 +2042,7 @@ with tempfile.TemporaryDirectory() as scratch:
     not_a_directory = scratch / "a-file"
     not_a_directory.write_text("", encoding="utf-8")
     unwritten = run_clean_logging_to(not_a_directory / "ned-box.txt")
-    output_lines = unwritten.stdout.splitlines()
+    output_lines = outcome_words_lines(unwritten.stdout)
     check("a log line that cannot be written is printed with FAILED and its cause, and the run "
           "still removes the worktree and deletes both branches, then exits 1",
           unwritten.returncode == 1 and not unwritable_wt.exists()
@@ -2039,7 +2054,7 @@ with tempfile.TemporaryDirectory() as scratch:
                   and "mkdir" in line for line in output_lines)
           and any(line.startswith("branch second-orphaned-branch: log of removals line(s) FAILED")
                   for line in output_lines)
-          and "clean-worktrees: finished; each failure is named above" in output_lines,
+          and "finished; each failure is named above" in output_lines,
           unwritten.stdout + unwritten.stderr)
     by_hand = [line for line in output_lines
                if line.startswith("unwritable-log-wt: to record it, run this once: ")]
@@ -2272,7 +2287,7 @@ with tempfile.TemporaryDirectory() as scratch:
         {"number": 33, "state": "CLOSED", "headRefName": "elsewhere", "headRefOid": open_head}])
     check("a closed pull request does not keep the worktree",
           closed_kept.returncode == 0 and not detached_open_wt.exists(), closed_kept.stdout)
-    detached_removal_line = next((line for line in closed_kept.stdout.splitlines()
+    detached_removal_line = next((line for line in outcome_words_lines(closed_kept.stdout)
                                   if line.startswith("detached-open-wt: removed")), "")
     detached_logged = [fields for kind, fields in logged_events()
                        if kind == "removed-worktree" and fields.get("path", "").endswith(
@@ -2824,7 +2839,7 @@ with tempfile.TemporaryDirectory() as scratch:
                               capture_output=True, text=True, check=False, env=environment)
 
     def review_line(output, name):
-        return next((line for line in output.splitlines() if line.startswith(f"{name}:")), "")
+        return next((line for line in outcome_words_lines(output) if line.startswith(f"{name}:")), "")
 
     every_checkout = (merged_checkout, closed_checkout, open_checkout, main_checkout,
                       main_green_checkout, unlisted_checkout, two_numbers_checkout, locked_checkout,
@@ -3201,7 +3216,7 @@ with tempfile.TemporaryDirectory() as scratch:
           "gone, and prints no FAILED line",
           undeleted_again.returncode == 0 and record_of(undeleted) is None
           and "FAILED" not in undeleted_again.stdout
-          and "stopped-partway-record-undeletable-wt: removed" in undeleted_again.stdout.splitlines(),
+          and "stopped-partway-record-undeletable-wt: removed" in outcome_words_lines(undeleted_again.stdout),
           undeleted_again.stdout + undeleted_again.stderr)
 
     def never_began_record(name):
@@ -3395,7 +3410,7 @@ with tempfile.TemporaryDirectory() as scratch:
                               capture_output=True, text=True, check=False, env=environment)
 
     def idle_line(output, name):
-        return next((line for line in output.splitlines() if line.startswith(f"{name}:")), "")
+        return next((line for line in outcome_words_lines(output) if line.startswith(f"{name}:")), "")
 
     idle_done_start = ("done — nothing in it, its git directory included, has changed for 2 days, "
                        "it holds no uncommitted or untracked file, GitHub holds every commit of its "

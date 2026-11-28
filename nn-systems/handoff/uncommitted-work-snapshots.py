@@ -1003,6 +1003,17 @@ def first_listing_times(handoff_directory):
     return times
 
 
+# scripts/clean-worktrees.py prints these lines, and the handoff-supervisor counts them by their hashtags.
+LEFTOVER_CLEANUP_LINE_START = "uncommitted-work-snapshots: "
+WORK_SNAPSHOT_DELETED_HASHTAG = "#work_snapshot_deleted#"
+WORK_SNAPSHOT_DUPLICATE_DELETED_HASHTAG = "#work_snapshot_duplicate_deleted#"
+WORK_SNAPSHOT_CLEANUP_FAILED_HASHTAG = "#work_snapshot_cleanup_failed#"
+
+
+def leftover_cleanup_line(hashtag, words):
+    return f"{LEFTOVER_CLEANUP_LINE_START}{hashtag} {words}"
+
+
 def clean_leftover_work_snapshots(repo, remove, only_due, handoff_directory, now=None,
                                   is_alive=None, out=print):
     """Report leftovers; with remove, delete duplicates and those listed and left.
@@ -1020,7 +1031,8 @@ def clean_leftover_work_snapshots(repo, remove, only_due, handoff_directory, now
         leftovers = leftover_work_snapshots(repo, is_alive=is_alive, everything=everything)
         listed = first_listing_times(handoff_directory)
     except Exception as error:
-        out(f"work-snapshots: could not be listed: {type(error).__name__}: {error}")
+        out(leftover_cleanup_line(WORK_SNAPSHOT_CLEANUP_FAILED_HASHTAG,
+                                  f"work-snapshots: could not be listed: {type(error).__name__}: {error}"))
         return 1
     failures = 0
     threshold = LEFTOVER_DELETED_DAYS_AFTER_FIRST_LISTING * 86400
@@ -1034,7 +1046,8 @@ def clean_leftover_work_snapshots(repo, remove, only_due, handoff_directory, now
             duplicate = newer_duplicate(repo, snapshot, leftovers, cache)
             state = None if duplicate else leftover_state(repo, snapshot)
         except WorkSnapshotError as error:
-            out(f"work-snapshot {ref}: could not be checked, kept: {error}")
+            out(leftover_cleanup_line(WORK_SNAPSHOT_CLEANUP_FAILED_HASHTAG,
+                                      f"work-snapshot {ref}: could not be checked, kept: {error}"))
             failures += 1
             continue
         where = (f"agent-seat {snapshot['agent_seat']}, worktree {snapshot['worktree']}, "
@@ -1047,9 +1060,12 @@ def clean_leftover_work_snapshots(repo, remove, only_due, handoff_directory, now
                       "same content" if duplicate else
                       f"first listed {utc_text(first_listed)} and not restored")
             if result.returncode == 0:
-                out(f"work-snapshot {ref}: deleted, {reason} ({where})")
+                out(leftover_cleanup_line(
+                    WORK_SNAPSHOT_DUPLICATE_DELETED_HASHTAG if duplicate else WORK_SNAPSHOT_DELETED_HASHTAG,
+                    f"work-snapshot {ref}: deleted, {reason} ({where})"))
             else:
-                out(f"work-snapshot {ref}: deletion failed: {result.stderr.strip()} ({where})")
+                out(leftover_cleanup_line(WORK_SNAPSHOT_CLEANUP_FAILED_HASHTAG,
+                                          f"work-snapshot {ref}: deletion failed: {result.stderr.strip()} ({where})"))
                 failures += 1
             continue
         if only_due and not due:
