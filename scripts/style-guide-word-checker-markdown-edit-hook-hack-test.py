@@ -178,6 +178,14 @@ for case_name, text in EXEMPT_TEXT_CASES:
 
 forms = file_hit_forms("```\ncode\n```\nThe seat after the fence.\n")
 check("a fence closes: prose after the closing fence is flagged", forms == ["seat"], forms)
+for content_line in ("- ```", "1. ```", "    ```"):
+    text = f"```\n{content_line}\ngit switch seat\n```\n\nThe seat is free.\n"
+    hits = checker.find_style_guide_word_hits_in_markdown(text, checker.APPLIES_TO_FILES)
+    check(f"{content_line!r} inside a top-level fence is code",
+          [(hit.line_number, hit.form) for hit in hits] == [(6, "seat")], hits)
+
+forms = file_hit_forms("10. ```sh\n    git switch seat\n    ```\n\nThe seat is free.\n")
+check("a four-space closer aligns with an ordered list item's content", forms == ["seat"], forms)
 
 NAMED_COMPOUNDS = ("agent-seat", "seat-branch", "seat-brief", "reincarnate-seat", "retire-seat",
                    "agent-home", "queue-drain", "frozen-head", "approval-walk",

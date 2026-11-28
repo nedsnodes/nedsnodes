@@ -116,8 +116,9 @@ class StyleGuideWordHit(NamedTuple):
 
 # Accept list markers and indentation before fences; missing an opener would invert later fence tracking.
 FENCE_PATTERN = re.compile(r"^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?(`{3,}|~{3,})")
+CLOSING_FENCE_PATTERN = re.compile(r"^( *)(`{3,}|~{3,}) *$")
 BLOCKQUOTE_LINE_PATTERN = re.compile(r"^[ \t]*>")
-LIST_ITEM_LINE_PATTERN = re.compile(r"^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]")
+LIST_ITEM_LINE_PATTERN = re.compile(r"^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+")
 INDENTED_LINE_PATTERN = re.compile(r"^(?: {4}|[ ]{0,3}\t)")
 
 # Blank with equal-length spaces to preserve offsets; code spans must hide embedded quotes and slashes.
@@ -229,13 +230,13 @@ def find_style_guide_word_hits_in_markdown(
     # Read all lines for fence and span state even when only selected lines are searched.
     words, word_pattern, exempt_pattern_by_word, entry_by_form = COMPILED_SCOPES[applies_to]
     hits = []
-    open_fence = None   # (fence character, fence length) while inside a fenced block
+    open_fence = None
     open_code_span_run = None
     # An indented code block starts only after a blank line, and a line indented under a
     # list item continues the item rather than starting code, so both are tracked.
     previous_line_blank = True
     inside_indented_code = False
-    inside_list = False
+    list_indent = 0
     lines = text.split("\n")
     line_start = 0
     for line_index, raw_line in enumerate(lines):
@@ -247,31 +248,34 @@ def find_style_guide_word_hits_in_markdown(
             indented = INDENTED_LINE_PATTERN.match(line) is not None
             # Decided before the list check: a line inside an indented code block that
             # looks like a list item is code, and must not start a list.
-            inside_indented_code = indented and not inside_list and (
+            inside_indented_code = indented and not list_indent and (
                 previous_line_blank or inside_indented_code)
             if inside_indented_code:
                 pass
-            elif LIST_ITEM_LINE_PATTERN.match(line):
-                inside_list = True
+            elif list_marker := LIST_ITEM_LINE_PATTERN.match(line.expandtabs(4)):
+                list_indent = list_marker.end()
             elif previous_line_blank and not line[0].isspace():
                 # Only an unindented line after a blank ends the item: any indented line
                 # continues it, and an unindented line straight after one is a lazy
                 # continuation of the item's paragraph.
-                inside_list = False
+                list_indent = 0
         previous_line_blank = line_blank
         if inside_indented_code and not line_blank:
             open_code_span_run = None
             continue
-        fence = FENCE_PATTERN.match(line)
         if open_fence is not None:
-            if (fence and fence.group(1)[0] == open_fence[0]
-                    and len(fence.group(1)) >= open_fence[1]
-                    and not line[fence.end():].strip()):
+            opening_run, max_indent = open_fence
+            closer = CLOSING_FENCE_PATTERN.fullmatch(line.expandtabs(4))
+            if (closer and len(closer[1]) <= max_indent
+                    and closer[2].startswith(opening_run)):
                 open_fence = None
             continue
+        fence = FENCE_PATTERN.match(line)
         # A backtick fence's info string cannot contain backticks; ```x``` is a code span.
         if fence and not (fence.group(1)[0] == "`" and "`" in line[fence.end():]):
-            open_fence = (fence.group(1)[0], len(fence.group(1)))
+            # An edit fragment may start inside a list whose marker we cannot see.
+            indent = list_indent if text_starts_document else len(line[:fence.start(1)].expandtabs(4))
+            open_fence = (fence.group(1), indent + 3)
             open_code_span_run = None
             continue
         # Track multiline code spans on every line so selected-line scans retain the correct context.
