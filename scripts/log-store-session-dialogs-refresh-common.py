@@ -164,8 +164,8 @@ def refresh_session_dialog_file_unless_current_with_transcript(extractor, extrac
     """Write the transcript's session dialog unless it is current and extractor_unchanged; return whether written.
 
     extractor is scripts/handoff-extract-conversation.py, loaded, and extractor_sha256 load_extractor's digest of
-    it, which the dialog's last line names. With refuse_without_subagent_turns, a dialog the
-    subagent tracker failed on is not written and SubagentTurnsLeftOut raises. Any other failure raises too.
+    it, which the dialog's last line names. A tracker failure raises SubagentTurnsLeftOut.
+    Unless the caller refuses partial dialogs, write the available turns with a stale timestamp first.
     """
     transcript_changed = transcript.stat().st_ctime_ns
     if extractor_unchanged and dialog.exists() and dialog.stat().st_mtime_ns == transcript_changed:
@@ -176,5 +176,7 @@ def refresh_session_dialog_file_unless_current_with_transcript(extractor, extrac
         raise SubagentTurnsLeftOut(left_out[0]["text"])
     text = (extractor.render_companion(turns, report) + "\n\n"
             + session_dialog_extractor_sha256_last_line_build(extractor_sha256) + "\n")
-    write_text_through_temporary_file(dialog, text, transcript_changed)
+    write_text_through_temporary_file(dialog, text, 0 if left_out else transcript_changed)
+    if left_out:
+        raise SubagentTurnsLeftOut(left_out[0]["text"])
     return True

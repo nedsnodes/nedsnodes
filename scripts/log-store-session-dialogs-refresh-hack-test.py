@@ -377,6 +377,39 @@ with tempfile.TemporaryDirectory() as workspace:
 
     # A tracker that cannot be read still lets every dialog be written, without subagent turns and saying so.
     tracker_copy = programs / SUBAGENT_TRACKER_PATH.name
+    # Fail only on one transcript, without changing the extractor between retry passes.
+    tracker_text = tracker_copy.read_text(encoding="utf-8")
+    switch = Path(workspace) / "break-box-tracker"
+    switch.touch()
+    with tracker_copy.open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n_original_turns = SubagentTracker.turns_from_record\n"
+            "def test_turns(self, record):\n"
+            f"    if __import__('os').path.exists({str(switch)!r}) and 'box question' in str(record):\n"
+            "        raise ValueError('box tracker failure')\n"
+            "    return _original_turns(self, record)\n"
+            "SubagentTracker.turns_from_record = test_turns\n")
+    tracker_store = Path(workspace) / "per-transcript-tracker"
+    broken_transcript = write_transcript(tracker_store, "ned-box", "project", "broken", conversation("box question"))
+    write_transcript(tracker_store, "ned-box", "project", "healthy", conversation("independent question"))
+    partial_dialog = dialog_path(tracker_store, "ned-box", "project", "broken")
+    try:
+        partial = run(tracker_store, script_path=script_copy)
+        text = partial_dialog.read_text(encoding="utf-8")
+        check("a tracker failure in one transcript reports it and leaves the partial dialog eligible for retry",
+              partial.returncode == 1 and "FAILED:" in partial.stdout and str(broken_transcript) in partial.stdout
+              and "box tracker failure" in partial.stdout and "box question" in text
+              and "## Subagent tasks and reports left out" in text and partial_dialog.stat().st_mtime_ns == 0,
+              (partial.stdout, partial_dialog.stat().st_mtime_ns))
+        check("the refresh summary counts both written dialogs and the one failure",
+              "wrote 2 session dialogs, 0 already current, 1 failed" in partial.stdout, partial.stdout)
+        switch.unlink()
+        recovered = run(tracker_store, script_path=script_copy)
+        check("the next pass recovers the dialog with unchanged tracker and transcript bytes",
+              recovered.returncode == 0 and "## Subagent task " in partial_dialog.read_text(encoding="utf-8")
+              and partial_dialog.stat().st_mtime_ns == broken_transcript.stat().st_ctime_ns, recovered.stdout)
+    finally:
+        tracker_copy.write_text(tracker_text, encoding="utf-8")
     tracker_aside = programs / "tracker-set-aside.py"
     tracker_copy.rename(tracker_aside)
     try:
