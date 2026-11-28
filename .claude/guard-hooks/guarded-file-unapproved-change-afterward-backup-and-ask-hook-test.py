@@ -461,16 +461,25 @@ def cases(scratch):
     claude.write_text("project v1, changed first\n")
     key = world.key(claude)
     world.run()
-    world.marker("#pre_approved_change\non neither list\n", before=time.time_ns() + 10_000_000_000)
+    marker = world.marker("#pre_approved_change\non neither list\n")
     result = world.command("--approve", claude, key)
     check("a #pre_approved_change marker written after the run that first saw the version is "
-          "refused, and the agent is told to ask the user with the exception named",
-          result.returncode == 1 and "ask him" in result.stderr
-          and (f'"A change to the guarded file {claude} that needs no approval as '
-               '`on neither list`; the marker was written after the change, so it needs your '
-               'yes"') in result.stderr, result.stderr)
-    check("the late #pre_approved_change marker leaves the version unapproved",
-          key not in world.store_file(claude, "approved"), world.store_file(claude, "approved"))
+          "accepted and records the exception",
+          result.returncode == 0 and key in world.store_file(claude, "approved")
+          and [fields[5:] for fields in approved_log_fields(world, claude, key)]
+          == [["pre-approved", "on neither list"]], (result.stderr, world.store_file(claude, "log")))
+    check("a late #pre_approved_change marker is spent and the reminder stops",
+          not marker.exists() and world.run() == "")
+
+    world = fresh(scratch, "pre-approved-not-seen")
+    claude = world.repo / "CLAUDE.md"
+    claude.write_text("project v1, change the hook has not seen\n")
+    key = world.key(claude)
+    marker = world.marker("#pre_approved_change\non neither list\n")
+    result = world.command("--approve", claude, key)
+    check("a #pre_approved_change marker cannot approve a version the hook has not seen",
+          result.returncode == 1 and f"has not seen {claude} at version {key}" in result.stderr
+          and key not in world.store_file(claude, "approved") and marker.exists(), result.stderr)
 
     world = fresh(scratch, "user-words-logged-as-user")
     claude = world.repo / "CLAUDE.md"
@@ -1846,13 +1855,29 @@ def cases(scratch):
     check("a MultiEdit of a guarded file, which the guard does not check, is asked about",
           str(claude) in message and "has not approved" in message, message)
 
-    # -- the subagent line comes first in the ask, and is in the reminder
+    # -- the pre-approved instructions come first in the ask and the reminder
     world = fresh(scratch, "subagent-line")
     claude = world.repo / "CLAUDE.md"
     claude.write_text("project v2\n")
     key = world.key(claude)
     message = world.run()
     reminder = world.run()
+    pre_approved_steps = [
+        "If you have no approval marker for the change, and each change since the newest approved "
+        "version either needs no approval under "
+        "docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md or carries out a "
+        "change the user already approved, write the `#pre_approved_change` marker naming the "
+        "exception, or his quoted words, into .walk-approved at the top of your session's "
+        "checkout. Run the following command once from that checkout, then do none of the steps "
+        f"below: python3 {HOOK} --approve {claude} {key}",
+        "If Claude Code's auto mode check refuses that --approve command, have the Codex agent "
+        "run the same command from your session's checkout using scripts/run-codex-task-from-brief.py, "
+        "then do none of the steps below.",
+    ]
+    check("the ask gives the pre-approved steps first, with the checkout, command and Codex handoff",
+          message.rsplit("\n\n", 1)[-1].splitlines()[:2] == pre_approved_steps, message)
+    check("the reminder gives the same pre-approved steps first",
+          reminder.splitlines()[1:3] == pre_approved_steps, reminder)
     obvious_fix_subagent = ("If you are a subagent, and you wrote an obvious-fix marker and then "
                             "made the change with a command other than Edit or Write, run once")
     pre_approved_subagent = ("If you are a subagent, and you wrote a `#pre_approved_change` marker "
@@ -1928,11 +1953,11 @@ def cases(scratch):
           "the --approve command for the result",
           "it was made on a version the user had not approved" in message
           and f"{HOOK} --approve {claude} {key}" in message, message)
-    check("the ask about that Edit's result says a marker written before the Edit does not "
-          "approve it, since the Edit spent the marker",
-          "An obvious-fix or `#pre_approved_change` marker you wrote before the Edit or Write does "
-          "not change this: the call spent it, so the lines below about those two markers do not "
-          "apply to you, and the text it was made on needs the user's yes." in message, message)
+    check("the ask about that Edit's result says the Edit spent its marker and to judge the "
+          "full change against the newest approved version",
+          "The Edit or Write spent any marker you wrote for that call. When following the "
+          "instructions below, judge the full change against the newest approved version."
+          in message, message)
     claude.write_text("project v3 by shell\n")
     message = world.run()
     check("a shell edit made on an unapproved version is asked about without the Edit's reason",

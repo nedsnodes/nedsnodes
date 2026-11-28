@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""After every tool call, notice a guarded file changed without the user's approval, keep
-every version, and tell the agent to ask him.
+"""After every tool call, notice a guarded file changed without recorded approval, keep
+every version, and tell the agent how to settle it.
 
 Registered under PostToolUse and PostToolUseFailure for every tool. A guarded file is a file
 instruction-file-guard.py protects, plus ~/.claude/CLAUDE.md, ~/.claude/settings.json and every
@@ -10,9 +10,10 @@ each run the hook compares each checked file's stat data with what it stored at 
 run, hashes only a file whose stat data differs, logs each new version in this machine's
 directory of the log-store kind guarded-file-versions-and-approvals/, copies it there unless
 the file's checkout is on a branch whose HEAD commit holds it, and, when the version is not in its path's
-approved set, tells the agent to show the user the change and run this program with --approve
-or --restore; for a file whose path has no approved version and that origin/main does not hold,
-when the store keeps its copy, it also offers the rm that deletes it. A version that the checkout's local origin/main holds at the same path enters the
+approved set, tells the agent to record an approval the change already has, or to ask the user
+and run this program with --approve or --restore; for a file whose path has no approved version
+and that origin/main does not hold, when the store keeps its copy, it also offers the rm that
+deletes it. A version that the checkout's local origin/main holds at the same path enters the
 approved set without asking, since main's versions came through reviewed pull requests; when
 git cannot read origin/main, the run reports that failure and settles nothing. A deletion of a
 guarded file enters the approved set without asking, wherever it came from; a rename's new path
@@ -140,17 +141,27 @@ EXIT_BAD_INVOCATION = 64
 
 ASK_HEADER_LINE = (
     "[rule guarded-file-changed-without-approval-ask-user-afterward] "
-    "A guarded file changed, and the user has not approved the new version. The change stays in "
-    "place while you ask him; this hook has kept a copy of the version.")
+    "A guarded file changed, and this hook has not approved the new version. The change stays "
+    "in place, and this hook has kept the version.")
 ASK_FILE = "{path}, version {key}.{reason} Its change against the newest approved version:\n{diff}"
 EDIT_ON_UNAPPROVED_VERSION = (
     " The Edit or Write did not approve this version, because it was made on a version the user "
     "had not approved: the instruction-file guard's approval covers only that call's change, not "
-    "the unapproved text already in the file. An obvious-fix or `#pre_approved_change` marker you "
-    "wrote before the Edit or Write does not change this: the call spent it, so the lines below "
-    "about those two markers do not apply to you, and the text it was made on needs the user's "
-    "yes.")
-ASK_INSTRUCTIONS = (
+    "the unapproved text already in the file. The Edit or Write spent any marker you wrote for "
+    "that call. When following the instructions below, judge the full change against the newest "
+    "approved version.")
+PRE_APPROVED_INSTRUCTIONS = (
+    "If you have no approval marker for the change, and each change since the newest approved "
+    "version either needs no approval under "
+    "docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md or carries out a "
+    "change the user already approved, write the `#pre_approved_change` marker naming the "
+    "exception, or his quoted words, into {marker} at the top of your session's checkout. Run "
+    "the following command once from that checkout, then do none of the steps below: "
+    "python3 {program} --approve {pairs}\n"
+    "If Claude Code's auto mode check refuses that --approve command, have the Codex agent run "
+    "the same command from your session's checkout using scripts/run-codex-task-from-brief.py, "
+    "then do none of the steps below.\n")
+ASK_INSTRUCTIONS = PRE_APPROVED_INSTRUCTIONS + (
     "If you are a subagent, and you wrote an obvious-fix marker and then made the change with a "
     "command other than Edit or Write, run once: python3 {program} --approve {pairs}, then tell "
     "the agent that dispatched you what you fixed, and do none of the steps below.\n"
@@ -172,7 +183,8 @@ ASK_INSTRUCTIONS = (
     "git commit --only -m \"Put back the approved <file name>\" -- <path>")
 UNAPPROVED_VERSION_REMINDER_MESSAGE = (
     "[rule guarded-file-changed-without-approval-ask-user-afterward] "
-    "Reminder: {path} still holds version {key}, which the user has not approved.\n"
+    "Reminder: {path} still holds version {key}, which this hook has not approved.\n"
+) + PRE_APPROVED_INSTRUCTIONS + (
     "If you are a subagent, and you wrote an obvious-fix marker and then made the change with a "
     "command other than Edit or Write, run once: python3 {program} --approve {path} {key}, then "
     "tell the agent that dispatched you what you fixed.\n"
@@ -1554,6 +1566,7 @@ def messages(asks, reminders):
     for path, key, offered in reminders:
         out.append(UNAPPROVED_VERSION_REMINDER_MESSAGE.format(
             path=path, key=key, marker=APPROVAL_MARKER_NAME, program=HOOK_PATH,
+            pairs=f"{path} {key}",
             deletions=deletion_offers([path] if offered else [])))
     return out
 
@@ -1612,20 +1625,10 @@ def approve(pairs, cwd: Path):
         # One log field: a tab in the agent's words would split it.
         exception = " ".join(words.splitlines()[1].split())
         how, extra_fields = HOW_PRE_APPROVED, [exception]
-        late_marker_kind = f"`{first_line}` marker"
-
-        def late_marker_line(path):
-            return (f"A change to the guarded file {path} that needs no approval as "
-                    f"`{exception}`; the marker was written after the change, so it needs your yes")
     elif obvious_fix:
         fix = " ".join(line.strip() for line in words[len(OBVIOUS_FIX_MARKER_PREFIX):].splitlines()
                        if line.strip()) or "(the marker does not say what)"
         how, extra_fields = HOW_OBVIOUS_FIX, []
-        late_marker_kind = "obvious-fix marker"
-
-        def late_marker_line(path):
-            return (f"An obvious fix to the guarded file {path}; the marker was written after the "
-                    f"change, so it needs your yes: {fix}")
     else:
         how, extra_fields = HOW_USER, []
     marker_time = os.stat(marker).st_mtime_ns
@@ -1641,13 +1644,18 @@ def approve(pairs, cwd: Path):
         if how != HOW_USER:
             for path, key in pairs:
                 seen = first_seen_time(logs[path], key)
-                # Equal times count as the marker coming after, so the change goes to the user.
-                if seen is None or marker_time >= seen:
+                if pre_approved and seen is None:
                     raise Refused(
-                        f"the {late_marker_kind} in {marker} was written after this hook first "
+                        f"this hook has not seen {path} at version {key}. Run --approve for "
+                        "the version this hook reports after it sees the change")
+                # Equal times count as an obvious-fix marker coming after the change.
+                if obvious_fix and (seen is None or marker_time >= seen):
+                    raise Refused(
+                        f"the obvious-fix marker in {marker} was written after this hook first "
                         f"saw {path} at version {key}, so it cannot approve that version. Show "
                         "the user the change and ask him, starting with this line: "
-                        f"\"{late_marker_line(path)}\". If he approves, write his words "
+                        f'"An obvious fix to the guarded file {path}; the marker was written '
+                        f'after the change, so it needs your yes: {fix}". If he approves, write his words '
                         f"into {marker} and run this command again")
         if time.monotonic() > end:
             raise StoreUnreachable("the deadline passed before the approval was recorded")

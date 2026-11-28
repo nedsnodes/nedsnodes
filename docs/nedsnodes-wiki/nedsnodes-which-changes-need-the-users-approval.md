@@ -27,6 +27,8 @@ A change is the difference an agent's work makes, from before it starts to after
 - Removing whole sentences, list items, table rows or paragraphs of prose from any file other than `CLAUDE.md`, when nothing is added or reworded and no removed sentence states a user-ruling.
 - An obvious-error-fix, which the project glossary defines; it covers prose only.
 - A cosmetic-change; it covers prose only.
+- Skipping a test case, with a line the test prints saying why, when the agent judges that the case cannot run on that machine or is not needed.
+- Correcting a comment or docstring so that it says what the code does, when the code does not change.
 - The wording of a message a program prints, such as an error, a refusal or a warning, when the message still tells the agent to do the same thing. Only the message's words change, together with each test or document that quotes the old words, changed to quote the new; the code that fills in the message's placeholders does not change. Before pushing, the agent that changes the wording saves the new wording to a file in its scratchpad, runs a cold-read-fast-read on that file, and applies each finding that holds without changing what the message tells the agent to do.
 - In prose: renumbering headings, steps or items; updating a citation; naming the source of a statement; adding an open question to a document without answering it. A number or heading that a program reads is data, and renumbering it is not this exception.
 - Renaming a page, a file of any kind or a title to a term the project glossary or a system glossary already lists, with every reference in the repository updated, when nothing outside the repository, such as a crontab entry or a LaunchAgent, names it.
