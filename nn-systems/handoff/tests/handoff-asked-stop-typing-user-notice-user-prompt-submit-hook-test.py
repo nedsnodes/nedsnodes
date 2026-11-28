@@ -54,7 +54,7 @@ def check(case_name, condition, detail=""):
 
 
 def run_hook(payload, home, agent_seat_name=None, raw_input_text=None, launched_session_id=None,
-             stdout_encoding=None):
+             stdout_encoding=None, stdout=subprocess.PIPE):
     environment = {**os.environ, "HOME": str(home)}
     if stdout_encoding is not None:
         environment["PYTHONIOENCODING"] = stdout_encoding
@@ -67,7 +67,7 @@ def run_hook(payload, home, agent_seat_name=None, raw_input_text=None, launched_
         if launched_session_id:
             environment[LAUNCHED_SESSION_ID_VARIABLE] = launched_session_id
     text = raw_input_text if raw_input_text is not None else json.dumps(payload)
-    return subprocess.run([sys.executable, str(HOOK_SCRIPT)], input=text, capture_output=True,
+    return subprocess.run([sys.executable, str(HOOK_SCRIPT)], input=text, stdout=stdout, stderr=subprocess.PIPE,
                           text=True, check=False, env=environment)
 
 
@@ -229,6 +229,21 @@ with tempfile.TemporaryDirectory() as workspace:
 
     # ---- faults --------------------------------------------------------------
 
+    marker("s-closed-pipe").touch()
+    payload = {"session_id": "s-closed-pipe", "transcript_path": str(titled)}
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    with os.fdopen(write_end, "wb") as closed_pipe:
+        result = run_hook(payload, home, stdout=closed_pipe)
+    check("a closed stdout reports the failed notice and leaves it unrecorded",
+          result.returncode == 1 and "BrokenPipeError" in result.stderr
+          and not (handoffs / "s-closed-pipe-handoff-asked-user-notice-shown").exists(),
+          (result.returncode, result.stderr))
+    result = run_hook(payload, home)
+    check("the next prompt after a failed write gets the notice",
+          result.returncode == 0 and shown_notice(result) == expected_named("efficiency-renamed"),
+          (result.returncode, result.stdout, result.stderr))
+
     result = run_hook(None, home, raw_input_text="[1, 2]")
     check("stdin not a JSON object: exit 1, nothing on stdout, one stderr line naming the hook",
           result.returncode == 1 and result.stdout == ""
@@ -257,11 +272,10 @@ with tempfile.TemporaryDirectory() as workspace:
                           unwritable_home, agent_seat_name="seat-a")
     finally:
         unwritable_handoffs.chmod(0o755)
-    check("no file recording a shown notice, and its directory refuses writes: exit 1, nothing on"
-          " stdout, one stderr line",
-          result.returncode == 1 and result.stdout == ""
+    check("an unwritable record after output: the notice and one error explaining it may repeat",
+          result.returncode == 1 and shown_notice(result) == expected_named("efficiency-renamed")
           and len(result.stderr.splitlines()) == 1
-          and result.stderr.startswith(hook.PROGRAM + ": "),
+          and "could not record" in result.stderr and "may appear again" in result.stderr,
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
     result = run_hook({"transcript_path": str(titled)}, home, agent_seat_name="seat-a")
