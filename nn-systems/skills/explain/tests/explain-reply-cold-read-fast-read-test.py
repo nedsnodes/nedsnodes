@@ -463,6 +463,13 @@ def main() -> int:
         # when the fast read printed a readable path but exited non-zero; its
         # contract is exit 0 on success only.
         readable_report = scratch / "readable-report.md"
+        unreadable_report = scratch / "invalid-report.md"
+        unreadable_report.write_bytes(b"\xff")
+        completed, _ = run_program(scratch, {"stdout": str(unreadable_report) + "\n", "exit": 0}, GOOD_INPUT)
+        check("an undecodable fast-read report gives the failure response naming its file",
+              completed.returncode == 1 and str(unreadable_report) in completed.stdout
+              and "could not be read" in completed.stdout and "Traceback" not in completed.stderr,
+              (completed.stdout, completed.stderr))
         readable_report.write_text("## Question 2: Where you struggled\nA finding.\n")
         completed, _ = run_program(
             scratch, {"stdout": f"{readable_report}\n", "exit": 1}, GOOD_INPUT)

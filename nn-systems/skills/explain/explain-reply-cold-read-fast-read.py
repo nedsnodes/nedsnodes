@@ -202,10 +202,12 @@ def main() -> int:
         return print_failure(report_line or last_nonempty_line(stderr), stderr)
     report_path = pathlib.Path(report_line)
     try:
-        report_text = report_path.read_text()
+        report_text = report_path.read_text(encoding="utf-8")
     except OSError as error:
         return print_failure(
             f"{report_line} (could not be read: {error.strerror})", stderr)
+    except UnicodeDecodeError as error:
+        return print_failure(f"{report_line} (could not be read as UTF-8: {error})", stderr)
     print(report_from_question_2(report_text))
     print()
     print(f"Report: {report_path}")
