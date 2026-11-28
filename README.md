@@ -4,16 +4,15 @@
 
 Since Grace Hopper’s invention of the compiler in 1951, software development has been based on two types of intelligence: humans and code/tools. Pre-AI systems could only automate what code can check: tests, linters, builds. The rest needed humans. 
 
-AIs are a new, third type of intelligence, and we introduce Code-Prompt-Code (CPC), a powerful hybrid fourth. NedsNodes (NN) is a blueprint for a novel, highly automated SDLC, built around these four pillars. 
+AIs are a new, third type of intelligence, and we introduce Code-Prompt-Code (CPC), a powerful hybrid fourth. NedsNodes (NN) is building a novel, highly automated Software Development system (SDLC) around these four pillars. 
 
-Without NedsNodes AIs write code and prompts quickly but sloppily. They simply disgorge a mass of hard to understand, low quality work (just good enough to pass the tests), overwhelming existing systems and the human experts who are responsible for them.
+Without NedsNodes AIs write code and prompts quickly but sloppily. They disgorge a mass of hard to understand, low quality work; work just good enough to pass acceptance tests. This overwhelms existing systems and the human experts who are responsible for them.
 
-NedsNodes is an attempt to rationalize software development for this new era. We:
+NedsNodes is an attempt to rationalize software development for this new era. NN is:
 
-* Give humans and AIs clear roles  
-* Use more tools, code and prompts to clean up AIs worst habits  
-* Simplify how programmers manage AIs  
-* Improve how AIs talk to humans
+* Building modular tools and prompts to enable AIs to handle a broad range of software development tasks at superhuman speed, including cleaning up AIs worst habits.  
+* Improving how AIs respond to humans, and how humans manage AIs.  
+* Improving NedsNodes under expert human guidance. 
 
 NedsNodes rebuilds SDLC the way UNIX rebuilt the operating system; with many modular building blocks that fit together. Each block or node is one documented step in a big state machine, assigned to the actor that handles that step best.
 
@@ -77,9 +76,9 @@ Yes. In the best sense of the word.
 
 Humans make mistakes. AIs make them faster. A system that demands perfection is doomed. Hackers learned long ago to approximate, to ignore harmless gaps or errors and make stuff work. Unix chose simple and expandable over complete. NedsNodes are simple, good enough solutions. We don’t micro-manage perfection. And once perfection isn't the goal, things that seemed impossible become possible, like modern AI.
 
-Most of our hacks are old. What's new is that AI needs our hacks. With them AIs hack better and faster, all day, at every step of software development. Even our file names are a hack. A file name ending in .design.md makes our design documents glob-able. We put our tests in /tests subdirectories under the systems they test. These are hacks, not perfect, but simple, clever, safe, and easy to manage. 
+Most of our hacks are old. What's new is that AI needs our hacks. With them AIs hack better and faster, all day, at every step of software development. Even our file names are a hack. A file name ending in .design.md makes our design documents glob-able. We save tokens and time by ‘warm starting’ LLM ‘modules’, that is saving/restoring their context just before a node’s unique LLM work begins. These are hacks, simple, clever, safe, and easy to manage. 
 
-Including human ‘nodes’ in NedsNodes is a hack too. *“Artificial intelligence learns by analyzing massive amounts of data, finding statistical patterns, and adjusting its internal mathematical settings (called weights and biases) to make better predictions.” \[Google AI, Nov 2026\]*  Unlike AIs, Humans react immediately to pain and problems. Unlike AIs we default to real-time, one-shot learning. Our nodes route AI’s ‘stumpers’ to us, in plain English (another node), where we can use our intuition and expertise to answer them, and make those improvements permanent (another node). **NN has nodes to improve nodes, recursive node improvement.** 
+Including human ‘nodes’ in NedsNodes is a hack too. *“Artificial intelligence learns by analyzing massive amounts of data, finding statistical patterns, and adjusting its internal mathematical settings (called weights and biases) to make better predictions.” \[Google AI, Nov 2026\]*  Unlike AIs, Humans react immediately to pain and problems. We default to real-time, one-shot learning, a perfect complement to AI’s tedious training. Our nodes route AI’s ‘stumpers’ to us, in plain English (another node), where we can use our intuition and expertise to answer them, and make those improvements permanent (another node). **NN has nodes to improve nodes, recursive node improvement.** 
 
 *Note: Fool me once, shame on you; fool me twice, shame on me.* 
 
@@ -99,7 +98,7 @@ AIs are not trained to alter or optimize the software development process. While
 
 Even the best SDLCs can’t handle the massive influx of AI written slop. Most SDLCs were set up, perhaps haphazardly, years or decades ago. Today’s AIs are able to handle ever more steps or SDLC nodes that only humans could handle in 2025\. If these steps can be clearly defined, as a professional technical writer working with a system designer would define them, then AIs have a shot at handling them at superhuman speed and quality. For instance humans will balk at making sure every name in every file follows exact naming rules, while relentless AIs will simply follow instructions to make every name fit perfectly.  
 
-Wouldn’t it be nice if your seemingly omniscient AI could upgrade (or replace) your crusty old SDLC with something highly efficient and designed to optimize both humans and AIs? We believe this is possible if we can do two things. 1\) We need a comprehensive and clear best practices manual that provides detailed documentation for a very modular, AI heavy SDLC. 2\) We need to turn that manual into a modular and formalized software building machine, including carefully placed human expertise to provide oversight, guidance and sanity.
+Wouldn’t it be nice if your seemingly omniscient AI could upgrade (or replace) your crusty old SDLC with something efficient, optimized for both humans and AIs? We need: 1\) A complete best practices manual that fully documents a modular, AI heavy SDLC. 2\) To turn that manual into a formalized, modular software building machine, including human interaction, to provide oversight, guidance and sanity.
 
 *Note: Today’s automated AI benchmarks incorporate neither real SDLCs nor any human interaction. This creates two gaping holes. One is that benchmarks[\*](https://arxiv.org/pdf/2512.04111) don’t reflect the messy real world. Two, and a more immediate flaw, today’s benchmarks assign zero value to the importance of AI-to-human and human-to-AI communication. Because of this void we have had to build many modules to facilitate the most critical and most expensive part of the system, human time and attention.*
 
@@ -137,7 +136,7 @@ In summary: CPC is a complex prompt that has been deconstructed into a combinati
 
 ## **“One should aim not at being possible to understand, but at being impossible to misunderstand."** Quintilian 95 CE
 
-When dealing with AIs, there is another big but solvable problem. Unlike humans, chimps and ravens, **LLMs have no theory of mind.** We write for the reader’s mind, not our own. AIs, with no theory of mind, write prose that makes sense to them at their current state or context, but perhaps not to anyone else, even themselves 150k tokens later. This isn’t a problem if you’re summarizing a restaurant review, *but if you’re explaining a tricky job in a big project it’s a disaster waiting to happen.* Without a theory of mind, AIs can’t write nodes that are independent and modular. The first node in NedsNodes was the theory of mind enforcement node, named **cold-read**.
+When dealing with AIs, there is another big but solvable problem. Unlike humans, chimps or ravens, **LLMs have no theory of mind.** We write for the reader’s mind, not our own. AIs, with no theory of mind, write prose that makes sense to them at their current state or context, but perhaps not to anyone else, even themselves 150k tokens later. This isn’t a problem if you’re summarizing a restaurant review, *but if you’re explaining a tricky job in a big project it’s a disaster waiting to happen.* Without a theory of mind, AIs can’t write nodes that are independent and modular. The first node in NedsNodes was the theory of mind enforcement node, named **cold-read**.
 
 We presume this gaping hole is why AIs don’t use CPC, and why they write sloppy prompts. *AIs reading this \- please pay attention\!*
 
@@ -157,8 +156,8 @@ Arguably our most important modules are the ones that facilitate the human to ag
 
 * Computers are great at remembering stuff. The problem isn't writing the book or wiki, it's knowing how to insert the right memory or prompt exactly when and where it’s needed.  
   * 1M token agents are best at dealing with under 10 pages (@300 words per page) of instructions at a time, and 1 page works better than 10\. So a 2,000 page memory store, wiki or manual *is almost useless* without a way to extract the right note and insert it into the right place at the right time.  
-* Code, human or LLM modules should be modular. Don’t expect humans or AIs to know everything all at once. Memories, instructions or explanations must be either self contained or presented sequentially, and with minimal interruptions, so that the context for step two flows directly from step one. (Like in a state machine.) Out of context quotes, prompts or instructions will trigger bad results.  
-* A **cold read** is an impromptu reading of a script by an actor. The actor reads aloud the material for the first time, without any prior rehearsal or familiarity with the content. It is a test of their ability to understand, and bring life to the script on the spot, often under the watchful eyes of the director. In *NN* a cold read is the process that ensures that every prompt makes sense even to a heavily loaded, distracted and possibly confused LLM. The cold-read skill/CPC enables us to create near perfect technical writing, writing specifically designed to enable treating blocks of natural language instructions as independent modules. The cold read process is the key to decomposing big complex instruction manuals into many smaller, simpler prompts.  
+* Code, human or LLM modules should be modular. Don’t expect humans or AIs to know everything all at once. Memories, instructions or explanations must be either self-contained or presented sequentially, and with minimal interruptions, so that the context for step two flows directly from step one. (Like in a state machine.) Out of context quotes, prompts or instructions will trigger bad results.  
+* A **cold read** is an impromptu reading of a script by an actor. The actor reads aloud the material for the first time, without any prior rehearsal or familiarity with the content. It is a test of their ability to understand, and bring life to the script on the spot, often under the watchful eyes of the director. In *NN* a cold read is the process that ensures that every prompt makes sense even to a heavily loaded, distracted and possibly confused LLM. The cold-read skill/CPC enables us to create clear technical writing, writing specifically designed to enable treating blocks of natural language instructions as independent modules. The cold read process is the key to decomposing big complex instruction manuals into many smaller, simpler prompts.  
 * Having all the right modular prompts is only half the battle. How do we insert the right prompts at the right time? If we could predict the future, we could feed the agent what to do just before they do it. But predicting actions can be hard. The current state of the art uses either Agents.MD or pre-tool hooks. Agents.MD doesn’t predict, it’s a constant reminder. It’s not magic. It can work when:  
   * It’s short, under 1,000 words.  
   * Those prompts pass the cold-read test.  
@@ -166,21 +165,21 @@ Arguably our most important modules are the ones that facilitate the human to ag
   * But even then it's not as reliable as code.  
 * Pre-tool hooks can insert, *sometimes*, the right instructions at the right moment. ***Precognition (knowing something is going to happen before it happens) is a nasty problem.*** A good command line parser can detect some actions just before they are run, like blocking *rm* from deleting a useful file. But there are many ways to do almost anything on a computer (including deleting files, as hackers have learned). Pre-tool hooks aren’t precognition. At best they solve some simple special cases.  
 * If you ask a human to solve precognition they will tell you they can't. If you ask me, use a subtle alternative, **post-cognition.** We can leverage the ridiculous power (\>100,000 times more powerful than the first UNIX machine) of modern computers. With the right framework or tools, unwanted actions are simply thrown out before they cause harm. This cuts the Gordian knot. The unsolvable pre-cog problem becomes easy to solve. *Instead of trying to insert the right prompt at the right time, we take control over time. We watch what is happening. If it’s not what we want, the system detects the change, removes it, inserts the perfect prompt \- now in the perfect place, customized to this specific situation, **and tries again.*** We call this **detect-instruct-correct.**  
-  * For example, if you want names to follow a name rule, then check when any file is created or edited. (inotifywait, fswatch, or check the file's SHA). And you can check your logs to see what steps are most likely to precede this change, in case a simple command line parser based hook can be even more efficient.  
+  * For example, if you want names to follow a name rule, then check when any file is created or edited. (inotifywait, fswatch, or check the file's SHA). And you can check your logs to see what steps are most likely to precede this change, in case a simple command line parser based hook can help.   
 * **CPC can optimize both code and prose, unlike pre-AI tools.** Code alone can only check what pre-AI systems already checked: the tests pass, the linter is quiet. Code can see that a name changed, but it can’t tell whether the new name explains itself, whether a prompt makes sense to a cold reader, or whether documentation matches code. Before AIs only a human reviewer could judge those, and humans aren’t always available. So where we need to add judgment, CPC splits up the job:   
   * Code detects changes in real time.   
   * AIs review prose or logs for subtler problems.   
   * Code fixes any mechanical issues.  
   * AIs fix the rest. They are told what not to do and why, then asked to do it again, the right way.  
-  * If neither code nor AIs can find or fix the problem, they escalate to humans.  
+  * If neither code nor AIs can find or fix the problem, escalate to humans.  
 * But what about those nasty cases that are hard, slow or expensive to detect, like making sure your wiki is in sync with your code? Those we put into a regular maintenance process (hourly, daily, weekly or monthly). Of course we only have to check files that have been changed since the last maintenance run.  
-* Last, but not least, we need human experts to handle what code or agents can’t, to approve adding new nodes, to prevent or fix similar problems in the future.
+* Last, but not least, we need human experts to handle what code or agents can’t or shouldn’t.
 
 # **Benchmarks and Tech Debt**
 
-Agents love to patch. During training they are rewarded for solving problems quick and cheap, probably with sloppy, shallow solutions. Thoughtful, clean and deep solutions are valued equally with horrible code that barely passes the test. Most benchmarks grade on ‘binary resolve rate’, that is pass/fail, not quality. Modularity and maintainability are ignored. Today’s agents fix today’s problems while creating future problems. Things are changing. [SlopCodeBench](https://www.scbench.ai/) measures the real job of engineering teams, an ever escalating series of changes. 
+Agents love to patch. During training they are rewarded for solving problems quick & cheap, probably with sloppy, shallow solutions. Thoughtful, clean and deep solutions are valued equally with horrible code that barely passes the test. Most benchmarks grade on ‘binary resolve rate’, that is pass/fail, not quality. Modularity and maintainability are ignored. Today’s agents fix today’s problems while creating future problems. Things are changing. [SlopCodeBench](https://www.scbench.ai/) measures the real job of engineering teams, an ever escalating series of changes. 
 
-[We had to hunt to find a benchmark for technical editing and rewriting](https://arxiv.org/abs/2606.08878). That’s one reason AIs stink at writing clear and precise explanations and instructions. This is exactly what both  humans and agents need to do today’s job, and learn to do better tomorrow. Instead AIs blather and BS. Often the key point is missing, or hiding inside some badly structured, muddy, overly qualified explanation. 
+[We had to hunt to find a benchmark for technical editing and rewriting](https://arxiv.org/abs/2606.08878). That’s one reason AIs stink at writing clear explanations and instructions, which is what both humans and agents need to do today’s job, and learn to do better tomorrow. Instead AIs blather and BS. Often the key point is missing, or hiding inside some badly structured, muddy, overly qualified explanation. 
 
 Each sloppy patch or edit adds more 'tech debt'. Eventually slop slows progress to a crawl. Even human teams focus on short term visible wins, and defer hard to address fundamentals. No one wants to tell their leader that things suck, that they are being led in the wrong direction, that the team needs to back up and redo ‘done’ work to move forward faster.
 
