@@ -115,7 +115,7 @@ def listed(*entries):
 
 
 def routes_for(number=9, head=HEAD, files=FILE, base_text=BASE_TEXT, head_after_read=None,
-               review=None, review_exit=0, entries=None, file_text=PASSING_FILE_TEXT,
+               review_exit=0, entries=None, file_text=PASSING_FILE_TEXT,
                contents_exit=0, head_bytes_hex=None):
     entries = entries if entries is not None else [
         (number, f"GHI-MD edit for issue {number}: a title", head, False)]
@@ -128,8 +128,7 @@ def routes_for(number=9, head=HEAD, files=FILE, base_text=BASE_TEXT, head_after_
                              else {"out": file_text} if contents_exit == 0
                              else {"exit": contents_exit, "err": "HTTP 404"}),
         f"view {number} headRefOid": {"out": json.dumps({"headRefOid": head_after_read or head})},
-        f"api {number}": ({"out": json.dumps(review if review is not None
-                                             else {"submitted_at": SUBMITTED})}
+        f"api {number}": ({"out": json.dumps({"submitted_at": SUBMITTED})}
                           if review_exit == 0 else {"exit": review_exit, "err": "refused"}),
     }
 
@@ -220,14 +219,14 @@ def main():
         approval = approvals(scratch)
         merges = scratch.merge_calls()
         check("a pull request that only adds provisional-additions is approved, pinned to its "
-              "nn-head-commit, and merged with the approval's time, exit 0",
+              "nn-head-commit, and merged with no reviewed-since time passed, exit 0",
               code == 0 and len(approval) == 1 and f"commit_id={HEAD}" in approval[0]
               and "event=APPROVE" in approval[0]
               and any(argument.startswith("body=") and "adding a \"Provisional additions"
                       in argument for argument in approval[0])
               # The merge gate refuses the merge account's approval without the posting program's verdict line.
               and any(argument.startswith("body=APPROVE\n\n") for argument in approval[0])
-              and merges and merges[0][:3] == ["9", HEAD, SUBMITTED]
+              and merges and merges[0][:3] == ["9", HEAD, "--merge-lane-worktrees-and-outputs-directory"]
               and "merged: merge program last line" in output and scratch.messages() == [],
               f"exit {code}\n{output}\n{approval}\n{merges}")
         check("the file is read at the nn-head-commit",
@@ -541,13 +540,6 @@ def main():
               code == 1 and scratch.merge_calls() == []
               and "its approval failed" in scratch.message(f"pr9-{HEAD[:12]}.txt")
               and "refused" in scratch.message(f"pr9-{HEAD[:12]}.txt"), f"exit {code}\n{output}")
-        scratch = Scratch(root, "approval-without-time")
-        scratch.routes(routes_for(review={"state": "APPROVED"}))
-        code, output = scratch.run()
-        check("an approval answer without submitted_at is reported, nothing is merged, exit 1",
-              code == 1 and scratch.merge_calls() == []
-              and "its approval failed" in scratch.message(f"pr9-{HEAD[:12]}.txt"),
-              f"exit {code}\n{output}")
         for merge_exit, outcome in ((1, "not merged"), (2, "not merged"),
                                     (3, "merged, but a step after the merge was not done"),
                                     (4, "whether it merged is unknown"), (5, "not merged"),

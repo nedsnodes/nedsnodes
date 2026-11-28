@@ -3,11 +3,13 @@
 
 Usage:
   scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py <pull request number>
-      <nn-head-commit, all 40 characters> <reviewed-since>
+      <nn-head-commit, all 40 characters>
       [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
 Runs --review-tools-worktree-at-main's scripts/merge-gate.sh, never the pull
-request's own copy, with the three arguments. While the gate
+request's own copy, with the two arguments. A third argument, such as the
+reviewed-since time the gate once took, stops the program before it runs
+anything, with the form to use. While the gate
 refuses with "mergeStateStatus is UNKNOWN", it runs the gate again, 5 seconds
 apart, at most 8 times in all. When the gate passes, the merge command it
 prints must be exactly the one this program expects; then every open pull
@@ -258,8 +260,7 @@ def parse_arguments(argv):
                     "gate printed.")
     parser.add_argument("pull_request", help="the pull request's number")
     parser.add_argument("head_commit", help="the nn-head-commit, all 40 characters")
-    parser.add_argument("reviewed_since",
-                        help="the reviewed-since time merge-gate.sh takes, YYYY-MM-DDTHH:MM:SSZ")
+    parser.add_argument("extra_arguments", nargs="*", help=argparse.SUPPRESS)
     common.add_directory_options(parser, "the after-merge test runs' logs")
     return common.resolve_path_options(parser.parse_args(argv))
 
@@ -281,8 +282,7 @@ def merge_gate_after_retries(arguments, environment, wait):
     for attempt in range(1, MERGE_GATE_TRIES + 1):
         gate = subprocess.run(
             ["bash", str(arguments.review_tools_worktree_at_main / MERGE_GATE),
-             arguments.pull_request, arguments.head_commit,
-             arguments.reviewed_since],
+             arguments.pull_request, arguments.head_commit],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=environment,
             stdin=subprocess.DEVNULL)
         if (gate.returncode == 0 or MERGE_STATE_UNKNOWN_REFUSAL not in gate.stdout
@@ -1619,6 +1619,14 @@ def surviving_mutant_test_prs_go_ahead_printed(environment):
 
 def main(argv=None, wait=time.sleep):
     arguments = parse_arguments(argv)
+    if arguments.extra_arguments:
+        print(f"STOP: not merged: this program takes two arguments, the pull request number and the "
+              f"nn-head-commit, and was also given {shlex.join(arguments.extra_arguments)}.\n"
+              f"If that is a reviewed-since time, leave it out: merge-gate.sh works reviewed-since "
+              f"out from the pull request's reviews.\n"
+              f"Run it as: scripts/{Path(__file__).name} <pull request number> "
+              f"<the nn-head-commit, all 40 characters>")
+        return EXIT_COULD_NOT_RUN
     outputs = arguments.merge_lane_worktrees_and_outputs_directory
     lock_path = outputs / MERGE_PROGRAM_RUN_LOCK_FILE_NAME
     try:

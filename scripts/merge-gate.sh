@@ -11,7 +11,7 @@
 # On a pass it also prints, after the merge command, each #follow_up link to an
 # open issue in this repository, which merge-lane-2 sends the author.
 #
-#   scripts/merge-gate.sh <pr-number> <expected-head-sha> <reviewed-since-iso8601>
+#   scripts/merge-gate.sh <pr-number> <expected-head-sha>
 #   scripts/merge-gate.sh --print-new-activity-count-after-reviewed-since-bound <pr-number>
 #
 # EXIT CODES. 0 the merge may proceed; 1 the gate REFUSES, a named reason on
@@ -47,31 +47,26 @@
 # is absent from older gh releases -- ned-box ran 2.46.0 when this was written;
 # jq -s over a captured here-string is equivalent and portable.
 #
-# WHY SINCE IS BOUNDED (F2). SINCE was caller-supplied and unbounded, so
-# `$(date -u +%FT%TZ)` -- "since now" -- turned all three activity checks into
-# no-ops. SINCE may be no later than the last moment the merge account
-# demonstrably acted on the pull request: the pinned approval, or the merge
-# account's own latest submitted review if that is later. Anything later is
-# refused rather than trusted.
+# WHY THE GATE WORKS OUT SINCE ITSELF (F2). SINCE, the reviewed-since time, is the
+# last moment the merge account demonstrably acted on the pull request: the
+# pinned approval, or the merge account's own latest submitted review if that is
+# later. A caller-supplied SINCE could be "now", which turns all three activity
+# checks into no-ops, or a time before the pin, which counts the pin's own inline
+# comments as new.
 #
 # The second half exists for pull requests the merge account itself opened.
 # GitHub refuses an approval from a pull request's author, so there mac-claude
 # approves (the pin) and the merge account then posts its required review as
-# COMMENTED. Bounded by the pin alone, that flow would be refused at every
-# SINCE: at or before the approval its own review would count as new activity,
-# after the approval SINCE would be out of bounds. What this allows: a SINCE at the merge account's own latest review,
-# so activity by any account between the pin and that review is not counted --
-# the same trust the ordinary flow already places in SINCE, which is the merge
-# account's own approval there. A review with findings from any account still
-# counts when it lands after SINCE, and a CHANGES_REQUESTED still refuses
-# through reviewDecision.
+# COMMENTED. Bounded by the pin alone, that review would count as new activity
+# and the merge could never pass. What this allows: activity by any account
+# between the pin and the merge account's latest review is not counted, and no
+# review by the merge account is ever new activity -- the trust the gate places
+# in the merge account's own reviews as the record that it read the pull request.
+# A review with findings from any other account still counts when it lands after
+# SINCE, and a CHANGES_REQUESTED still refuses through reviewDecision.
 #
-# WHY THE FORMAT IS STRICT (F3). Timestamps were compared as strings inside jq,
-# where an RFC 3339 SINCE carrying a positive offset under-counts to a FALSE PASS.
-# Rather than parse offsets, the gate accepts only the exact form GitHub itself
-# returns, YYYY-MM-DDTHH:MM:SSZ, and compares epoch seconds via fromdateiso8601.
-# A different-but-valid RFC 3339 spelling is refused with its reason, which is a
-# false refusal by design and cheap to correct at the call site.
+# Timestamps are compared as epoch seconds via fromdateiso8601, never as strings,
+# which would misorder two spellings of one time.
 #
 # WHY ANY ACCOUNT'S APPROVAL MAY BE THE PIN. The merge account approves every
 # pull request it merges, and its approval is often the only one at the head,
@@ -79,16 +74,14 @@
 # merges; the user decided against such a filter. GitHub's
 # required review already refuses an approval from the pull request's author.
 #
-# WHY THE REVIEW CHANNEL NO LONGER EXCLUDES AN ACCOUNT (F5). It excluded every
-# review by the merge account unconditionally, so that account's own later
-# COMMENTED review -- the merge lane reviewing the code itself and recording
-# findings -- was read by nobody. Only the pinned approving review is excluded
-# now, by its id, because counting it would refuse every merge it authorises.
+# WHY THE REVIEW COUNT EXCLUDES NO REVIEW (F5). The pin and every review by the
+# merge account are at or before SINCE by F2, so none of them is counted; every
+# later review, by any other account, is.
 #
 # WHY COMMENTS ARE READ BY THEIR LATEST TIMESTAMP (F6). created_at alone missed a
 # comment EDITED after the review to add a finding.
 #
-# WHY AN INLINE COMMENT POSTED WITH A REVIEW THE CALLER WROTE OR READ IS READ AT
+# WHY AN INLINE COMMENT POSTED WITH THE PIN OR A MERGE-ACCOUNT REVIEW IS READ AT
 # THAT REVIEW'S TIME. GHI "The merge gate refuses a merge when the merge
 # account's own review carries inline comments stamped a second later",
 # https://github.com/nedsnodes/nedsnodes/issues/729. GitHub stamps an inline
@@ -97,22 +90,20 @@
 # stopped at its time bound is counted and leaves no process running"
 # (https://github.com/nedsnodes/nedsnodes/pull/722) the merge account's
 # COMMENTED review read 20:43:02Z and its three inline comments 20:43:03Z. F2
-# bounds SINCE at that review, so no accepted SINCE was later than the
-# comments, they always counted as new, and the merge could never pass.
+# bounds SINCE at that review, so the comments would always count as new, and
+# the merge could never pass.
 #
 # So an inline comment is read at its review's submitted_at, instead of its own
-# latest timestamp, when all of these hold:
-#   - its pull_request_review_id is the pinned approval, or a review by the
-#     merge account;
-#   - that review was submitted at or before SINCE, so it is a review the caller
-#     demonstrably wrote or read;
+# latest timestamp, when both of these hold:
+#   - its pull_request_review_id is the pinned approval, or a submitted review by
+#     the merge account;
 #   - the comment's latest timestamp is no later than one second after that
 #     review's submitted_at, so it is the comment as posted with the review and
 #     not a later edit.
 # Every other inline comment keeps its own latest timestamp: a comment from any
-# other account's review, from a merge-account review or pin submitted after
-# SINCE, or edited after its review was posted. That last keeps F6: an approver
-# who edits its approval's comment afterwards to add a finding is still counted.
+# other account's review, or edited after its review was posted. That last keeps
+# F6: an approver who edits its approval's comment afterwards to add a finding is
+# still counted.
 #
 # The one-second allowance, and why the test is not updated_at == created_at,
 # come from every captured inline channel (merge-gate-test-captured-github-
@@ -149,24 +140,26 @@ TOKEN_ONLY_MERGE_ACCOUNT="The gate reads GitHub only as the merge account, $MERG
 TOKEN_TELL_THE_USER="Tell the user this message: only the user can restore the token."
 
 if [ $# -eq 1 ] && { [ "$1" = --help ] || [ "$1" = -h ]; }; then
-  echo "usage: scripts/merge-gate.sh <pull request number> <the nn-head-commit, all 40 characters> <reviewed-since: ISO 8601 time>"
+  echo "usage: scripts/merge-gate.sh <pull request number> <the nn-head-commit, all 40 characters>"
   echo
   echo "Decides whether a pull request may merge: reads it from GitHub as the merge account"
   echo "$MERGE_ACCOUNT and exits 0 only when every requirement is met, printing a merge"
   echo "command pinned to the commit the latest approving review covered."
+  echo "It refuses when anything was posted or edited on the pull request after reviewed-since,"
+  echo "which it works out itself: the later of that approving review and $MERGE_ACCOUNT's latest review."
   echo "Exit codes: 0 the merge may proceed; 1 the gate refuses, with the reason on stderr;"
   echo "2 the gate could not run: bad invocation, missing jq or gh, unreadable token, or a failed read."
   echo
   echo "usage: scripts/merge-gate.sh --print-new-activity-count-after-reviewed-since-bound <pull request number>"
   echo
   echo "Prints how many inline comments, issue comments and reviews the gate's activity check finds"
-  echo "after the latest reviewed-since it accepts: the later of the pin and $MERGE_ACCOUNT's latest review."
+  echo "after reviewed-since: the later of the latest approving review and $MERGE_ACCOUNT's latest review."
   echo "Exit codes: 0 the count is printed; 2 the gate could not count."
   exit 0
 fi
 # The posting program, scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py, runs this
 # mode to decide whether a review with no verdict answers the activity check below: it is the same check,
-# with reviewed-since at the bound that check accepts at most.
+# with the same reviewed-since.
 NEW_ACTIVITY_COUNT_OPTION=--print-new-activity-count-after-reviewed-since-bound
 if [ $# -eq 2 ] && [ "$1" = "$NEW_ACTIVITY_COUNT_OPTION" ]; then
   PR=$2
@@ -175,9 +168,10 @@ if [ $# -eq 2 ] && [ "$1" = "$NEW_ACTIVITY_COUNT_OPTION" ]; then
       "Call it as: scripts/merge-gate.sh $NEW_ACTIVITY_COUNT_OPTION <pull request number>" ;;
   esac
 else
-  [ $# -eq 3 ] || cannot "merge-gate.sh takes exactly three arguments and was given $#." \
-  "Call it as: scripts/merge-gate.sh <pull request number> <the nn-head-commit, all 40 characters> <reviewed-since: the submitted_at of your latest review as the merge account, or of the pin if that is later>"
-  PR=$1; EXPECTED=$2; SINCE=$3
+  [ $# -eq 2 ] || cannot "merge-gate.sh takes exactly two arguments and was given $#." \
+  "Call it as: scripts/merge-gate.sh <pull request number> <the nn-head-commit, all 40 characters>" \
+  "If your third argument is a reviewed-since time, leave it out: the gate works reviewed-since out from the pull request's reviews."
+  PR=$1; EXPECTED=$2
 
   NO_SANDBOX_SUITES_PROGRAM="$(dirname "${BASH_SOURCE[0]}")/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py"
   if ! python3 "$NO_SANDBOX_SUITES_PROGRAM" --print-merge-gate-notice-of-last-failed-or-stopped-run --clone "$(dirname "${BASH_SOURCE[0]}")/.." >&2; then
@@ -219,15 +213,6 @@ case "$EXPECTED" in
   *[!0-9a-f]*|"") cannot "expected-head-sha is not a full 40-character hex sha: $EXPECTED" "$FULL_HASH_LINE" ;;
 esac
 [ ${#EXPECTED} -eq 40 ] || cannot "expected-head-sha is ${#EXPECTED} characters, not 40: $EXPECTED" "$FULL_HASH_LINE"
-
-SINCE_FORM="reviewed-since must be a real time in exactly the form YYYY-MM-DDTHH:MM:SSZ, which GitHub returns: $SINCE"
-SINCE_FORM_LINE="Pass the review's submitted_at exactly as GitHub returns it, then run the gate again."
-case "$SINCE" in
-  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
-  *) cannot "$SINCE_FORM" "$SINCE_FORM_LINE" ;;
-esac
-# The right shape can still be no real time, such as month 13.
-jq -n --arg since "$SINCE" '$since | fromdateiso8601' >/dev/null 2>&1 || cannot "$SINCE_FORM" "$SINCE_FORM_LINE"
 fi
 
 # export's own status masked cat's, so a missing token file was swallowed and
@@ -260,10 +245,10 @@ approval_at=$(jq -r '.submitted_at' <<<"$approval")  || cannot "$APPROVAL_UNPARS
 approver=$(jq -r '.user.login' <<<"$approval")       || cannot "$APPROVAL_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
 }
 
-# The latest time the activity check accepts as reviewed-since: the later of the pin and the merge
-# account's own latest review.
-read_reviewed_since_bound() {
-bound_at=$(jq -s -r --arg merge_account "$MERGE_ACCOUNT" --arg approved "$approval_at" \
+# Sets SINCE, reviewed-since: the later of the pin and the merge account's own latest submitted review.
+# A PENDING review has no submitted_at and is left out.
+read_reviewed_since() {
+SINCE=$(jq -s -r --arg merge_account "$MERGE_ACCOUNT" --arg approved "$approval_at" \
   '[$approved] + [.[][] | select(.user.login == $merge_account and .submitted_at != null)
                           | .submitted_at]
    | max_by(fromdateiso8601)' <<<"$reviews_raw")
@@ -278,13 +263,12 @@ issue_raw=$(gh api "repos/$REPO/issues/$PR/comments" --paginate)
 [ $? -eq 0 ] || cannot "could not read the issue comments of pull request $PR; any error gh printed is just above this line." "$RERUN_ONCE_GH"
 
 # The reviews whose inline comments are read at the review's own time, by id:
-# the pin and the merge account's reviews, submitted at or before SINCE. See the
-# header, "WHY AN INLINE COMMENT POSTED WITH A REVIEW THE CALLER WROTE OR READ".
-reviews_read_by_caller=$(jq -s -c --arg merge_account "$MERGE_ACCOUNT" --arg since "$SINCE" \
+# the pin and the merge account's submitted reviews. See the header, "WHY AN
+# INLINE COMMENT POSTED WITH THE PIN OR A MERGE-ACCOUNT REVIEW".
+reviews_read_by_caller=$(jq -s -c --arg merge_account "$MERGE_ACCOUNT" \
     --argjson approval_id "$approval_id" \
   '[.[][] | select((.id == $approval_id or .user.login == $merge_account)
-                   and .submitted_at != null
-                   and (.submitted_at | fromdateiso8601) <= ($since | fromdateiso8601))
+                   and .submitted_at != null)
           | {key: (.id | tostring), value: (.submitted_at | fromdateiso8601)}]
    | from_entries' <<<"$reviews_raw")
 [ $? -eq 0 ] || cannot "could not parse the review channel" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
@@ -301,11 +285,8 @@ issue=$(jq -s --arg since "$SINCE" \
                    > ($since | fromdateiso8601))] | length' <<<"$issue_raw")
 [ $? -eq 0 ] || cannot "could not parse the issue comment channel" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
 
-# Every account's later reviews count, including the merge account's own
-# findings. Only the pinned approval is excluded, by id: counting it would refuse
-# every merge it authorises.
-reviews=$(jq -s --arg since "$SINCE" --argjson approval_id "$approval_id" \
-  '[.[][] | select(.id != $approval_id and (.submitted_at | fromdateiso8601) > ($since | fromdateiso8601))] | length' <<<"$reviews_raw")
+reviews=$(jq -s --arg since "$SINCE" \
+  '[.[][] | select((.submitted_at | fromdateiso8601) > ($since | fromdateiso8601))] | length' <<<"$reviews_raw")
 [ $? -eq 0 ] || cannot "could not parse the review channel" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
 }
 
@@ -319,8 +300,7 @@ if [ "$1" = "$NEW_ACTIVITY_COUNT_OPTION" ]; then
     # those either, everything on the pull request is new.
     approval_id=0; approval_at=1970-01-01T00:00:00Z
   fi
-  read_reviewed_since_bound
-  SINCE=$bound_at
+  read_reviewed_since
   count_channel_activity_since
   echo $((inline + issue + reviews))
   exit 0
@@ -388,7 +368,7 @@ if [ -n "$verdict_review" ]; then
        marks_refused="$MERGE_ACCOUNT's latest review with a verdict, https://github.com/$REPO/pull/$PR#pullrequestreview-$verdict_review_id ($verdict_review_state), lacks the marks scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py writes: $marks_missing."
        marks_unread="It was posted some other way, such as by hand with gh pr review, so $unread."
        marks_finding_category="Give each inline comment the finding_category merge-lane-2 judges it to have, one of must-fix-now, fix-next, fix-in-maintenance or file-for-later: must-fix-now only for a finding that blocks the merge, since the posting program posts a review with a must-fix-now comment as a request for changes and refuses an approval that has one."
-       marks_rerun="run the gate again: scripts/merge-gate.sh $PR $head <submitted_at>, where submitted_at is what gh api repos/$REPO/pulls/$PR/reviews/<id> --jq .submitted_at prints for the review id the posting program's success line names."
+       marks_rerun="run the gate again: scripts/merge-gate.sh $PR $head"
        # The posting program records a review on the --head-commit it is given, so reposting an older
        # commit's verdict on the head would let the stale-approval check below pass unreviewed commits.
        if [ "$verdict_review_commit" = "$head" ]; then
@@ -415,18 +395,10 @@ if [ -n "$verdict_review" ]; then
   esac
 fi
 
-# "Since now" made every activity check below a no-op (F2). A PENDING review has
-# no submitted_at and is left out of the bound.
-read_reviewed_since_bound
-since_ok=$(jq -n --arg since "$SINCE" --arg bound "$bound_at" \
-  '($since | fromdateiso8601) <= ($bound | fromdateiso8601)')
-[ $? -eq 0 ] || cannot "could not compare reviewed-since against $bound_at" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
-[ "$since_ok" = "true" ] || fail "reviewed-since $SINCE is later than $bound_at, the later of the pin and the merge account's own latest review; the gate accepts a reviewed-since only up to a review that records someone read the pull request." \
-  "Run the gate again with a reviewed-since no later than $bound_at." \
-  "If you have read the pull request after $bound_at, post a review as the merge account saying so, then run the gate again with that review's submitted_at."
+read_reviewed_since
 
 [ "$head" = "$EXPECTED" ] || fail "head moved: you passed $EXPECTED, and the nn-head-commit is now $head." \
-  "If an approving review covers $head, run the gate again with $head as the expected nn-head-commit and a reviewed-since from after you read that review." \
+  "If an approving review covers $head, run the gate again with $head as the expected nn-head-commit." \
   "Otherwise, have $head reviewed and approved, then run the gate again the same way."
 # Merging past this would land code no approval covered.
 [ "$approved_sha" = "$head" ] || fail "the approval covers $approved_sha but the nn-head-commit is now $head." \
@@ -466,9 +438,9 @@ esac
 # GitHub remaps to the new head and which therefore proves nothing about age.
 count_channel_activity_since
 
-NEW_ACTIVITY_READ="Read everything posted or edited since $SINCE: the inline comments, the issue comments and the reviews."
+NEW_ACTIVITY_READ="Read everything posted or edited since $SINCE (reviewed-since: the later of the approving review the gate pins and $MERGE_ACCOUNT's latest review): the inline comments, the issue comments and the reviews."
 NEW_ACTIVITY_FINDING="If any raises a finding, do not merge until the finding is fixed, or answered with a reason that shows it does not hold; a fix moves the nn-head-commit, which then needs its own approving review."
-NEW_ACTIVITY_RECORD="When nothing is left open, post a review as the merge account saying what you read, with a review file holding only {\"body\": <what you read>} and the command python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request $PR --head-commit $head --github-account $MERGE_ACCOUNT <review file>. Check that nothing was posted between your reading and that review; if something was, read it and repeat from the first line. Then run the gate again with the review's submitted_at as reviewed-since."
+NEW_ACTIVITY_RECORD="When nothing is left open, post a review as the merge account saying what you read, with a review file holding only {\"body\": <what you read>} and the command python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request $PR --head-commit $head --github-account $MERGE_ACCOUNT <review file>. Check that nothing was posted or edited between your reading and that review; if something was, read it and repeat from the first line. Then run the gate again: that review is now $MERGE_ACCOUNT's latest, so it becomes reviewed-since."
 [ "$inline" -eq 0 ]  || fail "$inline inline comment(s) posted or edited since $SINCE -- read them before merging" \
   "$NEW_ACTIVITY_READ" "$NEW_ACTIVITY_FINDING" "$NEW_ACTIVITY_RECORD"
 [ "$issue" -eq 0 ]   || fail "$issue issue comment(s) posted or edited since $SINCE -- read them before merging" \

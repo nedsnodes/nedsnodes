@@ -36,7 +36,6 @@ B = "b" * 40
 C = "c" * 40
 MOVED = "d" * 40
 QUEUED = "2026-11-25T10:00:00Z"
-REVIEWED = "2026-11-25T10:20:00Z"
 
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -74,9 +73,6 @@ elif argv[0] == "api" and "/compare/main..." in argv[1]:
         sys.stderr.write("HTTP 404: no common ancestor\n"); sys.exit(1)
     else:
         print(state["merge_bases"][head])
-elif argv[0] == "api":
-    number = argv[1].split("/")[-2]
-    print(json.dumps([state.get("reviews", {}).get(number, [])]))
 else:
     sys.stderr.write(f"fake gh has no route for {argv}\n"); sys.exit(1)
 '''
@@ -84,10 +80,10 @@ else:
 FAKE_MERGE_PROGRAM = r'''import json, os, sys
 state_file = os.environ["FAKE_STATE"]
 state = json.load(open(state_file))
-number, head, since = sys.argv[1:4]
+number, head = sys.argv[1:3]
 outputs = sys.argv[sys.argv.index("--merge-lane-worktrees-and-outputs-directory") + 1]
 with open(state_file + ".merge-calls", "a") as log:
-    log.write(json.dumps([number, head, since]) + "\n")
+    log.write(json.dumps(sys.argv[1:sys.argv.index("--merge-lane-worktrees-and-outputs-directory")]) + "\n")
 outcome = state["merge_outcomes"].get(number, {"exit": 0, "merged": True})
 for line in outcome.get("queue_append", []):
     with open(os.environ["FAKE_QUEUE"], "a") as queue:
@@ -125,12 +121,8 @@ def pr(head, base="main", state="OPEN"):
     return {"state": state, "headRefOid": head, "baseRefName": base, "mergeCommit": None}
 
 
-def merge_account_review(head, at):
-    return {"user": {"login": "ned-review-merge"}, "commit_id": head, "submitted_at": at}
-
-
 class Case:
-    def __init__(self, scratch, name, queue_lines, prs, merge_outcomes=None, reviews=None,
+    def __init__(self, scratch, name, queue_lines, prs, merge_outcomes=None,
                  branches=None, gh_fails=None, gh_garbles=None, gh_queue_appends=None,
                  high_priority=(), prose_only_heads=None, merge_bases=None):
         self.directory = scratch / name
@@ -142,7 +134,7 @@ class Case:
         self.outputs.mkdir()
         self.state = self.directory / "state.json"
         self.state.write_text(json.dumps({
-            "prs": prs, "merge_outcomes": merge_outcomes or {}, "reviews": reviews or {},
+            "prs": prs, "merge_outcomes": merge_outcomes or {},
             "branches": branches or {}, "gh_fails": gh_fails or [],
             "gh_garbles": gh_garbles or [], "gh_queue_appends": gh_queue_appends or {},
             "high_priority": list(high_priority),
@@ -214,9 +206,7 @@ def approved(number, head, author="author-seat", hold=""):
 def merging_cases(scratch):
     case = Case(scratch, "merges-in-order",
                 [approved(10, A), approved(11, B, hold="HOLD-user-approval "), approved(12, C)],
-                {"10": pr(A), "11": pr(B), "12": pr(C)},
-                reviews={"10": [merge_account_review(A, REVIEWED),
-                                merge_account_review(MOVED, "2026-11-25T11:00:00Z")]})
+                {"10": pr(A), "11": pr(B), "12": pr(C)})
     exit_code, output = case.run("merge-batch-run-in-queue-order")
     calls = case.merge_calls()
     check("a merge batch merges the waiting lines in order, passes over a held one, and appends "
@@ -226,9 +216,8 @@ def merging_cases(scratch):
           and f"MERGED 12 {'12'.rjust(40, 'e')}\n" in case.queue_text()
           and "MERGED 11" not in case.queue_text() and "DONE: nothing left to merge" in output,
           f"{calls}\n{case.queue_text()}\n{output}")
-    check("reviewed-since is the merge account's latest review of the queued nn-head-commit, "
-          "not the queued time, and the queued time when there is no such review",
-          calls[:1] == [["10", A, REVIEWED]] and calls[1:] == [["12", C, QUEUED]], calls)
+    check("the merge program is given the pull request and its queued nn-head-commit, and no time",
+          calls == [["10", A], ["12", C]], calls)
     notices = case.notices()
     check("each merge writes a MERGED notice naming the author, with the follow-up request",
           notices.get(f"merged-10-{'10'.rjust(40, 'e')[:12]}.txt", "").startswith(
@@ -386,7 +375,7 @@ def merging_cases(scratch):
     check("a new approved line a lane appends while the old line is checked is not put behind a "
           "HELD line, and is read again at once and merged",
           exit_code == 0 and "HELD 10" not in case.queue_text()
-          and case.merge_calls() == [["10", MOVED, QUEUED]] and case.notices().get("held-10.txt") is None,
+          and case.merge_calls() == [["10", MOVED]] and case.notices().get("held-10.txt") is None,
           f"{case.queue_text()}\n{case.merge_calls()}\n{output}")
 
     case = Case(scratch, "stacked-before-a-line-appended-meanwhile",
