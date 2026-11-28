@@ -401,11 +401,15 @@ def design_text_with_generated_diagrams(design_text, transition_table=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true",
-                        help="write nothing; exit 1 when any view's block differs")
+                        help="write nothing; exit 1 for differing views or 2 if the design cannot be read")
     parser.add_argument("--design-file", type=pathlib.Path, default=DESIGN_PATH)
     arguments = parser.parse_args(argv)
 
-    current = arguments.design_file.read_text()
+    try:
+        current = arguments.design_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        print(f"could not read {arguments.design_file}: {error}", file=sys.stderr)
+        return 2
     generated = design_text_with_generated_diagrams(current)
     if arguments.check:
         if generated == current:

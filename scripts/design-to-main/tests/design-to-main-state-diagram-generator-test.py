@@ -91,6 +91,17 @@ class TheCheckHasTeeth(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.directory, ignore_errors=True)
 
+    def test_unreadable_design_is_an_incomplete_check(self):
+        for bad_path in (self.copy.parent / "missing.md", self.copy):
+            with self.subTest(path=bad_path):
+                if bad_path == self.copy:
+                    bad_path.write_bytes(b"\xff")
+                result = run_generator("--check", "--design-file", str(bad_path))
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(str(bad_path), result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(result.stdout, "")
+
     def test_check_fails_on_any_one_view_with_one_edge_changed_and_writes_nothing(self):
         text = self.copy.read_text()
         spans = generator.section_3_3_view_block_spans(text)
