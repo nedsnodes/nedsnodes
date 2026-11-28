@@ -710,7 +710,7 @@ def closing_lines(pages, name, document_text, units, chosen, parser, numbers, ne
     pages = dict(pages)
     without_page = [number for number in numbers if number not in pages]
     pages.update(dict.fromkeys(without_page, NO_PAGE_LINK))
-    points = answer_hook.approval_walk_waiting_item_number_to_its_chosen_heading_point_text(document_text.split("\n"), chosen, parser)
+    points = answer_hook.approval_walk_waiting_item_chosen_heading_point_text_read_for_each_item_number(document_text.split("\n"), chosen, parser)
     no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
         document_text, parser, chosen, numbers, units)
     walk = answer_hook.WalkState(name, None, numbers, new_total, {}, None, pages=pages, points=points,
@@ -795,7 +795,7 @@ def output_for(payload, environment, model=model_judgement):
         numbers, total = walk_finder.parse_items(value)
         document_text = document.read_text(encoding="utf-8") if document.is_file() else ""
         units = walk_finder.item_unit_spans(document_text, parser)
-        total, chosen = walk_finder.approval_walk_waiting_item_number_to_its_chosen_heading(document, value, numbers, total,
+        total, chosen = walk_finder.approval_walk_waiting_item_heading_span_choose_for_each_item_number(document, value, numbers, total,
                                                                                   parser, all_units=units)
     except walk_finder.UnusableRange:
         return None
