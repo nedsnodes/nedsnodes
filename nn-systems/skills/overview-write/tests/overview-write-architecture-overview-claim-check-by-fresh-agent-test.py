@@ -258,14 +258,18 @@ def run_unit_cases():
     check("a claim takes its text from the assertion it was given, and a restatement differing only in whitespace "
           "is accepted", claims[0].assertion == "the program exists", claims)
     check("a restatement other than the assertion given its number makes the report malformed",
-          claim_check.claims_from_fresh_agent_report(GOOD_REPORT, ["The overview's own sentence."])
-          == (None, "malformed: VERDICT 1 restates an assertion other than assertion 1 given"))
+          claim_check.claims_from_fresh_agent_report(GOOD_REPORT, ["The overview's own sentence."])[1]
+          .startswith("malformed: VERDICT 1 restates an assertion other than assertion 1 given: it restates "))
     check("swapped VERDICT blocks, numbered in order, make the report malformed instead of binding a must-fix verdict "
           "to the other claim",
           claim_check.claims_from_fresh_agent_report(
               "VERDICT 1 supported: B\nVERDICT 2 contradicted must-fix: A\n"
               "COUNTS supported=1 contradicted=1 unsupported=0\n", ["A", "B"])
-          == (None, "malformed: VERDICT 1 restates an assertion other than assertion 1 given"))
+          == (None, "malformed: VERDICT 1 restates an assertion other than assertion 1 given: it restates 'B', "
+                    "and assertion 1 is 'A'"))
+    check("a recheck that restates its one assertion with a slip, such as a dropped full stop, is not malformed",
+          result(must_fix_report.replace(": b\n", ": b.\n"), {2: recheck("contradicted must-fix", "b")})
+          == "must-fix claims remain: 1 must-fix, 0 fix-later, 0 nit")
     check("a ``` line inside a ~~~ fence does not close it",
           [text for _, text in claim_check.overview_claims_split_from_text(
               "~~~\nA --> B\n```\nB --> C\n~~~\nProse. More.\n")] == ["A --> B", "```", "B --> C", "Prose.", "More."])
@@ -393,6 +397,15 @@ def run_claim_split_and_kept_verdict_unit_cases():
           claim_check.repository_paths_named_in_text(
               "./scripts/one.py:3 `x`; tool.py:1; same.py:2; see nn-systems/example/tool.py. gone.py", blobs)
           == ["nn-systems/example/tool.py", "scripts/one.py"])
+    blobs_with_nesting = {**blobs, "nn-systems/handoff/handoff-supervisor.py": "6" * 40,
+                          "scripts/checkout-freshness-catch-up.py": "7" * 40, "scripts/launch-claude-ubuntu": "8" * 40}
+    check("a text names a blob inside a longer path, by a partial path, after a variable, or by a bare name with no "
+          "extension that only one path has",
+          claim_check.repository_paths_named_in_text(
+              "python3 $HOME/Projects/nedsnodes/nn-systems/handoff/handoff-supervisor.py \\; handoff/handoff-supervisor.py:12; "
+              "SCRIPT_DIRECTORY/checkout-freshness-catch-up.py; launch-claude-ubuntu", blobs_with_nesting)
+          == ["nn-systems/handoff/handoff-supervisor.py", "scripts/checkout-freshness-catch-up.py",
+              "scripts/launch-claude-ubuntu"])
     check("a claim rests on the paths its backtick spans and its evidence name, never on the overview itself",
           claim_check.overview_claim_cited_file_blob_hashes_by_path("`scripts/one.py` runs, unlike tool.py", f"{OVERVIEW}:3 and a/same.py:1", blobs, OVERVIEW)
           == {"a/same.py": "3" * 40, "scripts/one.py": "2" * 40})
@@ -418,6 +431,14 @@ def run_claim_split_and_kept_verdict_unit_cases():
         older.write_text(f"result: x\n\nbody\n\n{heading}\n\n" + json.dumps({**record, "key": "older"}) + "\n")
         newer = directory / f"{'0' * 40}-2026-11-02T00-00-00-000000Z.md"
         newer.write_text(f"result: x\n\nbody\n\n{heading}\n\n" + json.dumps({**record, "key": "newer"}) + "\n")
+        line_separator_record = {**record, "key": "newest-with-line-separator", "evidence": "a\u2028b"}
+        newest_with_line_separator = directory / f"{'2' * 40}-2026-11-04T00-00-00-000000Z.md"
+        newest_with_line_separator.write_text(f"result: x\n\nbody\n\n{heading}\n\n"
+                                              + json.dumps(line_separator_record, ensure_ascii=False) + "\n", encoding="utf-8")
+        check("a claim record whose evidence holds a U+2028, which json.dumps leaves unescaped, is read whole",
+              claim_check.claim_records_of_newest_report_holding_them(directory)
+              == (newest_with_line_separator, {"newest-with-line-separator": line_separator_record}))
+        newest_with_line_separator.unlink()
         check("the newest report is found by its time, whatever overview blob its name starts with",
               claim_check.claim_records_of_newest_report_holding_them(directory) == (newer, {"newer": {**record, "key": "newer"}}))
         newest_without_records = directory / f"{'1' * 40}-2026-11-03T00-00-00-000000Z.md"

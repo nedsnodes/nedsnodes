@@ -204,7 +204,7 @@ BACKTICK_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 # A sentence ends at . ! or ? followed by a space and a capital, a backtick, an asterisk or an opening quote or
 # bracket; a full stop inside a path or a backtick span ends nothing.
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z`*\"'(\[])")
-REPOSITORY_PATH_CANDIDATE = re.compile(r"[\w.-]*[./][\w./-]*")
+REPOSITORY_PATH_CANDIDATE = re.compile(r"[\w./-]+")
 
 PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_PATH_TEMPLATE = (
     "nn-systems/{system}/docs/{system}-architecture-overview-proposed-improvements-or-changes-entries.md")
@@ -365,13 +365,14 @@ def find_newest_architecture_overview_claim_check_report_path_and_result_for_ove
     return newest, "no result line in the report's header"
 
 
-def claims_from_fresh_agent_report(report, assertions):
+def claims_from_fresh_agent_report(report, assertions, restatements_compared=True):
     """Return (the report's claims, None), or (None, a result saying why the report is malformed).
 
     assertions are the texts the fresh-agent was given, numbered from 1; each claim takes its text from them, not
-    from the fresh-agent's restatement, so that its key matches the overview's sentence. A restatement that differs
-    from the assertion given its number, whitespace aside, makes the report malformed, because the verdict could
-    then belong to another assertion."""
+    from the fresh-agent's restatement, so that its key matches the overview's sentence. With restatements_compared,
+    a restatement that differs from the assertion given its number, whitespace aside, makes the report malformed,
+    because the verdict could then belong to another assertion; a one-assertion recheck has no other assertion, so
+    it is not compared."""
     if not assertions and not report:
         return [], None
     matches = list(VERDICT_LINE.finditer(report))
@@ -389,8 +390,10 @@ def claims_from_fresh_agent_report(report, assertions):
     for index, match in enumerate(matches):
         number, verdict, rank = int(match.group(1)), match.group(2), match.group(3)
         assertion = assertions[number - 1]
-        if normalized_claim(match.group(4)) != normalized_claim(assertion):
-            return None, f"malformed: VERDICT {number} restates an assertion other than assertion {number} given"
+        if restatements_compared and normalized_claim(match.group(4)) != normalized_claim(assertion):
+            return None, (f"malformed: VERDICT {number} restates an assertion other than assertion {number} given: "
+                          f"it restates {normalized_claim(match.group(4))!r}, and assertion {number} is "
+                          f"{normalized_claim(assertion)!r}")
         if verdict == "supported" and rank is not None:
             return None, f"malformed: VERDICT {number} is supported but has the rank {rank}"
         if verdict != "supported" and rank not in RANKS:
@@ -434,7 +437,8 @@ def claims_ranked_after_recheck(claims, recheck_reports):
         if claim.rank != RANK_MUST_FIX:
             ranked.append(claim)
             continue
-        recheck, malformed = claims_from_fresh_agent_report(recheck_reports[claim.number], [claim.assertion])
+        recheck, malformed = claims_from_fresh_agent_report(recheck_reports[claim.number], [claim.assertion],
+                                                            restatements_compared=False)
         if malformed:
             return None, f"malformed: the recheck of VERDICT {claim.number} is {malformed}"
         ranked.append(claim._replace(rank=RANK_MUST_FIX if recheck[0].rank == RANK_MUST_FIX else RANK_FIX_LATER))
@@ -498,18 +502,23 @@ def git_blob_by_path_at_commit(repository, commit):
 
 
 def repository_paths_named_in_text(text, blobs):
-    """Return the paths of blobs that the text names: a path from the top of the repository, or a bare file name that
-    one path in blobs ends with."""
-    paths_by_name = collections.defaultdict(list)
+    """Return the paths of blobs that the text names. A name counts as the longest path in blobs that it ends with
+    after a /, as in $HOME/Projects/nedsnodes/scripts/x.py; failing that, as the one path in blobs that ends with
+    the name or a part of it after a /, as in handoff/x.py, SCRIPT_DIRECTORY/x.py or a bare launch-claude-ubuntu."""
+    paths_by_ending = collections.defaultdict(list)
     for path in blobs:
-        paths_by_name[path.rsplit("/", 1)[-1]].append(path)
+        parts = path.split("/")
+        for start in range(len(parts)):
+            paths_by_ending["/".join(parts[start:])].append(path)
     named = set()
     for candidate in REPOSITORY_PATH_CANDIDATE.findall(text):
         candidate = candidate.removeprefix("./").rstrip(".")
-        if candidate in blobs:
-            named.add(candidate)
-        elif "/" not in candidate and len(paths_by_name.get(candidate, ())) == 1:
-            named.add(paths_by_name[candidate][0])
+        parts = candidate.split("/")
+        endings = ["/".join(parts[start:]) for start in range(len(parts))]
+        exact = next((ending for ending in endings if ending in blobs), None)
+        unique = next((paths_by_ending[ending][0] for ending in endings if len(paths_by_ending.get(ending, ())) == 1), None)
+        if exact or unique:
+            named.add(exact or unique)
     return sorted(named)
 
 
@@ -531,7 +540,8 @@ def claim_records_of_newest_report_holding_them(destination_directory):
         heading = f"\n{CLAIM_RECORDS_SECTION_HEADING}\n"
         if heading not in text:
             continue
-        records = [json.loads(line) for line in text.rsplit(heading, 1)[1].splitlines() if line.strip()]
+        # Split on the "\n" the writer writes: splitlines() also breaks at a U+2028 that json.dumps leaves in evidence.
+        records = [json.loads(line) for line in text.rsplit(heading, 1)[1].split("\n") if line.strip()]
         return report, {record["key"]: record for record in records}
     return None, {}
 
