@@ -134,10 +134,12 @@ sys.stderr.write(route.get("stderr", ""))
 sys.exit(route.get("exit", 0))
 '''
 
+EVERY_SUITE_RUNS_ONLY_WHEN = "--every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since"
 FAKE_RUNNER = r'''#!/usr/bin/env python3
 import json, os, sys
 # The merge program reads this line to tell that the runner compares with every commit given:
 # def suites_selected_since_every_commit(
+# and that it accepts "--every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since"
 directory = os.environ["MERGE_LANE_MERGE_TEST_DIRECTORY"]
 with open(os.path.join(directory, "runner-calls.log"), "a") as log:
     log.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
@@ -721,6 +723,46 @@ def suite_selection_main_commit_cases(scratch):
               f"one given, {merged[:12]}" in output,
           f"exit {exit_code}\n{output}\n{calls}")
 
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-at-parent-and-runner-takes-the-merge-commits-first-parent", "PARENT\n",
+        head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
+    check("the after-merge test run gives the merge commit's first parent to "
+          f"{EVERY_SUITE_RUNS_ONLY_WHEN}, so only the merged pull request's own change to the "
+          "test runner, a guard hook or the settings runs every suite, and says so",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][4:6] == [EVERY_SUITE_RUNS_ONLY_WHEN, f"{merge_commit}^1"]
+          and f"the after-merge test run of the merge commit {merge_commit[:12]} runs every "
+              f"nn-test-suite only when this pull request's own change, the merge commit against "
+              f"its first parent, adds, changes, renames or deletes "
+              f"scripts/run-all-test-suites.py, a file under .claude/guard-hooks/ or "
+              f".claude/settings.json; otherwise it runs only the suites the test runner selects "
+              f"by their recorded inputs against {parent[:12]} and "
+              f"{merged_commit(scratch, 'no-test-failing-at-parent-and-runner-takes-the-merge-commits-first-parent')[:12]}, "
+              f"a suite with no recording included, even where another pull request merged "
+              f"before this one changed one of those files. Nothing to do: " in output,
+          f"exit {exit_code}\n{output}\n{calls}")
+
+    name = "no-test-failing-at-parent-and-runner-predates-the-every-suite-option"
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        name, "PARENT\n",
+        head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))],
+        origin_files={"scripts/run-all-test-suites.py": FAKE_RUNNER.replace(
+            f'# and that it accepts "{EVERY_SUITE_RUNS_ONLY_WHEN}"\n', "")})
+    check(f"when the test runner at the merge commit predates {EVERY_SUITE_RUNS_ONLY_WHEN}, "
+          "the after-merge test run leaves the option out, which that runner would refuse, and "
+          "says that such a change since the first commit runs every suite",
+          exit_code == 0 and len(calls) == 1
+          and EVERY_SUITE_RUNS_ONLY_WHEN not in calls[0]["argv"]
+          and calls[0]["argv"][:4] == ["--only-suites-whose-recorded-inputs-changed-since", parent,
+                                       "--only-suites-whose-recorded-inputs-changed-since",
+                                       merged_commit(scratch, name)]
+          and f"not giving {EVERY_SUITE_RUNS_ONLY_WHEN}: the test runner at the merge commit "
+              f"{merge_commit[:12]} predates it, so a change since {parent[:12]} to "
+              f"scripts/run-all-test-suites.py, a file under .claude/guard-hooks/ or "
+              f".claude/settings.json, another pull request's included, runs every "
+              f"nn-test-suite. Nothing to do: " in output,
+          f"exit {exit_code}\n{output}\n{calls}")
+
     # The merge commit's runner exists but cannot be read, as when its permissions deny reading.
     real_read_text = Path.read_text
 
@@ -1161,7 +1203,8 @@ def suite_selection_main_commit_cases(scratch):
           "the recovery command with the baseline the run used, not a check of the record again",
           exit_code == 3 and calls
           and f"run: python3 scripts/run-all-test-suites.py "
-              f"--only-suites-whose-recorded-inputs-changed-since {calls[0]['argv'][1]}\n" in output
+              f"--only-suites-whose-recorded-inputs-changed-since {calls[0]['argv'][1]} "
+              f"{EVERY_SUITE_RUNS_ONLY_WHEN} {merge_commit}^1\n" in output
           and "if git merge-base --is-ancestor" not in output,
           f"exit {exit_code}\n{output}")
 
@@ -2774,6 +2817,7 @@ def main():
               f"readable head test run record under" in output
               and len(calls) == 1 and calls[0]["cwd"] == str(merge_commit_worktree)
               and calls[0]["argv"] == ["--only-suites-whose-recorded-inputs-changed-since", HEAD,
+                                       EVERY_SUITE_RUNS_ONLY_WHEN, f"{merge_commit}^1",
                                        "--log-dir", str(log_dir)], json.dumps(calls))
         check("a passing after-merge test run prints its SUMMARY and log directory, removes "
               "its worktree and exits 0",
@@ -3382,15 +3426,19 @@ def main():
         exit_code_recorded, output_recorded, _, _, _ = run_case(
             scratch, "fetch-fails-after-merge-with-a-record", [(GATE_PASSED, 0)], routes,
             before_the_program_runs=record_written)
+        # The merge commit the recovery command's ancestor check names.
+        merge_commit_text = output_recorded.partition(f"--is-ancestor {recorded_commit} ")[2].partition(";")[0]
         check("a fetch that fails after the merge, with a recorded commit: the recovery command "
               "compares with the recorded commit when it is an ancestor of the merge commit, as "
               "the after-merge test run would, and with the head commit otherwise",
               exit_code_recorded == 3
               and f"run: if git merge-base --is-ancestor {recorded_commit} " in output_recorded
               and f"; then python3 scripts/run-all-test-suites.py "
-                  f"--only-suites-whose-recorded-inputs-changed-since {recorded_commit}; else "
+                  f"--only-suites-whose-recorded-inputs-changed-since {recorded_commit} "
+                  f"{EVERY_SUITE_RUNS_ONLY_WHEN} {merge_commit_text}^1; else "
                   f"python3 scripts/run-all-test-suites.py "
-                  f"--only-suites-whose-recorded-inputs-changed-since {HEAD}; fi\n"
+                  f"--only-suites-whose-recorded-inputs-changed-since {HEAD} "
+                  f"{EVERY_SUITE_RUNS_ONLY_WHEN} {merge_commit_text}^1; fi\n"
                   in output_recorded,
               f"exit {exit_code_recorded}\n{output_recorded}")
 
@@ -3399,6 +3447,8 @@ def main():
             scratch, name, [(GATE_PASSED, 0)], routes, before_the_program_runs=record_written,
             head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
         merged = merged_commit(scratch, name)
+        # The merge commit the recovery command's ancestor check names.
+        merge_commit_text = output_both.partition(f"--is-ancestor {recorded_commit} ")[2].partition(";")[0]
         check("a fetch that fails after the merge, with a recorded commit and a passing head "
               "test run: the recovery command compares with the same commits the after-merge "
               "test run would, the head test run's commit second in either case",
@@ -3406,10 +3456,12 @@ def main():
               and f"run: if git merge-base --is-ancestor {recorded_commit} " in output_both
               and f"; then python3 scripts/run-all-test-suites.py "
                   f"--only-suites-whose-recorded-inputs-changed-since {recorded_commit} "
-                  f"--only-suites-whose-recorded-inputs-changed-since {merged}; else "
+                  f"--only-suites-whose-recorded-inputs-changed-since {merged} "
+                  f"{EVERY_SUITE_RUNS_ONLY_WHEN} {merge_commit_text}^1; else "
                   f"python3 scripts/run-all-test-suites.py "
                   f"--only-suites-whose-recorded-inputs-changed-since {HEAD} "
-                  f"--only-suites-whose-recorded-inputs-changed-since {merged}; fi\n"
+                  f"--only-suites-whose-recorded-inputs-changed-since {merged} "
+                  f"{EVERY_SUITE_RUNS_ONLY_WHEN} {merge_commit_text}^1; fi\n"
                   in output_both,
               f"exit {exit_code_both}\n{output_both}")
         check("a fetch that fails after the merge exits 3 without a test run",

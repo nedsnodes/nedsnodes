@@ -824,6 +824,8 @@ check("the rest of the environment is passed through, not rebuilt",
 # --only-suites-whose-recorded-inputs-changed-since, so each selective run is
 # refused with exit 2 and nothing runs.
 CHANGED_SINCE = "--only-suites-whose-recorded-inputs-changed-since"
+EVERY_SUITE_JUDGED_SINCE = (
+    "--every-suite-runs-only-when-a-file-that-runs-every-suite-differs-since")
 RECORDING_SUITES = {
     "reads-a-file-test.py": "pathlib.Path('inputs/read-directly.txt').read_text()\n",
     "child-reads-a-file-test.py": (
@@ -1097,7 +1099,8 @@ with tempfile.TemporaryDirectory() as scratch:
     real_suites_selected_since = module.suites_selected_since
     compared = []
 
-    def suites_selected_since_failing_after_the_first(top, suites, recordings, commit, *rest):
+    def suites_selected_since_failing_after_the_first(top, suites, recordings, commit, *rest,
+                                                      **keywords):
         compared.append(commit)
         if len(compared) > 1:
             raise module.CouldNotRun("injected: git ls-tree of the second commit failed")
@@ -1123,6 +1126,85 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a commit git cannot resolve is refused, exit 2, before anything runs",
           result.returncode == 2 and CHANGED_SINCE in result.stderr, (result.returncode,
                                                                       result.stderr))
+
+    # The after-merge test run gives the merge commit's first parent to EVERY_SUITE_JUDGED_SINCE,
+    # so a test runner, guard-hook or settings change another pull request merged earlier no
+    # longer runs every suite, and the merged pull request's own change to one still does.
+    def commit_git_change(*git_arguments):
+        git(repo, *git_arguments)
+        git(repo, "commit", "-q", "-m", " ".join(git_arguments))
+        return git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    (root / "ran.txt").unlink(missing_ok=True)
+    result = run(root, CHANGED_SINCE, base, EVERY_SUITE_JUDGED_SINCE, "no-such-commit")
+    check(f"a {EVERY_SUITE_JUDGED_SINCE} commit git cannot resolve is refused, exit 2, naming "
+          f"that option",
+          result.returncode == 2 and ran(root) == []
+          and f"Pass {EVERY_SUITE_JUDGED_SINCE} a commit" in result.stderr,
+          (result.returncode, result.stderr))
+
+    main_passed = base
+    other_pull_request = commit_files(repo, {
+        "scripts/run-all-test-suites.py": "# another pull request's runner\n" + runner_copy_lists,
+        ".claude/guard-hooks/a-guard.py": "# another pull request's guard\n",
+        ".claude/settings.json": "{\"another\": \"pull request\"}\n"},
+        "another pull request changes the runner, a guard hook and the settings")
+    merged = commit_files(repo, {"inputs/read-directly.txt": "the merged change\n"},
+                          "the merged pull request changes a file one suite reads")
+    result = selective_run(root, main_passed)
+    check(f"without {EVERY_SUITE_JUDGED_SINCE}, a test runner, guard-hook or settings change "
+          f"since the first commit runs every suite",
+          ran(root) == sorted(RECORDING_SUITES), (ran(root), result.stdout, result.stderr))
+    for since in ((main_passed,), (main_passed, other_pull_request)):
+        (root / "ran.txt").unlink(missing_ok=True)
+        result = run(root, *[argument for commit in since for argument in (CHANGED_SINCE, commit)],
+                     EVERY_SUITE_JUDGED_SINCE, other_pull_request)
+        out = lines(result.stdout)
+        check(f"given {len(since)} commit(s), a test runner, guard-hook and settings change that "
+              f"differs since the first commit but not since the {EVERY_SUITE_JUDGED_SINCE} "
+              f"commit runs only the suites whose recorded inputs changed",
+              result.returncode == 0 and ran(root) == ["reads-a-file-test.py"]
+              and any(line.startswith("NOT SELECTED reads-nothing-else-test.py: ")
+                      for line in out)
+              and not any("every suite runs under it" in line for line in out),
+              (ran(root), result.stdout, result.stderr))
+    (root / "ran.txt").unlink(missing_ok=True)
+    result = run(root, CHANGED_SINCE, merged, EVERY_SUITE_JUDGED_SINCE, merged)
+    check(f"with nothing differing since the selection's commit or the {EVERY_SUITE_JUDGED_SINCE} "
+          f"commit, no suite runs",
+          result.returncode == 0 and ran(root) == [], (ran(root), result.stdout, result.stderr))
+
+    commit_git_change("mv", ".claude/guard-hooks/another-guard.py", "moved-out-of-the-hooks.py")
+    own_changes = {
+        "adds": lambda: commit_files(repo, {".claude/guard-hooks/a-new-guard.py": "# new\n"},
+                                     "add a guard hook"),
+        "changes": lambda: commit_files(repo, {".claude/settings.json": "{}\n"},
+                                        "change the settings"),
+        "changes, as the test runner,": lambda: commit_files(
+            repo, {"scripts/run-all-test-suites.py": "# the merged runner\n" + runner_copy_lists},
+            "change the test runner"),
+        "renames into .claude/guard-hooks/": lambda: commit_git_change(
+            "mv", "moved-out-of-the-hooks.py", ".claude/guard-hooks/moved-back.py"),
+        "renames out of .claude/guard-hooks/": lambda: commit_git_change(
+            "mv", ".claude/guard-hooks/moved-back.py", "moved-out-again.py"),
+        "deletes": lambda: commit_git_change("rm", "-q", ".claude/guard-hooks/a-guard.py"),
+    }
+    for how, change in own_changes.items():
+        (root / "ran.txt").unlink(missing_ok=True)
+        first_parent = git(repo, "rev-parse", "HEAD").stdout.strip()
+        merged = change()
+        result = run(root, CHANGED_SINCE, first_parent, CHANGED_SINCE, merged,
+                     EVERY_SUITE_JUDGED_SINCE, first_parent)
+        out = lines(result.stdout)
+        check(f"when the merged pull request's own change, since the {EVERY_SUITE_JUDGED_SINCE} "
+              f"commit, {how} a file that runs every suite, every suite runs, though the "
+              f"second commit already holds the change",
+              result.returncode == 0 and ran(root) == sorted(RECORDING_SUITES)
+              and any(line.startswith("SELECTED reads-nothing-else-test.py: ")
+                      and f"differs since {first_parent[:12]}, the commit given to "
+                          f"{EVERY_SUITE_JUDGED_SINCE}, and every suite runs under it" in line
+                      for line in out),
+              (how, ran(root), result.stdout, result.stderr))
 
 # --- Selection never trusts a recording it cannot show is complete and of ----
 # --- these files -------------------------------------------------------------
