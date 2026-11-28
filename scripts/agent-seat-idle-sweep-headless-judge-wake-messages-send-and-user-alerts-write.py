@@ -46,7 +46,10 @@ Each invocation, under a lock that keeps two from overlapping:
    `python3 scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py
    <message_id>` with the message's own id filled in; any wait ends once the agent-seat has run
    that command with the id of a message sent on the wait. A message starts a wait, unless a wait is
-   already open: 15 minutes later, if the agent-seat is idle, code sends the escalation, which
+   already open: 15 minutes later, if the agent-seat is idle, code sends the escalation, but on a
+   wait no rule 2 message was sent on, whose nudge reached the agent-seat, only once the user has
+   typed in the agent-session since that nudge, as `typed_by_user` or `queued_by_user` in
+   `scripts/search-user-messages-in-transcripts.py` accepts a transcript record. The escalation
    quotes the message that opened the wait and each rule 2 message whose send on the open wait
    failed, and names the sentences on the wait that no message was sent for and those of a rule 2
    message sent on the wait that the re-check did not find backed, and says so when the
@@ -84,8 +87,9 @@ asked for, as step 5 says, marks a message sent on the wait irrelevant, as step 
 usage limit (rule 1), starts a
 new agent-session, or spends tokens after the step that follows the escalation. So an agent-seat that answers a
 rule 3 or rule 5 message with a tool call and goes idle again is nudged again only about something
-new, or once the user has typed, and is not escalated; a command that hangs after the one
-question about it reaches nobody until the agent-seat looks. One that answers a rule 2 message
+new, or once the user has typed, and is not escalated; one that does not answer it is escalated
+only after the user has typed; a command that hangs after the one question about it reaches
+nobody until the agent-seat or the user looks. One that answers a rule 2 message
 with a tool call and a fresh promise is escalated, unless the re-check finds every sentence
 backed, because a tool call that ended a promise wait
 would let an agent-seat that makes a fresh promise at each rule 2 message be nudged again forever
@@ -1368,10 +1372,11 @@ class Sweep:
             self.end_wait(seat, "it spent tokens after the step that follows the escalation")
             wait = None
         events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
-        due_wake = self.pull_request_events_task_due_a_wake(seat, verdict) if wait and TELL_USER in wait else None
+        due_wake = (self.pull_request_events_task_due_a_wake(seat, verdict) if wait and (
+            TELL_USER in wait or self.escalation_withheld(seat, verdict, wait)) else None)
         if due_wake and not self.headless_usage_limit_pause_holds():
-            # The user already has that wait's alert, so it has no step left to hold the wake back.
-            # With no wait open, nudge sends the wake.
+            # The wait has no step left to hold the wake back, or none it will take before the
+            # user types. With no wait open, nudge sends the wake.
             self.end_wait(seat, "a new pull-request events task opened after the user was told")
             self.wake_for_pull_request_events_task(seat, verdict, stretch, due_wake)
             return
@@ -1564,7 +1569,8 @@ class Sweep:
 
     def due_step(self, seat, verdict, wait):
         """The step of an open wait that is due: the escalation 15 minutes after the nudge, unless
-        the re-check ends the wait, then the step that follows it 15 minutes later, which sends
+        the re-check ends the wait or escalation_withheld holds it, then the step that follows it
+        15 minutes later, which sends
         nothing and writes no user-alert; after that, none. The escalation is a send, so a headless
         usage-limit pause holds it. Returns WAIT_ENDED_BY_RECHECK when the re-check ended the
         wait, else None.
@@ -1580,6 +1586,8 @@ class Sweep:
         if ESCALATE in wait:
             if seconds_between(wait[ESCALATE], self.now) >= WAIT_STEP_SECONDS:
                 self.record({"event": "wait_step", "agent_seat": seat, "step": TELL_USER})
+            return None
+        if self.escalation_withheld(seat, verdict, wait):
             return None
         if (seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS
                 and not self.headless_usage_limit_pause_holds()):
@@ -1659,7 +1667,8 @@ class Sweep:
 
     def woken_for_pull_request_events_task(self, seat, task):
         """Whether any agent-session of the agent-seat was woken for this task: one wake per task,
-        as the judge reminds once per subject; the wait's escalation follows that wake. A wake
+        as the judge reminds once per subject; the wait's escalation, once the user has typed,
+        follows that wake. A wake
         whose send failed, or that the delivery check did not find, woke no one."""
         not_found = {event["message_id"] for event in self.log.of_seat(seat, "delivery_checked")
                      if not event["found"]}
@@ -1692,6 +1701,20 @@ class Sweep:
                 last_held_at[subject] = max(moment, last_held_at.get(subject, moment))
         return self.log.reminded_subjects(seat, verdict[fields.SESSION_ID],
                                           verdict.get(fields.LAST_USER_TYPED_AT), last_held_at)
+
+    def escalation_withheld(self, seat, verdict, wait):
+        """Whether the wait's escalation waits for the user to type in the agent-session: a wait no
+        rule 2 message was sent on, not yet escalated, whose nudge reached the agent-seat, while
+        the user has not typed since that nudge. A nudge whose send failed, or that the delivery
+        check did not find, is not withheld, since the escalation is then its only delivery."""
+        if PROMISE in wait or ESCALATE in wait:
+            return False
+        not_found = {event["message_id"] for event in self.log.of_seat(seat, "delivery_checked")
+                     if not event["found"]}
+        if not any(message_id not in not_found for message_id in wait[MESSAGE_IDS]):
+            return False
+        typed = verdict.get(fields.LAST_USER_TYPED_AT)
+        return not typed or parse_time(typed) <= parse_time(wait[NUDGE])
 
     def open_tasks_reminder_sent(self, seat, verdict, sent, task_ids):
         # The listing, not the judge's own words, says which tasks the message covers, and a task
