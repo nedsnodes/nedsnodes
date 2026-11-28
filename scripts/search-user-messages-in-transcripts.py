@@ -20,7 +20,6 @@ written before it did so has no such line and is read as his. Turns written
 before Claude Code recorded an origin are read by their text alone."""
 
 import argparse
-import glob
 import importlib.util
 import json
 import os
@@ -245,12 +244,17 @@ def read_turns(path):
 
 
 def transcripts(projects_dir, seats, since_hours):
-    paths = sorted(glob.glob(os.path.join(projects_dir, "*", "*.jsonl")))
-    if seats:
-        paths = [
-            p for p in paths
-            if any(s in os.path.basename(os.path.dirname(p)) for s in seats)
-        ]
+    paths = []
+    with os.scandir(projects_dir) as projects:
+        for project in projects:
+            if project.name.startswith(".") or not project.is_dir():
+                continue
+            if seats and not any(seat in project.name for seat in seats):
+                continue
+            with os.scandir(project.path) as entries:
+                paths.extend(entry.path for entry in entries
+                             if not entry.name.startswith(".") and entry.name.endswith(".jsonl"))
+    paths.sort()
     if since_hours is not None:
         floor = time.time() - since_hours * 3600
         paths = [p for p in paths if os.path.getmtime(p) >= floor]
@@ -294,7 +298,11 @@ def main():
     parser.add_argument("--list-seats", action="store_true")
     args = parser.parse_args()
 
-    paths = transcripts(args.projects_dir, args.seat, args.since_hours)
+    try:
+        paths = transcripts(args.projects_dir, args.seat, args.since_hours)
+    except OSError as error:
+        print(f"Could not list transcripts: {error}", file=sys.stderr)
+        return 2
 
     if args.list_seats:
         seen = {}

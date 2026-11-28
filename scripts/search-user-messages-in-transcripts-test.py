@@ -335,6 +335,23 @@ def search(directory, *arguments):
 
 
 with tempfile.TemporaryDirectory() as directory:
+    missing = str(Path(directory) / "absent-projects")
+    for argument in ("needle", "--list-seats"):
+        run = search(missing, argument)
+        check(f"{argument} reports a missing projects directory",
+              run.returncode == 2 and missing in run.stderr, (run.returncode, run.stderr))
+        run = search(directory, argument)
+        check(f"{argument} accepts an empty projects directory",
+              run.returncode == (0 if argument == "--list-seats" else 1), run.returncode)
+    unreadable = Path(directory) / "unreadable"
+    unreadable.mkdir()
+    unreadable.chmod(0)
+    try:
+        run = search(str(unreadable), "--list-seats")
+        check("an unreadable projects directory reports its path",
+              run.returncode == 2 and str(unreadable) in run.stderr, run.stderr)
+    finally:
+        unreadable.chmod(0o700)
     write_transcript(directory, [typed("the alpha plan"), agent("ok")], name="one.jsonl")
     write_transcript(directory, [typed("alpha then beta"), agent("ok")], name="two.jsonl")
     write_transcript(directory, [typed("nothing here"), agent("ok")], name="three.jsonl")
