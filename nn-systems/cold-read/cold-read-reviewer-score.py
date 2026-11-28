@@ -13,7 +13,7 @@ own, and sets of readers are scored once per run index k from the k-th run of
 each member, reporting the median over the run indices every member has. A
 file with no `-run-<k>` is run 1 of its reader, and two files that give one
 reader the same run index, such as `ann--placement.md` and
-`ann-run-1--placement.md`, are refused with exit 64.
+`ann-run-1--placement.md`, are refused with exit 2.
 
 When the defect list has a `## Sentences with no defect` section, a FALSE
 finding whose quote, whitespace normalised, lies inside one of its sentences
@@ -47,7 +47,7 @@ REVIEWER_RUN_PATTERN = re.compile(r"^(.+)-run-(\d+)$")
 SELF_REPORTED_TOTAL_PATTERN = re.compile(r"^\s*Findings:\s*(\d+)\s*$", re.MULTILINE)
 
 EXIT_SCORED = 0
-EXIT_BAD_INVOCATION = 64
+EXIT_BAD_INVOCATION = 2
 
 
 class PlacementParseError(Exception):
@@ -481,7 +481,8 @@ def print_hand_check(all_findings, summaries, weights, depth):
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog=PROGRAM,
-        description="Score reviewers against a defect list, flat and weighted.")
+        description="Score reviewers against a defect list, flat and weighted.",
+        epilog="Exits 0 when scores are produced and 2 for invalid arguments or placement input.")
     parser.add_argument("--placements", required=True, type=pathlib.Path,
                         help="directory of placement tables, one per reviewer, "
                              "named <reviewer>--placement.md, or "
