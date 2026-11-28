@@ -999,7 +999,8 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     check("answers kept: the file the brief replaced is in a new copy that the brief names",
           list(kept_copies.values()) == [GOOD_ANSWERS] and f"kept unchanged at {next(iter(kept_copies))}" in out
           and "Read that copy, and copy into the new file each answer that still answers a finding below, under that "
-              "finding's number." in " ".join(out.split()), f"{kept_copies}\n{out}")
+              "finding's number. An answer that describes a fix answers its finding only when that fix is in the "
+              "topic-worktree." in " ".join(out.split()), f"{kept_copies}\n{out}")
     partial = "1. Fixed the lookup.\n2. \n"
     write_answers(partial, 60)
     code, out, err = run(root, repository, dated_routes)
