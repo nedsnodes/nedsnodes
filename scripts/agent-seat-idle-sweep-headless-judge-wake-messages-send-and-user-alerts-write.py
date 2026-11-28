@@ -426,10 +426,10 @@ still running".
 # The one definition of a backed sentence, which both rule 2 judges are given.
 SENTENCE_BACKED_RULES = """\
 - An announced action, such as "Next I'm starting the pull request", is backed when a tool call in \
-the same turn, before or after the sentence, or a later one does the action, or a background task \
-it started is still running; when the action is to tell the user something, by a text message in \
-the same turn or a later one that tells it; and when the agent-seat put the action off, by an open \
-task whose prerequisites or blockedBy name what the action waits on.
+the same turn, before or after the sentence, or a later one does the action, or a background \
+command started to do it is still running; when the action is to tell the user something, by a \
+text message in the same turn or a later one that tells it; and when the agent-seat put the action \
+off, by an open task whose prerequisites or blockedBy name what the action waits on.
 - A promise to act after an event, such as "I'll report when PR 927 merges", is backed by a task \
 whose prerequisites or blockedBy name the event, so the idle check raises it.
 - A standing rule, such as "from now on" or "Noted", is backed by the hook or test that enforces \

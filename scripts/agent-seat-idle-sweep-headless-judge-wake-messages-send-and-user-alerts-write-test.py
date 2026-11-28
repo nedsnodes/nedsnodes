@@ -1881,13 +1881,15 @@ check("the rule 2 judge and the re-check are given one definition of backed, so 
 ANNOUNCED_ACTION_BACKED = (
     'An announced action, such as "Next I\'m starting the pull request", is backed when a tool call '
     "in the same turn, before or after the sentence, or a later one does the action, or a background "
-    "task it started is still running; when the action is to tell the user something, by a text "
-    "message in the same turn or a later one that tells it; and when the agent-seat put the action "
-    "off, by an open task whose prerequisites or blockedBy name what the action waits on.")
+    "command started to do it is still running; when the action is to tell the user something, by a "
+    "text message in the same turn or a later one that tells it; and when the agent-seat put the "
+    "action off, by an open task whose prerequisites or blockedBy name what the action waits on.")
 check("the rule 2 judge and the re-check are given the user's rule for an announced action word for "
-      "word, and told that a tool call marked failed backs nothing",
+      "word, under which a background command backs it only when started to do it, and told that a "
+      "tool call marked failed backs nothing",
       all(ANNOUNCED_ACTION_BACKED in prompt and "A tool call marked failed did not do its action"
-          in prompt for prompt in (rule_2_prompt, recheck_prompt)), rule_2_prompt[:1500])
+          in prompt and "a background task it started" not in prompt
+          for prompt in (rule_2_prompt, recheck_prompt)), rule_2_prompt[:1500])
 
 # The user's rule that a sentence called off or taken back in a text to the user is backed, which
 # both rule 2 judges must be given word for word.
@@ -1926,6 +1928,23 @@ check("the first rule 2 judge is handed the text messages and tool calls of the 
       and [(call["name"], call.get("failed")) for call in facts.get(
           "tool_calls_since_start_of_earliest_turn_with_sentence_to_judge", [])]
       == [("Bash", True)], facts)
+
+# A background command backs an announced action only when started to do it, so the first judge is
+# handed each running command by its description, beside the Bash call that started it.
+machine = Machine()
+machine.seat("alpha", [user("go", at(-12)),
+                       *background_bash_launch("bk1", "python3 scripts/x-test.py", at(-11.9), "tb1",
+                                               description="Run the x test suite"),
+                       assistant(OPENING_PULL_REQUEST, at(-11.6)), turn_end(at(-11.5))])
+machine.script(rechecked(False), sent_ok())
+machine.run(0)
+facts = first_judge_facts(machine.claude_calls())
+check("the first rule 2 judge is handed a running background command by its description, and the "
+      "Bash call that started it",
+      [entry.get("description") for entry in facts.get("running_background_commands", [])]
+      == ["Run the x test suite"]
+      and [call["name"] for call in facts.get(
+          "tool_calls_since_start_of_earliest_turn_with_sentence_to_judge", [])] == ["Bash"], facts)
 
 # A judge's answer of the wrong shape is a judge failure, never a crash.
 for case, answer in (
