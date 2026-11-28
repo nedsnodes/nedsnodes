@@ -426,7 +426,11 @@ def main(argv=None) -> int:
     place_final_message(report, last_message)
     if exit_code != 0:
         return fail(f"Codex exited {exit_code}; its output is in {run_log}.")
-    if not report.is_file() or not report.read_text(encoding="utf-8").strip():
+    try:
+        has_report = report.is_file() and report.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as error:
+        return fail(f"could not read the report at {report}: {error}; the run log is {run_log}.")
+    if not has_report:
         return fail(f"Codex exited 0 but wrote no report at {report}; "
                     f"its output is in {run_log}.")
     if last_message.exists():

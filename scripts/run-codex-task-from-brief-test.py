@@ -57,6 +57,8 @@ elif mode == "report-file-only":
 elif mode == "report-then-fail":
     open(report, "w").write("a partial report\n")
     sys.exit(3)
+elif mode == "undecodable-report":
+    open(report, "wb").write(b"\xff")
 elif mode == "no-report":
     pass
 elif mode in ("sleep", "sleep-child-ignores-sigterm"):
@@ -350,6 +352,12 @@ try:
           completed.returncode == 1 and "wrote no report" in completed.stderr
           and not report.exists(),
           f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    completed, report, _ = run("undecodable-report")
+    check("an unreadable report remains available and its path is reported without a traceback",
+          completed.returncode == 1 and report.read_bytes() == b"\xff"
+          and str(report) in completed.stderr and "could not read" in completed.stderr
+          and "Traceback" not in completed.stderr and not completed.stdout, completed.stderr)
 
     stale_last_message = scratch / "report-no-report.md.last-message"
     stale_last_message.write_text("an earlier run's final message\n")
