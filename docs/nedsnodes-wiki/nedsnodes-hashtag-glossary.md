@@ -13,6 +13,8 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#approval_walk_paused#` — the walk-minutes line that pauses an approval-walk, with the user's words; until a later `#next_to_present#` line, the walk has no item waiting.
 - `#approved_after_advisor#` — written in the walk-minutes right after "approved" when the user answered Aa, approving after an advisor check.
 - `#approved_obvious#` — written in the walk-minutes right after "approved" when the user answered AO, approving an item he found obvious.
+- `#bash_guard_refusal_right#` — the pull request review line `#bash_guard_refusal_right# <guard file> | <group id>` with which the reviewer answers that every recorded command of a refusal group the Bash-guards replay check lists is rightly refused by a guard the pull request adds.
+- `#bash_guard_verdict_change_intended#` — the pull request review line `#bash_guard_verdict_change_intended# <guard> | <working directory> | <command>` with which the reviewer answers that a verdict the Bash-guards replay check finds changed is the one the pull request means to give.
 - `#canary_fail#` — the last line an nn-canary-test prints, with exit 1, when the outside program it checks did not behave as the project relies on.
 - `#canary_no_answer#` — the last line an nn-canary-test prints, with exit 2, when it could not tell whether the outside program behaves as relied on.
 - `#canary_pass#` — the last line an nn-canary-test prints, with exit 0, when the outside program it checks behaved as the project relies on.
