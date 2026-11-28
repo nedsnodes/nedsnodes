@@ -533,7 +533,9 @@ def choose_branch_state_instruction_from_working_directory_push_state(working_di
 # Overview refreshes are this agent-seat's job; other agent-seats have jobs of their own.
 AGENT_SEAT_GIVEN_OVERVIEW_REFRESH_LINES = "agent-instructions-editor"
 
-SYSTEM_OVERVIEW_PATH_TEMPLATE = architecture_overview_path_template_and_checked_against_commit_reader.PATH_TEMPLATE
+SYSTEM_OVERVIEW_PATH_TEMPLATE = architecture_overview_path_template_and_checked_against_commit_reader.SYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE
+
+OVERVIEW_PURPOSE_HEADING = "## Purpose"
 
 # The overview-refresh line puts a system's name into a shell command unquoted.
 SYSTEM_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_-]*"
@@ -1711,6 +1713,90 @@ def overview_check_git_output(arguments: list, working_directory: Path,
     return output
 
 
+def git_log_commit_listing_command(commit_range: str, pathspecs: list, diff_filter: str = "") -> list:
+    return (["log", "--no-merges"] + ([f"--diff-filter={diff_filter}"] if diff_filter else [])
+            + [commit_range, "--", *pathspecs])
+
+
+def shell_words(arguments: list) -> str:
+    return " ".join(f"'{argument}'" if ":(" in argument else argument for argument in arguments)
+
+
+def overview_refresh_due_reason_and_commit_listing_command(code_directory: str, subsystem_overview_paths: list,
+                                                           subsystem_directories_with_overviews: list,
+                                                           commit_range: str, working_directory: Path):
+    """Return why a system's or subsystem's overview is due and the command listing the commits, or None.
+
+    A change inside a subsystem directory with an overview of its own makes only that overview due, not its system's.
+    A system's overview is also due for a commit adding or removing one of its subsystems' overviews."""
+    code_command = git_log_commit_listing_command(
+        commit_range, [f"{code_directory}/", f":(exclude){code_directory}/*.md"]
+        + [f":(exclude){directory}/" for directory in subsystem_directories_with_overviews])
+    moved = set(overview_check_git_output(code_command[:2] + ["--format=%h"] + code_command[2:],
+                                          working_directory).split())
+    commands = [code_command]
+    if subsystem_overview_paths:
+        overview_command = git_log_commit_listing_command(commit_range, subsystem_overview_paths, "AD")
+        added_or_removed = set(overview_check_git_output(
+            overview_command[:2] + ["--format=%h"] + overview_command[2:], working_directory).split())
+        if added_or_removed:
+            moved |= added_or_removed
+            commands.append(overview_command)
+    if not moved:
+        return None
+    what = f"under {code_directory}/" + (" or adding or removing one of its subsystems' overviews"
+                                         if len(commands) > 1 else "")
+    return (f"{len(moved)} commit(s) {what} since the commit its overview was checked against, in {commit_range}",
+            "` and `".join("git " + shell_words(command) for command in commands))
+
+
+def overview_purpose_section(text: str) -> str:
+    """Return the overview's Purpose section, heading excluded, or "" when it has none."""
+    section, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line.strip() == OVERVIEW_PURPOSE_HEADING
+        elif inside:
+            section.append(line)
+    return "\n".join(section).strip()
+
+
+def project_overview_refresh_due_reason_and_commit_listing_command(checked_commit: str, main_commit_full: str,
+                                                                   commit_range: str, system_names: list,
+                                                                   working_directory: Path):
+    """Return why the project overview is due and the command listing the commits, or None.
+
+    It is due when a directory directly under nn-systems/ is added or removed, or a system's overview changes its Purpose."""
+    # Both sides read alike, so a directory the name pattern passes over is neither added nor removed.
+    systems_then, systems_now = ({directory.rsplit("/", 1)[-1] for directory in overview_check_git_output(
+        ["ls-tree", "-d", "--name-only", commit, "nn-systems/"], working_directory).splitlines()}
+        for commit in (checked_commit, main_commit_full))
+    added = sorted(systems_now - systems_then)
+    removed = sorted(systems_then - systems_now)
+    wiki_files_by_commit = {commit: set(overview_check_git_output(
+        ["ls-tree", "--name-only", commit, "docs/nedsnodes-wiki/"], working_directory).splitlines())
+        for commit in (checked_commit, main_commit_full)}
+    purpose_changed = []
+    for system in system_names:
+        overview_path = SYSTEM_OVERVIEW_PATH_TEMPLATE.format(system=system)
+        # An overview written after the checked commit is no change of Purpose: overviews name a commit before themselves.
+        if not all(overview_path in wiki_files_by_commit[commit] for commit in wiki_files_by_commit):
+            continue
+        purposes = [overview_purpose_section(overview_check_git_output(["show", f"{commit}:{overview_path}"],
+                                                                      working_directory))
+                    for commit in (checked_commit, main_commit_full)]
+        if purposes[0] != purposes[1]:
+            purpose_changed.append(overview_path)
+    if not (added or removed or purpose_changed):
+        return None
+    reasons = ([f"nn-systems/ gained {', '.join(added)}"] if added else []) + (
+        [f"nn-systems/ lost {', '.join(removed)}"] if removed else []) + (
+        [f"the Purpose changed in {', '.join(purpose_changed)}"] if purpose_changed else [])
+    pathspecs = [f"nn-systems/{system}/" for system in added + removed] + purpose_changed
+    return (f"since the commit it was checked against, in {commit_range}, {'; '.join(reasons)}",
+            "git " + shell_words(git_log_commit_listing_command(commit_range, pathspecs)))
+
+
 def overview_refresh_due_lines(working_directory: Path) -> tuple:
     """Return the overview-refresh reminders no open pull request answers; never block launch."""
     # Read origin/main so unmerged seat work cannot trigger a refresh; Markdown-only refreshes must not trigger another.
@@ -1727,28 +1813,44 @@ def overview_refresh_due_lines(working_directory: Path) -> tuple:
         # Bytes, so a directory name that is not valid UTF-8 is passed over below rather than stopping every system's check.
         listed = git_machine_readable_output.run_git(
             working_directory,
-            ["ls-tree", "-z", "-d", "--name-only", main_commit_full, "nn-systems/"],
+            ["ls-tree", "-r", "-z", "-d", "--name-only", main_commit_full, "nn-systems/"],
             timeout_seconds=timeout)
     except Exception as error:
         print(f"handoff-supervisor: overview check stopped: "
               f"{type(error).__name__}: {error}")
         return ()
-    due = []
-    for system_directory in git_machine_readable_output.nul_separated_fields(listed):
-        system = system_directory.rsplit("/", 1)[-1]
-        if not re.fullmatch(SYSTEM_NAME_PATTERN, system):
-            printable = system.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
-            print(f"handoff-supervisor: overview check for {printable} passed over: "
-                  f"the directory name nn-systems/{printable} on origin/main does not match "
+    code_directories = [directory for directory in git_machine_readable_output.nul_separated_fields(listed)
+                        if directory.count("/") in (1, 2)]
+    system_names = []
+    subsystem_overview_paths_by_system = {}
+    # The project overview first; it has no code directory of its own.
+    overviews = [("project", None)]
+    for code_directory in code_directories:
+        names = code_directory.split("/")[1:]
+        if not all(re.fullmatch(SYSTEM_NAME_PATTERN, name) for name in names):
+            printable = code_directory.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
+            print(f"handoff-supervisor: overview check for {printable.split('/', 1)[1].replace('/', '-')} passed over: "
+                  f"the directory name {printable} on origin/main does not match "
                   f"{SYSTEM_NAME_PATTERN}, the system-name pattern the overview-refresh line "
                   f"needs, so its nn-architecture-overview is not checked; the other systems "
                   f"still are.\n"
-                  f"If nn-systems/{printable} holds a system's programs, propose to the user a "
+                  f"If {printable} holds a system's or subsystem's programs, propose to the user a "
                   f"name for it that matches, to be renamed in a pull request; otherwise "
                   f"nothing needs doing.")
             continue
+        if len(names) == 1:
+            system_names.append(names[0])
+        else:
+            subsystem_overview_paths_by_system.setdefault(names[0], {})[
+                architecture_overview_path_template_and_checked_against_commit_reader.SUBSYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE.format(
+                    system=names[0], subsystem=names[1])] = code_directory
+        overviews.append(("-".join(names), code_directory))
+    due = []
+    for system, code_directory in overviews:
         try:
-            overview_path = SYSTEM_OVERVIEW_PATH_TEMPLATE.format(system=system)
+            overview_path = (
+                architecture_overview_path_template_and_checked_against_commit_reader.PROJECT_ARCHITECTURE_OVERVIEW_PATH
+                if code_directory is None else SYSTEM_OVERVIEW_PATH_TEMPLATE.format(system=system))
             # git show exits 128 both for an absent path and for a failure; ls-tree prints nothing for an absent one.
             if not overview_check_git_output(
                     ["ls-tree", "--full-tree", "--name-only", main_commit_full, "--",
@@ -1767,22 +1869,25 @@ def overview_refresh_due_lines(working_directory: Path) -> tuple:
             if checked_commit is None:
                 continue
             commit_range = f"{checked_commit}..{main_commit}"
-            pathspecs = [f"nn-systems/{system}/", f":(exclude)nn-systems/{system}/*.md"]
-            moved = overview_check_git_output(
-                ["log", "--no-merges", "--format=%h", commit_range, "--", *pathspecs],
-                working_directory)
-            count = len(moved.split())
-            if not count:
+            if code_directory is None:
+                reason_and_commit_listing_command = project_overview_refresh_due_reason_and_commit_listing_command(
+                    checked_commit, main_commit_full, commit_range, system_names, working_directory)
+            else:
+                subsystem_directories_by_overview_path = (
+                    subsystem_overview_paths_by_system.get(system, {}) if system in system_names else {})
+                subsystem_overview_paths_on_main = overview_check_git_output(
+                    ["ls-tree", "--full-tree", "--name-only", main_commit_full, "--",
+                     *subsystem_directories_by_overview_path], working_directory,
+                    timeout=timeout).splitlines() if subsystem_directories_by_overview_path else []
+                reason_and_commit_listing_command = overview_refresh_due_reason_and_commit_listing_command(
+                    code_directory, list(subsystem_directories_by_overview_path),
+                    [subsystem_directories_by_overview_path[path] for path in subsystem_overview_paths_on_main],
+                    commit_range, working_directory)
+            if reason_and_commit_listing_command is None:
                 continue
-            commit_listing_command = (
-                f"git log --no-merges {commit_range} -- "
-                + " ".join(f"'{pathspec}'" if ":(" in pathspec else pathspec
-                           for pathspec in pathspecs))
+            reason, commit_listing_command = reason_and_commit_listing_command
             due.append((system, overview_path,
-                f"overview refresh due: {system} — {count} commit(s) under "
-                f"nn-systems/{system}/ since the commit its overview was checked "
-                f"against, in "
-                f"{commit_range}"
+                f"overview refresh due: {system} — {reason}"
                 + OVERVIEW_REFRESH_DUE_INSTRUCTION_TEMPLATE.format(
                     overview_path=overview_path,
                     commit_listing_command=commit_listing_command,

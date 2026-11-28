@@ -1474,6 +1474,52 @@ def run_architecture_overview_checked_against_commit_cases(fixture):
     check("a later commit adding a program under nn-systems/<system>/ that the overview does not list is refused",
           refused_for_checked_against(result) and "nn-systems/example/unlisted-program.py." in result.stderr, result.stderr)
 
+    subsystem_overview_path = "docs/nedsnodes-wiki/nedsnodes-example-part-architecture-overview.md"
+    fixture.reset_fixture_to_base()
+    code_commit = change_and_commit("nn-systems/example/part/part-program.py", 'print("first")\n')
+    write_overview_with_report(code_commit, path=subsystem_overview_path)
+    fixture.configure_github_answers(fixture.commit_fixture_changes("the subsystem's overview"))
+    change_and_commit("nn-systems/example/unlisted-program.py", 'print("new")\n')
+    result = fixture.run_review_plan(*flag)
+    check("a subsystem's overview is not refused for a later change in its system outside the subsystem's directory",
+          result.returncode == 0, result.stderr)
+    change_and_commit("nn-systems/example/part/part-program.py", 'print("second")\n')
+    result = fixture.run_review_plan(*flag)
+    check("a subsystem's overview is refused for a later change in the subsystem's directory",
+          refused_for_checked_against(result, subsystem_overview_path)
+          and "nn-systems/example/part/part-program.py." in result.stderr, result.stderr)
+
+    fixture.reset_fixture_to_base()
+    code_commit = change_and_commit("nn-systems/example/part/part-program.py", 'print("first")\n')
+    write_overview_with_report(code_commit)
+    write_overview_with_report(code_commit, path=subsystem_overview_path)
+    fixture.configure_github_answers(fixture.commit_fixture_changes("the system's and subsystem's overviews"))
+    change_and_commit("nn-systems/example/part/part-program.py", 'print("second")\n')
+    result = fixture.run_review_plan(*flag)
+    check("a later change in a subsystem's directory that has an overview of its own refuses that overview, not its system's",
+          refused_for_checked_against(result, subsystem_overview_path)
+          and f"--overview {FIXTURE_OVERVIEW_PATH}\n" not in result.stderr, result.stderr)
+    change_and_commit("nn-systems/example/other/other-program.py", 'print("new")\n')
+    result = fixture.run_review_plan(*flag)
+    check("a later change in a subsystem's directory with no overview of its own refuses the system's overview",
+          refused_for_checked_against(result, FIXTURE_OVERVIEW_PATH)
+          and "nn-systems/example/other/other-program.py." in result.stderr, result.stderr)
+
+    project_overview_path = "docs/nedsnodes-wiki/nedsnodes-project-architecture-overview.md"
+    fixture.reset_fixture_to_base()
+    code_commit = change_and_commit("nn-systems/example/unlisted-program.py", 'print("first")\n')
+    write_overview_with_report(code_commit, path=project_overview_path)
+    fixture.configure_github_answers(fixture.commit_fixture_changes("the project overview"))
+    change_and_commit("nn-systems/example/unlisted-program.py", 'print("second")\n')
+    result = fixture.run_review_plan(*flag)
+    check("the project overview is not refused for a later change under nn-systems/ that its Components section does not name",
+          result.returncode == 0, result.stderr)
+    change_and_commit("scripts/example-program.py", "VALUE = 'later'\n")
+    result = fixture.run_review_plan(*flag)
+    check("the project overview is refused for a later change to a path its Components section names",
+          refused_for_checked_against(result, project_overview_path)
+          and "scripts/example-program.py." in result.stderr, result.stderr)
+
     fixture.reset_fixture_to_base()
     side_commit = change_and_commit("nn-systems/example/parent-program.py", 'print("side")\n')
     fixture.git_command("checkout", "-q", "--detach", fixture.base_head)

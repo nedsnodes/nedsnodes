@@ -2,7 +2,13 @@
 
 An nn-architecture-overview tells a reader who must change a system what the system is for, what its components are, and how the components fit together. It describes the system as it is on main at the commit named in its last line. It summarizes and points: it says in a sentence, or for a few in a short paragraph, what each component and each piece of shared state does and where it lives, and leaves the detail to the code and the documents that hold it. An overview does not replace reading the code; it teaches an agent who will change the system the rules no single file states, and what to do and not do.
 
-The overview of a system whose code lives in `nn-systems/<system>/` is `docs/nedsnodes-wiki/nedsnodes-<system>-architecture-overview.md`, where `<system>` is the directory directly under `nn-systems/`. This page is `docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md`.
+Overviews follow the directories under `nn-systems/`, at three levels:
+
+- **The project overview**, `docs/nedsnodes-wiki/nedsnodes-project-architecture-overview.md`, covers the whole project. It has the seven sections below, with the systems in place of components: Components gives each system one sentence and a link to its overview, and Invariants and Shared state cover only what crosses systems.
+- **A system's overview**, for a system whose code lives in `nn-systems/<system>/`, is `docs/nedsnodes-wiki/nedsnodes-<system>-architecture-overview.md`, where `<system>` is the directory directly under `nn-systems/`.
+- **A subsystem's overview**, for a subsystem with its own directory, `nn-systems/<system>/<subsystem>/`, such as `nn-systems/skills/walk-me-through/`, is `docs/nedsnodes-wiki/nedsnodes-<system>-<subsystem>-architecture-overview.md`. A subsystem gets one when its system's overview could not otherwise stay within the length below. The system's overview then lists the subsystem in Components as one sentence and a link, not file by file.
+
+This page is `docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md`.
 
 ## What an overview contains
 
@@ -41,7 +47,7 @@ The last line of an overview is `**Checked against:** commit [<full commit id>](
 
 An overview refresh brings an overview into line with the code on main and with this page. It reads the commits between the commit in the `**Checked against:**` line and main to find what changed; nothing about those commits goes into the overview. It corrects every statement that is no longer true, adds what the code added (a component, an invariant, shared state, an entry point), takes out what the code removed, takes out anything this page leaves out, and updates Planned work to the open GHIs. Then it replaces the `**Checked against:**` line with the commit it checked against. A refresh that finds nothing to change replaces only that line.
 
-A refresh is due when a commit after the one in the `**Checked against:**` line changes a file that `path_is_architecture_overview_described_code` in `scripts/pull-request-review-plan.py` matches, or when the open GHIs on the system no longer match Planned work. Who runs a refresh, and when, belongs to the program that runs refreshes; this page says what a refresh does.
+A refresh is due when a commit after the one in the `**Checked against:**` line changes a file that `path_is_architecture_overview_described_code` in `scripts/pull-request-review-plan.py` matches, or when the open GHIs on the system no longer match Planned work. The project overview's refresh is also due when a directory directly under `nn-systems/` is added or removed, or when a system's overview changes its Purpose. A system's overview is also due when one of its subsystems' overviews is added or removed. Who runs a refresh, and when, belongs to the program that runs refreshes; this page says what a refresh does.
 
 An overview already on main without a `**Checked against:**` line was written before this page. It is not edited; it is written anew from the code at the path this page gives for an overview, and the old file is deleted in the same pull request, with every link to it changed to the new path. The writer may read the old page for invariants and reasons, and keeps what still describes the code.
 

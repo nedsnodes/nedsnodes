@@ -1015,6 +1015,16 @@ def run_program_cases(fixture):
                             env=fixture.environment, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
     check("a path with no nn-systems/<system> directory is refused as not an overview",
           result.returncode == 1 and "is not an nn-architecture-overview" in result.stderr, result.stderr)
+    fixture.write("nn-systems/example/part/tool.py", "y = 1\n")
+    fixture.commit("a subsystem")
+    for level, path in (("the project overview", "docs/nedsnodes-wiki/nedsnodes-project-architecture-overview.md"),
+                        ("a subsystem's overview", "docs/nedsnodes-wiki/nedsnodes-example-part-architecture-overview.md")):
+        result = subprocess.run([sys.executable, str(PROGRAM), "--overview", path,
+                                 "--report-directory", str(fixture.reports)], cwd=fixture.repository,
+                                env=fixture.environment, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+        check(f"{level} is taken for an overview, and refused only because it is not committed",
+              result.returncode == 1 and "is not an nn-architecture-overview" not in result.stderr
+              and f"{path} is not in" in result.stderr, result.stderr)
 
     fixture.commit_overview(checked_against=False)
     result = fixture.run()

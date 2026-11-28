@@ -174,7 +174,7 @@ OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_REPORT_DIRECTORY = LOG_STORE_DI
 HOW_TO_PAGE = "docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md"
 
 ARCHITECTURE_OVERVIEW_PATH = re.compile(
-    re.escape(overview_path_reader.PATH_TEMPLATE).replace(re.escape("{system}"), r"(?P<system>[^/]+)"))
+    re.escape(overview_path_reader.SYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE).replace(re.escape("{system}"), r"(?P<system>[^/]+)"))
 
 # The fresh-agent checks claims against code; a weaker model misses confident errors, the defect this check exists for.
 FRESH_AGENT_MODEL = "claude-opus-5-5"
@@ -770,13 +770,16 @@ def check_overview_claims(arguments):
                                 "To check an overview: run this from a checkout of this repository.")
     repository = Path(top_level.stdout.strip())
     overview_path = arguments.overview
-    system = nn_architecture_overview_described_system_name_from_page_path(overview_path)
     revision = run_git(repository, "rev-parse", "--verify", f"{arguments.revision}^{{commit}}").stdout.strip()
-    if system is None or not run_git(repository, "ls-tree", "-d", "--name-only", revision,
-                                     f"nn-systems/{system}").stdout.strip():
+    if overview_path_reader.architecture_overview_level_and_described_code_directory_from_path(
+            overview_path, lambda directory: bool(run_git(repository, "ls-tree", "-d", "--name-only", revision,
+                                                          directory).stdout.strip())) is None:
         raise ClaimCheckRefusal(
             f"{overview_path} is not an nn-architecture-overview at {revision[:12]}: an overview is at "
-            f"{overview_path_reader.PATH_TEMPLATE}, where nn-systems/<system> is a directory.\n"
+            f"{overview_path_reader.PROJECT_ARCHITECTURE_OVERVIEW_PATH}, at {overview_path_reader.SYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE}, "
+            "where nn-systems/<system> is a directory, or at "
+            f"{overview_path_reader.SUBSYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE}, where nn-systems/<system>/<subsystem> "
+            "is a directory.\n"
             "To check an overview: pass its path, relative to the top of the checkout, with --overview.")
     blob = run_git(repository, "rev-parse", "--verify", "--quiet", f"{revision}:{overview_path}", check=False)
     if blob.returncode:

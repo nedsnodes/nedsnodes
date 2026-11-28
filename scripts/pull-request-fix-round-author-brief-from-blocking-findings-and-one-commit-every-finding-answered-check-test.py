@@ -3025,6 +3025,9 @@ def fix_commit_range_two_commit_round_cases(_root, repository, _base, _frozen_he
     from an equality one."""
     program = load_program()
     (repository / "docs" / "nedsnodes-wiki").mkdir(parents=True)
+    # An overview is an overview only while the directory it describes exists.
+    (repository / "nn-systems" / "demo").mkdir(parents=True)
+    commit_file(repository, "nn-systems/demo/demo.py", "one\n", "demo code")
     first_parent = commit_file(repository, DEMO_OVERVIEW, demo_overview_text("0" * 40), "the frozen-head's parent")
     grandparents = git(repository, "rev-list", "--parents", "-n", "1", first_parent).split()[1:]
     # The frozen-head's id must sort after its parent's, so that a merge whose first parent is that parent

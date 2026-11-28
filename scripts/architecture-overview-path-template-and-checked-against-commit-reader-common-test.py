@@ -53,11 +53,45 @@ check("the line an overview had before the page does not count",
            f"(https://github.com/nedsnodes/nedsnodes/commit/{FULL}) on 2026-09-28 — it.\n")
       is None)
 
+# A tree with a hyphenated system holding a subsystem, a hyphenated subsystem, and a plain system.
+directories = {"nn-systems/general-tools", "nn-systems/general-tools/scheduled",
+               "nn-systems/skills", "nn-systems/skills/walk-me-through", "nn-systems/handoff"}
+level = lambda path: architecture_overview_path_template_and_checked_against_commit_reader.architecture_overview_level_and_described_code_directory_from_path(
+    path, directories.__contains__)
+wiki = "docs/nedsnodes-wiki/"
+check("the project overview has no code directory of its own, and needs no nn-systems/project",
+      level(wiki + "nedsnodes-project-architecture-overview.md") == ("project", None))
+check("a system's overview describes nn-systems/<system>",
+      level(wiki + "nedsnodes-handoff-architecture-overview.md") == ("system", "nn-systems/handoff"))
+check("a hyphenated system's overview is read as the system, not as a subsystem",
+      level(wiki + "nedsnodes-general-tools-architecture-overview.md") == ("system", "nn-systems/general-tools"))
+check("a subsystem's overview describes nn-systems/<system>/<subsystem>, the subsystem name holding hyphens",
+      level(wiki + "nedsnodes-skills-walk-me-through-architecture-overview.md")
+      == ("subsystem", "nn-systems/skills/walk-me-through"))
+check("a subsystem of a hyphenated system is found",
+      level(wiki + "nedsnodes-general-tools-scheduled-architecture-overview.md")
+      == ("subsystem", "nn-systems/general-tools/scheduled"))
+check("a name with no directory behind it is not an overview",
+      level(wiki + "nedsnodes-skills-gone-architecture-overview.md") is None)
+check("the how-to page itself is not an overview",
+      level(wiki + "nedsnodes-how-to-write-an-architecture-overview.md") is None)
+check("a proposed-improvements file beside an overview is not an overview",
+      level(wiki + "nedsnodes-handoff-architecture-overview-proposed-improvements-or-changes-x.md") is None)
+check("a path elsewhere is not an overview",
+      level("docs/nedsnodes-handoff-architecture-overview.md") is None)
+
 # The page is where the path and the line are defined; this module must say the same.
 page = PAGE_PATH.read_text(encoding="utf-8")
 check("the page names the overview path this module builds",
-      architecture_overview_path_template_and_checked_against_commit_reader.PATH_TEMPLATE.replace("{system}", "<system>") in page,
-      architecture_overview_path_template_and_checked_against_commit_reader.PATH_TEMPLATE)
+      architecture_overview_path_template_and_checked_against_commit_reader.SYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE.replace("{system}", "<system>") in page,
+      architecture_overview_path_template_and_checked_against_commit_reader.SYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE)
+check("the page names the project overview's path",
+      architecture_overview_path_template_and_checked_against_commit_reader.PROJECT_ARCHITECTURE_OVERVIEW_PATH in page,
+      architecture_overview_path_template_and_checked_against_commit_reader.PROJECT_ARCHITECTURE_OVERVIEW_PATH)
+check("the page names the subsystem overview path this module builds",
+      architecture_overview_path_template_and_checked_against_commit_reader.SUBSYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE.replace(
+          "{system}", "<system>").replace("{subsystem}", "<subsystem>") in page,
+      architecture_overview_path_template_and_checked_against_commit_reader.SUBSYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE)
 check("the page spells the last line this module reads",
       architecture_overview_path_template_and_checked_against_commit_reader.CHECKED_AGAINST_LINE_TEMPLATE.replace(
           "{commit}", "<full commit id>") in page,

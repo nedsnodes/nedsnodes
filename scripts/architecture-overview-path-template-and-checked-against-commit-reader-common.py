@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Where a system's nn-architecture-overview lives, and the commit its last line names.
+"""Where an nn-architecture-overview lives, which code it describes, and the commit its last line names.
 
 docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md defines
 both; programs that find an overview or read its **Checked against:** line
@@ -7,7 +7,14 @@ import them from here, so a change to the page is made in one place in code.
 """
 import re
 
-PATH_TEMPLATE = "docs/nedsnodes-wiki/nedsnodes-{system}-architecture-overview.md"
+SYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE = "docs/nedsnodes-wiki/nedsnodes-{system}-architecture-overview.md"
+
+PROJECT_ARCHITECTURE_OVERVIEW_PATH = "docs/nedsnodes-wiki/nedsnodes-project-architecture-overview.md"
+
+SUBSYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE = "docs/nedsnodes-wiki/nedsnodes-{system}-{subsystem}-architecture-overview.md"
+
+_OVERVIEW_NAME = re.compile(
+    re.escape(SYSTEM_ARCHITECTURE_OVERVIEW_PATH_TEMPLATE).replace(re.escape("{system}"), r"(?P<name>[^/]+)"))
 
 CHECKED_AGAINST_PREFIX = "**Checked against:** commit ["
 
@@ -27,3 +34,27 @@ def checked_against_commit(text: str):
         return None
     named = _CHECKED_AGAINST_COMMIT.match(lines[-1])
     return named.group(1) if named else None
+
+
+def architecture_overview_level_and_described_code_directory_from_path(path: str, is_directory):
+    """Return ("project", None), ("system", "nn-systems/<system>") or
+    ("subsystem", "nn-systems/<system>/<subsystem>") for a path the page gives an
+    overview, or None for any other path.
+
+    is_directory(repository path) says whether that directory exists in the tree
+    the caller reads: a system or subsystem name may itself hold hyphens, so only
+    the tree tells nedsnodes-<system>-<subsystem> from nedsnodes-<system>."""
+    if path == PROJECT_ARCHITECTURE_OVERVIEW_PATH:
+        return ("project", None)
+    named = _OVERVIEW_NAME.fullmatch(path)
+    # The template alone also matches nedsnodes-how-to-write-an-architecture-overview.md.
+    if named is None:
+        return None
+    name = named.group("name")
+    if is_directory(f"nn-systems/{name}"):
+        return ("system", f"nn-systems/{name}")
+    for hyphen in (index for index, character in enumerate(name) if character == "-"):
+        directory = f"nn-systems/{name[:hyphen]}/{name[hyphen + 1:]}"
+        if is_directory(directory):
+            return ("subsystem", directory)
+    return None
