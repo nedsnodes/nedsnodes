@@ -27,18 +27,12 @@ class Refusal(Exception):
     """A reason the brief cannot be composed; one line for stderr."""
 
 
-class RefusingArgumentParser(argparse.ArgumentParser):
-    """Use exit 1 for malformed arguments; the project reserves exit 2 for defects."""
-
-    def error(self, message):
-        raise Refusal(f"the command line is malformed: {message}")
-
-
 def build_parser() -> argparse.ArgumentParser:
-    parser = RefusingArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="compose-pull-request-reviewer-brief.py",
         description="Compose the standing reviewer brief with the reviewing "
                     "rule inserted verbatim at its marker line.",
+        epilog="Exits 0 for a composed brief, 1 for a refused brief, and 2 for bad arguments or a program error.",
     )
     parser.add_argument("--pull-request", required=True, type=int, metavar="N",
                         help="the pull request number; replaces every <N> in the brief")
@@ -84,11 +78,11 @@ def compose(brief: bytes, instructions: bytes, pull_request: int) -> bytes:
 
 
 def main(argv=None) -> int:
+    parser = build_parser()
+    arguments = parser.parse_args(argv)
+    if arguments.pull_request <= 0:
+        parser.error(f"--pull-request must be a positive integer, not {arguments.pull_request}")
     try:
-        arguments = build_parser().parse_args(argv)
-        if arguments.pull_request <= 0:
-            raise Refusal(f"--pull-request must be a positive integer, "
-                          f"not {arguments.pull_request}")
         brief = read_bytes_or_refuse(arguments.brief_file, "the brief file")
         instructions = read_bytes_or_refuse(arguments.instructions_file,
                                             "the instructions file")

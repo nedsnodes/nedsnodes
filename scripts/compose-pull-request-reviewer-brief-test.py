@@ -207,27 +207,27 @@ with tempfile.TemporaryDirectory(prefix="compose-reviewer-brief-test-") as name:
     check("a directory given as the brief file is unreadable, exit 1",
           result.returncode == 1 and b"unreadable" in result.stderr, result.stderr)
 
-    # --- Refusals: the command line, which must be exit 1 and never 2 --------
+    # --- Malformed invocations use the standard usage error --------
     result = run("--brief-file", str(brief), "--instructions-file", str(instructions))
-    check("a missing --pull-request is a refusal, exit 1, not argparse's exit 2",
-          result.returncode == 1 and b"malformed" in result.stderr, result.stderr)
+    check("a missing --pull-request is a refusal, exit 2",
+          result.returncode == 2 and b"usage:" in result.stderr, result.stderr)
     result = run("--pull-request", "abc", "--brief-file", str(brief),
                  "--instructions-file", str(instructions))
-    check("a non-integer --pull-request is a refusal, exit 1",
-          result.returncode == 1 and b"malformed" in result.stderr, result.stderr)
+    check("a non-integer --pull-request is a refusal, exit 2",
+          result.returncode == 2 and b"usage:" in result.stderr, result.stderr)
     for bad in ("0", "-5"):
         result = run("--pull-request", bad, "--brief-file", str(brief),
                      "--instructions-file", str(instructions))
-        check(f"--pull-request {bad} is refused as not a positive integer, exit 1",
-              result.returncode == 1 and b"positive integer" in result.stderr,
+        check(f"--pull-request {bad} is refused as not a positive integer, exit 2",
+              result.returncode == 2 and b"positive integer" in result.stderr,
               result.stderr)
     result = run("--pull-request", "7", "--instructions-file", str(instructions))
     check("a missing --brief-file is a refusal: the standing brief has no default",
-          result.returncode == 1 and b"malformed" in result.stderr, result.stderr)
+          result.returncode == 2 and b"usage:" in result.stderr, result.stderr)
     result = run("--pull-request", "7", "--brief-file", str(brief),
                  "--instructions-file", str(instructions), "--unknown-flag")
-    check("an unknown flag is a refusal, exit 1",
-          result.returncode == 1 and b"malformed" in result.stderr, result.stderr)
+    check("an unknown flag is a refusal, exit 2",
+          result.returncode == 2 and b"usage:" in result.stderr, result.stderr)
 
 print()
 # The count is printed so a short run is visible on sight: a run that ends
