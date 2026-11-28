@@ -817,8 +817,8 @@ def merge_account_comment_review_cases(scratch):
           "COMMENT, keeping the verdict line, the blocking count and the blocking mark",
           result.code == 0 and result.posted == {
               "commit_id": HEAD, "event": "COMMENT",
-              "body": "REQUEST_CHANGES\n\n**Blocking: 1**\n\n**Merge-lane: merge-lane-2**\n\nThe review body.",
-              "comments": [{"path": "scripts/thing.py", "line": 2, "body": "**Blocks** Finding on line 2."}]}
+              "body": "REQUEST_CHANGES\n\n**Blocking: 1** #review_blocking_finding_count#\n\n**Merge-lane: merge-lane-2**\n\nThe review body.",
+              "comments": [{"path": "scripts/thing.py", "line": 2, "body": "**Blocks** #review_finding_blocks# Finding on line 2."}]}
           and "by ned-review-merge as COMMENT, verdict REQUEST_CHANGES" in result.stdout
           and "reads back as COMMENTED" in result.stdout, result.detail)
     if result.posted:
@@ -895,11 +895,11 @@ def merge_lane_cases(scratch):
           "each other comment opened with its category in bold, and no finding_category key sent",
           result.code == 0 and result.posted == {
               "commit_id": HEAD, "event": "REQUEST_CHANGES",
-              "body": "REQUEST_CHANGES\n\n**Blocking: 2**\n\n**Merge-lane: merge-lane-2**\n\nThe review body.",
+              "body": "REQUEST_CHANGES\n\n**Blocking: 2** #review_blocking_finding_count#\n\n**Merge-lane: merge-lane-2**\n\nThe review body.",
               "comments": [
-                  {"path": "scripts/thing.py", "line": 2, "body": "**Blocks** Finding on line 2."},
+                  {"path": "scripts/thing.py", "line": 2, "body": "**Blocks** #review_finding_blocks# Finding on line 2."},
                   {"path": "scripts/thing.py", "line": 3, "body": "**fix-next** Finding on line 3."},
-                  {"path": "scripts/thing.py", "line": 4, "body": "**Blocks** Finding on line 4."},
+                  {"path": "scripts/thing.py", "line": 4, "body": "**Blocks** #review_finding_blocks# Finding on line 4."},
                   {"path": "scripts/thing.py", "line": 1,
                    "body": "**fix-in-maintenance** Finding on line 1."}]}
           and len(result.calls) == 4 and all(call["token"] == MERGE_TOKEN for call in result.calls)
@@ -913,7 +913,7 @@ def merge_lane_cases(scratch):
     check("a merge-lane's request for changes names the merge-lane GIT_AUTHOR_NAME names on the line after the "
           "count, and the fix-round program reads that merge-lane back from the posted body",
           result.code == 0 and result.posted is not None
-          and result.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 1**\n\n**Merge-lane: merge-lane-1**\n\n")
+          and result.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 1** #review_blocking_finding_count#\n\n**Merge-lane: merge-lane-1**\n\n")
           and fix_round.read_merge_lane_that_posted_changes_requested_review_from_body(result.posted) == "merge-lane-1",
           result.detail)
     for name in ("", "cold-read-research", "merge-lane-", "merge-lane-1 "):
@@ -944,7 +944,7 @@ def merge_lane_cases(scratch):
     check("merge-lane-2's APPROVE file with a must-fix-now comment is posted as REQUEST_CHANGES",
           result.code == 0 and result.posted is not None
           and result.posted["event"] == "REQUEST_CHANGES"
-          and result.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 1**\n\n"),
+          and result.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 1** #review_blocking_finding_count#\n\n"),
           result.detail)
 
     for name, comments, verdict, reason in (
@@ -960,6 +960,9 @@ def merge_lane_cases(scratch):
              "comment on scripts/thing.py:2 whose body already opens with the blocking mark "
              "**Blocks**; this program writes that mark for each must-fix-now comment, so remove the mark "
              "from the start of its \"body\""),
+            ("a finding opening with a hand-written blocking mark and its hashtag",
+             [finding(2, "must-fix-now", "**Blocks** #review_finding_blocks# b")], "REQUEST_CHANGES",
+             "already opens with the blocking mark **Blocks** #review_finding_blocks#;"),
             ("a fix-next finding opening, after spaces, with a hand-written mark",
              [finding(3, "fix-next", "  **Blocks:** b")], "APPROVE",
              "already opens with the blocking mark **Blocks:**"),
@@ -994,6 +997,10 @@ def merge_lane_cases(scratch):
             ("a nit opening with a hand-written nit mark", [nit(2, "**fix-in-maintenance, nit** b")], "APPROVE",
              "comment on scripts/thing.py:2 whose body already opens with the category mark "
              "**fix-in-maintenance, nit**"),
+            ("a nit opening with a hand-written nit mark and its hashtag",
+             [nit(2, "**fix-in-maintenance, nit** #review_finding_fix_in_maintenance_nit# b")], "APPROVE",
+             "already opens with the category mark "
+             "**fix-in-maintenance, nit** #review_finding_fix_in_maintenance_nit#,"),
             ("a comment with a key other than \"nit\" beside its category", [{**finding(2, "fix-next"), "note": "x"}],
              "APPROVE", "and a \"finding_category\", with no other keys but an optional \"nit\": true")):
         result = run_program(scratch, review(verdict, comments=comments),
@@ -1108,7 +1115,7 @@ def merge_lane_cases(scratch):
     check("two must-fix-now comments with the same path, line and body are posted once and "
           "counted once, as are two equal fix-next ones",
           duplicated.code == 0 and duplicated.posted is not None
-          and duplicated.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 1**\n\n")
+          and duplicated.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 1** #review_blocking_finding_count#\n\n")
           and [comment["line"] for comment in duplicated.posted["comments"]] == [2, 3],
           duplicated.detail)
     found = fix_round_blocking_findings(fix_round, [duplicated.posted])
@@ -1121,9 +1128,9 @@ def merge_lane_cases(scratch):
     found = fix_round_blocking_findings(fix_round, [moved.posted])
     check("round trip: a must-fix-now comment moved into the body counts in the posted count, "
           "and the fix-round program briefs it beside the inline one",
-          isinstance(found, list) and moved.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 2**\n\n")
+          isinstance(found, list) and moved.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 2** #review_blocking_finding_count#\n\n")
           and [(item["path"], item["line"], item["body"]) for item in found]
-          == [("scripts/thing.py", 2, "**Blocks** Finding on line 2."), ("scripts/other.py", 1, "**Blocks** Outside.")],
+          == [("scripts/thing.py", 2, "**Blocks** #review_finding_blocks# Finding on line 2."), ("scripts/other.py", 1, "**Blocks** #review_finding_blocks# Outside.")],
           f"{found}\n{moved.detail}")
 
     marks = [load_posting_program().review_comment_opening_mark_for_finding_category(category)
@@ -1131,7 +1138,7 @@ def merge_lane_cases(scratch):
     marks.append(load_posting_program().review_comment_opening_mark_for_finding_category("fix-in-maintenance", True))
     check("no non-blocking category's mark, nor the nit mark, matches the fix-round program's blocking mark, so "
           "the fix-round program never reads a non-blocking finding or a nit as blocking",
-          len(set(marks)) == 4 and marks[3] == "**fix-in-maintenance, nit** " and not any(
+          len(set(marks)) == 4 and marks[3] == "**fix-in-maintenance, nit** #review_finding_fix_in_maintenance_nit# " and not any(
               fix_round.BLOCKING_MARKER_PATTERN.search(mark + "A finding.") for mark in marks), str(marks))
 
     with_nit = run_program(scratch, review("REQUEST_CHANGES", comments=[
@@ -1140,10 +1147,10 @@ def merge_lane_cases(scratch):
     check("a nit is posted opening with the nit mark and no nit key, a fix-in-maintenance finding without the "
           "key keeps its plain mark, and the nit is not counted as blocking",
           with_nit.code == 0 and with_nit.posted is not None
-          and with_nit.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 1**\n\n")
+          and with_nit.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 1** #review_blocking_finding_count#\n\n")
           and with_nit.posted["comments"] == [
-              {"path": "scripts/thing.py", "line": 2, "body": "**Blocks** Finding on line 2."},
-              {"path": "scripts/thing.py", "line": 3, "body": "**fix-in-maintenance, nit** A misspelt name."},
+              {"path": "scripts/thing.py", "line": 2, "body": "**Blocks** #review_finding_blocks# Finding on line 2."},
+              {"path": "scripts/thing.py", "line": 3, "body": "**fix-in-maintenance, nit** #review_finding_fix_in_maintenance_nit# A misspelt name."},
               {"path": "scripts/thing.py", "line": 4, "body": "**fix-in-maintenance** Finding on line 4."}],
           with_nit.detail)
     posting = load_posting_program()
@@ -1153,6 +1160,11 @@ def merge_lane_cases(scratch):
           read_back == [("must-fix-now", "Finding on line 2.", False),
                         ("fix-in-maintenance", "A misspelt name.", True),
                         ("fix-in-maintenance", "Finding on line 4.", False)], str(read_back))
+    old_form = [posting.finding_category_and_text_read_from_review_comment_opening_mark(body)
+                for body in ("**Blocks** Finding on line 2.", "**fix-in-maintenance, nit** A misspelt name.")]
+    check("the read-back reads a blocking mark and a nit mark posted without their hashtags as it reads them with",
+          old_form == [("must-fix-now", "Finding on line 2.", False),
+                       ("fix-in-maintenance", "A misspelt name.", True)], str(old_form))
     found = fix_round_blocking_findings(fix_round, [with_nit.posted])
     reviews = [{"id": 1, "user": {"login": "ned-review-merge"}, "body": with_nit.posted["body"]},
                {"id": 2, "user": {"login": "mac-claude"}, "body": "COMMENT"}]

@@ -714,6 +714,22 @@ def brief_cases(root, repository, base, frozen_head):
         check(f"brief: a comment starting {spelling!r} is a blocking finding",
               code == 0 and "Blocking findings (1)" in out and "the spelling under test" in out, err + out)
 
+    hashtag_count_review = review(commit_id=frozen_head,
+                                  body="REQUEST_CHANGES\n\n**Blocking: 1** #review_blocking_finding_count#\n")
+    code, out, err = run(root, repository, routes_for(
+        frozen_head, [hashtag_count_review],
+        comments=[comment("hook.py", "**Blocks** #review_finding_blocks# the hashtag form.")]))
+    check("brief: a comment starting '**Blocks** #review_finding_blocks#' is a blocking finding, counted by a "
+          "count line carrying #review_blocking_finding_count#, and the brief keeps the mark as posted",
+          code == 0 and "Blocking findings (1)" in out
+          and "**Blocks** #review_finding_blocks# the hashtag form." in out, err + out)
+    code, out, err = run(root, repository, routes_for(
+        frozen_head, [review(commit_id=frozen_head,
+                             body="REQUEST_CHANGES\n\n**Blocking: 2** #review_blocking_finding_count#\n")],
+        comments=[comment("hook.py", "**Blocks** #review_finding_blocks# the hashtag form.")]))
+    check("brief: a count line carrying #review_blocking_finding_count# is checked against the marked comments",
+          code == 1 and "says **Blocking: 2**" in err, err + out)
+
     mixed = [comment("a.py", "**Blocks.** first.", comment_id=21),
              comment("b.py", "**Blocks.** second.", comment_id=22),
              comment("c.py", "**Blocks** (cold-read-fast-read hold on the docstring) third.", comment_id=23),
@@ -3139,6 +3155,15 @@ def nit_cases(root, repository, base, frozen_head):
     check("nits: step 2 says a nit needs no test",
           "with a test that fails without the fix; a nit needs no test." in out, out)
 
+    hashtag_nit = comment("nit.txt", "**fix-in-maintenance, nit** #review_finding_fix_in_maintenance_nit# "
+                          "nit.txt misspells it.", line=21, comment_id=9)
+    code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head)],
+                                                      comments=[*BLOCKING_COMMENTS, hashtag_nit]))
+    check("nits: a nit opening with the nit mark and #review_finding_fix_in_maintenance_nit# is listed as a nit, "
+          "not counted as blocking",
+          code == 0 and "Blocking findings (2)" in out and "Nits to fix in this round too (1)" in out
+          and "nit.txt misspells it." in out, err + out)
+
     code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head)]))
     check("nits: a round with no nit prints no nit heading", code == 0 and "Nits to fix" not in out, err + out)
 
@@ -3457,6 +3482,14 @@ def merge_lane_name_line_cases(root, repository, _base, frozen_head):
     check("merge-lane name line: --check on a merge-lane-1 round prints the message for merge-lane-1",
           code == 0 and "Send merge-lane-1 this message with SendMessage:" in out
           and "merge-lane-2" not in out, err + out)
+
+    hashtag_lane_1_review = review(commit_id=frozen_head, body=(
+        "REQUEST_CHANGES\n\n**Blocking: 2** #review_blocking_finding_count#\n\n**Merge-lane: merge-lane-1**\n\nRound 1."))
+    code, out, err = run(root, repository, routes_for(frozen_head, [hashtag_lane_1_review]))
+    check("merge-lane name line: after a count line carrying #review_blocking_finding_count#, the brief still "
+          "sends every message to the merge-lane the review names",
+          code == 0 and "send that message to merge-lane-1 with SendMessage" in out
+          and "merge-lane-2 with SendMessage" not in out, err + out)
 
     for body in ["REQUEST_CHANGES\n\n**Blocking: 2**\n\nmerge-lane-1's review of round 1.",
                  "REQUEST_CHANGES\n\n**Blocking: 2**\n\nQuoted: **Merge-lane: merge-lane-1**",
