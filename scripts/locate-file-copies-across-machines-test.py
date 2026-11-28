@@ -39,6 +39,7 @@ import sys
 import tempfile
 import time
 import types
+from unittest import mock
 
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
 PROGRAM = pathlib.Path(
@@ -879,6 +880,38 @@ else:
               and str(locked) in stdout
               and "Tell the user which places above could not be searched"
               in stdout, stdout)
+
+with scratch() as directory:
+    surface = {"name": "files", "roots": [directory]}
+    plan = {"machine": "mac", "surfaces": [surface]}
+    entry = mock.Mock(path=os.path.join(directory, "gone.md"))
+    entry.is_dir.side_effect = PermissionError("permission denied")
+    with mock.patch.object(os, "scandir", return_value=[entry]):
+        _, _, report = program.split_surface(surface, "gone")
+    check("a directory entry that cannot be inspected is named in the surface failures",
+          any(entry.path in failure for failure in report["failures"]), report)
+    entry.is_dir.side_effect = None
+    entry.is_dir.return_value = False
+    entry.is_file.return_value = True
+    entry.name = "gone.md"
+    with mock.patch.object(os, "scandir", return_value=[entry]):
+        result = program.search_this_machine(plan, "gone", "gone.md")
+    check("a matching file that disappears before stat is named in the surface failures",
+          any(entry.path in failure for failure in result["surfaces"][0]["failures"]), result)
+
+if os.geteuid() != 0:
+    with scratch() as directory:
+        base = pathlib.Path(directory)
+        make_stand_in_bin(base)
+        pointer = base / "mac" / "Projects" / "checkout" / ".git"
+        write(pointer, "gitdir: elsewhere")
+        pointer.chmod(0)
+        try:
+            code, stdout, stderr = run(base, "absent-everywhere.md")
+        finally:
+            pointer.chmod(0o600)
+        check("an unreadable worktree pointer leaves the search incomplete",
+              code == 3 and str(pointer) in stdout, (code, stdout, stderr))
 
 # --- Run on ned-box: the Mac is reported as not searched ------------------------
 with scratch() as directory:
