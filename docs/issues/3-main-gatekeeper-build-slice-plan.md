@@ -204,7 +204,7 @@ spec text.
 
 Applied 2026-08-11 (suite then 140 cases green, was 146): the `imports` deletion, the base absorption, and the catalog collapse below. Applied 2026-08-12 (suite then 150 cases green): the symlink refusal, the parser-contract wrap, the untracked-files advisory, and the digest length-prefix reframing. Slice 4 itself BUILT later the same day (suite 162 green): the worker lifecycle landed with all four of its ruled build notes — the 30-day expiry sweep (plus stale screening scratch and day-old dead-worker leftovers), the liveness check before the resubmit sweep, process-group kill-and-wait for cancel, and the worker start-time recorded beside its pid (Codex FIX-2 — the tag-only framing was collidable by crafted content; every component is now length-prefixed) — plus one stray the sweep exposed: the program's `unsafe-path` code, which the spec's catalog never listed, folded into `malformed-field` under the same collapse principle. The refusal-text quality pass ran the same day over the final catalog: every refusal site meets the user's bar (facts name the offending path/field and embed what the program holds — stderr, intervening commits, the current tip; next actions are verb-first and specific); no entry needed a user judgment call.
 
-- APPLIED 2026-08-12 — **Refusal-text quality pass** (user-ruled 2026-08-10). The bar, in the user's words: a refused check-in gets "the best, most useful and actionable refusal text that can be reliably generated." Sweep every error-catalog entry against three questions: (1) does the text say what happened, in the caller's terms; (2) does it name the exact next action, not a category of action; (3) does it include every fact the program already holds that the caller would otherwise have to dig up — the offending path, the conflicting commit id, the expected form of a missing argument. "Already holds" is the limit: no speculative investigation beyond what the check-in computed. Entries whose text needs a judgment call go to the user rather than being decided silently. Runs alongside slice 4.
+- APPLIED 2026-08-12 — **Refusal-text quality pass** (user-ruled 2026-08-10). The bar is the user's, quoted in the specification's § The job and the guarantee. Sweep every error-catalog entry against three questions: (1) does the text say what happened, in the caller's terms; (2) does it name the exact next action, not a category of action; (3) does it include every fact the program already holds that the caller would otherwise have to dig up — the offending path, the conflicting commit id, the expected form of a missing argument. "Already holds" is the limit: no speculative investigation beyond what the check-in computed. Entries whose text needs a judgment call go to the user rather than being decided silently. Runs alongside slice 4.
 - APPLIED 2026-08-12 with slice 4 — **Refusal-record expiry**
   (user-ruled 2026-08-10). Every gatekeeper
   invocation first sweeps retained `--no-wait` refusal records older than
@@ -719,7 +719,7 @@ remains in git history at `4cadb46`.
 
 ### Approval-walk `complexity-sweep-findings-2026-10-02`, item 17: making the asynchronous machinery robust
 
-The approval-walk `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/complexity-sweep-findings-2026-10-02.md`, item 17, held on 2026-10-03 (walk-minutes: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/complexity-sweep-findings-2026-10-02-minutes.md`), asked whether build-slice 4's asynchronous machinery — `--no-wait`, the detached worker, `status` and `cancel` — should be removed, since no slow check has yet run at the main-gatekeeper. The user ruled to keep it: a main-gatekeeper run with its checks can take 20 minutes or more, and a run that long must outlive the agent-session that submitted it, which an agent-seat's session-handoff or crash can end at any time. A command run by an agent's harness as a background task belongs to that agent-session and is not built to outlive it; the detached worker, started in its own operating-system session, is, and so is what the worker leaves for `status`: a commit on main, or a refusal record in its workspace. Neither survives a reboot of the host, after which the request reads as abandoned and is resubmitted. The user also ruled that the machinery must be made robust before the main-gatekeeper is activated, and that the requirements are recorded here, because no agent-seat owns the main-gatekeeper (the agent-seat `gatekeeper` was retired on 2026-10-04), and this build-slice plan is where whoever builds the main-gatekeeper starts. The user approved the six requirements below in summary form; the detail under each is the recording agent's, and a builder who finds it wrong proposes a change to the user rather than building around it.
+The approval-walk `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/complexity-sweep-findings-2026-10-02.md`, item 17, held on 2026-10-03 (walk-minutes: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/complexity-sweep-findings-2026-10-02-minutes.md`), asked whether build-slice 4's asynchronous machinery — `--no-wait`, the detached worker, `status` and `cancel` — should be removed, since no slow check has yet run at the main-gatekeeper. The user ruled to keep it, and to make it robust before the main-gatekeeper is activated, by six requirements; the ruling, its reason and the six in summary are stated in the specification, `nn-systems/main-gatekeeper/main-gatekeeper.system.design.md` § States, crashes, cancel, and errors. A command run by an agent's harness as a background task belongs to that agent-session and is not built to outlive it; the detached worker, started in its own operating-system session, is, and so is what the worker leaves for `status`: a commit on main, or a refusal record in its workspace. Neither survives a reboot of the host, after which the request reads as abandoned and is resubmitted. The detail of the requirements is recorded here, because no agent-seat owns the main-gatekeeper (the agent-seat `gatekeeper` was retired on 2026-10-04), and this build-slice plan is where whoever builds the main-gatekeeper starts. The user approved the six requirements below in summary form; the detail under each is the recording agent's, and a builder who finds it wrong proposes a change to the user rather than building around it.
 
 The six are program work in `nn-systems/main-gatekeeper/main-gatekeeper.py`, where every function and constant named below lives, with their tests in `nn-systems/main-gatekeeper/tests/main-gatekeeper-test.py`. Each is a prerequisite of activation; requirement 5 is built with build-slice 7. None is built. They contradict specification text in `nn-systems/main-gatekeeper/main-gatekeeper.system.design.md`, so the pull request that builds each one amends every passage of the specification it contradicts, at least these: § The request and the reply (the instant `accepted` of a non-waiting caller, which requirement 2 changes, and the outcomes `status` returns, which requirements 1, 4 and 5 change); the error catalog in § States, crashes, cancel, and errors (requirement 2's new refusal); § States, crashes, cancel, and errors (the workspace's `main-gatekeeper-check-in-request-holder.pid`, liveness judged by the recorded process ID and start time, and `cancel`'s group rule, which requirement 3 changes); and the Records paragraph of § The job and the guarantee, "No side files, no separate logs" (requirements 1 and 4 add files to the workspace). The exact field names and wording of the new outcomes are the builder's, recorded in those amendments.
 
@@ -732,7 +732,7 @@ In what follows, the main-gatekeeper-check-in-request-holder is the process that
 5. **The outcomes fit the gate's pull request (build-slice 7).** Today a main-gatekeeper-check-in-request-holder that succeeds deletes its workspace, and `status`, `cancel` and a twin `check-in` learn the result from main's history. Once build-slice 7 has the main-gatekeeper open a pull request instead of pushing to main, a finished request leaves no commit on main until the merge-lane merges the pull request, so `status` would answer `unknown`, `cancel` would answer `cancelled` while the pull request stays open, and a resubmission would open a second pull request. Required, built with build-slice 7: an outcome for a request whose pull request is open, naming the pull request, which `status`, `cancel` and `check-in` all honour. Build-slice 7 also decides where that outcome is kept, what removes it, what `status` answers once the pull request is closed without merging, and what a main-gatekeeper-check-in-request-holder that dies after opening the pull request but before recording it leaves behind.
 6. **A long run is tested.** No check slow enough to need the detached worker has run, because build-slice 9's check battery is not built, and the worker has no check step yet. Required: a test-only check step in the worker, inert unless a test enables it as the existing `worker_phase` pauses are, that blocks until the test releases it, with a deadline of its own so that a failed case ends in seconds rather than minutes. With it, the tests cover: a detached worker that keeps running after its caller's whole process group is killed, which a worker sharing that group would not survive; a worker killed with `SIGKILL`, and one whose `run_worker` raises outside its `try` block, each giving `abandoned` with requirement 1's content; a worker that dies before it is ready, and one that is slower than the readiness bound, each refused with its workspace removed (requirement 2); a twin submission while the main-gatekeeper-worker-spawner is still filling the workspace, which must read the request as live; `status` during the run, carrying the step (requirement 4); `cancel` during the run; `cancel` after the lock is free, which signals nothing; and a workspace older than `STALE_WORKSPACE_SECONDS` whose lock is held, which the sweep keeps.
 
-Item 10 of the same walk adds one more requirement, ruled by the user on 2026-10-04 after the build found that the sweep had missed half of what the read-once rule does. Today `status` returns a retained refusal record once and then deletes its workspace, and that deletion is also what lets the same work be resubmitted: a kept workspace makes `check-in` answer `in-progress` for the same digest. Required, built with the six requirements above: `status` returns a refusal record every time it is asked, until the record expires after `REFUSAL_RECORD_RETENTION_SECONDS`, 30 days; and a refusal record does not block a new `check-in` of identical work, which starts a fresh run. The pull request that builds it amends every passage that says a refusal is returned once: the specification, `nn-systems/main-gatekeeper/main-gatekeeper.system.design.md`, in its opening revision note, in § The request and the reply (twice, the `status` line included), and in § States, crashes, cancel, and errors; `docs/issues/3-gatekeeper-build-bindings.md`, ruling B4d; and this plan's own follow-up entry on claiming the record.
+Item 10 of the same walk adds one more requirement, ruled by the user on 2026-10-04 after the build found that the sweep had missed half of what the read-once rule does; it is stated in the specification, § States, crashes, cancel, and errors. Today `status` returns a retained refusal record once and then deletes its workspace, and that deletion is also what lets the same work be resubmitted: a kept workspace makes `check-in` answer `in-progress` for the same digest. It is built with the six requirements above, the record kept for `REFUSAL_RECORD_RETENTION_SECONDS`, 30 days. The pull request that builds it amends the two other passages that say a refusal is returned once: `docs/issues/3-gatekeeper-build-bindings.md`, ruling B4d, and this plan's own follow-up entry on claiming the record.
 
 ## Design points this plan settles
 
@@ -803,11 +803,12 @@ The 2026-08-10 subtraction review proposed three cuts that the user rejected: it
 **Ruled 2026-09-14 at the merge-lane seat: shape 1.** Provenance, recorded
 exactly: merge-lane presented two shapes with a recommendation for shape 1;
 the user's whole reply was "shape 1". Every other word in this section is
-merge-lane's. Issue [main-gatekeeper — the single check-in gate (design: nn-systems/main-gatekeeper/main-gatekeeper.system.design.md)](https://github.com/nedsnodes/nedsnodes/issues/3)'s body and the specification's Implementation status
-paragraph each carry the ruling in one sentence; this section is its record.
+merge-lane's. Issue [main-gatekeeper — the single check-in gate (design: nn-systems/main-gatekeeper/main-gatekeeper.system.design.md)](https://github.com/nedsnodes/nedsnodes/issues/3)'s body carries the ruling in one sentence, and the
+specification states it in § The credential and enforcement, the bullet on
+the gate's pull request; this section is its record.
 
-**Shape 1.** At activation the merge lane keeps reviewing and approving the
-gate's pull requests. The gate is the program that opens them: attribution
+**Shape 1**, stated in the specification's bullet on the gate's pull
+request. The gate is the program that opens those pull requests: attribution
 computed (it already writes the `Gatekeeper-origin` trailer from
 `CLAUDE_CODE_SESSION_ID` — the request's `origin` field in
 `nn-systems/main-gatekeeper/main-gatekeeper.py`, pinned by the suite's case "the origin trailer
@@ -847,20 +848,20 @@ its number, so the slices below start at 7.
 **Ruled 2026-09-15 at the merge-lane seat: shape A.** Provenance, recorded
 exactly: merge-lane presented two shapes with a recommendation for shape A;
 the user's whole reply was "a". Every other word in this section is
-merge-lane's. The specification's Implementation status paragraph and the
-state machine's § 3.4 each carry the ruling in one sentence; this section
-is its record. The ghi-write split that makes room in issue [main-gatekeeper — the single check-in gate (design: nn-systems/main-gatekeeper/main-gatekeeper.system.design.md)](https://github.com/nedsnodes/nedsnodes/issues/3)'s body for
+merge-lane's. The specification states the ruling in § The credential and enforcement,
+the bullet on the gate's pull request, and in § The procedure, step 6; the
+state machine's § 3.4 carries it in one sentence; this section is its
+record. The ghi-write split that makes room in issue [main-gatekeeper — the single check-in gate (design: nn-systems/main-gatekeeper/main-gatekeeper.system.design.md)](https://github.com/nedsnodes/nedsnodes/issues/3)'s body for
 this ruling is § The per-file staleness report — slice 8's requirement:
 that requirement's substance lives here now, and the body keeps a summary
 and a pointer to it.
 
-**Shape A, ruled.** The gate's pull request carries the single candidate
-commit the gate composes today — one commit on top of current main, the
-declared files, the caller's message, the gate's trailers — opened from the
-gate's candidate branch. The merge lane reviews, approves and merges it
-exactly as it merges every pull request now: an independent reviewer plus
-the merge seat's own approving review, a merge commit pinned to the
-approved commit. The caller's working commits stay on its topic branch and
+**Shape A, ruled**, and stated in the specification at the places above.
+The detail is merge-lane's: the commit is the one the gate composes today —
+on top of current main, the declared files, the caller's message, the
+gate's trailers — opened from the gate's candidate branch; the merge lane's
+review is an independent reviewer plus the merge seat's own approving
+review, and the merge commit is pinned to the approved commit. The caller's working commits stay on its topic branch and
 do not reach main.
 
 **Shape B, not chosen.** The caller's topic branch with its run of commits
@@ -893,8 +894,8 @@ The slice numbers are not a ruled build order: which of slices 7, 8 and 10 is bu
 
 | Slice | Delivers | Spec tests | Retires |
 |---|---|---|---|
-| 7 | The gate opens a pull request instead of pushing to main (ruled 2026-08-29). Today `attempt_push` pushes `main-gatekeeper-candidate:main` directly. **Ruled 2026-09-15: shape A** — the pull request carries the single candidate commit and the merge lane merges it as a merge commit; § What the gate's pull request carries and how it merges — ruled 2026-09-15 | none yet | `attempt_push`'s direct push to main |
-| 8 | The per-file staleness report (user-ruled 2026-08-31; in full below, § The per-file staleness report — slice 8's requirement): for every declared path, whether main has changed it since the base commit, how many commits, the latest pull request — a report, never a refusal. Build note: the pre-push hook's `scripts/branch-reverts-a-file-to-an-older-main-version-check.py` already makes part of this comparison, finding a file the branch sets back to a version main has since replaced; slice 8 builds on it rather than writing that comparison a second time, since the user ruled on 2026-08-31 that this check belongs to the gate so that it is not built twice (§ The per-file staleness report — slice 8's requirement, "Why it belongs to the gate rather than to a session hook") | none yet | the accepted interim in which nothing reports, path by path, that main changed a declared path since the base |
+| 7 | The gate opens a pull request instead of pushing to main (ruled 2026-08-29). Today `attempt_push` pushes `main-gatekeeper-candidate:main` directly. **Ruled 2026-09-15: shape A** — stated in the specification's § The credential and enforcement, the bullet on the gate's pull request; its record is § What the gate's pull request carries and how it merges — ruled 2026-09-15 | none yet | `attempt_push`'s direct push to main |
+| 8 | The per-file staleness report (user-ruled 2026-08-31; stated in the specification's § Constructive guarantees, the advisory, and the growth point; its record is below, § The per-file staleness report — slice 8's requirement). Build note: the pre-push hook's `scripts/branch-reverts-a-file-to-an-older-main-version-check.py` already makes part of this comparison, finding a file the branch sets back to a version main has since replaced; slice 8 builds on it rather than writing that comparison a second time, since the user ruled on 2026-08-31 that this check belongs to the gate so that it is not built twice (§ The per-file staleness report — slice 8's requirement, "Why it belongs to the gate rather than to a session hook") | none yet | the accepted interim in which nothing reports, path by path, that main changed a declared path since the base |
 | 9 | The check battery, the mechanical checks that run at check-in. **Ownership unruled** since 2026-08-14 (§ Open item 3 below; PR [gatekeeper slice plan: an open question on whether this build owns the check battery](https://github.com/nedsnodes/nedsnodes/pull/63)): whether this build owns it or the toolchain plan's Phase 1 binding is corrected is the user's ruling | none yet | unruled |
 | 10 | The C2 move: the gate runs from the dedicated Unix user, on the deployed root-owned copy, pushing on the `ned-git-gatekeeper` token rather than on its caller's credential (specification § The credential and enforcement, the Unix-user boundary bullet) | none yet | pushing on whatever credential the caller's environment carries |
 
@@ -916,12 +917,9 @@ Moved here from issue [main-gatekeeper — the single check-in gate (design: nn-
 rather than being shortened. The requirement and the quoted words are the
 user's; the arrangement is merge-lane's. The body keeps the summary.
 
-**The requirement.** For every path a check-in carries, the gate says
-whether main has changed that same path since the check-in's base commit,
-naming how many commits and the latest pull request. It is a report, not a
-refusal: the false-positive case is real — two agents editing different
-parts of one file merge cleanly — and a refusal that misjudges wedges the
-caller.
+**The requirement** is stated in the specification, § Constructive
+guarantees, the advisory, and the growth point; the paragraphs below are
+its record.
 
 **Why it belongs to the gate rather than to a session hook.** This is the
 same computation the gate already performs one comparison-point away — its
