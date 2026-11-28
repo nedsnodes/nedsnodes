@@ -2986,6 +2986,63 @@ def test_a_closing_line_never_takes_the_point_of_another_heading_for_its_number(
           "keep it" not in text and "remove it" not in text and "page2" in text, text)
 
 
+ITEM_2_ALONE_AND_SHARED_WITH_ITEM_4 = """# A walk
+
+## Item 2 of 8: keep it
+
+Recommendation: keep the filter.
+
+## Items 2 and 4 of 9: remove it
+
+Item 2 of 9 drops the filter. Recommendation: remove the filter.
+
+Item 4 of 9 drops a sentence. Recommendation: drop the sentence.
+"""
+
+
+def test_a_heading_chosen_for_one_waiting_item_never_gives_another_waiting_item_it_names_its_text():
+    case = Case(next_to_present="items 2 and 4 of 8", document=ITEM_2_ALONE_AND_SHARED_WITH_ITEM_4)
+    case.minutes("#item_page item 2 of 8 https://claude.ai/artifact/page2\n"
+                 "#item_page item 4 of 8 https://claude.ai/artifact/page4\n#next_to_present items 2 and 4 of 8")
+    text = "\n".join(case.lines("2 r") or [])
+    check("R on item 2, whose `of 8` heading is chosen, names that heading's point, not the shared heading's",
+          "Item 2 of 8, keep it" in text and "Item 2 of 8, remove it" not in text, text)
+    text = "\n".join(case.lines("4 r") or [])
+    check("R on item 4, which only the shared heading names, names the shared heading's point",
+          "Item 4 of 8, remove it" in text, text)
+    walk = HOOK_MODULE.read_walk(case.checkout)
+    check("item 2 gets the recommendation of the heading chosen for it, not the shared heading's, and item 4 its own",
+          walk.recommendations.get("2") == "keep the filter" and walk.recommendations.get("4") == "drop the sentence",
+          walk.recommendations)
+
+
+TWO_HEADINGS_FOR_ITEM_4_EACH_WITH_PARTS = """# A walk
+
+## Item 4 of 8: a filter
+
+Part 1. Hide old rows.
+Part 2. Hide new rows.
+
+Recommendation: approve parts 1 and 2.
+
+## Item 4 of 9: a filter, revised
+
+Part 1. Hide old rows only.
+Part 2. Keep new rows.
+
+Recommendation: approve parts 1 and 2.
+"""
+
+
+def test_a_part_answer_to_an_item_with_two_headings_neither_chosen_is_refused_without_either_headings_text():
+    case = Case(next_to_present="item 4", document=TWO_HEADINGS_FOR_ITEM_4_EACH_WITH_PARTS)
+    text = "\n".join(case.lines("approve 1 and 2") or [])
+    check("`approve 1 and 2` while item 4 has two headings and neither is chosen is refused and says why",
+          "The hook discarded this answer" in text and "more than one heading for `Item 4`" in text, text)
+    check("the refusal takes no text from either heading",
+          "Hide old rows" not in text and "Hide new rows" not in text and "Keep new rows" not in text, text)
+
+
 def test_m_on_an_item_with_no_heading_reports_why_before_the_publish_steps():
     case = Case(next_to_present="items 5 and 6 of 9", document="# A walk\n\n## Item 5 of 9: fix a path\n\nFix it.\n")
     case.minutes("#item_page item 5 of 9 https://claude.ai/artifact/PageOfItem5\n\n#next_to_present items 5 and 6 of 9")

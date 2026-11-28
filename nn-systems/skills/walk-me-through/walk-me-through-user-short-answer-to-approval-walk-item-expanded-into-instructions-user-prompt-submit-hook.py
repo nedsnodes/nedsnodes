@@ -736,17 +736,18 @@ def read_walk(cwd):
     references = {}
     shown_text_parser(walk_finder).parse(text, references)
     spans = walk_finder.item_unit_spans(text, parser)
-    units, shown_texts, shown_text_problem, no_decision_numbers = [], {}, None, set()
+    chosen, shown_texts, shown_text_problem, no_decision_numbers = {}, {}, None, set()
     try:
-        _, units = walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
+        _, chosen = walk_finder.waiting_item_unit_chosen_for_each_item_number(document, value, numbers, total, parser,
+                                                                              spans)
         for number in numbers:
-            unit = next(unit for unit in units if number in unit[0])
-            shown_texts[number] = walk_finder.approval_walk_item_text_as_shown_to_user(text, parser, spans, unit, number)
+            shown_texts[number] = walk_finder.approval_walk_item_text_as_shown_to_user(text, parser, spans,
+                                                                                       chosen[number], number)
         no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
-            text, parser, units, numbers, spans)
+            text, parser, chosen, numbers, spans)
     except walk_finder.UnusableRange as problem:
         shown_text_problem = f"the `#next_to_present` line, `{value}`, {problem}"
-    stated = item_numbers_each_unit_states(spans, units, numbers)
+    stated = item_numbers_each_unit_states(spans, chosen)
     recommendations, problems, parts = recommendations_in(
         walk_finder.prose_lines(text, parser, tokens), walk_finder.item_opening_lines(text, parser, tokens),
         spans, walk_finder, part_starts(tokens), stated)
@@ -758,12 +759,13 @@ def read_walk(cwd):
                      document, references, no_decision_numbers)
 
 
-def item_numbers_each_unit_states(spans, waiting_units, waiting_numbers):
+def item_numbers_each_unit_states(spans, chosen):
     """For each of spans, the item numbers whose text it holds: those no other unit names, and a waiting item's number
-    in the unit waiting_item_units chose for it. A number two units name and none was chosen for is in neither list."""
+    in the unit chosen for it, chosen being waiting_item_unit_chosen_for_each_item_number's {number: unit}. A number
+    two units name is in the list of the unit chosen for it, or, when none was chosen, in neither list."""
     naming = collections.Counter(number for unit in spans for number in unit[0])
     return [[number for number in unit[0]
-             if naming[number] == 1 or (number in waiting_numbers and unit in waiting_units)] for unit in spans]
+             if (chosen[number] is unit if number in chosen else naming[number] == 1)] for unit in spans]
 
 
 def heading_points(lines, spans, parser):
@@ -774,6 +776,18 @@ def heading_points(lines, spans, parser):
         point = approval_walk_item_heading_point_without_links(lines[first], parser)
         if point is not None:
             points.update({number: point for number in numbers})
+    return points
+
+
+def waiting_item_heading_points(lines, chosen, parser):
+    """{waiting item number: the point the heading chosen for it states}, chosen being
+    waiting_item_unit_chosen_for_each_item_number's {number: unit}, so a later heading that also names the item
+    does not give it its own point."""
+    points = {}
+    for number, unit in chosen.items():
+        point = approval_walk_item_heading_point_without_links(lines[unit[3]], parser)
+        if point is not None:
+            points[number] = point
     return points
 
 
@@ -864,7 +878,7 @@ def recommendations_in(lines, openings, spans, walk_finder, starts, stated):
     Under a heading that names several items, every item's recommendation is None when any of them has no
     opening and either the heading holds more than one recommendation or that item's lines run over another
     item's opening, since an opening missed leaves the part before it running on into the next item's text."""
-    found, problems, parts = {}, {}, {}
+    found, problems, parts, unchosen_parts = {}, {}, {}, {}
     for (numbers, unit_total, _, first, end), own_numbers in zip(spans, stated):
         ranges = {number: walk_finder.approval_walk_item_line_range_within_heading_shared_by_several_items(
             openings, first, end, number, numbers, unit_total) for number in numbers}
@@ -883,14 +897,20 @@ def recommendations_in(lines, openings, spans, walk_finder, starts, stated):
                 for number in own_numbers:
                     found[number], problems[number] = None, problem
                 continue
-        for number in own_numbers:
-            part = lines[ranges[number][0]:ranges[number][1]]
-            found[number] = walk_finder.approval_walk_item_last_recommendation_text_from_item_lines(part)
+        for number in numbers:
             numbered = part_numbers(starts, *ranges[number])
-            if numbered:
-                parts[number] = numbered
-    # A waiting item with such a number never reaches its answer's lines: unseen_item_lines refuses the answer.
+            if number in own_numbers:
+                part = lines[ranges[number][0]:ranges[number][1]]
+                found[number] = walk_finder.approval_walk_item_last_recommendation_text_from_item_lines(part)
+                if numbered:
+                    parts[number] = numbered
+            elif numbered:
+                unchosen_parts.setdefault(number, set()).update(numbered)
+    # A waiting item with such a number never reaches its answer's lines: unseen_item_lines refuses the answer. Its
+    # headings' part numbers are kept, though no text is read from either, so that `approve 1 and 2` reaches that
+    # refusal as an answer to its parts instead of naming items the walk does not have.
     found.update({number: None for unit in spans for number in unit[0] if number not in found})
+    parts.update({number: sorted(found_parts) for number, found_parts in unchosen_parts.items() if number not in parts})
     return found, problems, parts
 
 
