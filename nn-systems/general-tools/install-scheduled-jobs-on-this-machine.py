@@ -11,7 +11,7 @@ Usage:
   --check       compare what this machine has installed with the table; exit 1
                 when any job differs, or when this machine runs a job the
                 table does not name; exit 2 when a job or a crontab line is
-                NOT CHECKED. Changes nothing.
+                #scheduled_job_not_checked#. Changes nothing.
   --install     make this machine's crontab and launchd jobs what the table
                 says. A job already installed as the table says is left alone.
   --start-once  with --install: after installing, ask launchd to run each
@@ -21,8 +21,8 @@ Usage:
                 and delete its plist. Needs --job, so a bare --remove cannot
                 take off every job.
   --remove-not-in-table
-                take off this machine every job --check reports NOT IN THE
-                TABLE. Takes no --job. Exits 1 when it leaves a line KEPT.
+                take off this machine every job --check marks
+                #scheduled_job_not_in_table#. Takes no --job. Exits 1 when it leaves a line KEPT.
   --job NAME    limit the run to this job of the table; repeat for several.
                 Without it --print, --check and --install take every job the
                 table places on this machine.
@@ -131,7 +131,7 @@ from its entry, in a pull request: at the next pull into each machine's
 reference-checkout, --remove-not-in-table takes it off that machine. Do not
 run --remove --job NAME first: while the job's entry is still in the table,
 the --install after the next pull, whatever it merges, installs the job
-again. --check, run without --job, reports each job this machine runs that no job of the table names for it, NOT IN THE TABLE:
+again. --check, run without --job, marks #scheduled_job_not_in_table# each job this machine runs that no job of the table names for it:
 a cron line whose command runs a program from the machine's clone, directly or
 through an interpreter, and is no cron job's line of the table — not a
 comment, not a line that sets a variable, and not a line that only reads or
@@ -140,9 +140,9 @@ label is no launchd job's of the table.
 A plist written before that line existed is not found. A cron line whose
 programs this program cannot tell, because it gives an interpreter or env an
 option, defines a function, or names no program after its interpreter or env,
-is reported NOT CHECKED instead, with which of these it does, and
+is marked #scheduled_job_not_checked# instead, with which of these it does, and
 --remove-not-in-table leaves it in place.
---remove-not-in-table takes exactly the NOT IN THE TABLE jobs off, except a cron line that also
+--remove-not-in-table takes exactly the #scheduled_job_not_in_table# jobs off, except a cron line that also
 runs a job that is not a program of the clone: it reports that line as KEPT
 and leaves it for a person to edit, since removing it would stop the other
 job too. A later pipeline stage, such as the logger of `job | logger`, only
@@ -196,6 +196,9 @@ next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
 PROGRAM = "install-scheduled-jobs-on-this-machine"
+DIFFERS_HASHTAG = "#scheduled_job_differs_from_table#"
+NOT_IN_TABLE_HASHTAG = "#scheduled_job_not_in_table#"
+NOT_CHECKED_HASHTAG = "#scheduled_job_not_checked#"
 TABLE_FILE_NAME = "scheduled-jobs-on-each-machine.json"
 SCHEDULERS = ("cron", "launchd")
 # Reject table overrides of program-owned plist keys to avoid conflicting definitions.
@@ -1029,7 +1032,7 @@ def check_mode(machine, placed, launch_agents_directory: Path, table_path: Path,
             if len(differs) == marker_differences_of_this_job:
                 differences_only_the_marker += 1
             for difference in differs:
-                print(f"DIFFERS: {name} — {difference}.")
+                print(f"{PROGRAM}: {DIFFERS_HASHTAG} {name} — {difference}.")
         elif not loaded_state_unknown:
             print(f"matches: {name} — {placement['scheduler']}.")
     not_in_table = shares_a_line = 0
@@ -1041,14 +1044,14 @@ def check_mode(machine, placed, launch_agents_directory: Path, table_path: Path,
         for index, also_runs_others in cron_lines_not_in_table(machine, placed, lines):
             not_in_table += 1
             shares_a_line += also_runs_others
-            print(f"NOT IN THE TABLE: the crontab line {lines[index]} — no job of the table "
+            print(f"{PROGRAM}: {NOT_IN_TABLE_HASHTAG} the crontab line {lines[index]} — no job of the table "
                   f"names it for this machine."
                   + (" The line also runs a job that is not a program of the clone, so "
                      "--remove-not-in-table leaves the line in place." if also_runs_others else ""))
         lines_not_read = _cron_lines_not_read(placed, lines)
         for plist_path, label in plists_not_in_table(machine, placed, launch_agents_directory):
             not_in_table += 1
-            print(f"NOT IN THE TABLE: {plist_path}, label {label} — no job of the table "
+            print(f"{PROGRAM}: {NOT_IN_TABLE_HASHTAG} {plist_path}, label {label} — no job of the table "
                   f"names it for this machine.")
     if differences:
         print(f"When the table says what this machine should run, run "
@@ -1058,14 +1061,14 @@ def check_mode(machine, placed, launch_agents_directory: Path, table_path: Path,
             print(f"When this machine is right and the table is wrong, change {table_path} "
                   f"through a pull request.")
     if not_in_table:
-        print(f"When every job NOT IN THE TABLE is retired, run "
+        print(f"When every job marked {NOT_IN_TABLE_HASHTAG} is retired, run "
               f"`{Path(__file__).resolve()} --remove-not-in-table` on this machine; it "
               f"removes all of them.")
         print(f"When only some are retired, first add the others' entries to {table_path} "
               f"through a pull request.")
-        print(f"When a job NOT IN THE TABLE should still run, add its entry to {table_path} "
+        print(f"When a job marked {NOT_IN_TABLE_HASHTAG} should still run, add its entry to {table_path} "
               f"through a pull request, before the next pull into this machine's "
-              f"reference-checkout, which takes off every job NOT IN THE TABLE.")
+              f"reference-checkout, which takes off every job marked {NOT_IN_TABLE_HASHTAG}.")
         if shares_a_line:
             print("When a retired job shares its crontab line with a job that is not the clone's, "
                   "ask the user to take the retired job off that line by hand in this machine's "
@@ -1073,12 +1076,12 @@ def check_mode(machine, placed, launch_agents_directory: Path, table_path: Path,
         print(f"To learn whether a job was retired on purpose, run "
               f"`git log -p -- {table_path}` in the clone.")
     for name, placement, failure in not_checked:
-        print(f"NOT CHECKED: {name} — {failure.cause}; so whether launchd has "
+        print(f"{PROGRAM}: {NOT_CHECKED_HASHTAG} {name} — {failure.cause}; so whether launchd has "
               f"{placement['label']} loaded is unknown.", file=sys.stderr)
-        print(failure.next_steps(rerun_command('--check', name), f"NOT CHECKED: {name}",
-                                 drift_line="DIFFERS"), file=sys.stderr)
+        print(failure.next_steps(rerun_command('--check', name), f"{PROGRAM}: {NOT_CHECKED_HASHTAG} {name}",
+                                 drift_line=DIFFERS_HASHTAG), file=sys.stderr)
     for line, cause in lines_not_read:
-        print(f"NOT CHECKED: the crontab line {line} — {cause}, so whether it runs a program of "
+        print(f"{PROGRAM}: {NOT_CHECKED_HASHTAG} the crontab line {line} — {cause}, so whether it runs a program of "
               f"the clone that no job of the table names is unknown.", file=sys.stderr)
     if lines_not_read:
         print(f"When such a line runs a program of the clone, add its job to {table_path} through "
@@ -1113,7 +1116,8 @@ def main(argv=None, platform: str = sys.platform, home: Path = None, table_path:
     mode.add_argument("--remove", action="store_true",
                       help="take the jobs named by --job off this machine")
     mode.add_argument("--remove-not-in-table", action="store_true",
-                      help="take off this machine every job --check reports NOT IN THE TABLE")
+                      help="take off this machine every job --check marks "
+                           "#scheduled_job_not_in_table#")
     parser.add_argument("--job", action="append", metavar="NAME",
                         help="limit the run to this job; repeat for several")
     parser.add_argument("--start-once", action="store_true",
@@ -1125,7 +1129,7 @@ def main(argv=None, platform: str = sys.platform, home: Path = None, table_path:
         parser.error("--remove needs --job: name each job to take off this machine")
     if arguments.remove_not_in_table and arguments.job:
         parser.error("--remove-not-in-table takes no --job: it removes every job --check "
-                     "reports NOT IN THE TABLE")
+                     "marks #scheduled_job_not_in_table#")
 
     home = Path(home) if home is not None else Path.home()
     table_path = Path(table_path) if table_path is not None \

@@ -695,7 +695,7 @@ with tempfile.TemporaryDirectory() as temporary:
     exit_code, printed, errors = run_main(["--check"] + TWO_JOBS, NED_BOX, stub)
     check("--check on a crontab holding the table's lines says each job matches, exits 0 and "
           "writes nothing",
-          exit_code == 0 and printed.count("matches: ") == 2 and "DIFFERS" not in printed
+          exit_code == 0 and printed.count("matches: ") == 2 and "#scheduled_job_differs_from_table#" not in printed
           and stub.crontab_writes == [] and stub.commands == [["crontab", "-l"]],
           (exit_code, printed, errors, stub.commands))
     stub = MachineStub(crontab=as_installed_today)
@@ -983,9 +983,9 @@ with tempfile.TemporaryDirectory() as temporary:
     exit_code, printed, errors = run_main(["--check"] + TWO_JOBS, NED_BOX, stub)
     check("--check names a missing line and a differing line, exits 1 and writes nothing",
           exit_code == 1 and stub.crontab_writes == []
-          and "DIFFERS: transcript-mirror-to-log-store — the crontab holds no line for "
+          and "install-scheduled-jobs-on-this-machine: #scheduled_job_differs_from_table# transcript-mirror-to-log-store — the crontab holds no line for "
               "transcript-mirror-to-log-store.py" in printed
-          and f"DIFFERS: scheduled-full-test-run-of-main — the crontab holds {differing_full_test_run}, "
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_differs_from_table# scheduled-full-test-run-of-main — the crontab holds {differing_full_test_run}, "
               f"not the table's line: {BOX_FULL_TEST_RUN}.\n" in printed,
           (exit_code, printed, errors))
     check("and tells the agent what to do in each of the two cases, one instruction a line",
@@ -998,7 +998,7 @@ with tempfile.TemporaryDirectory() as temporary:
     exit_code, printed, errors = run_main(
         ["--check", "--job", "runs-on-ned-box-alone"], NED_BOX, MachineStub(crontab=None))
     check("--check for a user with no crontab reports the job's line missing, exit 1",
-          exit_code == 1 and "DIFFERS: runs-on-ned-box-alone" in printed, (exit_code, printed))
+          exit_code == 1 and "install-scheduled-jobs-on-this-machine: #scheduled_job_differs_from_table# runs-on-ned-box-alone" in printed, (exit_code, printed))
 
     # --- cron: remove -----------------------------------------------------
     stub = MachineStub(crontab=as_installed_today)
@@ -1161,8 +1161,8 @@ with tempfile.TemporaryDirectory() as temporary:
     check("--check on the Mac before the scheduled run is installed: the mirror matches, the "
           "launchd job is not there and not loaded, exit 1, nothing written",
           exit_code == 1 and "matches: transcript-mirror-to-log-store — cron." in printed
-          and f"DIFFERS: scheduled-full-test-run-of-main — {plist_path} is not there." in printed
-          and f"DIFFERS: scheduled-full-test-run-of-main — launchd has no job {LABEL} loaded in "
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_differs_from_table# scheduled-full-test-run-of-main — {plist_path} is not there." in printed
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_differs_from_table# scheduled-full-test-run-of-main — launchd has no job {LABEL} loaded in "
               f"{DOMAIN}." in printed
           and not LAUNCH_AGENTS.exists() and stub.crontab_writes == []
           and stub.launchctl_verbs() == ["print"],
@@ -1314,9 +1314,9 @@ with tempfile.TemporaryDirectory() as temporary:
           and "installed:" not in printed, (exit_code, printed, errors))
     exit_code, printed, errors = run_main(["--check"] + FULL_TEST_RUN_JOB, MAC, stub)
     check("--check whose launchctl print fails with other than service-not-found reports the "
-          "job NOT CHECKED with print's exit and error, not as unloaded, and exits 2",
+          "job #scheduled_job_not_checked# with print's exit and error, not as unloaded, and exits 2",
           exit_code == 2
-          and (f"NOT CHECKED: scheduled-full-test-run-of-main — `launchctl print {TARGET}` exited 5, "
+          and (f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_checked# scheduled-full-test-run-of-main — `launchctl print {TARGET}` exited 5, "
                f"which is neither 0 (loaded) nor 113 (no such job loaded), with the error: "
                f"Could not print: injected launchctl failure; so whether launchd has {LABEL} "
                f"loaded is unknown.") in errors
@@ -1337,13 +1337,13 @@ with tempfile.TemporaryDirectory() as temporary:
     exit_code, printed, errors = run_main(["--check"] + FULL_TEST_RUN_JOB, MAC, stub)
     check_rerun = f"{SCRIPT_PATH.resolve()} --check --job scheduled-full-test-run-of-main"
     check("--check whose launchctl print fails printing no error ends with the rerun and with "
-          "when to stop, which is NOT CHECKED again, not a DIFFERS line, and exits 2",
+          "when to stop, which is #scheduled_job_not_checked# again, not a #scheduled_job_differs_from_table# line, and exits 2",
           exit_code == 2 and errors.splitlines()[-3:] == [
               f"Run `{check_rerun}` once more, on this machine; it tries this job alone.",
-              "A DIFFERS line is not this failure: it is drift the check found, and does not "
+              "A #scheduled_job_differs_from_table# line is not this failure: it is drift the check found, and does not "
               "count as the rerun failing.",
               installer.next_step_lines.agent_instruction_if_rerun_fails_too_stop_and_report_both_runs_line(
-                  "NOT CHECKED: scheduled-full-test-run-of-main")], (exit_code, errors))
+                  "install-scheduled-jobs-on-this-machine: #scheduled_job_not_checked# scheduled-full-test-run-of-main")], (exit_code, errors))
     exit_code, printed, errors = run_main(["--install"] + FULL_TEST_RUN_JOB, MAC, stub)
     install_rerun = f"{SCRIPT_PATH.resolve()} --install --job scheduled-full-test-run-of-main"
     check("--install whose launchctl print fails printing no error ends with the rerun and "
@@ -1424,31 +1424,31 @@ with tempfile.TemporaryDirectory() as temporary:
     check("--check reports a cron line that runs a program from the clone and is no job's "
           "line of the table, exit 1, and writes nothing",
           exit_code == 1 and stub.crontab_writes == [] and printed.count("matches: ") == 3
-          and f"NOT IN THE TABLE: the crontab line {retired_line} — no job of the table names "
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# the crontab line {retired_line} — no job of the table names "
               f"it for this machine.\n" in printed
-          and printed.count("NOT IN THE TABLE: ") == 1 and "DIFFERS" not in printed,
+          and printed.count("install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# ") == 1 and "#scheduled_job_differs_from_table#" not in printed,
           (exit_code, printed, errors))
     check("and not a commented-out line, a line running a program outside the clone, or "
           "another user's comment",
           commented_retired not in printed and foreign_line not in printed
           and "nedsmessenger" not in printed, printed)
-    check("and says what to do with a job NOT IN THE TABLE, one instruction a line",
+    check("and says what to do with a job marked #scheduled_job_not_in_table#, one instruction a line",
           printed.splitlines()[-4] == (
-              f"When every job NOT IN THE TABLE is retired, run `{SCRIPT_PATH.resolve()} "
+              f"When every job marked #scheduled_job_not_in_table# is retired, run `{SCRIPT_PATH.resolve()} "
               "--remove-not-in-table` on this machine; it removes all of them.")
           and printed.splitlines()[-3] == (
               "When only some are retired, first add the others' entries to "
               f"{FIXTURE_TABLE_PATH} through a pull request.")
           and printed.splitlines()[-2] == (
-              "When a job NOT IN THE TABLE should still run, add its entry to "
+              "When a job marked #scheduled_job_not_in_table# should still run, add its entry to "
               f"{FIXTURE_TABLE_PATH} through a pull request, before the next pull into this "
-              "machine's reference-checkout, which takes off every job NOT IN THE TABLE.")
+              "machine's reference-checkout, which takes off every job marked #scheduled_job_not_in_table#.")
           and printed.splitlines()[-1] == (
               "To learn whether a job was retired on purpose, run "
               f"`git log -p -- {FIXTURE_TABLE_PATH}` in the clone."), printed)
     exit_code, printed, errors = run_main(["--check"] + TWO_JOBS, NED_BOX, stub)
     check("--check limited by --job does not look for jobs the table does not name",
-          exit_code == 0 and "NOT IN THE TABLE" not in printed, (exit_code, printed))
+          exit_code == 0 and "#scheduled_job_not_in_table#" not in printed, (exit_code, printed))
 
     exit_code, printed, errors = run_main(["--remove-not-in-table"], NED_BOX, stub)
     check("--remove-not-in-table takes out exactly that line, in one crontab write, and "
@@ -1466,12 +1466,12 @@ with tempfile.TemporaryDirectory() as temporary:
           (exit_code, printed))
     exit_code, printed, errors = run_main(["--check"], NED_BOX, stub)
     check("and --check then finds every job matching and nothing outside the table, exit 0",
-          exit_code == 0 and "NOT IN THE TABLE" not in printed, (exit_code, printed))
+          exit_code == 0 and "#scheduled_job_not_in_table#" not in printed, (exit_code, printed))
     exit_code, printed, errors = run_main(
         ["--remove-not-in-table", "--job", "scheduled-full-test-run-of-main"], NED_BOX, stub)
     check("--remove-not-in-table with --job is refused before anything is read",
           exit_code == 2 and "--remove-not-in-table takes no --job: it removes every job "
-                             "--check reports NOT IN THE TABLE" in errors,
+                             "--check marks #scheduled_job_not_in_table#" in errors,
           (exit_code, errors))
     stub = MachineStub(crontab=None)
     stub.exit_codes["crontab-write"] = 1
@@ -1517,14 +1517,14 @@ with tempfile.TemporaryDirectory() as temporary:
     check("--check reports a line that runs a program from the clone, directly, through env "
           "or at reboot, and not a line that sets PATH to the clone, only reads or writes "
           "a file there, or gives env or an interpreter an option such as `env -C <clone>/data`",
-          printed.count("NOT IN THE TABLE: ") == 3
-          and all(f"NOT IN THE TABLE: the crontab line {line} — " in printed for line in runs)
+          printed.count("install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# ") == 3
+          and all(f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# the crontab line {line} — " in printed for line in runs)
           and not any(line in printed for line in not_runs), (exit_code, printed))
     unread = [env_option_takes_a_clone_directory, interpreter_option]
     check("and names on stderr each line that gives env or an interpreter an option as NOT "
           "CHECKED, and exits 2, not 1 or 0",
-          exit_code == 2 and errors.count("NOT CHECKED: the crontab line ") == 2
-          and all(f"NOT CHECKED: the crontab line {line} — it gives an interpreter or env an "
+          exit_code == 2 and errors.count("install-scheduled-jobs-on-this-machine: #scheduled_job_not_checked# the crontab line ") == 2
+          and all(f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_checked# the crontab line {line} — it gives an interpreter or env an "
                   f"option" in errors for line in unread)
           and f"add its job to {FIXTURE_TABLE_PATH} through a pull request" in errors,
           (exit_code, errors))
@@ -1532,9 +1532,9 @@ with tempfile.TemporaryDirectory() as temporary:
         line + "\n" for line in [BOX_MIRROR, BOX_FULL_TEST_RUN, BOX_ALONE, interpreter_option]).encode())
     exit_code, printed, errors = run_main(["--check"], NED_BOX, stub)
     check("--check with every job matching and one line it cannot read does not report a clean "
-          "result: it names the line NOT CHECKED and exits 2",
-          exit_code == 2 and printed.count("matches: ") == 3 and "NOT IN THE TABLE" not in printed
-          and f"NOT CHECKED: the crontab line {interpreter_option} — " in errors,
+          "result: it marks the line #scheduled_job_not_checked# and exits 2",
+          exit_code == 2 and printed.count("matches: ") == 3 and "#scheduled_job_not_in_table#" not in printed
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_checked# the crontab line {interpreter_option} — " in errors,
           (exit_code, printed, errors))
     exit_code, printed, errors = run_main(["--check"] + TWO_JOBS, NED_BOX, stub)
     check("and --check limited by --job does not read that line",
@@ -1545,15 +1545,15 @@ with tempfile.TemporaryDirectory() as temporary:
         line + "\n" for line in [BOX_MIRROR, BOX_FULL_TEST_RUN, BOX_ALONE, interpreter_option,
                                  defines_a_function, no_program_after_interpreter]).encode())
     exit_code, printed, errors = run_main(["--check"], NED_BOX, stub)
-    check("each NOT CHECKED line names its one cause: the option line its option, the function "
+    check("each #scheduled_job_not_checked# line names its one cause: the option line its option, the function "
           "line its function, the line with no program after its interpreter that, and none "
           "another's",
           exit_code == 2
-          and f"NOT CHECKED: the crontab line {no_program_after_interpreter} — it names no "
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_checked# the crontab line {no_program_after_interpreter} — it names no "
               f"program after its interpreter or env, so whether" in errors
-          and f"NOT CHECKED: the crontab line {interpreter_option} — it gives an interpreter or "
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_checked# the crontab line {interpreter_option} — it gives an interpreter or "
               f"env an option, which may take the next word, so whether" in errors
-          and f"NOT CHECKED: the crontab line {defines_a_function} — it defines a function, "
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_checked# the crontab line {defines_a_function} — it defines a function, "
               f"whose body may never run, so whether" in errors
           and errors.count("it defines a function") == 1
           and errors.count("it gives an interpreter or env an option") == 1
@@ -1565,10 +1565,10 @@ with tempfile.TemporaryDirectory() as temporary:
     stub = MachineStub(crontab="".join(
         line + "\n" for line in [BOX_MIRROR, full_test_run_behind_an_option, BOX_ALONE]).encode())
     exit_code, printed, errors = run_main(["--check"], NED_BOX, stub)
-    check("a table job's own line that gives its interpreter an option is that job's DIFFERS, "
-          "exit 1, and not NOT CHECKED",
+    check("a table job's own line that gives its interpreter an option is that job's #scheduled_job_differs_from_table#, "
+          "exit 1, and not #scheduled_job_not_checked#",
           full_test_run_behind_an_option != BOX_FULL_TEST_RUN and exit_code == 1
-          and "DIFFERS: scheduled-full-test-run-of-main" in printed and "NOT CHECKED" not in errors,
+          and "install-scheduled-jobs-on-this-machine: #scheduled_job_differs_from_table# scheduled-full-test-run-of-main" in printed and "#scheduled_job_not_checked#" not in errors,
           (full_test_run_behind_an_option, exit_code, printed, errors))
     stub = MachineStub(crontab="".join(
         line + "\n" for line in [path_setting, BOX_MIRROR, BOX_FULL_TEST_RUN, BOX_ALONE]
@@ -1582,16 +1582,16 @@ with tempfile.TemporaryDirectory() as temporary:
 
     # A retired line that runs a program file of the same name as a cron job
     # of the table is found as that job's line, the way an install finds it:
-    # --check reports it as that job's DIFFERS, and --install replaces it.
+    # --check reports it as that job's #scheduled_job_differs_from_table#, and --install replaces it.
     same_file_other_arguments = BOX_FULL_TEST_RUN.replace(
         "scheduled-full-test-run-of-main.py", "scheduled-full-test-run-of-main.py --a-retired-argument")
     stub = MachineStub(crontab=(f"{BOX_MIRROR}\n{BOX_FULL_TEST_RUN}\n{BOX_ALONE}\n"
                                 f"{same_file_other_arguments}\n").encode())
     exit_code, printed, errors = run_main(["--check"], NED_BOX, stub)
-    check("a retired line running a table job's program file is that job's DIFFERS, not NOT "
-          "IN THE TABLE",
-          exit_code == 1 and "NOT IN THE TABLE" not in printed
-          and f"DIFFERS: scheduled-full-test-run-of-main — the crontab holds {BOX_FULL_TEST_RUN}; "
+    check("a retired line running a table job's program file is that job's "
+          "#scheduled_job_differs_from_table#, not #scheduled_job_not_in_table#",
+          exit_code == 1 and "#scheduled_job_not_in_table#" not in printed
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_differs_from_table# scheduled-full-test-run-of-main — the crontab holds {BOX_FULL_TEST_RUN}; "
               f"{same_file_other_arguments}, not the table's line" in printed,
           (exit_code, printed))
     exit_code, printed, errors = run_main(["--install"], NED_BOX, stub)
@@ -1605,7 +1605,7 @@ with tempfile.TemporaryDirectory() as temporary:
     exit_code, printed, errors = run_main(["--check"], MAC, stub)
     check("a cron line for a job the table gives this machine as a launchd job is NOT IN THE "
           "TABLE: the table names no cron line for it here",
-          exit_code == 1 and f"NOT IN THE TABLE: the crontab line {stray_full_test_run_line}" in printed,
+          exit_code == 1 and f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# the crontab line {stray_full_test_run_line}" in printed,
           (exit_code, printed))
 
     LAUNCH_AGENTS.mkdir(parents=True, exist_ok=True)
@@ -1624,10 +1624,10 @@ with tempfile.TemporaryDirectory() as temporary:
     exit_code, printed, errors = run_main(["--check"], MAC, stub)
     check("--check reports a plist this program wrote whose label the table does not name, "
           "exit 1",
-          exit_code == 1 and f"NOT IN THE TABLE: {retired_plist_path}, label "
+          exit_code == 1 and f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# {retired_plist_path}, label "
                              f"com.nedsnodes.a-retired-job — no job of the table names it for "
                              f"this machine.\n" in printed
-          and printed.count("NOT IN THE TABLE: ") == 1 and printed.count("matches: ") == 2,
+          and printed.count("install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# ") == 1 and printed.count("matches: ") == 2,
           (exit_code, printed))
     check("and not a plist of the same shape and label prefix that another program wrote, "
           "or anyone else's",
@@ -1711,7 +1711,7 @@ with tempfile.TemporaryDirectory() as temporary:
     check("a plist that says what the table says but lacks this program's line is a "
           "difference of its own, so --install rewrites it with the line",
           exit_code == 1 and (
-              f"DIFFERS: scheduled-full-test-run-of-main — {plist_path} says what the table says "
+              f"install-scheduled-jobs-on-this-machine: #scheduled_job_differs_from_table# scheduled-full-test-run-of-main — {plist_path} says what the table says "
               "but lacks the line marking it as written by this installer; --install adds "
               "that line.\n") in printed
           and "does not say what the table says" not in printed
@@ -1788,8 +1788,8 @@ with tempfile.TemporaryDirectory() as temporary:
     exit_code, printed, errors = run_main(["--check"], NED_BOX, stub)
     check("--check reports a retired job piped to logger, and a line that also runs another job, "
           "saying --remove-not-in-table leaves that line in place",
-          exit_code == 1 and printed.count("NOT IN THE TABLE: ") == 2
-          and f"NOT IN THE TABLE: the crontab line {mixed} — " in printed
+          exit_code == 1 and printed.count("install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# ") == 2
+          and f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# the crontab line {mixed} — " in printed
           and "leaves the line in place" in printed and "take the retired job off that line by hand"
           in printed, (exit_code, printed))
     exit_code, printed, errors = run_main(["--remove-not-in-table"], NED_BOX, stub)
@@ -1837,7 +1837,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 check("with tree-sitter-bash missing, the installer has the shell module install "
                       "it, then reads the crontab and reports the retired line",
                       install_calls == [True] and exit_code == 1
-                      and f"NOT IN THE TABLE: the crontab line {runs_directly} — " in printed,
+                      and f"install-scheduled-jobs-on-this-machine: #scheduled_job_not_in_table# the crontab line {runs_directly} — " in printed,
                       (install_calls, exit_code, printed, errors))
             else:
                 check("when that install fails, --remove-not-in-table writes no crontab, exits 2 "

@@ -67,5 +67,8 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#root_cause#` — the pull request description line that names the root cause of a defect that the change removes.
 - `#root_cause_not_fixed#` — the pull request description line that names the root cause that stays, or says none was found, and why, with a `#follow_up#` link.
 - `#ruling_given#` — the comment `#ruling_given <walk name> item <number> <approved or disapproved>` the walk check program posts on a pull request held on that ruling once the user rules.
+- `#scheduled_job_differs_from_table#` — the line `install-scheduled-jobs-on-this-machine.py --check` prints for each way a job of the table is installed on this machine other than as the table says.
+- `#scheduled_job_not_checked#` — the line `install-scheduled-jobs-on-this-machine.py --check` prints, with exit 2, for a job or a crontab line whose state it could not tell, with the cause.
+- `#scheduled_job_not_in_table#` — the line `install-scheduled-jobs-on-this-machine.py --check` prints for a crontab line or launchd plist that runs a program of the clone and that no job of the table names for this machine.
 - `#user_alert#` — the walk-minutes line `#user_alert <id>` that records a user-alert inserted into the approval-walk as an item.
 - `#walk_minutes_hand_written_lines_converted#` — the walk-minutes line that `nn-systems/skills/walk-me-through/walk-me-through-open-walk-minutes-hand-written-decision-lines-to-program-lines-one-time-conversion-hack.py` writes after rewriting the hand-written decision lines, so it does not run twice on that file.
