@@ -247,8 +247,7 @@ def listings(pins, run_command):
                 prefix = headless.claude_code_headless_run_command_line_prefix_build("default", program=path or CLAUDE)
                 command = prefix + [CLAUDE_ALIAS_PROBE_PROMPT, "--model", families[0], "--output-format", "json",
                                     "--tools", "", "--no-session-persistence"]
-                shown = shlex.join([CLAUDE, "-p", CLAUDE_ALIAS_PROBE_PROMPT, "--model", families[0],
-                                    "--output-format", "json"])
+                shown = shlex.join([CLAUDE, *command[1:]])
             else:
                 command = [path or agent_binary, *arguments]
                 shown = " ".join([agent_binary, *arguments])

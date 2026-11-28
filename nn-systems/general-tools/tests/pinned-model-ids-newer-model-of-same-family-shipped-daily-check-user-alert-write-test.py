@@ -13,6 +13,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -192,6 +193,10 @@ def raises(error):
     return run
 
 
+CLAUDE_OPUS_COMMAND_SHOWN = shlex.join(
+    program.headless.claude_code_headless_run_command_line_prefix_build("default")
+    + [program.CLAUDE_ALIAS_PROBE_PROMPT, "--model", "opus", "--output-format", "json", "--tools", "",
+       "--no-session-persistence"])
 failure_case("codex exits 1 because it is logged out",
              {"codex": lambda command: completed(command, "", 1, "Not logged in. Run codex login.")},
              "exited 1, printing: Not logged in. Run codex login.", "codex debug models")
@@ -210,11 +215,11 @@ failure_case("agy cannot be started", {"agy": raises(PermissionError(13, "Permis
 failure_case("claude does not know the alias",
              {"claude:opus": json.dumps({"modelUsage": {}, "is_error": True, "terminal_reason": "api_error"})},
              "names 0 models of the family opus, not one",
-             "claude -p 'Reply with the single word ok.' --model opus --output-format json")
+             CLAUDE_OPUS_COMMAND_SHOWN)
 failure_case("claude prints text that is not JSON",
              {"claude:opus": "[claude-code:unrecognized_model] {\"model\":\"opus\"}"},
              "is not the JSON result it should print",
-             "claude -p 'Reply with the single word ok.' --model opus --output-format json")
+             CLAUDE_OPUS_COMMAND_SHOWN)
 
 with scratch() as (repository, home):
     exit_code, output, errors = run_main(repository, fake_run({"claude:opus": json.dumps(
