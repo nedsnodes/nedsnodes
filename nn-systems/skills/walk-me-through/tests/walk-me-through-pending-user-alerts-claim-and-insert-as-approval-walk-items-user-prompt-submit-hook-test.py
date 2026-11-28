@@ -281,15 +281,54 @@ def run_not_typed_cases(root):
     check("a background-task notice claims nothing when the transcript's newest turn is the user's previous one",
           case.names("pending") == ["alert-a"], repr(case.names("claimed")))
 
-    case = Case(root, "string-message-record")
+    for pending in (True, False):
+        case = Case(root, f"string-message-record-{'alert' if pending else 'none'}-pending")
+        if pending:
+            case.alert("alert-a")
+        with case.transcript.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"type": "user", "turnOrigin": "human", "message": "hello"}) + "\n")
+        result, context = case.run("hello")
+        system_message = case.output.get("systemMessage", "")
+        check(f"a transcript record whose message is a string is a failed read, so a prompt that opens as no "
+              f"program's message counts as typed, and with {'an alert' if pending else 'no alert'} pending and no "
+              f"approval-walk open the hook exits 0, {'claims the alert' if pending else 'claims nothing'}, and "
+              f"shows the user and the agent the read error, which no other hook reports then",
+              result.returncode == 0 and case.names("claimed") == (["alert-a"] if pending else [])
+              and "not an object" in system_message and str(case.transcript) in system_message
+              and "not an object" in context and system_message in context
+              and ("alert-a" in context) == pending,
+              result.stderr + result.stdout + repr(case.names("claimed")))
+
+    case = Case(root, "string-message-record-not-typed")
     case.alert("alert-a")
     with case.transcript.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps({"type": "user", "turnOrigin": "human", "message": "hello"}) + "\n")
+        stream.write(json.dumps({"type": "user", "turnOrigin": "task", "message": "x"}) + "\n")
+    result, context = case.run("<task-notification>done</task-notification>")
+    check("after a failed transcript read, a prompt that opens as a program's message claims nothing, and the hook "
+          "still shows the read error, saying it counted the prompt as not his",
+          result.returncode == 0 and case.names("pending") == ["alert-a"]
+          and "not an object" in case.output.get("systemMessage", "") and "counted it as not his" in context,
+          result.stderr + result.stdout)
+
+    case = Case(root, "transcript-not-utf-8")
+    case.alert("alert-a")
+    case.transcript.write_bytes(b"\xff\n{}\n")
     result, context = case.run("hello")
-    check("a transcript record whose message is a string is a failed read, so a prompt that opens as no "
-          "program's message counts as typed: exits 0 and claims the alert",
-          result.returncode == 0 and case.names("claimed") == ["alert-a"],
-          result.stderr + repr(case.names("claimed")))
+    check("a transcript line that is not UTF-8 is a failed read: the hook exits 0, claims the alert on a prompt "
+          "that opens as no program's message, and shows the UnicodeDecodeError",
+          result.returncode == 0 and case.names("claimed") == ["alert-a"]
+          and "UnicodeDecodeError" in case.output.get("systemMessage", "") and "counted it as his" in context,
+          result.stderr + result.stdout)
+
+    if os.geteuid() != 0:
+        case = Case(root, "transcript-unreadable")
+        case.turn_record("human", "hello")
+        case.transcript.chmod(0)
+        result, context = case.run("hello")
+        check("a transcript the hook may not open is a failed read: with no alert pending the hook exits 0 and "
+              "shows the PermissionError",
+              result.returncode == 0 and "PermissionError" in case.output.get("systemMessage", "")
+              and "PermissionError" in context, result.stderr + result.stdout)
 
 
 def run_headless_cases(root):

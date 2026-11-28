@@ -39,7 +39,10 @@ module the other walk-me-through hooks use, and its additionalContext tells the 
 FAILURES. A payload that is not JSON: one line on stderr, exit 1. A failure claiming alerts: a systemMessage, which
 Claude Code shows the user, says that alerts may be waiting unseen, since an alert is how a program reaches
 him, and that an agent on ned-box should fix the cause; additionalContext tells the agent what failed and
-that the user has been told.
+that the user has been told. A transcript the hook cannot read, or a record in it record_text cannot read: the
+prompt's opening decides, as above, and a systemMessage and additionalContext say so and why, on every prompt
+that reaches the transcript, typed or not and alerts claimed or not, since no other hook reports it on every one.
+typed_by_user_and_transcript_read_error gives the short-answer hook the same decision and error.
 
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
@@ -120,6 +123,17 @@ CLAIM_FAILED_LINES = (
     "be waiting in {directory} where nobody sees it: {error}.",
     "The hook has shown the user this sentence, so do not repeat it: \"{user_sentence}\"",
 )
+TRANSCRIPT_READ_FAILED_LINES = (
+    "The user-alerts hook could not read this agent-session's transcript {path}: {error}. So it judged by how the "
+    "prompt opens whether the user typed it, and counted it as {whose}.",
+    "The hook has shown the user this sentence, so do not repeat it: \"{user_sentence}\"",
+    "If the record it could not read is one Claude Code writes in normal use, then after you act on the user's "
+    "prompt, change record_text in {hook} to read it, on an nn-topic-branch with a test.",
+)
+TRANSCRIPT_READ_FAILED_USER_SENTENCE = ("The hook that brings program alerts into your approval-walk could not read "
+                                        "this agent-session's transcript {path} on ned-box ({error}), so it judged "
+                                        "by how your prompt opens whether you typed it. An agent on ned-box should "
+                                        "find out why.")
 CLAIM_FAILED_USER_SENTENCE = ("The hook that brings program alerts into your approval-walk failed on ned-box "
                               "({error}), so a program's alert may be waiting unseen in {directory}. An agent on ned-box "
                               "should fix the cause.")
@@ -137,8 +151,7 @@ def record_text(record):
         return None  # a metadata record, such as a system turn_duration record, which holds no text
     message = record["message"]
     if not isinstance(message, dict):
-        # AttributeError, which both callers of typed_by_user handle as a failed transcript read.
-        raise AttributeError(f"a transcript record's message is a {type(message).__name__}, not an object")
+        raise ValueError(f"a transcript record's message is a {type(message).__name__}, not an object")
     content = message.get("content")
     if isinstance(content, str):
         return content
@@ -148,20 +161,25 @@ def record_text(record):
     return None
 
 
-def typed_by_user(payload):
+def typed_by_user_and_transcript_read_error(payload):
+    """(whether the user typed the prompt, the error reading the transcript or None)."""
     prompt = payload.get("prompt") or ""
     speaker_test = load_module("search_user_messages_in_transcripts", SPEAKER_TEST_FILE)
     if speaker_test.user_turn_text_is_compaction_summary_or_launch_prompt(prompt):
-        return False
+        return False, None
+    by_opening = not prompt.lstrip().startswith(NOT_TYPED_PROMPT_OPENINGS)
     transcript = payload.get("transcript_path")
     if transcript and Path(transcript).expanduser().is_file():
         reader = load_module("claude_code_session_transcript_records_read_backward_common", TRANSCRIPT_READER_FILE)
-        for record in reader.records_newest_first(Path(transcript).expanduser()):
-            if "turnOrigin" in record:
-                if record_text(record) == prompt:
-                    return record["turnOrigin"] == USER_TURN_ORIGIN
-                break
-    return not prompt.lstrip().startswith(NOT_TYPED_PROMPT_OPENINGS)
+        try:
+            for record in reader.records_newest_first(Path(transcript).expanduser()):
+                if "turnOrigin" in record:
+                    if record_text(record) == prompt:
+                        return record["turnOrigin"] == USER_TURN_ORIGIN, None
+                    break
+        except (OSError, ValueError) as error:
+            return by_opening, error
+    return by_opening, None
 
 
 def open_walk_name(cwd):
@@ -226,13 +244,23 @@ def output_for(payload, environment, user_alerts=None):
     """Return the hook's output for the payload as a dict, or None."""
     if sys.platform != "linux" or headless(environment):
         return None
-    try:
-        typed = typed_by_user(payload)
-    except AttributeError:
-        # A record record_text cannot read; the short-answer hook falls back the same way and reports the error.
-        typed = not (payload.get("prompt") or "").lstrip().startswith(NOT_TYPED_PROMPT_OPENINGS)
-    if not typed:
-        return None
+    typed, transcript_error = typed_by_user_and_transcript_read_error(payload)
+    output = claim_output(payload, environment, user_alerts) if typed else None
+    if transcript_error is None:
+        return output
+    path = payload.get("transcript_path")
+    user_sentence = TRANSCRIPT_READ_FAILED_USER_SENTENCE.format(path=path, error=repr(transcript_error))
+    lines = [line.format(path=path, error=repr(transcript_error), whose="his" if typed else "not his",
+                         user_sentence=user_sentence, hook=Path(__file__).resolve()) for line in TRANSCRIPT_READ_FAILED_LINES]
+    output = output or {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": ""}}
+    specific = output["hookSpecificOutput"]
+    specific["additionalContext"] = "\n".join(lines + [specific["additionalContext"]]).rstrip("\n")
+    output["systemMessage"] = " ".join(filter(None, [user_sentence, output.get("systemMessage")]))
+    return output
+
+
+def claim_output(payload, environment, user_alerts):
+    """The output for a prompt the user typed: the claimed alerts' context, a failed claim's, or None."""
     user_alerts = user_alerts or load_module(
         "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common", ALERTS_MODULE_FILE)
     directory = user_alerts.user_alerts_directory()
