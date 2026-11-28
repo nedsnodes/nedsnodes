@@ -6,7 +6,7 @@ Usage: nn-systems/skills/explain/explain-reply-cold-read-fast-read.py < <draft>
 Pipe a draft beginning with `The user wrote:` and containing a line
 `The reply to him:` followed by the reply. The fast read is
 nn-systems/cold-read/cold-read-fast-read.py. This program exits 0 when it
-printed a report, 1 when the fast read failed or timed out, and 64 on invalid
+printed a report, 1 when the fast read failed or timed out, and 2 on invalid
 input. The fast read may name its report and exit 1 only because its record
 did not reach the log-store, which its stderr says in a `record:` line saying
 FAILED or REFUSED. Then this program prints the report like any other, with
@@ -58,7 +58,7 @@ CELL_LAUNCHER_LINES_INSTRUCTION = (
     "Tell the user what the cell launcher's lines above say, remedy included, "
     "before your closing line.")
 EXIT_FAST_READ_FAILED = 1
-EXIT_BAD_INPUT = 64
+EXIT_BAD_INPUT = 2
 
 INPUT_SHAPE_INSTRUCTIONS = (
     "Nothing was run. Pipe the draft in on standard input, in this shape:",
@@ -167,16 +167,15 @@ def main() -> int:
         print(__doc__)
         return 0
     if len(sys.argv) > 1:
-        for line in INPUT_SHAPE_INSTRUCTIONS:
-            print(line)
-        print("Pass no arguments.")
-        return EXIT_BAD_INPUT
-    text = sys.stdin.read()
-    problem = input_shape_problem(text)
+        problem = "Pass no arguments."
+    else:
+        text = sys.stdin.read()
+        shape_problem = input_shape_problem(text)
+        problem = f"The draft was not read: {shape_problem}." if shape_problem is not None else None
     if problem is not None:
-        print(f"The draft was not read: {problem}.")
+        print(problem, file=sys.stderr)
         for line in INPUT_SHAPE_INSTRUCTIONS:
-            print(line)
+            print(line, file=sys.stderr)
         return EXIT_BAD_INPUT
 
     directory = pathlib.Path(tempfile.mkdtemp(prefix="explain-reply-"))

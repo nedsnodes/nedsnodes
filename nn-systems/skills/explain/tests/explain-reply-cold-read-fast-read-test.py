@@ -579,7 +579,7 @@ def main() -> int:
               completed.stdout)
 
         # Oracle: exit code and whether the stand-in ran. Red: exit other
-        # than 64, or the stand-in launched on input it should refuse.
+        # than 2, or the stand-in launched on input it should refuse.
         refused_inputs = {
             "input not opening with the user's words":
                 "The reply to him:\nSome reply.\n",
@@ -591,14 +591,15 @@ def main() -> int:
         }
         for case_name, text in refused_inputs.items():
             completed, logged = run_program(scratch, success_plan, text)
-            check(f"{case_name} exits 64 and launches nothing",
-                  completed.returncode == 64 and logged is None
-                  and "Nothing was run." in completed.stdout,
+            check(f"{case_name} exits 2 and launches nothing",
+                  completed.returncode == 2 and logged is None
+                  and "Nothing was run." in completed.stderr and not completed.stdout,
                   f"exit {completed.returncode}, launched {logged is not None}")
         completed, logged = run_program(scratch, success_plan, GOOD_INPUT,
                                         arguments=("--target", "x.md"))
-        check("any argument exits 64 and launches nothing",
-              completed.returncode == 64 and logged is None,
+        check("any argument exits 2 and launches nothing",
+              completed.returncode == 2 and logged is None and not completed.stdout
+              and "Pass no arguments." in completed.stderr,
               f"exit {completed.returncode}, launched {logged is not None}")
 
         # Oracle: the return value, the elapsed time and the child process.
