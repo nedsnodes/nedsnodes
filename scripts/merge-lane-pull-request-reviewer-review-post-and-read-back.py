@@ -103,6 +103,19 @@ object is refused too; the agent then asks merge-lane-2. Then:
   and added, and names each possible regression and possible miss. When either
   subcommand exits nonzero or prints an answer this program cannot read, nothing is
   posted;
+- a finding with no grade in the file and no findings record row needing none needs no grade
+  when a review the merge-lane account posted earlier on the same commit graded it, as when
+  a description edit settles a must-fix-now finding and the next round has no new commit;
+  the program reads the pull request's reviews only when such a finding, or an answer below,
+  is in view. A file may grade such a finding again, and its grade replaces the earlier one.
+  For each one the earlier review graded must-fix-now, the file's optional
+  "merge_lane_codex_review_earlier_must_fix_now_finding_answers" lists
+  {"finding": <id>, "answer": "settled" or "still-open"}: the program refuses a file that
+  answers neither, an answer for any other finding, and an APPROVE file that answers
+  still-open; a still-open finding is then held open as a must-fix-now grade is, with its
+  comment. The posted body lists each earlier-graded finding under the graded-findings
+  heading with its earlier grade and review, and for must-fix-now its answer, so that only
+  a comment, never that list, holds a finding open;
 - a run that found nothing, or exited nonzero, needs no grade, and the review posts as
   it would without this check;
 - when no run record names the commit, the program reads the commit's review tier from
@@ -198,6 +211,8 @@ NON_BLOCKING_CATEGORY_MARK_FORMAT = "**{category}** "
 BLOCKING_COUNT_FORMAT = "**Blocking: {count}**"
 DOES_NOT_HOLD_GRADE = "does-not-hold"
 CODEX_FINDING_GRADES_KEY = "merge_lane_codex_review_finding_grades"
+EARLIER_MUST_FIX_NOW_ANSWERS_KEY = "merge_lane_codex_review_earlier_must_fix_now_finding_answers"
+SETTLED_ANSWER, STILL_OPEN_ANSWER = "settled", "still-open"
 NO_REVIEWER_TIER = "no-reviewer-tier"
 REVIEW_TIERS_THAT_RUN_CODEX = ("codex-review-and-head-tests-tier", "claude-and-codex-review-and-head-tests-tier")
 REVIEW_PLAN_PROGRAM = Path(__file__).resolve().with_name("pull-request-review-plan.py")
@@ -357,10 +372,44 @@ class CodexRunRecordUnusable(Exception):
     pass
 
 
+def codex_grades_of_earlier_reviews_on_commit(reviews, head):
+    """{finding id: (grade, review id)} for each Codex finding a review the merge-lane account posted on this
+    commit graded under CODEX_GRADES_BODY_HEADING; a later review's grade replaces an earlier one's, since
+    GitHub lists reviews oldest first."""
+    graded_line = re.compile(r"- ([0-9a-f]{12}) \(P[0-3]\): (" + "|".join(
+        map(re.escape, (*FINDING_CATEGORIES, DOES_NOT_HOLD_GRADE))) + r")(?=[,:])")
+    grades = {}
+    for review in reviews:
+        body = review.get("body") or ""
+        if (review.get("commit_id") != head or (review.get("user") or {}).get("login") != MERGE_LANE_ACCOUNT
+                or CODEX_GRADES_BODY_HEADING not in body):
+            continue
+        for line in body.split(CODEX_GRADES_BODY_HEADING, 1)[1].splitlines()[1:]:
+            graded = graded_line.match(line)
+            if not graded:
+                break
+            grades[graded[1]] = (graded[2], review["id"])
+    return grades
+
+
+def codex_grades_of_earlier_reviews_read(account, number, head):
+    """Read the pull request's reviews and return codex_grades_of_earlier_reviews_on_commit's answer, or raise
+    CodexRunRecordUnusable naming why they could not be read."""
+    try:
+        pages = gh_json(read_token(account), ["--paginate", "--slurp",
+                                              f"repos/{REPOSITORY}/pulls/{number}/reviews?per_page=100"])
+        return codex_grades_of_earlier_reviews_on_commit([review for page in pages for review in page], head)
+    except (GhFailed, KeyError, TypeError, AttributeError) as error:
+        raise CodexRunRecordUnusable(
+            f"reading pull request {number}'s reviews, to find the Codex findings an earlier review on commit "
+            f"{head} graded, failed: {reason_of(error)}")
+
+
 def read_review_file(path, account):
     """Return (verdict, body, comments, Codex answers) from the account's review file, verdict None for
     merge-lane-2's review with no verdict, or raise ReviewFileUnusable. The Codex answers are the file's
-    grades of Codex findings, as a dict holding CODEX_FINDING_GRADES_KEY when the file has it."""
+    grades of Codex findings and its answers on earlier must-fix-now ones, as a dict holding
+    CODEX_FINDING_GRADES_KEY and EARLIER_MUST_FIX_NOW_ANSWERS_KEY when the file has them."""
     try:
         review = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as error:
@@ -374,8 +423,9 @@ def read_review_file(path, account):
     codex_answers = {}
     if account == MERGE_LANE_ACCOUNT and isinstance(review, dict):  # pragma: no mutate, --github-account allows only mac-claude and ned-review-merge, and mac-claude sorts before ned-review-merge, so >= gives what == gives
         review = dict(review)
-        if CODEX_FINDING_GRADES_KEY in review:
-            codex_answers[CODEX_FINDING_GRADES_KEY] = review.pop(CODEX_FINDING_GRADES_KEY)
+        for key in (CODEX_FINDING_GRADES_KEY, EARLIER_MUST_FIX_NOW_ANSWERS_KEY):
+            if key in review:
+                codex_answers[key] = review.pop(key)
         codex_answers_check(codex_answers)
     if not isinstance(review, dict) or set(review) != {"verdict", "body", "comments"}:
         raise ReviewFileUnusable(
@@ -447,6 +497,15 @@ def one_line_text(value):
 
 def codex_answers_check(answers):
     """Raise ReviewFileUnusable when the review file's Codex answers are malformed."""
+    earlier = answers.get(EARLIER_MUST_FIX_NOW_ANSWERS_KEY, [])
+    if not isinstance(earlier, list) or not all(
+            isinstance(entry, dict) and set(entry) == {"finding", "answer"} and isinstance(entry["finding"], str)
+            and entry["answer"] in (SETTLED_ANSWER, STILL_OPEN_ANSWER) for entry in earlier):
+        raise ReviewFileUnusable(
+            f"has a \"{EARLIER_MUST_FIX_NOW_ANSWERS_KEY}\" that is not a list of {{\"finding\": \"<id>\", "
+            f"\"answer\": \"{SETTLED_ANSWER}\" or \"{STILL_OPEN_ANSWER}\"}} entries")
+    if len({entry["finding"] for entry in earlier}) != len(earlier):
+        raise ReviewFileUnusable(f"answers a Codex finding more than once in \"{EARLIER_MUST_FIX_NOW_ANSWERS_KEY}\"")
     grades = answers.get(CODEX_FINDING_GRADES_KEY, [])
     if not isinstance(grades, list):
         raise ReviewFileUnusable(f"has a \"{CODEX_FINDING_GRADES_KEY}\" that is not a list")
@@ -632,17 +691,23 @@ def review_tier_of_commit(plan_program, number, head):
 
 
 def body_with_codex_answers(body, comments, answers, findings, plan, number, head, review_file, outputs_directory,
-                            recorded=None):
+                            recorded=None, earlier_grades_read=None, verdict=None):
     """Return the body with the Codex grades, and with the findings record rows of the findings in recorded,
     or raise CodexRunRecordUnusable with the whole refusal when an answer is missing or does not fit the run
     records. plan, review_tier_of_commit()'s answer, is None unless findings is None. recorded holds, by
     finding id, the match program's SAME answer for each finding the findings record already holds, which
-    needs no grade."""
+    needs no grade. earlier_grades_read, called only when a finding has neither, returns
+    codex_grades_of_earlier_reviews_on_commit's answer; a finding an earlier review on this commit graded needs no
+    grade either, since a later round on the same commit, such as one settled by a description edit, has no new
+    Codex run to grade; for one graded must-fix-now, the file answers whether this round settled it, and a
+    still-open one is held open as a must-fix-now grade is. verdict is the file's verdict."""
     recorded = recorded or {}
     grades = {entry["finding"]: entry for entry in answers.get(CODEX_FINDING_GRADES_KEY, [])}
+    settled_or_open = {entry["finding"]: entry["answer"]
+                       for entry in answers.get(EARLIER_MUST_FIX_NOW_ANSWERS_KEY, [])}
     if findings is None:
         tier, base, base_reason = plan
-        if grades and tier == NO_REVIEWER_TIER:
+        if (grades or settled_or_open) and tier == NO_REVIEWER_TIER:
             raise CodexRunRecordUnusable(
                 f"review not posted: the review file {review_file} grades Codex findings, but no Codex run "
                 f"record names commit {head}, and the review plan gives {tier}, which runs no Codex.\n"
@@ -658,6 +723,38 @@ def body_with_codex_answers(body, comments, answers, findings, plan, number, hea
             f"review not posted: the review file {review_file} grades {', '.join(unknown)}, which no Codex "
             f"report on commit {head} holds.\nRemove or correct each, then run the same command again.")
     missing = [finding for finding in findings if finding not in grades and finding not in recorded]
+    earlier = earlier_grades_read() if (missing or settled_or_open) and earlier_grades_read else {}
+    graded_before = {finding: earlier[finding] for finding in missing if finding in earlier}
+    missing = [finding for finding in missing if finding not in graded_before]
+    must_fix_now_before = [finding for finding, (grade, _) in graded_before.items() if grade == BLOCKING_CATEGORY]
+    not_asked = sorted(set(settled_or_open) - set(must_fix_now_before))
+    if not_asked:
+        raise CodexRunRecordUnusable(
+            f"review not posted: the review file {review_file} answers {', '.join(not_asked)} in "
+            f"\"{EARLIER_MUST_FIX_NOW_ANSWERS_KEY}\", but no earlier review on commit {head} graded it "
+            f"{BLOCKING_CATEGORY}, or this file grades it again.\n"
+            f"Remove each such answer, then run the same command again.")
+    unanswered = [finding for finding in must_fix_now_before if finding not in settled_or_open]
+    if unanswered:
+        raise CodexRunRecordUnusable(
+            f"review not posted: {len(unanswered)} Codex finding(s) an earlier review on commit {head} graded "
+            f"{BLOCKING_CATEGORY} have no answer in the review file {review_file}:\n"
+            + "\n".join(f"- {finding}: graded in review {graded_before[finding][1]}: {findings[finding][1]}"
+                        for finding in unanswered)
+            + f"\nAdd one entry per finding to the file's \"{EARLIER_MUST_FIX_NOW_ANSWERS_KEY}\" list, as "
+              f"{{\"finding\": \"<id>\", \"answer\": \"{SETTLED_ANSWER}\"}} when this round settled it, or with "
+              f"\"{STILL_OPEN_ANSWER}\" when it still blocks the merge, with a {BLOCKING_CATEGORY} comment naming it.\n"
+              f"Then run the same command again.")
+    still_open = [finding for finding in must_fix_now_before if settled_or_open[finding] == STILL_OPEN_ANSWER]
+    if still_open and verdict == "APPROVE":
+        raise CodexRunRecordUnusable(
+            f"review not posted: the review file {review_file} has the verdict APPROVE but answers "
+            f"{', '.join(still_open)} {STILL_OPEN_ANSWER}, a {BLOCKING_CATEGORY} finding that blocks the merge.\n"
+            f"If the finding still blocks, make the verdict REQUEST_CHANGES with a {BLOCKING_CATEGORY} comment "
+            f"naming it; if this round settled it, answer {SETTLED_ANSWER}. Then run the same command again.")
+    for finding in still_open:
+        grades[finding] = {"finding": finding, "grade": BLOCKING_CATEGORY}
+        del graded_before[finding]
     if missing:
         raise CodexRunRecordUnusable(CODEX_FINDINGS_NOT_GRADED.format(
             count=len(missing), head=head, path=review_file,
@@ -680,6 +777,9 @@ def body_with_codex_answers(body, comments, answers, findings, plan, number, hea
     lines = [f"- {finding} ({findings[finding][0]}): {grades[finding]['grade']}"
              + (f", {grades[finding]['reason']}" if "reason" in grades[finding] else "")
              + f": {findings[finding][1]}" for finding in graded]
+    lines += [f"- {finding} ({findings[finding][0]}): {grade}, graded in review {review_id}"
+              + (f", {settled_or_open[finding]} in this round" if finding in settled_or_open else "")
+              + f": {findings[finding][1]}" for finding, (grade, review_id) in graded_before.items()]
     if lines:
         body = "\n".join((f"{body}\n\n{CODEX_GRADES_BODY_HEADING}", *lines))
     return body + findings_record_rows_already_holding_lines(recorded, f"\n\n{FINDINGS_RECORD_BODY_HEADING}")
@@ -774,13 +874,14 @@ def findings_record_match(program, number, head, findings):
 
 
 def findings_record_add(program, number, head, findings, matched, answers):
-    """Add each matched NEW Codex finding, with its accepted grade, to the findings record; return the program's
-    add answer by finding id."""
+    """Add each matched NEW Codex finding the file grades, with its accepted grade, to the findings record; return
+    the program's add answer by finding id. A NEW finding the file does not grade is one an earlier review on this
+    commit graded, whose posting added its row already."""
     grades = {entry["finding"]: entry for entry in answers.get(CODEX_FINDING_GRADES_KEY, [])}
     request = [{"finding_id": finding, "priority": findings[finding][0], "heading": findings[finding][1],
                 "text": findings[finding][3][0], "grade": grades[finding]["grade"],
                 **({"reason": grades[finding]["reason"]} if "reason" in grades[finding] else {})}
-               for finding, answer in matched.items() if answer["answer"] == "NEW"]
+               for finding, answer in matched.items() if answer["answer"] == "NEW" and finding in grades]
     if not request:
         return {}
     return findings_record_program_answers(
@@ -1007,7 +1108,8 @@ def main(argv=None):
             matched = findings_record_match(program, number, head, findings) if findings else {}
             body = body_with_codex_answers(
                 body, comments, codex_answers, findings, plan, number, head, arguments.review_file,
-                outputs_directory, findings_record_rows_needing_no_grade(matched, findings))
+                outputs_directory, findings_record_rows_needing_no_grade(matched, findings),
+                lambda: codex_grades_of_earlier_reviews_read(account, number, head), verdict)
             # Added only once the grades are accepted, since a row keeps the grade it was added with.
             added = findings_record_add(program, number, head, findings, matched, codex_answers)
         except CodexRunRecordUnusable as error:
