@@ -25,10 +25,10 @@ The sweep marks a promise's sentences checked at line 1029, before it logs or se
 
 [The idle sweep loses a promise when it stops between marking the sentence checked and opening the wait](https://github.com/nedsnodes/nedsnodes/issues/4398) covers a promise that opens its wait. This issue covers a promise on a wait that is already open.
 
-[Idle sweep settles and reports a failed promise message correctly](https://github.com/nedsnodes/nedsnodes/pull/4372), open at head c84a03041c5d, adds a `promise_message_pending` record that holds the promise's text. mac-claude's review of that head reports that this loss remains there: when the wait ends, the sweep drops the pending record, and the record's sentences still count as checked.
+[Idle sweep settles and reports a failed promise message correctly](https://github.com/nedsnodes/nedsnodes/pull/4372) added a `promise_message_pending` record that holds the promise's text; mac-claude's review of its head c84a03041c5d reported that this loss remained there, and it closed unmerged on 2026-11-23. ned-box-helper's new pull request, which rebuilds how the sweep keeps a promise, waits on the user's ruling on the item "Rebuild how the idle sweep keeps a promise, so a stopped sweep does not lose it" of ned-box-helper's approval-walk ned-box-helper-open-items-approval-walk-2026-11-22.
 
 ## What to do
 
 Keep a promise whose send has no logged result, meaning neither `promise_message` nor `promise_message_send_failed`, when its wait ends for any reason, not only a usage limit. After that wait ends, the first invocation that finds the agent-seat no longer at a usage limit opens a new wait for every such promise and sends them in one message.
 
-Add a test that cuts the log after each line the promise step writes, ends the wait by each reason `end_wait` is given, and asserts that a later message names the promise. The owner is ned-box-helper, whose [pull request](https://github.com/nedsnodes/nedsnodes/pull/4372) holds the record this fix would build on.
+Add a test that cuts the log after each line the promise step writes, ends the wait by each reason `end_wait` is given, and asserts that a later message names the promise. The owner is ned-box-helper.
