@@ -956,15 +956,23 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
 
     git(made, "reset", "-q", "--hard", frozen_head)
     write_answers(GOOD_ANSWERS, 60)
+    kept_directory = (Path(git(made, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+                      / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-review-11")
+    shutil.rmtree(kept_directory, ignore_errors=True)
+    moved = kept_directory / f"{answers.stem}-moved-{answers.stat().st_mtime_ns}.md"
+    move_line = f"mkdir -p {kept_directory} && mv {answers} {moved}"
     code, out, err = run(root, repository, dated_routes)
     check("stopped round: no fix-round commit and every answer written refuses the brief, exit 1, saying to finish "
-          "the round with --check, and leaves the answers file as it was",
+          "the round with --check or to move the answers file into the round's kept-copies directory, and leaves "
+          "the answers file as it was",
           code == 1 and out == ""
           and f"is at the frozen-head {frozen_head[:12]} with no fix-round commit, and its answers file {answers} "
           "answers every finding of this round, so a fix-round subagent wrote every answer.\n"
           "If that subagent is still working there, wait for it to finish.\n"
           "If the answers describe fixes, which means the fix-round commit was reset away, or if you mean to start the "
-          f"round again: delete {answers}, then run this command:\n"
+          "round again: move the answers file into this round's kept-copies directory with this command, then run "
+          "the command after it, whose brief names the moved copy for the next subagent to read:\n"
+          f"{move_line}\n"
           f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}\n"
           + finish in err
           and answers.read_text() == GOOD_ANSWERS, err + out)
@@ -973,15 +981,15 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     check("stopped round: with no fix-round commit, the --check command that refusal names, run as printed, prints "
           "the message for merge-lane-2",
           code == 0 and "Send merge-lane-2 this message with SendMessage" in check_out, check_out + check_err)
-    answers.unlink()
+    move_codes = printed_commands_exit_codes([line for line in refusal.splitlines() if line.startswith("mkdir -p ")],
+                                             made, made)
     code, out, err, line = run_printed_command(
         root, dated_routes, refusal, f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}") or (1, "", "", "")
-    check("stopped round: with no fix-round commit, deleting the answers file and running the command that refusal "
-          "names, its arguments copied from its line, where its cd goes, prints the brief",
-          line == f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}" and code == 0
-          and answers.read_text() == "1. \n2. \n", line + err + out)
-    kept_directory = (Path(git(made, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-                      / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-review-11")
+    check("stopped round: with no fix-round commit, the move command that refusal names, then its rerun, run as "
+          "printed, print the brief, which names the moved copy holding every answer",
+          move_codes == [0] and line == f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}" and code == 0
+          and answers.read_text() == "1. \n2. \n" and moved.read_text() == GOOD_ANSWERS
+          and f"kept unchanged at {moved}" in out, f"{move_codes} {line}\n{err}{out}")
     shutil.rmtree(kept_directory, ignore_errors=True)
     write_answers(GOOD_ANSWERS, -60)
     code, out, err = run(root, repository, dated_routes)
@@ -989,9 +997,10 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           code == 0 and answers.read_text() == "1. \n2. \n", err + out)
     kept_copies = {path: path.read_text() for path in kept_directory.iterdir()}
     check("answers kept: the file the brief replaced is in a new copy that the brief names",
-          list(kept_copies.values()) == [GOOD_ANSWERS] and f"copied it unchanged to {next(iter(kept_copies))}" in out
+          list(kept_copies.values()) == [GOOD_ANSWERS] and f"kept unchanged at {next(iter(kept_copies))}" in out
           and "Read that copy, and copy into the new file each answer that still answers a finding below, under that "
-              "finding's number." in " ".join(out.split()), f"{kept_copies}\n{out}")
+              "finding's number. An answer that describes a fix answers its finding only when that fix is in the "
+              "topic-worktree." in " ".join(out.split()), f"{kept_copies}\n{out}")
     partial = "1. Fixed the lookup.\n2. \n"
     write_answers(partial, 60)
     code, out, err = run(root, repository, dated_routes)
@@ -1001,8 +1010,8 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           and all(path.read_text() == text for path, text in kept_copies.items()), err + out)
     check("answers kept: the brief names the earlier copy, then the copy it just made",
           len(new_copies) == 1
-          and 0 <= out.find(f"copied it unchanged to {next(iter(kept_copies))}")
-          < out.find(f"copied it unchanged to {new_copies[0]}"), out)
+          and 0 <= out.find(f"kept unchanged at {next(iter(kept_copies))}")
+          < out.find(f"kept unchanged at {new_copies[0]}"), out)
     first_review = json.loads(dated_routes[REVIEWS]["stdout"].splitlines()[0])
     second_part_routes = routes_for(frozen_head, [first_review, dict(first_review, id=12,
                                                                      html_url=f"{URL}#pullrequestreview-12")],
@@ -1014,7 +1023,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     check("answers kept: a rerun after merge-lane-2 posts a second changes-requested review on the same frozen-head "
           "keeps the round's copies directory and names every copy made before it",
           code == 0 and len(list(kept_directory.iterdir())) == len(copies_of_round) + 1
-          and all(f"copied it unchanged to {path}" in out for path in copies_of_round), err + out)
+          and all(f"kept unchanged at {path}" in out for path in copies_of_round), err + out)
     for path in set(kept_directory.iterdir()) - set(copies_of_round):
         path.unlink()
     other_review_directory = kept_directory.parent / f"pr-{NUMBER}-review-12"
@@ -1072,13 +1081,13 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     code, out, err = run(root, repository, dated_routes)
     check("answers kept: a rerun that finds a blank file makes no copy and still names every copy of the round",
           code == 0 and len(list(kept_directory.iterdir())) == count == 2
-          and all(f"copied it unchanged to {path}" in out for path in kept_directory.iterdir()), err + out)
+          and all(f"kept unchanged at {path}" in out for path in kept_directory.iterdir()), err + out)
     shutil.rmtree(kept_directory)
     write_answers("1. \n\n2. \n", 60)
     code, out, err = run(root, repository, dated_routes)
     check("answers kept: a file holding only numbered lines and blank lines, with no copy kept, gets no line in the "
           "brief",
-          code == 0 and not kept_directory.exists() and "copied it unchanged" not in out, err + out)
+          code == 0 and not kept_directory.exists() and "kept unchanged at" not in out, err + out)
     kept_directory.write_text("a file where the directory of copies goes")
     write_answers(partial, 60)
     code, out, err = run(root, repository, dated_routes)
