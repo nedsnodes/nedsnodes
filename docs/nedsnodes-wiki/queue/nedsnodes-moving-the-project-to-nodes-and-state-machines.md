@@ -136,7 +136,7 @@ A loop needs no count limit when it passes through a `user` node whose output st
 One runner has three commands (item 4):
 
 - `start <machine>` creates a state-machine-run and prints its id.
-- `next <state-machine-run>` runs `code` and `cpc-node` nodes itself until the machine ends or a node needs the agent-seat's interactive agent or the user, then prints that step. It is also what notices a crash: it reads the state-machine-run's record and finds a node started and never ended.
+- `next <state-machine-run>` runs `code` and `cpc-node` nodes itself until the machine ends, a node waits, as a node holding `running` or a `parallel` node's join does, or a node needs the agent-seat's interactive agent or the user, then prints that step and returns. It is also what notices a crash: it reads the state-machine-run's record and finds a node started and never ended.
 - `answer <state-machine-run>` takes that node's output state and output JSON, and refuses any other output state or output that fails the node's schema.
 
 The runner validates each node's output against the input schema of the node that receives it, so no node repeats that validation. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are. It counts every loop. The project uses one JSON Schema library, compared in section 5.1, which replaces the hand-written `answer_problems()` validator in `scripts/merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py`.
@@ -284,7 +284,7 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 Each line is a case the build or later evidence settles; whoever settles it removes the line and writes the decision into the section it belongs to.
 
 - How the `agent` field binds to an agent-session id so that `write` resumes the same writer, and what happens when that agent-session is gone.
-- How `next` delivers its one message to the agent-seat's interactive agent, which agent-seat that is when a subagent or a program started the state-machine-run, and what happens when that agent-seat is mid-handoff.
+- How `next` delivers its one message to the agent-seat's interactive agent, which agent-seat that is when a subagent or a program started the state-machine-run, what happens when that agent-seat is mid-handoff, and how a machine file marks the end states that send it.
 - Whether `could-not-run`, `interrupted` and `timed-out`, the output states the runner takes itself, count in every node's fixed list for the lint's rule that an output state has no transition.
 - The output state the runner takes when a node's JSON names a missing or unlisted output state, fails the receiving node's input schema, or disagrees with the exit code, and how output sent to an end state is checked.
 - How `next` tells a node that crashed from one still working, such as a node within its limit, a node holding `running`, an open `user` window or a parallel branch's sibling, and the limit on reruns of an idempotent node that crashes each time.
@@ -295,7 +295,7 @@ Each line is a case the build or later evidence settles; whoever settles it remo
 - Where machine files live and how they are named, how `program` and `prompt` resolve to files, which fields name a `machine` node's child and a `parallel` node's branches, and where a `cpc-node`'s and a `user` node's schemas come from.
 - The `parallel` node's output state when its branches end in a mix of failure and timeout, what its output holds for a failed branch, and whether it stops running siblings once one fails.
 - How two calls of `next` or `answer` on one state-machine-run at once are kept from interleaving.
-- How `start` takes the state-machine-run's input, how `answer` names the waiting node when two nodes wait, and what `answer` does on a state-machine-run with no waiting node.
+- How `start` takes the state-machine-run's input, how `answer` takes its output state and output JSON and names the waiting node when two nodes wait, what `answer` does on a state-machine-run with no waiting node, and what `next` prints when the machine ends.
 - The record's file name and layout in the log-store, each event's fields, where input and output payloads are kept, and how the runner reads a record whose last line was cut short.
 - How a state-machine-run on the Mac writes its record to the log-store, and what resumes it once ned-box can be reached again.
 - How the `--schema` test suite gives each idempotent tool its input, and what it compares, so that a tool whose output reports a changing subject, such as `background-task-check`'s `minutes_run`, still passes.
@@ -304,4 +304,7 @@ Each line is a case the build or later evidence settles; whoever settles it remo
 - Which code the runner takes from the two step programs, and whether those programs move onto the runner at step 4 or later.
 - The state registry file's path and row format, how the lint recognizes a state literal, and what the lint compares against before the file is on `origin/main`.
 - The program ledger's path and row format, and which files count as programs.
+- Which agent-session a `user` node resumes when the node before it is not a `cpc-node`, and what the fallback's interactive `claude` is told to ask.
+- Which output states of a `user` node may continue a loop with no count limit, when the node has others besides `answered`.
+- What `idempotent: true` means for a `cpc-node` or `user` node, and how it is tested.
 - When the JSON Schema library replaces `answer_problems()` in `scripts/merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py`.
