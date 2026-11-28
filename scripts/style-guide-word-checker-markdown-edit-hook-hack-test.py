@@ -337,6 +337,12 @@ INDENTED_CODE_CASES = {
         ("- a\n\nthe seat\n\n    code seat\n", ["seat"]),
     "a four-space paragraph after a two-space continuation of a list item is prose":
         ("- item\n\n  continuation\n\n    about the seat\n", ["seat"]),
+    "a heading interrupts a list before an indented code block":
+        ("- item\n# Heading\n\n    ~~~\n\nThe seat is free.\n", ["seat"]),
+    "a heading aligned with the list content stays inside the item":
+        ("- item\n  # Heading\n\n    The seat is free.\n", ["seat"]),
+    "a hash joined to a word is a lazy continuation":
+        ("- item\n#tag\n\n    The seat is free.\n", ["seat"]),
     "a lazy continuation keeps the list item open":
         ("- item\nlazy line\n\n    about the seat\n", ["seat"]),
     "a list marker inside an indented code block is code, and a fence there opens nothing":

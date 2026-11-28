@@ -119,6 +119,7 @@ FENCE_PATTERN = re.compile(r"^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?(`{3,}|~{3,}
 CLOSING_FENCE_PATTERN = re.compile(r"^( *)(`{3,}|~{3,}) *$")
 BLOCKQUOTE_LINE_PATTERN = re.compile(r"^[ \t]*>")
 LIST_ITEM_LINE_PATTERN = re.compile(r"^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+")
+ATX_HEADING_PATTERN = re.compile(r"^( {0,3})#{1,6}(?:[ \t]|$)")
 INDENTED_LINE_PATTERN = re.compile(r"^(?: {4}|[ ]{0,3}\t)")
 
 # Blank with equal-length spaces to preserve offsets; code spans must hide embedded quotes and slashes.
@@ -255,10 +256,11 @@ def find_style_guide_word_hits_in_markdown(
             elif list_marker := LIST_ITEM_LINE_PATTERN.match(line.expandtabs(4)):
                 list_indent = list_marker.end()
             elif previous_line_blank and not line[0].isspace():
-                # Only an unindented line after a blank ends the item: any indented line
-                # continues it, and an unindented line straight after one is a lazy
-                # continuation of the item's paragraph.
                 list_indent = 0
+            elif list_indent and (heading := ATX_HEADING_PATTERN.match(line)):
+                # A heading outside the item's content interrupts a lazy continuation.
+                if len(heading[1]) < list_indent:
+                    list_indent = 0
         previous_line_blank = line_blank
         if inside_indented_code and not line_blank:
             open_code_span_run = None
