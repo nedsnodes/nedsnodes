@@ -4743,7 +4743,7 @@ def adopt_passing_recordings_that_match_the_checkout(top, into_given, from_given
     return adopted
 
 
-def files_the_checkouts_own_change_differs_in(top, commit, differ):
+def files_that_differ_since_merge_base_with_head_and_that_merge_base_or_none(top, commit, differ):
     """(the files that differ since the merge base of commit and HEAD, that merge base), or
     (differ, None) when commit is that merge base or the two have none.
 
@@ -4772,7 +4772,7 @@ def suites_selected_since(top, suites, recordings, commit, differ, files_only_st
     read_only_recordings, read from read_only_directory, would leave it out, unless its
     recording in recordings shows an input the change differs in; read_only_recordings never
     select a suite."""
-    own_change, merge_base = files_the_checkouts_own_change_differs_in(top, commit, differ)
+    own_change, merge_base = files_that_differ_since_merge_base_with_head_and_that_merge_base_or_none(top, commit, differ)
     everything = [path for path in sorted(own_change)
                   if any(path == prefix or (prefix.endswith("/") and path.startswith(prefix))
                          for prefix in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE)]

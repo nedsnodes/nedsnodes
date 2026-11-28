@@ -1173,7 +1173,7 @@ with tempfile.TemporaryDirectory() as scratch:
 
     module.git = git_whose_merge_base_fails
     try:
-        module.files_the_checkouts_own_change_differs_in(repo, main_moved_on, {})
+        module.files_that_differ_since_merge_base_with_head_and_that_merge_base_or_none(repo, main_moved_on, {})
         refused = None
     except module.CouldNotRun as refusal:
         refused = str(refusal)
