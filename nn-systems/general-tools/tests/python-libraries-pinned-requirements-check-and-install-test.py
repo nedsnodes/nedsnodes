@@ -202,12 +202,13 @@ def check_failing(host):
 
 checker.check_and_install = check_failing
 printed = io.StringIO()
-with contextlib.redirect_stdout(printed):
+diagnostic = io.StringIO()
+with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(diagnostic):
     status = checker.main([])
 checker.check_and_install = real_check_and_install
-check("a check that cannot run exits 1 and says why, naming the machine",
-      status == 1 and "could not be checked: python3 not found" in printed.getvalue(),
-      (status, printed.getvalue()))
+check("a check that cannot run exits 2 and says why, naming the machine",
+      status == 2 and not printed.getvalue() and "could not be checked: python3 not found" in diagnostic.getvalue(),
+      (status, printed.getvalue(), diagnostic.getvalue()))
 
 print("all cases passed" if not failures else f"{failures} case(s) failed")
 sys.exit(1 if failures else 0)
