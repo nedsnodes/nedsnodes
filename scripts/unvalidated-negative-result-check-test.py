@@ -686,6 +686,20 @@ code, out = run_main("--transcripts", str(SCRATCH / "transcripts"))
 check("the measurement counts recorded runs and the ones that fire",
       code == 0 and "pairs           : 2" in out and "fired           : 1" in out
       and GLOB_DASH_NAME in out, out)
+missing = SCRATCH / "unavailable-project"
+code, out = run_main("--transcripts", str(missing))
+check("a missing directory prevents transcript measurement",
+      code == 2 and str(missing) in out, (code, out))
+blocked = transcripts / "blocked.jsonl"
+blocked.write_text("{}\n")
+blocked.chmod(0)
+try:
+    code, out = run_main("--transcripts", str(SCRATCH / "transcripts"))
+    check("an unreadable transcript is named beside the measurements of readable transcripts",
+          code == 1 and str(blocked) in out and "pairs           : 2" in out, (code, out))
+finally:
+    blocked.chmod(0o600)
+    blocked.unlink()
 check_module.shell_reader.simple_commands = unreadable
 try:
     code, out = run_main("--transcripts", str(SCRATCH / "transcripts"))
