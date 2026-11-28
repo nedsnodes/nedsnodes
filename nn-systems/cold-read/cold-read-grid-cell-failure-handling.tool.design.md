@@ -129,7 +129,7 @@ The user-ruling of 2026-09-11, point 5: "a marker line naming the absent cells a
 
 When a report is absent, the cold-read-grid writes one marker line into every `.md` file in the cold-read-record: the reports that landed, and the reference-check file. It uses the mechanism that writes the target-changed marker (`mark_reports_target_changed` in `nn-systems/cold-read/cold-read-grid.py`). That mechanism puts the line after the provenance stamp when there is one, so the stamp stays the first line, and at the top otherwise; this is the top the ruling means.
 
-`<!-- INCOMPLETE SET: 2 of 7 reports absent — claude-hunt-good (logged-out — Not logged in · Please run /login), claude-terminology-good (logged-out — Not logged in · Please run /login) -->`
+`<!-- #cold_read_grid_incomplete_set# 2 of 7 reports absent — claude-hunt-good (logged-out — Not logged in · Please run /login), claude-terminology-good (logged-out — Not logged in · Please run /login) -->`
 
 When the cold-read-target also changed, both markers are written, the target-changed marker first.
 

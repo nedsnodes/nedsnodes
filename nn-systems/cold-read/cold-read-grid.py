@@ -99,7 +99,7 @@ agent-binary-wide cause, one `AGENT-BINARY DOWN:` line says so. Every run closes
 with one closing text built from what landed: all landed, some landed (the
 set is valid and incomplete, and is triaged), none landed, or the
 frozen copy changed, whatever else happened. When any report is absent
-every .md file in the record is marked `<!-- INCOMPLETE SET: ... -->`, and
+every .md file in the record is marked `<!-- #cold_read_grid_incomplete_set# ... -->`, and
 when an absent report's cause is one the user can clear the closing text
 ends "Tell the user: ...", which repeats each such cause as the run's
 summary. Apart from the retry, a cause changes what is reported, never what
@@ -112,9 +112,9 @@ cold-read-fast-read uses for it, with the cold-read-fast-read's own prompt
 for it, read from that program so the two runs cannot drift apart. It reads
 the frozen copy like the cells above and is retried and timed out by the same
 rules, but it is not one of the seven: whether its report landed changes
-neither the closing text's variant, the INCOMPLETE SET marker, the
+neither the closing text's variant, the #cold_read_grid_incomplete_set# marker, the
 AGENT-BINARY DOWN line, "Tell the user: ..." nor the exit code. When one of
-the cells above is absent, its landed report gets the INCOMPLETE SET marker like
+the cells above is absent, its landed report gets the #cold_read_grid_incomplete_set# marker like
 every .md file in the record; its own absence puts no marker anywhere. Its report
 is `question-4-what-should-be-code-answer.md`, a name that starts with neither agent-binary, so a run in
 which it alone landed is not counted among the three. The grid writes the
@@ -279,7 +279,8 @@ UNREVIEWABLE_TARGET_GENRE_SUFFIXES = ("-log", "-report", "-capture")
 FROZEN_COPY_CHANGED_HASHTAG = "#frozen_copy_changed_during_run"
 COLD_READ_TARGET_CHANGED_HASHTAG = "#cold_read_target_changed_during_run"
 FROZEN_COPY_CHANGED_MARKER_PREFIX = f"<!-- {FROZEN_COPY_CHANGED_HASHTAG}"
-INCOMPLETE_SET_MARKER_PREFIX = "<!-- INCOMPLETE SET:"
+INCOMPLETE_SET_HASHTAG = "#cold_read_grid_incomplete_set#"
+INCOMPLETE_SET_MARKER_PREFIX = f"<!-- {INCOMPLETE_SET_HASHTAG}"
 GRID_MARKER_PREFIXES = (FROZEN_COPY_CHANGED_MARKER_PREFIX, INCOMPLETE_SET_MARKER_PREFIX)
 
 # These prefixes are consumed by the cold-read skill's Monitor; FAILED keeps its no-colon form.

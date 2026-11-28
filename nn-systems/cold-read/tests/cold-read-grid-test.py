@@ -44,7 +44,7 @@ WHAT IS PINNED HERE.
     changed -- replacing the Opus-absent and Fable-only branches of
     2026-09-04 ("why is opus special? I don't think it should be"). Absent
     reports are listed with their causes, every .md file in the record is
-    marked INCOMPLETE SET, an agent-binary whose every cell is absent for one
+    marked #cold_read_grid_incomplete_set#, an agent-binary whose every cell is absent for one
     agent-binary-wide cause gets one AGENT-BINARY DOWN: line, and a cause the user
     can clear ends the text with "Tell the user:". Apart from the retry, a
     cause changes what is reported, never what is decided: the cases below
@@ -1005,8 +1005,8 @@ try:
           sorted(path.name for path in record_directory.glob("*.stderr.log"))
           == ["claude-hunt-second-strongest-model.md.attempt-1.stderr.log"],
           sorted(path.name for path in record_directory.glob("*.stderr.log")))
-    check("a set with no absent report carries no INCOMPLETE SET marker",
-          markers_in(record_directory, "<!-- INCOMPLETE SET:") == [])
+    check("a set with no absent report carries no #cold_read_grid_incomplete_set# marker",
+          markers_in(record_directory, "<!-- #cold_read_grid_incomplete_set#") == [])
 
     # --- A failed first attempt's stray write is still reported ---------------
     # The retry takes its own baseline after the first attempt's write, so
@@ -1060,13 +1060,13 @@ try:
           "Tell the user:" not in result.stdout and "AGENT-BINARY DOWN:" not in result.stdout,
           repr(result.stdout))
     record_directory = record_directory_of(repository)
-    check("the INCOMPLETE SET marker is in all eight .md files of the record, the Question 4 report's included",
-          len(markers_in(record_directory, "<!-- INCOMPLETE SET: 1 of 7 reports absent — "
+    check("the #cold_read_grid_incomplete_set# marker is in all eight .md files of the record, the Question 4 report's included",
+          len(markers_in(record_directory, "<!-- #cold_read_grid_incomplete_set# 1 of 7 reports absent — "
                                             "claude-terminology-deep (exit-1 — ")) == 8,
-          markers_in(record_directory, "<!-- INCOMPLETE SET:"))
+          markers_in(record_directory, "<!-- #cold_read_grid_incomplete_set#"))
     stamped = (record_directory / "claude-hunt-deep.md").read_text(encoding="utf-8").split("\n")
     check("the marker goes after the provenance stamp",
-          stamped[0].startswith("<!-- provenance:") and stamped[1].startswith("<!-- INCOMPLETE SET:"),
+          stamped[0].startswith("<!-- provenance:") and stamped[1].startswith("<!-- #cold_read_grid_incomplete_set#"),
           repr(stamped[:2]))
     check("both attempts' logs of the absent cell are kept, the landed cells' deleted",
           sorted(path.name for path in record_directory.glob("*.stderr.log"))
@@ -1384,8 +1384,8 @@ try:
           f"exit {result.returncode}; stdout={result.stdout!r}")
     record_directory = record_directory_of(repository)
     check("the marker still goes into the reference-check file, the set's one .md",
-          markers_in(record_directory, "<!-- INCOMPLETE SET: 7 of 7 reports absent") == ["cold-read-reference-check.md"],
-          markers_in(record_directory, "<!-- INCOMPLETE SET:"))
+          markers_in(record_directory, "<!-- #cold_read_grid_incomplete_set# 7 of 7 reports absent") == ["cold-read-reference-check.md"],
+          markers_in(record_directory, "<!-- #cold_read_grid_incomplete_set#"))
 
     # --- A cell program the grid cannot start (user-ruled 2026-09-16) --------
     # The copied Claude launcher loses its execute permission, so Popen
@@ -1442,7 +1442,7 @@ try:
     check("both markers are written, the target-changed marker first, after the stamp",
           marked[0].startswith("<!-- provenance:")
           and marked[1].startswith("<!-- #frozen_copy_changed_during_run")
-          and marked[2].startswith("<!-- INCOMPLETE SET: 1 of 7 reports absent"),
+          and marked[2].startswith("<!-- #cold_read_grid_incomplete_set# 1 of 7 reports absent"),
           repr(marked[:3]))
 
     # --- A Codex attempt's output holds the Claude logged-out text -----------
@@ -1659,9 +1659,9 @@ try:
           and "All seven reports landed" in result.stdout
           and "of 7 reports landed" not in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}")
-    check("a failed Question 4 cell marks no report INCOMPLETE SET",
-          markers_in(record_directory, "<!-- INCOMPLETE SET:") == [],
-          markers_in(record_directory, "<!-- INCOMPLETE SET:"))
+    check("a failed Question 4 cell marks no report #cold_read_grid_incomplete_set#",
+          markers_in(record_directory, "<!-- #cold_read_grid_incomplete_set#") == [],
+          markers_in(record_directory, "<!-- #cold_read_grid_incomplete_set#"))
     check("the closing text says Question 4 was not answered, why, and where its log is",
           "Question 4, What should be code, was not answered: exit-1 — " in result.stdout
           and f"{QUESTION_4_REPORT_NAME}.attempt-2.stderr.log). The other reports do not "
@@ -1683,7 +1683,7 @@ try:
     check("a logged-out Question 4 cell tells the user nothing and downs no agent-binary",
           "Tell the user:" not in result.stdout and "AGENT-BINARY DOWN:" not in result.stdout
           and result.returncode == 0 and "All seven reports landed" in result.stdout
-          and markers_in(record_directory, "<!-- INCOMPLETE SET:") == [],
+          and markers_in(record_directory, "<!-- #cold_read_grid_incomplete_set#") == [],
           f"exit {result.returncode}; stdout={result.stdout!r}")
     check("the closing text gives the logged-out line as why Question 4 was not answered",
           "Question 4, What should be code, was not answered: logged-out — Not logged in · Please run /login (log: "
@@ -3009,7 +3009,7 @@ try:
 
     # --- An incomplete set ships with its marker, so cold-read-triage.md can follow ----
     # The shipper is add-only and refuses a record whose stored file differs
-    # from the local one, so the INCOMPLETE SET marker must be in the reports
+    # from the local one, so the #cold_read_grid_incomplete_set# marker must be in the reports
     # BEFORE the run ships them: a marker written after the ship left the
     # store's reports without it, and the post-triage ship the closing text
     # asks for was refused, triage.md never reaching the store. Found by
@@ -3048,9 +3048,9 @@ try:
           store_copy.is_dir() and files_under(store_copy) == files_under(record_directory),
           f"store={sorted(str(p) for p in store_copy.rglob('*'))}")
     stored_report = store_copy / "claude-hunt-deep.md"
-    check("the store's copy of a report carries the INCOMPLETE SET marker",
+    check("the store's copy of a report carries the #cold_read_grid_incomplete_set# marker",
           stored_report.is_file()
-          and "<!-- INCOMPLETE SET:" in stored_report.read_text(encoding="utf-8"),
+          and "<!-- #cold_read_grid_incomplete_set#" in stored_report.read_text(encoding="utf-8"),
           stored_report.read_text(encoding="utf-8")[:300] if stored_report.is_file() else "absent")
     (record_directory / "cold-read-triage.md").write_text("# Triage\n\nOne absent report.\n", encoding="utf-8")
     third_ship = ship_again()
