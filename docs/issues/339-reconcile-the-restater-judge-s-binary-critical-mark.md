@@ -10,7 +10,7 @@ Severity weights were adopted the same day, and they overlap it.
 
 ## The conflict, precisely
 
-`cold-read-reviewer-test-cases/ghi-write-trio/ghi-write-defect-list-2026-09-07.md` now carries a per-row weight of 1 to 8 in its "Severity weights" section, and `scripts/cold-read-reviewer-score.py` reads those weights out of the list rather than holding a copy.
+`cold-read-reviewer-test-cases/ghi-write-trio/ghi-write-defect-list-2026-09-07.md` now carries a per-row weight of 1 to 8 in its "Severity weights" section, and `nn-systems/cold-read/cold-read-reviewer-score.py` reads those weights out of the list rather than holding a copy.
 
 - **Where a catch maps to a defect-list row,** the row's weight already states how serious it is. The judge's binary mark is redundant, and worse, it is a second severity signal that can disagree with the first.
 - **Where a catch maps to no row,** the mark is the only severity signal there is. Dropping it loses information.
@@ -25,7 +25,7 @@ The reconciliation therefore belongs to the user's walk of that prompt. **Do not
 
 Two related facts a builder needs:
 
-- The judge runner, `scripts/cold-read-restater-judge-runner.py`, is inert on purpose: `--prompt-file` is required and the prompt is not on main.
+- The judge runner, `nn-systems/cold-read/cold-read-restater-judge-runner.py`, is inert on purpose: `--prompt-file` is required and the prompt is not on main.
 - No restater run may use the merged 80/20 composite, which the 2026-09-08 item 8 ruling superseded.
 
 ## What ruling would settle it
