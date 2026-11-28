@@ -17,7 +17,10 @@ constants. That includes a prompt passed to the handoff-supervisor with
 --first-prompt-file or --first-prompt, such as a new agent-seat's founding
 prompt, which the handoff-supervisor ends with a line of its own; such a prompt
 written before it did so has no such line and is read as his. Turns written
-before Claude Code recorded an origin are read by their text alone."""
+before Claude Code recorded an origin are read by their text alone.
+
+Search exits 0 for a match, 1 for no match, or 2 when a transcript could not
+be listed or read completely. A partial final record may still be in flight."""
 
 import argparse
 import importlib.util
@@ -223,24 +226,29 @@ class TurnReader:
 
 
 def read_turns(path):
-    """Every turn in one transcript: (index, speaker, text, timestamp)."""
+    """Return the turns and the number of malformed records skipped."""
     turns = []
+    malformed = 0
+    partial_final = False
     reader = TurnReader()
     with open(path, "r", errors="replace") as handle:
         for line in handle:
+            partial_final = False
             line = line.strip()
             if not line:
                 continue
             try:
                 record = json.loads(line)
             except json.JSONDecodeError:
+                malformed += 1
+                partial_final = not line.endswith("}")
                 continue
             if not isinstance(record, dict):
                 continue
             turn = reader.turn(record)
             if turn is not None:
                 turns.append((len(turns), turn[0], turn[1], record.get("timestamp", "")))
-    return turns
+    return turns, malformed - int(partial_final)
 
 
 def transcripts(projects_dir, seats, since_hours):
@@ -334,8 +342,17 @@ def main():
     if note:
         print(note, file=sys.stderr)
 
+    incomplete = False
     for path in read:
-        turns = read_turns(path)
+        try:
+            turns, malformed = read_turns(path)
+        except OSError as error:
+            print(f"Could not read {path}: {error}", file=sys.stderr)
+            incomplete = True
+            continue
+        if malformed:
+            print(f"{path}: skipped {malformed} malformed record(s)", file=sys.stderr)
+            incomplete = True
         user_turns = [t for t in turns if t[1] == "user"]
         total_user_messages += len(user_turns)
         hits = [t for t in user_turns if matches(t[2])]
@@ -363,6 +380,8 @@ def main():
            f"{len(read)} {'was' if len(read) == 1 else 'were'} opened" if skipped else "")
         + f"; {total_user_messages} user message(s) read in the transcript(s) opened."
     )
+    if incomplete:
+        return 2
     return 0 if total_hits else 1
 
 

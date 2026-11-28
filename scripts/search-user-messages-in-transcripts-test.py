@@ -70,7 +70,8 @@ def write_transcript(directory, records, name="session.jsonl"):
 
 
 def user_texts(path):
-    return [turn[2] for turn in search_module.read_turns(str(path)) if turn[1] == "user"]
+    turns, _ = search_module.read_turns(str(path))
+    return [turn[2] for turn in turns if turn[1] == "user"]
 
 
 with tempfile.TemporaryDirectory() as directory:
@@ -335,6 +336,26 @@ def search(directory, *arguments):
 
 
 with tempfile.TemporaryDirectory() as directory:
+    path = write_transcript(directory, [typed("needle")])
+    valid = path.read_text(encoding="utf-8")
+    for tail, expected_code in (("bad\n" + valid, 2), ("{broken}", 2), ('{"message":', 0)):
+        path.write_text(valid + tail, encoding="utf-8")
+        run = search(directory, "^needle$")
+        check(f"a malformed line is reported unless it is a partial final record: {tail[:12]!r}",
+              run.returncode == expected_code and "USER: needle" in run.stdout
+              and (str(path) in run.stderr) == (expected_code == 2), (run.returncode, run.stderr))
+    later = write_transcript(directory, [typed("needle")], name="z-readable.jsonl")
+    path.chmod(0)
+    try:
+        run = search(directory, "^needle$")
+        check("an unreadable transcript is named and later transcripts are still searched",
+              run.returncode == 2 and str(path) in run.stderr
+              and later.name in run.stdout and "USER: needle" in run.stdout,
+              (run.returncode, run.stderr, run.stdout))
+    finally:
+        path.chmod(0o600)
+    path.unlink()
+    later.unlink()
     missing = str(Path(directory) / "absent-projects")
     for argument in ("needle", "--list-seats"):
         run = search(missing, argument)
