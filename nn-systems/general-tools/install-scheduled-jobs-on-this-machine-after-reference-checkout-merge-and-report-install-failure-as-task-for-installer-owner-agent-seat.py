@@ -49,7 +49,8 @@ When the task cannot be written, or a step failed on the Mac, where
 OWNING_AGENT_SEAT's task list is not, a FAILED message holding the failed
 step's output goes to standard error instead: git puts it on its own stderr,
 and scripts/checkout-freshness-catch-up.py, which fast-forwards the
-reference-checkout, shows the user any FAILED line there.
+reference-checkout, shows it to the user, since the post-merge hook then adds
+its #post_merge_hook_failed# line.
 
 Git ignores a post-merge hook's exit code; the merge stands either way.
 

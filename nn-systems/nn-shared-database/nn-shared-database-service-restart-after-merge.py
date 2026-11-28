@@ -22,7 +22,9 @@ unit's install step again.
 
 Git ignores a post-merge hook's exit code; the merge stands either way. Git
 puts this program's output on its own stderr; checkout-freshness-catch-up.py,
-which fast-forwards the reference-checkout, shows the user any FAILED line.
+which fast-forwards the reference-checkout, shows it to the user when the
+post-merge hook adds its #post_merge_hook_failed# line, as it does whenever
+this program exits nonzero.
 
 Exit codes: 0 outside any Git checkout, not ned-box's reference-checkout,
 nothing to restart, or the restart succeeded; 1 `git rev-parse --show-toplevel`
