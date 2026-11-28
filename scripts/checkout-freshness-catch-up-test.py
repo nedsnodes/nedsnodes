@@ -1136,25 +1136,39 @@ with tempfile.TemporaryDirectory() as reference_pull_scratch:
           f"rc={already_current.returncode} {already_current.stdout}")
 
     # Git exits 0 after a fast-forward whatever post-merge returns, so the
-    # hook's FAILED line reaches nobody unless the catch-up relays it.
-    hooks = tmp / "hooks"
-    hooks.mkdir()
-    (hooks / "post-merge").write_text(
-        "#!/bin/sh\necho 'restart-program: FAILED — the restart did not happen' >&2\nexit 1\n",
-        encoding="utf-8")
+    # hook's failure reaches nobody unless the catch-up relays it. The real
+    # hook runs here, with stand-ins for the two programs it runs.
+    hook_tree = tmp / "hook-tree"
+    hooks = hook_tree / "scripts" / "git-client-side-hooks"
+    hooks.mkdir(parents=True)
+    shutil.copy(SCRIPT_PATH.resolve().parent / "git-client-side-hooks" / "post-merge", hooks / "post-merge")
     (hooks / "post-merge").chmod(0o755)
+    restart_program = (hook_tree / "nn-systems" / "nn-shared-database"
+                       / "nn-shared-database-service-restart-after-merge.py")
+    installer_program = (hook_tree / "nn-systems" / "general-tools"
+                         / "install-scheduled-jobs-on-this-machine-after-reference-checkout-merge-and-report-install-failure-as-task-for-installer-owner-agent-seat.py")
+    restart_program.parent.mkdir(parents=True)
+    installer_program.parent.mkdir(parents=True)
+    restart_program.write_text(
+        "import sys\nprint('restart-program: FAILED — the restart did not happen', file=sys.stderr)\n"
+        "sys.exit(1)\n", encoding="utf-8")
+    installer_program.write_text("", encoding="utf-8")
     git(["config", "core.hooksPath", str(hooks)], reference)
     commit_file(origin, "advance-again.txt", "two\n", "advance again")
     pulled = run_catch_up(["--reference-pull", "--repo", str(reference)])
-    check("a post-merge hook's FAILED line after a fast-forward of the reference is relayed",
+    check("the post-merge hook's #post_merge_hook_failed# line after a fast-forward of the reference "
+          "is relayed with the failed program's message",
           (reference / "advance-again.txt").exists()
           and "post-merge hook reported a failure" in pulled.stdout
-          and "restart-program: FAILED — the restart did not happen" in pulled.stdout,
+          and "restart-program: FAILED — the restart did not happen" in pulled.stdout
+          and f"post-merge: {catch_up_module.POST_MERGE_HOOK_FAILED_HASHTAG} " in pulled.stdout,
           pulled.stdout + pulled.stderr)
-    (hooks / "post-merge").write_text("#!/bin/sh\necho 'all went well' >&2\n", encoding="utf-8")
+    restart_program.write_text(
+        "import sys\nprint('restart-program: the word FAILED in a line that is no failure', "
+        "file=sys.stderr)\n", encoding="utf-8")
     commit_file(origin, "advance-third.txt", "three\n", "advance a third time")
     pulled = run_catch_up(["--reference-pull", "--repo", str(reference)])
-    check("(control) a post-merge hook that reports no failure adds no line",
+    check("(control) a post-merge hook whose programs all exit 0 adds no line, though one printed FAILED",
           "post-merge hook" not in pulled.stdout, pulled.stdout)
 
     # An ignored directory at a path main newly tracks: without

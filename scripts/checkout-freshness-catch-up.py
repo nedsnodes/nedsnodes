@@ -73,8 +73,8 @@ Wired as a Stop hook, so it runs at every turn boundary. Each run:
      33 commits stale, running a superseded extractor under every supervisor
      on the machine. A reference that cannot update — someone left work
      there — is a user line; a success is silent, unless git's output from
-     the fast-forward carries a FAILED line from the post-merge hook, which
-     git does not count as a failure.
+     the fast-forward carries the post-merge hook's `#post_merge_hook_failed#`
+     line, a failure git does not count.
 
 The user's lines travel as the Stop hook's `systemMessage`. The agent's notes
 are NOT emitted at Stop: a Stop hook's `additionalContext` makes Claude Code
@@ -1686,6 +1686,10 @@ def reference_checkout_of(checkout: Path):
     return Path(records[0].path) if records else None
 
 
+# scripts/git-client-side-hooks/post-merge prints this on its last line when a program it runs failed.
+POST_MERGE_HOOK_FAILED_HASHTAG = "#post_merge_hook_failed#"
+
+
 def fast_forward_reference_checkout(reference: Path, interval_seconds: int,
                                     operator_facing: bool = True) -> bool:
     """ff-only pull of a checkout parked on main; never a real merge.
@@ -1813,7 +1817,7 @@ def fast_forward_reference_checkout(reference: Path, interval_seconds: int,
     write_stamp(stamp_path, stamp)
     # Git exits 0 whatever the post-merge hook returns, and puts the hook's
     # output on its own stderr, so a hook's failure is seen only here.
-    if "FAILED" in pulled.stderr:
+    if POST_MERGE_HOOK_FAILED_HASHTAG in pulled.stderr:
         report(f"catch-up: reference checkout {reference} fast-forwarded {behind} commit(s), "
                f"and its post-merge hook reported a failure:\n{pulled.stderr.strip()}")
     if operator_facing:

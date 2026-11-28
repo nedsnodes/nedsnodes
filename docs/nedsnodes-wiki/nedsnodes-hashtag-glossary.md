@@ -56,6 +56,7 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#not_asked_unused#` — the approval-walk item evidence line that names a thing a change removes because nothing uses it.
 - `#not_in_this_run#` — a design's Deferred-decisions line for a decision left out of this run of design-to-main, with its `#reason#`.
 - `#open_question#` — the line that opens an open question in a document.
+- `#post_merge_hook_failed#` — the last line `scripts/git-client-side-hooks/post-merge` prints on standard error, after the hook's name, when a program the hook runs failed; `scripts/checkout-freshness-catch-up.py` shows the user the hook's output when git's output holds it.
 - `#pre_approved_change#` — the first line of `.walk-approved` when a change to a guarded-file needs no approval, with the exception it falls under on the second line.
 - `#prose#` — a project glossary label: the term of the entry it ends covers prose.
 - `#pull_request_triggers_the_defect#` — a fact line ending each code finding of a pull request review: whether running the code as the pull request leaves it hits the defect where running main does not, `yes`, `no` or `not checked`.
