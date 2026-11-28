@@ -517,22 +517,25 @@ names = importlib.util.module_from_spec(_names_spec)
 _names_spec.loader.exec_module(names)
 with tempfile.TemporaryDirectory() as scratch:
     record = pathlib.Path(scratch)
-    for name, old_name in names.COLD_READ_RECORD_FILE_NAME_TO_ITS_NAME_BEFORE_COLD_READ_PREFIX.items():
-        check(f"a record holding neither name of {name} is given {name}",
+    for name, current_name, old_name in (
+            (names.COLD_READ_FAST_READ_REPORT_FILE_NAME, "cold-read-fast-read.md", "fast-read.md"),
+            (names.COLD_READ_TRIAGE_FILE_NAME, "cold-read-triage.md", "triage.md"),
+            (names.COLD_READ_REFERENCE_CHECK_REPORT_FILE_NAME, "cold-read-reference-check.md", "reference-check.md")):
+        check(f"a record holding neither name of {current_name} is given {current_name}",
               names.cold_read_record_file_path_prefixed_name_else_name_before_prefix(record, name)
-              == record / name)
+              == record / current_name)
         (record / old_name).write_text("old\n", encoding="utf-8")
         check(f"a record holding only {old_name} is given {old_name}",
               names.cold_read_record_file_name_prefixed_name_else_name_before_prefix(record, name)
               == old_name)
-        (record / name).write_text("new\n", encoding="utf-8")
-        check(f"a record holding both {name} and {old_name} is given {name}",
+        (record / current_name).write_text("new\n", encoding="utf-8")
+        check(f"a record holding both {current_name} and {old_name} is given {current_name}",
               names.cold_read_record_file_name_prefixed_name_else_name_before_prefix(record, name)
-              == name)
+              == current_name)
         (record / old_name).unlink()
-        check(f"a record holding only {name} is given {name}",
+        check(f"a record holding only {current_name} is given {current_name}",
               names.cold_read_record_file_name_prefixed_name_else_name_before_prefix(record, name)
-              == name)
+              == current_name)
     (record / "fast-read.md").mkdir()
     check("a directory under the old name is not taken for the file",
           names.cold_read_record_file_name_prefixed_name_else_name_before_prefix(
