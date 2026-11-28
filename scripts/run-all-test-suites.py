@@ -994,6 +994,8 @@ FILES_ONLY_STRACE_SAW_LIST_MAXIMUM_AGE_HOURS_BEFORE_NOTICE = 36
 # The runner, hooks and settings can affect every suite or session a suite starts.
 EVERY_SUITE_RUNS_WHEN_THESE_CHANGE = (
     "scripts/run-all-test-suites.py", ".claude/guard-hooks/", ".claude/settings.json")
+# git merge-base exits 1, printing nothing, when the two commits share no history.
+GIT_MERGE_BASE_FOUND_NONE = 1
 # Object-store content reads evade recorders; only metadata-only commands belong here.
 # status is excluded because stale timestamps can make it read working files.
 GIT_COMMANDS_THAT_ONLY_LIST = frozenset((
@@ -4741,6 +4743,27 @@ def adopt_passing_recordings_that_match_the_checkout(top, into_given, from_given
     return adopted
 
 
+def files_the_checkouts_own_change_differs_in(top, commit, differ):
+    """(the files that differ since the merge base of commit and HEAD, that merge base), or
+    (differ, None) when commit is that merge base or the two have none.
+
+    A checkout behind commit differs from it in every file commit's own history changed since
+    the checkout left it, and those are not the checkout's change. Raises CouldNotRun when git
+    cannot find the merge base."""
+    answer = git(top, "merge-base", commit, "HEAD")
+    if answer.returncode == GIT_MERGE_BASE_FOUND_NONE and not answer.stdout.strip():
+        return differ, None
+    if answer.returncode != 0:
+        error = git_failure_stderr_first_line_or_printed_no_error_text(answer)
+        raise CouldNotRun(
+            f"{PROGRAM}: not run — git merge-base {commit} HEAD failed in {top}: {error}\n"
+            + git_failure_next_step_lines(error))
+    merge_base = answer.stdout.strip()
+    if merge_base == commit:
+        return differ, None
+    return files_that_differ_since(top, merge_base), merge_base
+
+
 def suites_selected_since(top, suites, recordings, commit, differ, files_only_strace_saw_by_suite,
                           read_only_recordings, read_only_directory):
     """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's.
@@ -4749,11 +4772,14 @@ def suites_selected_since(top, suites, recordings, commit, differ, files_only_st
     read_only_recordings, read from read_only_directory, would leave it out, unless its
     recording in recordings shows an input the change differs in; read_only_recordings never
     select a suite."""
-    everything = [path for path in sorted(differ)
+    own_change, merge_base = files_the_checkouts_own_change_differs_in(top, commit, differ)
+    everything = [path for path in sorted(own_change)
                   if any(path == prefix or (prefix.endswith("/") and path.startswith(prefix))
                          for prefix in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE)]
     if everything:
-        return [(suite, True, f"{everything[0]} differs, and every suite runs under it")
+        since = (f" since {merge_base[:12]}, this checkout's merge base with {commit[:12]}"
+                 if merge_base is not None else "")
+        return [(suite, True, f"{everything[0]} differs{since}, and every suite runs under it")
                 for suite in suites]
     checkout = CheckoutComparedWithCommit(top, commit, differ,
                                           [recordings.get(suite) for suite in suites])

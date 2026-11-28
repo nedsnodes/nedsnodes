@@ -1124,6 +1124,65 @@ with tempfile.TemporaryDirectory() as scratch:
           result.returncode == 2 and CHANGED_SINCE in result.stderr, (result.returncode,
                                                                       result.stderr))
 
+    # An agent's pushed branch behind origin/main, tested since origin/main, differs from it in
+    # every file main changed after the branch left it.
+    left_main = git(repo, "rev-parse", "HEAD").stdout.strip()
+    main_moved_on = commit_files(repo, {".claude/guard-hooks/a-guard.py": "# main's change\n"},
+                                 "main changes a guard hook after the checkout left it")
+    git(repo, "checkout", "-q", "--detach", left_main)
+    result = selective_run(root, main_moved_on)
+    check("a checkout behind the commit given does not run every suite for a file under "
+          ".claude/guard-hooks/ that only the commit's own history changed",
+          result.returncode == 0 and ran(root) == []
+          and not any("every suite runs under it" in line for line in lines(result.stdout)),
+          (ran(root), result.stdout, result.stderr))
+    own_change = commit_files(repo, {".claude/guard-hooks/own-guard.py": "# own\n"},
+                              "the checkout's own change to a guard hook")
+    result = selective_run(root, main_moved_on)
+    check("a checkout behind the commit given runs every suite for its own change under "
+          ".claude/guard-hooks/, naming the merge base the change is measured from",
+          ran(root) == sorted(RECORDING_SUITES)
+          and "SELECTED reads-nothing-else-test.py: .claude/guard-hooks/own-guard.py differs "
+              f"since {left_main[:12]}, this checkout's merge base with {main_moved_on[:12]}, "
+              "and every suite runs under it" in lines(result.stdout),
+          (ran(root), result.stdout, result.stderr))
+    result = selective_run(root, left_main)
+    check("a checkout given an ancestor of its HEAD keeps the reason without a merge base",
+          "SELECTED reads-nothing-else-test.py: .claude/guard-hooks/own-guard.py differs, "
+          "and every suite runs under it" in lines(result.stdout),
+          (result.stdout, result.stderr))
+    git(repo, "checkout", "-q", "--orphan", "shares-no-history")
+    unrelated = commit_files(repo, {".claude/settings.json": "{}\n"}, "a history of its own")
+    git(repo, "checkout", "-q", "--detach", own_change)
+    result = selective_run(root, unrelated)
+    check("a commit sharing no history with the checkout is compared with directly, so a file "
+          "under .claude/guard-hooks/ that differs from it runs every suite",
+          ran(root) == sorted(RECORDING_SUITES)
+          and any(line.startswith("SELECTED reads-nothing-else-test.py: ")
+                  and line.endswith("differs, and every suite runs under it")
+                  for line in lines(result.stdout)),
+          (ran(root), result.stdout, result.stderr))
+
+    real_git = module.git
+
+    def git_whose_merge_base_fails(checkout, *arguments):
+        if arguments[:1] == ("merge-base",):
+            return subprocess.CompletedProcess(["git", *arguments], 128, "",
+                                               "fatal: injected merge-base failure\n")
+        return real_git(checkout, *arguments)
+
+    module.git = git_whose_merge_base_fails
+    try:
+        module.files_the_checkouts_own_change_differs_in(repo, main_moved_on, {})
+        refused = None
+    except module.CouldNotRun as refusal:
+        refused = str(refusal)
+    finally:
+        module.git = real_git
+    check("a git merge-base that fails stops the selection, naming the command and git's error",
+          refused is not None and f"git merge-base {main_moved_on} HEAD failed" in refused
+          and "injected merge-base failure" in refused, refused)
+
 # --- Selection never trusts a recording it cannot show is complete and of ----
 # --- these files -------------------------------------------------------------
 # merge-lane-2's review of round 1 (review 5373089211 on pull request
