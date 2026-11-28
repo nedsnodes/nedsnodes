@@ -7169,7 +7169,7 @@ def test_a_file_or_path_git_lists_counts_as_a_fact_and_git_failing_counts_every_
           and program.approval_walk_item_before_and_after_fixes_compare_for_changed_fact_words_needing_another_cold_read_fast_read("Look in a place.", "Look in scripts/.", top) == ["scripts/."]
           and program.approval_walk_item_before_and_after_fixes_compare_for_changed_fact_words_needing_another_cold_read_fast_read("It runs a tool.", "It runs a script.", top) == []
           and program.approval_walk_item_before_and_after_fixes_compare_for_changed_fact_words_needing_another_cold_read_fast_read(
-              "It reads <the item>.", "It reads <the item> [advisor].", top) == [], repr(named))
+              "It reads <the item>.", "It reads <the item> #approval_walk_text_changed_by_advisor#.", top) == [], repr(named))
     not_a_checkout = SUITE_ROOT / "facts-no-git"
     not_a_checkout.mkdir()
     facts = program.approval_walk_item_before_and_after_fixes_compare_for_changed_fact_words_needing_another_cold_read_fast_read("It runs a tool.", "It runs a script.", not_a_checkout)

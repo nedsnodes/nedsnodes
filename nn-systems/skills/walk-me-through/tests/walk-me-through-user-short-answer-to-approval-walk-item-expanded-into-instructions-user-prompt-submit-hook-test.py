@@ -1887,7 +1887,7 @@ A filter would hide old rows. For example, a row from 2024 would vanish.
 
 #new_if_d Show every row.
 
-[advisor] #case_against weak: old rows confuse readers.
+#approval_walk_text_changed_by_advisor# #case_against weak: old rows confuse readers.
 
 The alternative: add the filter.
 
