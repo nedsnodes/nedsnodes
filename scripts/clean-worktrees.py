@@ -1537,11 +1537,13 @@ def remove_worktree(worktree, branch, repo, verdict, one_named=False):
             # keeps an agent-seat's own worktree while its owner runs.
             return False
         # No next-step line may contain FAILED: the handoff-supervisor counts each such line as a failure.
+        # A record's refusal says what resolves it: a rename for another read's report, a merge
+        # of the triage file for a newer log-store triage; restating one of them misleads on the other.
         if any(line.startswith("REFUSED:") and shipper != WALK_FILES_SHIPPER
                for shipper, line in unshipped):
-            print(f"{worktree.name}: for each record whose line starts REFUSED:, rename its directory "
-                  f"as that line says; the next scripts/clean-worktrees.py --remove then ships it "
-                  f"and removes the worktree")
+            print(f"{worktree.name}: for each record whose line starts REFUSED:, do what that line "
+                  f"says; the next scripts/clean-worktrees.py --remove then ships it and removes "
+                  f"the worktree")
         # A walk's refusal names add-only files the store holds with other bytes; no rename resolves it.
         if any(line.startswith("REFUSED:") and shipper == WALK_FILES_SHIPPER
                for shipper, line in unshipped):

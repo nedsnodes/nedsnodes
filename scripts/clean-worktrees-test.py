@@ -1706,15 +1706,39 @@ with tempfile.TemporaryDirectory() as scratch:
           and "refused-wt: record shipment FAILED, worktree kept — " in refused.stdout
           and refused.returncode == 1,
           refused.stdout + refused.stderr)
-    check("--remove tells a worktree whose record was refused to rename it, and gives no retry "
-          "step when every unshipped record was refused",
-          "refused-wt: for each record whose line starts REFUSED:, rename its directory as that "
-          "line says; the next scripts/clean-worktrees.py --remove then ships it and removes "
-          "the worktree" in refused.stdout
+    check("--remove tells a worktree whose record was refused to do what the refusal says, "
+          "and gives no retry step when every unshipped record was refused",
+          "refused-wt: for each record whose line starts REFUSED:, do what that line says; the "
+          "next scripts/clean-worktrees.py --remove then ships it and removes the worktree"
+          in refused.stdout
           and "whose line does not start REFUSED:" not in refused.stdout
           and "for each walk whose line starts REFUSED:" not in refused.stdout,
           refused.stdout)
     remove_worktree_for_next_case(refused_wt)
+
+    # A log-store triage newer than the worktree's is refused too, and a rename would only ship a
+    # second record holding the stale triage: the cleanup's line must not say to rename.
+    newer_triage_store = scratch / "newer-triage-store"
+    newer_triage_stored = newer_triage_store / "cold-read-records" / cold_read_record_name
+    newer_triage_stored.mkdir(parents=True)
+    (newer_triage_stored / "fast-read.md").write_text("report\n", encoding="utf-8")
+    (newer_triage_stored / "cold-read-triage.md").write_text(
+        "# triage\nruling: the user's answer\n", encoding="utf-8")
+    newer_triage_wt = worktree_holding_records("newer-triage-wt")
+    stale_triage = newer_triage_wt / "cold-read-records" / cold_read_record_name / "cold-read-triage.md"
+    stale_triage.write_text("# triage\n", encoding="utf-8")
+    stale_seconds = (newer_triage_stored / "cold-read-triage.md").stat().st_mtime - 3600
+    os.utime(stale_triage, (stale_seconds, stale_seconds))
+    newer_triage = run_clean_shipping_to(str(newer_triage_store / "cold-read-records"), None, "--remove")
+    check("--remove keeps a worktree whose triage is older than the log-store's, and its "
+          "line defers to the refusal's instead of saying to rename",
+          newer_triage_wt.exists()
+          and "REFUSED:" in newer_triage.stdout and "was modified at" in newer_triage.stdout
+          and "newer-triage-wt: for each record whose line starts REFUSED:, do what that line "
+              "says" in newer_triage.stdout
+          and "rename its directory" not in newer_triage.stdout,
+          newer_triage.stdout + newer_triage.stderr)
+    remove_worktree_for_next_case(newer_triage_wt)
 
     # A shipper that dies before printing its line: a record file it cannot read raises, uncaught.
     silent_wt = worktree_holding_records("silent-wt")
