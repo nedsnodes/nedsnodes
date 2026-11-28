@@ -158,6 +158,16 @@ def codex_credential_denying_permission_profile_arguments(
     return arguments + ["-c", f"permissions.{profile_name}.filesystem={table}"]
 
 
+# Given once per link target that cold-read-fast-read.py or cold-read-grid.py rewrote in the reviewer's copy.
+REWRITTEN_LINK_TARGET_OPTION = "--mac-mount-of-ned-box-home-file-link-target-rewritten-as-ned-box-home-path"
+
+
+def rewritten_link_target_options(rewritten_link_targets: typing.Sequence) -> list:
+    """Return the launcher arguments that name each rewritten link target."""
+    # The = form, so a target that starts with - is not read as an option.
+    return [f"{REWRITTEN_LINK_TARGET_OPTION}={target}" for target in rewritten_link_targets]
+
+
 class BadInvocationArgumentParser(argparse.ArgumentParser):
     """Use the launcher refusal code to distinguish argparse errors from agent-binary errors."""
 
@@ -194,6 +204,15 @@ def build_argument_parser(
              "since nothing else was copied beside the target. Relative to "
              "the current directory or absolute; not required to exist, so a retry "
              "still runs after the original moved.",
+    )
+    parser.add_argument(
+        REWRITTEN_LINK_TARGET_OPTION, metavar="PATH", action="append", default=[],
+        dest="rewritten_link_targets",
+        help="a link target in --target that was file:///Volumes/nedhome/... in the "
+             "original and was rewritten to this /home/nedlern/... path for the "
+             "reviewer, as cold-read-record-names-common.py's rewrite does; given "
+             "once per target. The prompt then names each one to the reviewer, so "
+             "that it does not report their form",
     )
     parser.add_argument(
         "--report", required=True,
@@ -322,9 +341,29 @@ def prompt_template_path(cell: str, prompt_file=None) -> pathlib.Path:
     return template_path
 
 
+def rewritten_link_targets_paragraph(target: pathlib.Path, rewritten_link_targets: typing.Sequence) -> str:
+    """Return the note naming the link targets rewritten in the reviewer's copy, or "" when none were."""
+    # Without it, reviewers report the rewritten links as bare ned-box paths that do not open on the Mac.
+    if not rewritten_link_targets:
+        return ""
+    listed = "\n".join(f"- {link_target}" for link_target in rewritten_link_targets)
+    return (
+        f"\n\nIn {target}, each link target listed below starts "
+        f"{record_names.NED_BOX_HOME_PATH_PREFIX}, but starts "
+        f"{record_names.MAC_MOUNT_OF_NED_BOX_HOME_LINK_PREFIX} in the original document, "
+        f"the form that opens ned-box's file on the user's Mac. It was rewritten so that "
+        f"you can open the file on this machine.\n"
+        f"Do not report a link to one of these targets for its form, such as for being a bare "
+        f"ned-box path, or a link that does not open on the Mac: the original already has the Mac form.\n"
+        f"Report any other {record_names.NED_BOX_HOME_PATH_PREFIX} link target as you would "
+        f"without this note: the original has it in that form.\n"
+        f"{listed}\n"
+    )
+
+
 def compose_prompt(
     template_path: pathlib.Path, target: pathlib.Path, report: pathlib.Path,
-    target_origin=None,
+    target_origin=None, rewritten_link_targets: typing.Sequence = (),
 ) -> str:
     prompt = (
         template_path.read_text(encoding="utf-8")
@@ -333,7 +372,7 @@ def compose_prompt(
     )
     if target_origin is not None:
         prompt += target_origin_paragraph(target, target_origin)
-    return prompt
+    return prompt + rewritten_link_targets_paragraph(target, rewritten_link_targets)
 
 
 class WriteDetectorUnavailable(Exception):
@@ -1074,7 +1113,8 @@ def run_cell(
         staging_directory.mkdir()
     reviewer_report = (
         staging_directory / report.name if staging_directory else report)
-    prompt = compose_prompt(template_path, target, reviewer_report, target_origin)
+    prompt = compose_prompt(template_path, target, reviewer_report, target_origin,
+                            args.rewritten_link_targets)
 
     # An explicit model must not silently fall back to a different model.
     chain = (args.model,) if args.model else tier_to_model_chain[args.tier]

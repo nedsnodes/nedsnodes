@@ -1522,7 +1522,7 @@ def ship_record(record_dir: pathlib.Path) -> str:
 
 def run_one_fast_clarify_cell(
     launcher: pathlib.Path, target: pathlib.Path, report: pathlib.Path,
-    prompt_file: pathlib.Path,
+    prompt_file: pathlib.Path, rewritten_link_targets: typing.Sequence = (),
 ) -> tuple:
     """One attempt through `launcher`. Returns (the launcher's exit code,
     its stderr and stdout together).
@@ -1536,7 +1536,7 @@ def run_one_fast_clarify_cell(
         "--cell", FAST_READ_CELL, "--tier", FAST_READ_TIER,
         "--target", str(target), "--report", str(report),
         "--prompt-file", str(prompt_file),
-    ]
+    ] + cell_common.rewritten_link_target_options(rewritten_link_targets)
     completed = subprocess.run(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL, cwd=REPO_ROOT, text=True, check=False,
@@ -2007,7 +2007,7 @@ def main() -> int:
         marked_text, sentences = sentence_id_markup(
             target.read_text(encoding="utf-8"))
         # After the markup, so `sentences` keep the document's own text for triage.
-        marked_text = record_names.cold_read_reviewer_copy_text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths_where_mac_mount_absent(
+        marked_text, rewritten_link_targets = record_names.cold_read_reviewer_copy_text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths_where_mac_mount_absent(
             marked_text)
         marked_copy = (report.parent if on_records_route else pathlib.Path(scratch)) / (
             f"{target.stem}{SENTENCE_ID_MARKED_COPY_SUFFIX}")
@@ -2032,7 +2032,8 @@ def main() -> int:
             quota_error_line = ""
             for attempt in range(1, FAST_READ_ATTEMPTS + 1):  # pragma: no mutate, FAST_READ_ATTEMPTS is even, so | 1 gives + 1
                 exit_code, output = run_one_fast_clarify_cell(
-                    AGY_CELL_LAUNCHER, marked_copy, cell_report, prompt_file)
+                    AGY_CELL_LAUNCHER, marked_copy, cell_report, prompt_file,
+                    rewritten_link_targets)
                 if exit_code == 0:
                     return fast_read_report_finish_and_print_path(
                         **finish, backup_line="", word_check_launcher=AGY_CELL_LAUNCHER)
@@ -2061,7 +2062,8 @@ def main() -> int:
                   f"running the same cell once on {SONNET_BACKUP_MODEL}, the Sonnet "
                   "backup, through the claude cell launcher.", file=sys.stderr)
             exit_code, output = run_one_fast_clarify_cell(
-                CLAUDE_CELL_LAUNCHER, marked_copy, cell_report, prompt_file)
+                CLAUDE_CELL_LAUNCHER, marked_copy, cell_report, prompt_file,
+                rewritten_link_targets)
             if exit_code == 0:
                 return fast_read_report_finish_and_print_path(
                     **finish, word_check_launcher=CLAUDE_CELL_LAUNCHER,

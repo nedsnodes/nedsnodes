@@ -620,9 +620,11 @@ with tempfile.TemporaryDirectory() as scratch:
     signal.signal(signal.SIGALRM, previous_handler)
 
 LINK_TEXT = ("[a](file:///Volumes/nedhome/x/y.md) and ![b](<file:///Volumes/nedhome/p q.png>), "
-             "bare /Volumes/nedhome/w, other [c](file:///Volumes/other/q)\n")
+             "bare /Volumes/nedhome/w, other [c](file:///Volumes/other/q), "
+             "[d](file:///Volumes/nedhome/e.md#L3 \"title\"), again [a](file:///Volumes/nedhome/x/y.md)\n")
 LINK_TEXT_REWRITTEN = ("[a](/home/nedlern/x/y.md) and ![b](</home/nedlern/p q.png>), "
-                       "bare /Volumes/nedhome/w, other [c](file:///Volumes/other/q)\n")
+                       "bare /Volumes/nedhome/w, other [c](file:///Volumes/other/q), "
+                       "[d](/home/nedlern/e.md#L3 \"title\"), again [a](/home/nedlern/x/y.md)\n")
 rewritten = names.text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths(LINK_TEXT)
 check("the rewrite changes each Markdown link target under file:///Volumes/nedhome/ and nothing else",
       rewritten == LINK_TEXT_REWRITTEN, repr(rewritten))
@@ -649,14 +651,27 @@ with tempfile.TemporaryDirectory() as scratch:
         reviewer_copy = (
             names.cold_read_reviewer_copy_text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths_where_mac_mount_absent(
                 LINK_TEXT))
-        check("where the Mac's mount of ned-box's home is absent, as on ned-box, the reviewer's copy is rewritten",
-              reviewer_copy == LINK_TEXT_REWRITTEN, repr(reviewer_copy))
+        check("where the Mac's mount of ned-box's home is absent, as on ned-box, the reviewer's copy is rewritten "
+              "and each rewritten link target is returned once, as the reviewer sees it",
+              reviewer_copy == (LINK_TEXT_REWRITTEN,
+                                ["/home/nedlern/x/y.md", "/home/nedlern/p q.png", "/home/nedlern/e.md#L3"]),
+              repr(reviewer_copy))
+        reviewer_copy = (
+            names.cold_read_reviewer_copy_text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths_where_mac_mount_absent(
+                NAMED_NOT_LINKED_TEXT))
+        check("a file:///Volumes/nedhome/ that is named rather than linked is not returned as a rewritten target",
+              reviewer_copy == (NAMED_NOT_LINKED_TEXT_REWRITTEN, ["/home/nedlern/z"]), repr(reviewer_copy))
+        reviewer_copy = (
+            names.cold_read_reviewer_copy_text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths_where_mac_mount_absent(
+                "No link, and a bare [one](/home/nedlern/a.md).\n"))
+        check("a text with no file:///Volumes/nedhome/ link target returns no rewritten target",
+              reviewer_copy == ("No link, and a bare [one](/home/nedlern/a.md).\n", []), repr(reviewer_copy))
         os.environ[names.MAC_MOUNT_OF_NED_BOX_HOME_OVERRIDE_VARIABLE] = scratch
         reviewer_copy = (
             names.cold_read_reviewer_copy_text_with_mac_mount_of_ned_box_home_file_links_rewritten_as_ned_box_home_paths_where_mac_mount_absent(
                 LINK_TEXT))
         check("where the Mac's mount of ned-box's home is a directory, as on the Mac, the reviewer's copy keeps its links",
-              reviewer_copy == LINK_TEXT, repr(reviewer_copy))
+              reviewer_copy == (LINK_TEXT, []), repr(reviewer_copy))
     finally:
         if saved_override is None:
             os.environ.pop(names.MAC_MOUNT_OF_NED_BOX_HOME_OVERRIDE_VARIABLE, None)
