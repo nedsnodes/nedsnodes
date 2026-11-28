@@ -4090,7 +4090,8 @@ def waiting_item_read(arguments, sub_step_of=None):
         (reads / f"{key}-started.json").unlink(missing_ok=True)
         record_read(reads, key, item, text, outcome)
         if outcome["status"] == READ_FAILED:
-            print("\n".join([outcome["failed"]]
+            # A row settles the item without showing it, so it needs no fast read and is offered here too.
+            print("\n".join([outcome["failed"]] + no_answer_rows
                             + [line.format(item=item, command=command_reading_again)
                                for line in ITEM_READ_FAILED_LINES]))
             return 1

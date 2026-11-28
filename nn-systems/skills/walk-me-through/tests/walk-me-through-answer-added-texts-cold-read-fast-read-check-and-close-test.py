@@ -6567,7 +6567,9 @@ def test_a_read_that_fails_in_the_read_step_says_not_to_present_the_item():
     case = item_read_case()
     answered_and_closed(case)
     result = case.run(WAITING_ITEM_READ, mode="failed")
-    lines = result.stdout.rstrip("\n").split("\n")
+    rows = set(no_answer_rows_printed(result))
+    lines = [line for line in result.stdout.rstrip("\n").split("\n")
+             if line not in rows and not line.startswith("Rows of the no-answer table")]
     check("a failed read of the waiting item exits 1 and says not to present it, with the command to run again",
           result.returncode == 1 and lines[0] == "FAILED: the stand-in cold-read-cell failed twice"
           and lines[1].startswith("item 3 of 5 has had no cold-read-fast-read of its text as it stands, so do not "
@@ -6578,6 +6580,16 @@ def test_a_read_that_fails_in_the_read_step_says_not_to_present_the_item():
     check("the read step after a failed read reads the item, naming no read ahead",
           retried.returncode == 0 and "had to be run now: " in retried.stdout
           and "started ahead" not in retried.stdout, described(retried))
+
+
+def test_a_read_that_fails_in_the_read_step_still_prints_the_no_answer_rows_the_item_could_settle_by():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ, mode="failed")
+    check("a failed read of an item a no-answer row settles exits 1 and still offers that row with its command",
+          result.returncode == 1 and "has had no cold-read-fast-read of its text as it stands" in result.stdout
+          and any(row.startswith("- case against weak, cost only:") and "Its evidence passes" in row
+                  and check_command_for(case, "--not-asked", "weak-cost-only") in row
+                  for row in no_answer_rows_printed(result)), described(result))
 
 
 def test_a_stop_signal_that_cannot_remove_the_read_steps_scratch_directory_gives_the_read_step_command():
