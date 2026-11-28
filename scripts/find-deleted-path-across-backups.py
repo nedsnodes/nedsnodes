@@ -2620,7 +2620,7 @@ def main(argv=None, runner=run_command):
             destination = os.path.join(top_level or os.path.realpath(args.repo), named)
         destination_existed = os.path.lexists(destination)
         try:
-            saved_copy_put_back.saved_copy_put_back_at_path(args.restore, destination)
+            saved_copy_put_back.saved_copy_put_back_at_path(args.restore, destination, follow_symlink=False)
         except OSError as error:
             print("%s: could NOT restore %s to %s — %s: %s; %s"
                   % (THIS_SCRIPT_NAME, args.restore, destination, type(error).__name__, error,
