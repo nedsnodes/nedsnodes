@@ -117,13 +117,13 @@ gate's job is that main receives complete work, not that a procedure was
 obeyed.
 
 The refusal already has the right shape. Per
-`docs/cross-project/git-gatekeeper-design.md`, every refusal carries the named
+`nn-systems/main-gatekeeper/main-gatekeeper.system.design.md`, every refusal carries the named
 error, the specific facts, and "the exact next action, written for an agent" —
 and `gatekeeper-source-refused` is the built precedent, naming the
 pull-request lane as its next action. The new refusal names the document and
 says to run this skill and resubmit.
 
-## Interaction with the git-gatekeeper
+## Interaction with the main-gatekeeper
 
 No conflict. The activation shape ruled 2026-08-29 is that **the gate opens a
 pull request rather than pushing to main**, because main's protection requires
@@ -135,7 +135,7 @@ survives activation intact.
 Two consequences:
 
 - The branch procedure becomes a minority path. After activation an agent
-  creates a branch only for `scripts/git-gatekeeper.py`, which the gate refuses
+  creates a branch only for `nn-systems/main-gatekeeper/main-gatekeeper.py`, which the gate refuses
   to check in (`gatekeeper-source-refused`). Everything else goes through the
   gate with no branch, and where the caller stands is irrelevant.
 - **GHI [Build draft-md: the drafting-stage skill run before md-review (user-ruled 2026-08-22)](https://github.com/nedsnodes/nedsnodes/issues/142)'s assumption expires.** It assigns this skill the description of an
