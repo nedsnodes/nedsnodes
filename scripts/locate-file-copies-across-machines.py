@@ -173,9 +173,24 @@ class CurrentDirectoryIsGone(Exception):
     """A relative query cannot be resolved from a removed working directory."""
 
 
+def names_this_machine(host):
+    return host.split(".")[0] == socket.gethostname().split(".")[0]
+
+
+def placed_as_the_system_places_it(path):
+    # realpath, not normpath: ".." must climb from the directory a symlink leads to, as the system does. The
+    # file name is kept as given, so a symlink at the path itself is replaced, not the file it leads to.
+    parent, name = os.path.split(path)
+    if name in ("", ".", ".."):
+        return os.path.realpath(path)
+    return os.path.join(os.path.realpath(parent), name)
+
+
 def resolve_query(query, cwd=None):
     """Resolve scp and relative paths, leaving bare file names unchanged."""
     host, path = split_host(query)
+    # Another machine's symlinks cannot be read from here, so its ".." can only be collapsed as written.
+    symlinks_readable = host is None or names_this_machine(host)
     if host is not None and not path.startswith("/"):
         # An scp-relative path is relative to the remote home.
         home = KNOWN_HOST_HOMES.get(host.split(".")[0])
@@ -192,15 +207,17 @@ def resolve_query(query, cwd=None):
     elif host is None and (path == "~" or path.startswith("~/")):
         path = os.path.expanduser(path)
     bare = "/" not in path
-    path = os.path.normpath(path.rstrip("/") or path)
+    path = path.rstrip("/") or path
     if not bare and not os.path.isabs(path):
         if cwd is None:
             try:
                 cwd = os.getcwd()
             except OSError as error:
                 raise CurrentDirectoryIsGone(str(error)) from error
-        path = os.path.normpath(os.path.join(cwd, path))
-    return path
+        path = os.path.join(cwd, path)
+    if not bare and symlinks_readable and ".." in path.split("/"):
+        return placed_as_the_system_places_it(path)
+    return os.path.normpath(path)
 
 
 def parts_of(path):

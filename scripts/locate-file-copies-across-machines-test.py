@@ -2424,6 +2424,33 @@ check("every relative path with a / is made absolute, ./ and a plain "
       == "/x/seat/.claude/settings.local.json"
       and program.resolve_query("CLAUDE.local.md", cwd="/x/seat")
       == "CLAUDE.local.md")
+# ".." climbs from the directory a symlink leads to, as the system does.
+with scratch() as directory:
+    base = pathlib.Path(os.path.realpath(directory))
+    (base / "real" / "deep").mkdir(parents=True)
+    (base / "elsewhere").mkdir()
+    (base / "elsewhere" / "link").symlink_to(base / "real" / "deep")
+    through_link = str(base / "elsewhere" / "link" / ".." / "a.md")
+    check("an absolute path's .. climbs from where its symlink leads",
+          program.resolve_query(through_link) == str(base / "real" / "a.md"),
+          program.resolve_query(through_link))
+    check("a relative path's .. climbs from where its symlink leads",
+          program.resolve_query("link/../a.md", cwd=str(base / "elsewhere"))
+          == str(base / "real" / "a.md"),
+          program.resolve_query("link/../a.md", cwd=str(base / "elsewhere")))
+    this_host = socket.gethostname().split(".")[0]
+    check("a path named on this machine's own host is placed the same way",
+          program.resolve_query(this_host + ":" + through_link)
+          == str(base / "real" / "a.md"),
+          program.resolve_query(this_host + ":" + through_link))
+    check("another machine's path is collapsed as written, since its "
+          "symlinks cannot be read from here",
+          program.resolve_query("el@elsewhere:" + through_link)
+          == str(base / "elsewhere" / "a.md"),
+          program.resolve_query("el@elsewhere:" + through_link))
+    check("a path with no .. keeps its spelling, symlink and all",
+          program.resolve_query(str(base / "elsewhere" / "link" / "a.md"))
+          == str(base / "elsewhere" / "link" / "a.md"))
 check("a relative query's target is the same as its absolute spelling's",
       program.query_target(program.resolve_query(
           ".claude/worktrees/a/docs/b.md", cwd="/Users/el/agents/s"),
