@@ -1479,13 +1479,44 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
           "text when the local copy holds text of its own",
           compare_command in out and copy_command in out
           and "If no line opens `<`, replace this checkout's copy" in out
-          and "keeps the log-store's `>` text that is still wanted" in out, out)
+          and "keeps the log-store's `>` text that is still wanted" in out
+          and "An exit other than 0 (the same) or 1 (they differ) means the comparison "
+              "did not run" in out, out)
     compared = subprocess.run(compare_command.split(), capture_output=True, text=True)
     check("following the refusal, the comparison shows only lines opening `>`, the "
           "log-store's appended ruling",
           compared.returncode == 1
           and [line for line in compared.stdout.splitlines() if line[:1] in "<>"]
           == ["> ruling: closed by the user's answer"], compared.stdout)
+    # From the Mac the compare command fetches over ssh. A stub `ssh` that runs
+    # its remote command here stands in for a reachable ned-box, and one that
+    # fails as an unreachable host does for the outage the command must show.
+    remote_compare = racing.cold_read_triage_file_local_copy_against_log_store_copy_diff_shell_command(
+        "ned-box", newer_record / "cold-read-triage.md", newer_stored_triage)
+    compare_stubs = {}
+    for stub_name, stub_body in (("reachable", 'shift\nexec "$@"\n'),
+                                 ("unreachable", 'echo "ssh: connect to host $1 port 22: '
+                                                 'No route to host" >&2\nexit 255\n')):
+        stub_directory = scratch / f"compare-ssh-{stub_name}"
+        stub_directory.mkdir()
+        (stub_directory / "ssh").write_text("#!/bin/sh\n" + stub_body, encoding="utf-8")
+        (stub_directory / "ssh").chmod(0o755)
+        compare_stubs[stub_name] = subprocess.run(
+            ["/bin/sh", "-c", remote_compare], capture_output=True, text=True,
+            env={**os.environ, "PATH": f"{stub_directory}{os.pathsep}{os.environ['PATH']}"})
+    reachable, unreachable = compare_stubs["reachable"], compare_stubs["unreachable"]
+    check("from the Mac, with ned-box reachable, the compare command shows only the "
+          "log-store's appended ruling, opening `>`",
+          reachable.returncode == 1
+          and [line for line in reachable.stdout.splitlines() if line[:1] in "<>"]
+          == ["> ruling: closed by the user's answer"],
+          reachable.stdout + reachable.stderr)
+    check("from the Mac, with ned-box unreachable, the compare command prints no `<` "
+          "line and exits other than 0 or 1, so it cannot read as the checkout's copy "
+          "holding text the log-store's lacks",
+          unreachable.returncode not in (0, 1)
+          and not any(line.startswith("<") for line in unreachable.stdout.splitlines()),
+          f"exit {unreachable.returncode}: {unreachable.stdout}{unreachable.stderr}")
     subprocess.run(copy_command.split(), check=True)
     code, out, err = ship_in_process(newer_store, newer_record)
     check("after the refusal's copy command, the record ships as nothing new",
