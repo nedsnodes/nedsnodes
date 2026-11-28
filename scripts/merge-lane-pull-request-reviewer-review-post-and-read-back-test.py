@@ -542,7 +542,7 @@ def earlier_review(review_id, body, commit=HEAD, login="ned-review-merge"):
 
 
 def earlier_review_grade_cases(scratch):
-    """PR 5314's case: round 1 graded a must-fix-now Codex finding on head H; a description edit settled it, so
+    """Round 1 graded a must-fix-now Codex finding on head H; a description edit settled it, so
     round 2 is on the same head, with the same Codex run, and its APPROVE file grades nothing."""
     text = "Keep the error \u2014 scripts/thing.py:2-2"
     finding_id = codex_finding_id("P1", text)
