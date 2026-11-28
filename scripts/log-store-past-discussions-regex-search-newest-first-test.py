@@ -260,6 +260,12 @@ with tempfile.TemporaryDirectory() as scratch:
     finding = run(root, "one egret seat", "--kind", "session-dialogs", "--until", "2026-09-15")
     check("--until keeps a dialog hit whose turn is inside the window",
           finding.returncode == 0 and "2026-09-10T08:00:00Z" in finding.stdout, finding.stdout)
+    with turns_transcript.open("a") as stream:
+        stream.write("{broken}\n" + "x" * (4 * 1024 * 1024 + 1) + "\n")
+    partial = run(root, "one egret seat", "--kind", "session-dialogs", "--until", "2026-09-15")
+    check("a partially readable transcript still dates the confirmed dialog hit and reports the skipped record",
+          partial.returncode == 2 and "2026-09-10T08:00:00Z" in partial.stdout
+          and "1 malformed, 1 oversized" in partial.stderr, partial.stdout + partial.stderr)
     turns_dialog.unlink()
     turns_transcript.unlink()
 
@@ -808,10 +814,17 @@ print(x.render_companion(*x.complete_dialog_turns_and_report(pathlib.Path({str(e
           + transcript_records(dict(typed("egret typed by the user", "2026-10-03T00:04:00Z"),
                                     origin={"kind": "human"})))
     finding = run(root, "egret", "--kind", "user-messages")
+    write(injected, transcript_records(typed("egret typed by the user", "2026-10-03T00:04:00Z"))
+          + '{"type":')
+    unfinished = run(root, "egret", "--kind", "user-messages")
+    check("a final unfinished record leaves the typed-message search complete",
+          unfinished.returncode == 0 and "[user] egret typed by the user" in unfinished.stdout,
+          unfinished.stdout + unfinished.stderr)
     injected.unlink()
     check("user-messages marks the user's typed message [user], after a record that is not JSON, and leaves out "
           "user records a hook, a peer, a program or a subagent's task wrote",
-          finding.returncode == 0 and "[user] egret typed by the user" in finding.stdout
+          finding.returncode == 2 and "1 malformed" in finding.stderr
+          and "[user] egret typed by the user" in finding.stdout
           and finding.stdout.count("egret") == 1, finding.stdout + finding.stderr)
 
     pasted = root / "agent-session-files-by-machine" / "ned-box" / "projects" / "-home-nedlern-agents-y" / "s14.jsonl"

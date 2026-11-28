@@ -866,7 +866,11 @@ def complete_dialog_lines_with_turn_timestamps(transcript_path: Path):
     whose record has none. left_out_notes holds the text of each note saying the subagent tracker failed,
     so the lines lack every subagent turn; it is empty when the dialog is whole.
     """
-    turns, report = complete_dialog_turns_and_report(transcript_path)
+    return dialog_lines_with_turn_timestamps(*complete_dialog_turns_and_report(transcript_path))
+
+
+def dialog_lines_with_turn_timestamps(turns, report):
+    """Pair the rendered dialog lines with their source turns and return any tracker notes."""
     lines = render_companion(turns, report).split("\n")
     stamps = []
     for turn in turns:

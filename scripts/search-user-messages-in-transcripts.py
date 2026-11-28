@@ -225,30 +225,42 @@ class TurnReader:
         return None
 
 
+def transcript_records(handle):
+    """Yield transcript objects, or None for malformed records. A torn final record is still being written."""
+    possible_partial = False
+    for line in handle:
+        if possible_partial:
+            yield None
+            possible_partial = False
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            if line.endswith("}"):
+                yield None
+            else:
+                possible_partial = True
+            continue
+        if isinstance(record, dict):
+            yield record
+
+
 def read_turns(path):
     """Return the turns and the number of malformed records skipped."""
     turns = []
     malformed = 0
-    partial_final = False
     reader = TurnReader()
     with open(path, "r", errors="replace") as handle:
-        for line in handle:
-            partial_final = False
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
+        for record in transcript_records(handle):
+            if record is None:
                 malformed += 1
-                partial_final = not line.endswith("}")
-                continue
-            if not isinstance(record, dict):
                 continue
             turn = reader.turn(record)
             if turn is not None:
                 turns.append((len(turns), turn[0], turn[1], record.get("timestamp", "")))
-    return turns, malformed - int(partial_final)
+    return turns, malformed
 
 
 def transcripts(projects_dir, seats, since_hours):
