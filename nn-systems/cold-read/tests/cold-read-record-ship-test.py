@@ -444,7 +444,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-record-ship-test-") as scratc
     (demo / "late.md").write_text("# late\n", encoding="utf-8")
     result = ship(local_destination, str(demo))
     check("a differing file is REFUSED with exit 2",
-          result.returncode == 2 and result.stdout.startswith("REFUSED:"), result.stdout)
+          result.returncode == 2 and result.stdout.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:"), result.stdout)
     check("the refusal names the file and prints both provenance comments",
           "a.md" in result.stdout and "model=opus " in result.stdout
           and "model=opus-rerun" in result.stdout, result.stdout)
@@ -466,7 +466,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-record-ship-test-") as scratc
         encoding="utf-8")
     result = ship(local_destination, str(demo))
     check("two differing files at once are REFUSED with exit 2",
-          result.returncode == 2 and result.stdout.startswith("REFUSED:"), result.stdout)
+          result.returncode == 2 and result.stdout.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:"), result.stdout)
     check("two differing files still make exactly one stdout line",
           result.stdout.count("\n") == 1, result.stdout)
     check("the one line names both files and carries all four provenance comments",
@@ -586,7 +586,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-record-ship-test-") as scratc
     result = ship(local_destination, str(demo))
     check("a differing report is REFUSED with exit 2 even though the triage "
           "beside it is replaceable",
-          result.returncode == 2 and result.stdout.startswith("REFUSED:")
+          result.returncode == 2 and result.stdout.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:")
           and "a.md" in result.stdout, result.stdout)
     check("the refused run replaced nothing: the store keeps the triage it had "
           "and says nothing about a replacement",
@@ -614,7 +614,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-record-ship-test-") as scratc
     result = ship(local_destination, str(demo))
     check("a triage.md under the frozen cold-read-target is REFUSED, not "
           "replaced: only the record's own top-level triage.md is replaceable",
-          result.returncode == 2 and result.stdout.startswith("REFUSED:")
+          result.returncode == 2 and result.stdout.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:")
           and "target/docs/triage.md" in result.stdout
           and stored_frozen_triage.read_text(encoding="utf-8")
           == "# the reviewed document\n\nas read\n",
@@ -650,7 +650,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-record-ship-test-") as scratc
     result = ship(local_destination, str(prefixed))
     check("beside cold-read-triage.md, a rewritten triage.md is add-only and REFUSED, "
           "and the store's cold-read-triage.md is not replaced",
-          result.returncode == 2 and result.stdout.startswith("REFUSED:")
+          result.returncode == 2 and result.stdout.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:")
           and "different content: triage.md (store" in result.stdout
           and "cold-read-triage.md (store" not in result.stdout
           and stored_prefixed_triage.read_text(encoding="utf-8") == "# triage\n\nafter the walk\n",
@@ -674,7 +674,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-record-ship-test-") as scratc
                               f"{shlex.quote(str(renamed / stored_name))}`")
         check(f"{case_label}: REFUSED, nothing is copied, and the line gives the mv of the "
               "local triage file to the store's name instead of a directory rename",
-              result.returncode == 2 and result.stdout.startswith("REFUSED:")
+              result.returncode == 2 and result.stdout.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:")
               and f"holds its triage file as {stored_name}" in result.stdout
               and rename_triage_file in result.stdout
               and "Rename this directory" not in result.stdout
@@ -783,7 +783,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-record-ship-test-") as scratc
     lines = result.stdout.splitlines()
     check("--all ships the good directory, refuses the differing one, and goes on",
           any(line.startswith("shipped: 2026-09-01-good") for line in lines)
-          and any(line.startswith("REFUSED: 2026-09-02-bad") for line in lines),
+          and any(line.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED: 2026-09-02-bad") for line in lines),
           result.stdout + result.stderr)
     check("--all ends with one summary line naming the refused directory and exits 2",
           lines and lines[-1].startswith("--all:") and "1 shipped" in lines[-1]
@@ -1030,7 +1030,7 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
         "RECORD_SHIP_TEST_STORE_HOLDS_OTHER_A": "1"})
     check("a store copy whose first line ssh could not read is REFUSED saying so, "
           "not described as having no provenance comment",
-          result.returncode == 2 and result.stdout.startswith("REFUSED:")
+          result.returncode == 2 and result.stdout.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:")
           and "store: (could not be read: ssh exit 255: Connection closed by remote host)"
           in result.stdout
           and f"local: {REPORT_A.splitlines()[0]}" in result.stdout,
@@ -1181,7 +1181,7 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
         check("the other shipment's differing report landing between this "
               "shipment's inventory and its copy makes this one REFUSED, never "
               "shipped:, its own report not being what the store keeps",
-              code == 2 and out.startswith("REFUSED:") and "fast-read.md" in out
+              code == 2 and out.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:") and "fast-read.md" in out
               and out.count("\n") == 1,
               f"exit {code}: {out}")
         check("that refusal leaves the other shipment's report in the store, "
@@ -1199,7 +1199,7 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
         check("the other shipment's differing report landing after this "
               "shipment's copy ran still never lets both print shipped: -- "
               "this one refuses, or its report is the one the store keeps",
-              (code == 2 and out.startswith("REFUSED:") and kept == REPORT_B)
+              (code == 2 and out.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:") and kept == REPORT_B)
               or (code == 0 and out.startswith("shipped:") and kept == REPORT_A),
               f"exit {code}: {out}; store keeps {kept!r}")
 
@@ -1387,7 +1387,7 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
                      for p in (unlocked_store / unlocked_record.name).iterdir()}
     check("a file another shipment lands just before the link is never "
           "overwritten: placing stops there and the shipment is REFUSED",
-          code == 2 and out.startswith("REFUSED:") and "b.md" in out
+          code == 2 and out.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:") and "b.md" in out
           and unlocked_held == {"a.md": REPORT_A, "b.md": REPORT_B},
           f"exit {code}: {out}{err} {unlocked_held}")
 
@@ -1409,7 +1409,7 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
     check("when placing stops at a file another shipment landed, the shipment "
           "is REFUSED and the store's triage.md is not replaced, nor announced "
           "as replaced",
-          code == 2 and out.startswith("REFUSED:") and "b.md" in out
+          code == 2 and out.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:") and "b.md" in out
           and stopped_triage.read_text(encoding="utf-8") == "# triage, the store's\n"
           and "REPLACED" not in err,
           f"exit {code}: {out}{err}")
@@ -1465,7 +1465,7 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
     check("a store triage file newer than the local copy is not replaced: the "
           "shipment is REFUSED, the store keeps its copy, nothing is announced as "
           "replaced, and other new files are still added",
-          code == 2 and out.startswith("REFUSED:") and out.count("\n") == 1
+          code == 2 and out.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:") and out.count("\n") == 1
           and "the log-store's cold-read-triage.md in" in out
           and "the other new files were added" in out
           and newer_stored_triage.read_text(encoding="utf-8") == appended
@@ -1523,7 +1523,7 @@ subprocess.Popen([sys.executable, "-c", "import sys; print('cell', flush=True); 
         os.replace = saved_replace
     check("a triage.md another shipment replaces after this one's replacement "
           "is REFUSED naming triage.md, and never shipped:",
-          code == 2 and out.startswith("REFUSED:") and "triage.md" in out
+          code == 2 and out.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:") and "triage.md" in out
           and "shipped:" not in out,
           f"exit {code}: {out}{err}")
 
@@ -2163,7 +2163,7 @@ with tempfile.TemporaryDirectory(prefix="cold-read-record-ship-store-names-test-
         p.relative_to(names_store).as_posix() for p in names_store.rglob("*") if p.is_file())
     check("a store record holding files the local directory lacks is REFUSED with exit 2, "
           "though no file name is in both",
-          result.returncode == 2 and result.stdout.startswith("REFUSED:")
+          result.returncode == 2 and result.stdout.startswith("cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:")
           and result.stdout.count("\n") == 1, result.stdout + result.stderr)
     rename = (f"`mv {fast_read_record} {names_records / 'SKILL-handoff-2026-10-25-3'}`, a name "
               f"free in this checkout and in the store when this ran")

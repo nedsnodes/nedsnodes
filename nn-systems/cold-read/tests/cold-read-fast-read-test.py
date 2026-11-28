@@ -782,8 +782,8 @@ with tempfile.TemporaryDirectory() as scratch:
     )
     check("a cell that fails twice fails the read with exit 1",
           result.returncode == 1, f"exit {result.returncode}; stderr={result.stderr!r}")
-    check("the read prints one line opening FAILED on stdout",
-          result.stdout.startswith("FAILED") and len(result.stdout.splitlines()) == 1,
+    check("the read prints its one failure line on stdout",
+          result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (") and len(result.stdout.splitlines()) == 1,
           repr(result.stdout))
     check("exactly two Gemini launches were made: the run and one retry, then one "
           "Sonnet backup launch",
@@ -919,7 +919,7 @@ with tempfile.TemporaryDirectory() as scratch:
     )
     check("a Sonnet backup failure whose output carries agy's cap line is not reported as "
           "Gemini's spending cap",
-          result.returncode == 1 and result.stdout.startswith("FAILED")
+          result.returncode == 1 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and "stub agy: the gemini cause" in result.stdout
           and "spending cap is reached" not in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}")
@@ -934,7 +934,7 @@ with tempfile.TemporaryDirectory() as scratch:
     )
     check("a Sonnet backup failure whose output carries agy's quota line is not reported as "
           "the Ultra sign-in's quota",
-          result.returncode == 1 and result.stdout.startswith("FAILED")
+          result.returncode == 1 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and "stub agy: the gemini cause" in result.stdout
           and "Gemini refused with" not in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}")
@@ -1003,13 +1003,34 @@ with tempfile.TemporaryDirectory() as scratch:
     )
     check("when the Sonnet backup fails after the quota, no line says Sonnet read the "
           "document, and FAILED names the quota and its reset time",
-          result.returncode == 1 and result.stdout.startswith("FAILED")
+          result.returncode == 1 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and 'Gemini refused with "Individual quota reached"; the quota resets in 2h27m' in result.stdout
           and "Ultra quota used up" not in result.stderr
           and "Copy the line above" not in result.stderr,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
 
     module = script_under_test_module()
+    import importlib.util
+
+    def module_at(relative_path):
+        spec = importlib.util.spec_from_file_location(Path(relative_path).stem.replace("-", "_"),
+                                                      REPO_ROOT / relative_path)
+        loaded = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loaded)
+        return loaded
+    walk_check = module_at("nn-systems/skills/walk-me-through/"
+                           "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
+    explain_reply = module_at("nn-systems/skills/explain/explain-reply-cold-read-fast-read.py")
+    shipper = module_at("nn-systems/cold-read/cold-read-record-ship.py")
+    check("the walk check program and the explain reply program match the failure and unshipped-record openings "
+          "this program prints, and the shipper's refusal hashtag",
+          walk_check.FAST_READ_FAILED_LINE_OPENING == module.FAST_READ_FAILED_LINE_OPENING
+          == explain_reply.FAST_READ_FAILED_LINE_OPENING
+          and walk_check.FAST_READ_RECORD_NOT_SHIPPED_MARKERS
+          == (f"{module.PROGRAM}: {module.COLD_READ_RECORD_NOT_SHIPPED_HASHTAG}",)
+          and explain_reply.RECORD_NOT_SHIPPED_LINE_PREFIX == module.record_line_for_stderr("FAILED: x")[
+              :-len(" FAILED: x")]
+          and explain_reply.RECORD_SHIP_REFUSED_HASHTAG == shipper.COLD_READ_RECORD_SHIP_REFUSED_HASHTAG)
     for refusal, expected in (
             ("Resets in 95h3m42s.", "Ultra quota used up; Sonnet read this; Gemini resets in 95h3m."),
             ("Resets in 5m.", "Ultra quota used up; Sonnet read this; Gemini resets in 5m."),
@@ -1121,7 +1142,7 @@ with tempfile.TemporaryDirectory() as scratch:
     )
     check("when Gemini and the Sonnet backup both fail, one FAILED line names both causes",
           result.returncode == 1 and len(result.stdout.splitlines()) == 1
-          and result.stdout.startswith("FAILED")
+          and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and "stub agy: the gemini cause" in result.stdout
           and "stub claude: the sonnet cause" in result.stdout
           and not suggestions.exists(),
@@ -1274,7 +1295,7 @@ with tempfile.TemporaryDirectory() as scratch:
     check("with --without-question-4, a read whose Gemini cell and Sonnet backup both "
           "fail prints its FAILED line and exits 1, with no traceback and no Question 4 "
           "abandoned line",
-          result.returncode == 1 and result.stdout.startswith("FAILED")
+          result.returncode == 1 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and "Traceback" not in result.stderr
           and "Question 4 was abandoned" not in result.stderr,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr[-1500:]!r}")
@@ -1487,7 +1508,7 @@ with tempfile.TemporaryDirectory() as scratch:
     abandoned_read_seconds = time.monotonic() - abandoned_read_started_at
     check("when Questions 1 to 3 fail, the read exits 1 with its FAILED line and no report, "
           "says Question 4 was abandoned, and does not wait for the Question 4 cell",
-          result.returncode == 1 and result.stdout.startswith("FAILED")
+          result.returncode == 1 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and not suggestions.exists()
           and "Question 4 was abandoned" in result.stderr
           and abandoned_read_seconds < 300,
@@ -1547,7 +1568,7 @@ with tempfile.TemporaryDirectory() as scratch:
           "cell, the read still says Question 4 was abandoned, and that its cell was "
           "stopped at its time limit",
           question_4_died_before_questions_1_to_3_failed == [True]
-          and result.returncode == 1 and result.stdout.startswith("FAILED")
+          and result.returncode == 1 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and "Question 4 was abandoned" in result.stderr
           and "its cell was stopped at its time limit" in result.stderr,
           f"died before 1 to 3 failed: {question_4_died_before_questions_1_to_3_failed}; "
@@ -1769,7 +1790,7 @@ with tempfile.TemporaryDirectory() as scratch:
         repository / "never-written.md", "docs/walk/no-such-item-draft.md", counter,
     )
     check("a --target that is not a file exits 64 with FAILED on stdout, launching nothing",
-          result.returncode == 64 and result.stdout.startswith("FAILED")
+          result.returncode == 64 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and "target not found" in result.stderr and launches_counted(counter) == 0
           and "Traceback" not in result.stderr,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
@@ -2023,7 +2044,8 @@ with tempfile.TemporaryDirectory() as scratch:
           "is still the stdout line, and the read exits 1",
           result.returncode == 1 and result.stdout.strip() == str(records_report)
           and records_report.is_file()
-          and any("record: FAILED:" in line for line in result.stderr.splitlines()),
+          and any(line.startswith("cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED:")
+                  for line in result.stderr.splitlines()),
           f"exit {result.returncode}; stderr={result.stderr[-400:]!r}")
 
     # A store already holding other bytes under the record's name refuses it:
@@ -2044,7 +2066,9 @@ with tempfile.TemporaryDirectory() as scratch:
           "report's path is still the stdout line, and the read exits 1",
           result.returncode == 1 and result.stdout.strip() == str(records_report)
           and records_report.is_file()
-          and any("record: REFUSED:" in line for line in result.stderr.splitlines()),
+          and any(line.startswith("cold-read-fast-read: #cold_read_record_not_shipped# record: "
+                                  "cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:")
+                  for line in result.stderr.splitlines()),
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr[-400:]!r}")
 
 
@@ -2614,7 +2638,7 @@ with tempfile.TemporaryDirectory() as bare_scratch:
         failing_suggestions, "docs/walk/a-failing-walk-draft.md", bare_counter,
     )
     check("a failed read of a walk draft with bare numbers still fails, with no file",
-          result.returncode == 1 and result.stdout.startswith("FAILED")
+          result.returncode == 1 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and not failing_suggestions.exists(),
           f"exit {result.returncode}; stdout={result.stdout!r}")
     check("a failed read never says the suggestions file lists the numbers",
@@ -2668,7 +2692,7 @@ with tempfile.TemporaryDirectory() as git_failure_scratch:
           "dubious ownership" in git_failure_raised, repr(git_failure_raised))
     check("the read fails and says why when git cannot place the target",
           git_failure_run.returncode == 1
-          and "FAILED (no fast read ran and no report was written: could not tell which checkout holds" in git_failure_run.stdout
+          and "cold-read-fast-read: #cold_read_fast_read_failed# FAILED (no fast read ran and no report was written: could not tell which checkout holds" in git_failure_run.stdout
           and "dubious ownership" in git_failure_run.stderr,
           f"exit {git_failure_run.returncode}; {git_failure_run.stdout!r}; {git_failure_run.stderr!r}")
 
@@ -2847,7 +2871,7 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
     environment_before = {name: os.environ.get(name) for name in environment_names}
     argv_before = sys.argv
 
-    def read_from_mac(target, ssh_mode="", remote_exit=0, remote_stdout=None,
+    def read_from_mac(target, ssh_mode="", remote_exit=0, remote_stdout=None, remote_stderr=None,
                       ssh_program=stand_in_ssh, session_id=None, options=(),
                       timeout_seconds=attributes_before["COLD_READ_FAST_READ_RUN_ON_NED_BOX_OVER_SSH_TIMEOUT_SECONDS"]):
         """main() on `target` as the Mac runs it: (exit, stdout, stderr)."""
@@ -2863,8 +2887,8 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
         os.environ["STAND_IN_REMOTE_FAST_READ_PLAN"] = json.dumps({
             "record": str(remote_record), "exit": remote_exit,
             "stdout": f"{ned_box_suggestions}\n" if remote_stdout is None else remote_stdout,
-            "stderr": f"cold-read-fast-read: record: shipped: {log_store_citation}\n"
-                      f"cold-read-fast-read: read {ned_box_draft}\n"})
+            "stderr": (f"cold-read-fast-read: record: shipped: {log_store_citation}\n"
+                       f"cold-read-fast-read: read {ned_box_draft}\n") if remote_stderr is None else remote_stderr})
         if session_id is None:
             os.environ.pop(AGENT_SESSION_ID_VARIABLE, None)
         else:
@@ -2935,7 +2959,7 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
 
         exit_code, stdout, stderr = read_from_mac(mac_draft, ssh_mode="unreachable")
         check("when ned-box cannot be reached, the read says so with ssh's words and exits 1",
-              exit_code == 1 and stdout.startswith("FAILED")
+              exit_code == 1 and stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
               and "ned-box could not be reached" in stderr
               and "No route to host" in stderr and "ssh nedlern@ned-box true" in stderr,
               f"exit {exit_code}; {stdout!r}; {stderr!r}")
@@ -2971,7 +2995,7 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
         check("when a signal kills ssh, the read says which signal, prints a FAILED line "
               "and exits 1",
               exit_code == 1
-              and stdout.startswith("FAILED (ssh was killed by signal 15")
+              and stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (ssh was killed by signal 15")
               and "ssh was killed by signal 15 before the cold-read-fast-read on ned-box finished"
               in stderr and "the fast read on ned-box failed" not in stderr,
               f"exit {exit_code}; {stdout!r}; {stderr!r}")
@@ -2991,7 +3015,7 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
         check("when the read on ned-box outlasts the time limit, ssh is stopped, the read "
               "says so with the target and exits 1",
               exit_code == 1
-              and stdout.startswith("FAILED (no fast read result: the fast read on ned-box "
+              and stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (no fast read result: the fast read on ned-box "
                                     "did not finish within")
               and "so this program stopped waiting and ended ssh, and" in stderr
               and f"report, which this Mac sees at {mac_suggestions}." in stderr
@@ -3116,7 +3140,7 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
             mac_draft, ssh_program=over_ssh_scratch / "no-such-ssh")
         check("when ssh cannot be started, the read says so, names who can run "
               "it on ned-box and with what command, and exits 1",
-              exit_code == 1 and stdout.startswith("FAILED")
+              exit_code == 1 and stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
               and "ssh could not be started" in stderr
               and "Ask any agent-seat on ned-box" in stderr
               and f"--target {shlex.quote(str(ned_box_draft))}" in stderr
@@ -3150,16 +3174,43 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
         exit_code, stdout, stderr = read_from_mac(
             mac_draft, remote_exit=64,
             remote_stdout=f"FAILED (target not found: {ned_box_draft})\n")
-        check("when the read on ned-box fails, its FAILED line is relayed in Mac mount form, "
+        check("when the read on ned-box fails, its failure line is relayed in Mac mount form, "
               "a line says it failed, and its exit code is kept",
-              exit_code == 64 and stdout == f"FAILED (target not found: {mac_draft})\n"
+              exit_code == 64
+              and stdout == f"cold-read-fast-read: #cold_read_fast_read_failed# FAILED (target not found: {mac_draft})\n"
               and "the fast read on ned-box failed (exit 64)" in stderr,
+              f"exit {exit_code}; {stdout!r}; {stderr!r}")
+
+        exit_code, stdout, stderr = read_from_mac(
+            mac_draft, remote_exit=64,
+            remote_stdout=f"cold-read-fast-read: #cold_read_fast_read_failed# FAILED (target not found: {ned_box_draft})\n")
+        check("a failure line ned-box prints in this program's own form is relayed once, unchanged but for the path",
+              exit_code == 64
+              and stdout == f"cold-read-fast-read: #cold_read_fast_read_failed# FAILED (target not found: {mac_draft})\n",
+              f"exit {exit_code}; {stdout!r}; {stderr!r}")
+
+        exit_code, stdout, stderr = read_from_mac(
+            mac_draft, remote_exit=1,
+            remote_stderr="cold-read-fast-read: record: FAILED: ned-box could not be reached\n"
+                          "cold-read-fast-read: record: REFUSED: x — already in the store\n"
+                          "cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: marked already\n"
+                          "cold-read-fast-read: record: shipped: y\n")
+        check("an older ned-box clone's unmarked record lines are relayed marked #cold_read_record_not_shipped#, "
+              "and a marked or shipped line is relayed as it was",
+              "cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ned-box could not be reached\n"
+              in stderr
+              and "cold-read-fast-read: #cold_read_record_not_shipped# record: REFUSED: x — already in the store\n"
+              in stderr
+              and "cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: marked already\n" in stderr
+              and "cold-read-fast-read: record: shipped: y\n" in stderr
+              and "cold-read-fast-read: record: FAILED" not in stderr,
               f"exit {exit_code}; {stdout!r}; {stderr!r}")
 
         exit_code, stdout, stderr = read_from_mac(mac_draft, remote_exit=1, remote_stdout="")
         check("when the read on ned-box fails printing no result line, the read prints a "
               "FAILED line of its own",
-              exit_code == 1 and stdout.startswith("FAILED (the fast read on ned-box exited 1"),
+              exit_code == 1 and stdout.startswith(
+                  "cold-read-fast-read: #cold_read_fast_read_failed# FAILED (the fast read on ned-box exited 1"),
               f"exit {exit_code}; {stdout!r}; {stderr!r}")
 
         exit_code, stdout, stderr = read_from_mac(mac_draft, remote_exit=1)
@@ -3174,7 +3225,7 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
         exit_code, stdout, stderr = read_from_mac(mac_draft)
         check("when ned-box has no checkout holding the target, git's words are relayed, "
               "a FAILED line is printed and the exit is nonzero",
-              exit_code != 0 and stdout.startswith("FAILED")
+              exit_code != 0 and stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
               and "not a git repository" in stderr and remote_record.exists() is False,
               f"exit {exit_code}; {stdout!r}; {stderr!r}")
 
@@ -3186,7 +3237,7 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
         elsewhere_draft.write_text("## Item 1 of 1\n", encoding="utf-8")
         exit_code, stdout, stderr = read_from_mac(elsewhere_draft)
         check("a broken worktree outside the mount still stops the read, exit 1, with no ssh",
-              exit_code == 1 and stdout.startswith("FAILED (no fast read ran")
+              exit_code == 1 and stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (no fast read ran")
               and "machine that made the worktree" in stderr
               and not ssh_arguments_file.exists(),
               f"exit {exit_code}; {stdout!r}; {stderr!r}")
@@ -3473,7 +3524,7 @@ with tempfile.TemporaryDirectory() as edit_scratch:
         edit_report, design_relative, edit_counter)
     check("when git cannot find the edit, the read prints FAILED, creates no record "
           "and launches nothing",
-          result.returncode == 1 and result.stdout.startswith("FAILED")
+          result.returncode == 1 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and "git merge-base HEAD origin/main failed" in result.stdout
           and f"\nFirst, run `git -C {repository} fetch origin main`.\nThen, " in result.stderr
           and "and the fetch's own error output if it failed" in result.stderr
@@ -3494,7 +3545,7 @@ with tempfile.TemporaryDirectory() as edit_scratch:
         edit_report, design_relative, edit_counter)
     check("when HEAD and origin/main share no commit, the read prints FAILED and hands the "
           "message on without offering a fetch",
-          result.returncode == 1 and result.stdout.startswith("FAILED")
+          result.returncode == 1 and result.stdout.startswith("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (")
           and "git merge-base HEAD origin/main failed" in result.stdout
           and "fetch origin main" not in result.stderr
           and "Give this whole message to the user" in result.stderr

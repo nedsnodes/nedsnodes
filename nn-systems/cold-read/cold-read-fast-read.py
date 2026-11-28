@@ -22,12 +22,13 @@ cold-read-cell's fast
 cold-read-tier, through nn-systems/cold-read/cold-read-claude-cell.py, the
 Sonnet backup. It then prints exactly one line on stdout:
 the report's absolute path on success, or, when both the Gemini cell and the
-Sonnet backup failed, a line opening `FAILED` that names both causes. Exit 0 on success, 1 on failure, 64 when
+Sonnet backup failed, the failure line, which opens
+`cold-read-fast-read: #cold_read_fast_read_failed# FAILED (` and names both causes. Exit 0 on success, 1 on failure, 64 when
 the invocation itself was wrong (a --target that is not a file) and nothing
 was launched. A read that wrote its report but whose record did not reach the
 log-store also exits 1, with the report's path still the line on stdout and
-the shipper's `record:` line on stderr, FAILED or REFUSED; that is the one
-exit 1 whose stdout line is a path rather than a line opening `FAILED`,
+the shipper's `record:` line on stderr, marked `#cold_read_record_not_shipped#`;
+that is the one exit 1 whose stdout line is a path rather than the failure line,
 apart from a run from the Mac whose ssh a signal killed after the read on
 ned-box had finished. A walk draft's read ships nothing, so it never exits 1
 for its record. When the cold-read-target belongs to a class the
@@ -169,7 +170,7 @@ placeholders become `none`, and the reviewer gives no labels, for a file git
 does not track, such as a walk draft; for a document absent at that commit,
 such as one new or renamed on its branch; and for one identical to that
 version. When a git command fails, the read stops before it creates a record
-or launches a cell, with FAILED on stdout and exit code 1: telling the reviewer that nothing
+or launches a cell, with the failure line on stdout and exit code 1: telling the reviewer that nothing
 changed would be false.
 
 AN EDIT DURING THE READ IS NAMED, NOT HIDDEN. The cold-read-target's sha256
@@ -481,6 +482,14 @@ WHAT_SHOULD_BE_CODE_QUESTION_LAUNCHER_OUTPUT_SCRATCH_FILE_NAME = (
 COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 10 * 60
 
 PROGRAM = "cold-read-fast-read"
+COLD_READ_FAST_READ_FAILED_HASHTAG = "#cold_read_fast_read_failed#"
+COLD_READ_RECORD_NOT_SHIPPED_HASHTAG = "#cold_read_record_not_shipped#"
+# The one stdout line of a read that wrote no report opens with this.
+FAST_READ_FAILED_LINE_OPENING = f"{PROGRAM}: {COLD_READ_FAST_READ_FAILED_HASHTAG} FAILED ("
+RECORD_LINE_OPENING = f"{PROGRAM}: record: "
+# A ned-box clone older than this program prints these, without the hashtags; the run from the Mac relays
+# its lines, so it rewrites them into the forms above and no reader keeps the older ones.
+OLDER_FAILED_LINE_OPENING = "FAILED ("
 CHANGED_SENTENCE_IDS_PLACEHOLDER = "{CHANGED_SENTENCE_IDS}"
 REMOVED_TEXT_PLACEHOLDER = "{REMOVED_TEXT}"
 NOTHING_IN_THE_EDIT = "none"
@@ -725,7 +734,7 @@ def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str, options: tu
                   f"the document has no cold-read-fast-read result yet; if a complete "
                   f"report appears at {report_place}, that is its result.",
                   holds_a_command=False), file=sys.stderr)
-        print(f"FAILED (no fast read result: the fast read on ned-box did not finish "
+        print(f"{FAST_READ_FAILED_LINE_OPENING}no fast read result: the fast read on ned-box did not finish "
               f"within {minutes} minutes)")
         return 1
     except OSError as error:
@@ -739,7 +748,7 @@ def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str, options: tu
               f"this program could not:\n"
               f"ssh {NED_BOX_SSH_TARGET} {shlex.quote(command_for_a_person)}",
               file=sys.stderr)
-        print("FAILED (no fast read ran: ssh could not be started to reach ned-box)")
+        print(f"{FAST_READ_FAILED_LINE_OPENING}no fast read ran: ssh could not be started to reach ned-box)")
         return 1
     if completed.returncode == SSH_EXIT_CONNECTION_FAILED:
         ssh_words = completed.stderr.strip() or "nothing"
@@ -754,10 +763,12 @@ def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str, options: tu
                   f"command fails with 'Permission denied', ned-box refused this Mac's key; "
                   f"if it fails another way, check that ned-box is on and on the LAN.",
                   holds_a_command=True), file=sys.stderr)
-        print("FAILED (no fast read ran: ned-box could not be reached)")
+        print(f"{FAST_READ_FAILED_LINE_OPENING}no fast read ran: ned-box could not be reached)")
         return 1
-    sys.stderr.write(text_with_ned_box_paths_rewritten_as_mac_mount_paths(completed.stderr))
-    stdout = text_with_ned_box_paths_rewritten_as_mac_mount_paths(completed.stdout)
+    sys.stderr.write(older_clone_record_lines_rewritten(
+        text_with_ned_box_paths_rewritten_as_mac_mount_paths(completed.stderr)))
+    stdout = older_clone_failed_line_rewritten(
+        text_with_ned_box_paths_rewritten_as_mac_mount_paths(completed.stdout))
     if completed.returncode == 0:
         sys.stdout.write(stdout)
         return 0
@@ -770,7 +781,7 @@ def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str, options: tu
               f"ssh may have been killed after the read finished: when the result "
               f"line on stdout is a report path, that report is the result, and the "
               f"read needs no second run.\n"
-              f"When that line starts FAILED, run the command that printed this "
+              f"When that line holds {COLD_READ_FAST_READ_FAILED_HASHTAG}, run the command that printed this "
               f"message once more, here on this Mac; it runs the read on ned-box over "
               f"ssh again:\n{rerun_command}\n"
               f"When that run's result line on stdout is a report path, that report "
@@ -782,7 +793,7 @@ def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str, options: tu
               f"subagent, tell the agent that dispatched you instead; then go on with "
               f"your task without the result. When the second run fails in any other "
               f"way, follow the message it prints.", file=sys.stderr)
-    elif stdout.strip() and not stdout.lstrip().startswith("FAILED"):
+    elif stdout.strip() and not stdout.lstrip().startswith(FAST_READ_FAILED_LINE_OPENING):
         print(f"{PROGRAM}: the fast read on ned-box wrote its report, whose path is "
               f"the result line on stdout, and exited {completed.returncode}; its "
               f"`record:` line, above, says why its record did not reach the log-store.",
@@ -792,7 +803,7 @@ def cold_read_fast_read_run_on_ned_box_over_ssh(ned_box_target: str, options: tu
                    f"and printed no result line")
         print(f"{PROGRAM}: the fast read on ned-box failed (exit {completed.returncode}); "
               f"its own lines, above, say why.", file=sys.stderr)
-    sys.stdout.write(stdout if stdout.strip() else f"FAILED ({failure})\n")
+    sys.stdout.write(stdout if stdout.strip() else f"{FAST_READ_FAILED_LINE_OPENING}{failure})\n")
     return max(completed.returncode, 1)
 
 
@@ -1501,6 +1512,31 @@ def fast_clarify_prompt_template_changed_sentence_ids_removed_text_and_text_inte
                      or NOTHING_IN_THE_EDIT))
 
 
+def record_line_for_stderr(record_line: str) -> str:
+    """The line this program prints on stderr for the shipper's line: marked
+    #cold_read_record_not_shipped# when the record did not reach the log-store."""
+    if record_line.startswith(RECORD_SHIPPED_LINE_PREFIX):
+        return f"{RECORD_LINE_OPENING}{record_line}"
+    return f"{PROGRAM}: {COLD_READ_RECORD_NOT_SHIPPED_HASHTAG} record: {record_line}"
+
+
+def older_clone_record_lines_rewritten(stderr: str) -> str:
+    """stderr relayed from ned-box, with each unmarked record line of an older clone given its mark."""
+    return "".join(
+        record_line_for_stderr(line[len(RECORD_LINE_OPENING):].rstrip("\n"))
+        + line[len(line.rstrip("\n")):]
+        if line.startswith(RECORD_LINE_OPENING) else line
+        for line in stderr.splitlines(keepends=True))
+
+
+def older_clone_failed_line_rewritten(stdout: str) -> str:
+    """stdout relayed from ned-box, with an older clone's failure line put in this program's form."""
+    return "".join(
+        FAST_READ_FAILED_LINE_OPENING + line[len(OLDER_FAILED_LINE_OPENING):]
+        if line.startswith(OLDER_FAILED_LINE_OPENING) else line
+        for line in stdout.splitlines(keepends=True))
+
+
 def ship_record(record_dir: pathlib.Path) -> str:
     """Release the record's being-written lock, and return the shipper's one
     line, or a FAILED line of this program's own when it could not run. The
@@ -1817,7 +1853,7 @@ def fast_read_report_finish_and_print_path(
     shipped = True
     if on_records_route:
         record_line = ship_record(report.parent)
-        print(f"{PROGRAM}: record: {record_line}", file=sys.stderr)
+        print(record_line_for_stderr(record_line), file=sys.stderr)
         shipped = record_line.startswith(RECORD_SHIPPED_LINE_PREFIX)
         print(finding_outcomes_to_record_lines(report.parent), file=sys.stderr)
     print(report)
@@ -1884,7 +1920,7 @@ def finding_outcomes_record(record_dir: pathlib.Path, values: list) -> int:
             report.read_bytes(), outcomes,
             datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")))
     record_line = ship_record(record_dir)
-    print(f"{PROGRAM}: record: {record_line}", file=sys.stderr)
+    print(record_line_for_stderr(record_line), file=sys.stderr)
     print(outcomes_file)
     if record_line.startswith(RECORD_SHIPPED_LINE_PREFIX):
         return 0
@@ -1932,7 +1968,7 @@ def main() -> int:
     target = pathlib.Path(args.target).resolve()
     if not target.is_file():
         print(f"{PROGRAM}: target not found: {target}", file=sys.stderr)
-        print(f"FAILED (target not found: {target})")
+        print(f"{FAST_READ_FAILED_LINE_OPENING}target not found: {target})")
         return EXIT_BAD_INVOCATION
 
     try:
@@ -1954,7 +1990,7 @@ def main() -> int:
                  if error.origin_main_unresolved else "Give this whole message ")
               + "to the user, or, if you are a subagent, "
               "to the agent that dispatched you.", file=sys.stderr)
-        print(f"FAILED (no fast read ran: a git command failed while finding what the "
+        print(f"{FAST_READ_FAILED_LINE_OPENING}no fast read ran: a git command failed while finding what the "
               f"edit changed: {error})")
         return 1
     except NedBoxWorktreeUnreadableThroughMacMount as error:
@@ -1967,7 +2003,7 @@ def main() -> int:
         print(f"{PROGRAM}: no fast read ran and no report was written: could "
               f"not tell which checkout holds the target, so could not tell "
               f"where its report goes: {error}", file=sys.stderr)
-        print(f"FAILED (no fast read ran and no report was written: could not "
+        print(f"{FAST_READ_FAILED_LINE_OPENING}no fast read ran and no report was written: could not "
               f"tell which checkout holds {target})")
         return 1
     if full_run_class_name is not None:
@@ -2081,7 +2117,7 @@ def main() -> int:
               "file lists them. They are:", file=sys.stderr)
         for line_number, reference in bare_references:
             print(f"{PROGRAM}:   line {line_number}: {reference}", file=sys.stderr)
-    print(f"FAILED (the fast-clarify cell failed on Gemini, {gemini_cause}, and on "
+    print(f"{FAST_READ_FAILED_LINE_OPENING}the fast-clarify cell failed on Gemini, {gemini_cause}, and on "
           f"the Sonnet backup {SONNET_BACKUP_MODEL}, {sonnet_cause}; no report at {report})")
     return 1
 

@@ -290,7 +290,7 @@ SHIP_RECORDS_YOURSELF_NEXT_STEP_LINES = (
     "If it exits 0, remove the worktree from a directory outside it, since git cannot remove the worktree "
     "your shell is in; the parentheses return your shell to the directory it was in.\n"
     f"If it exits nonzero, leave the worktree in place, and {TELL_THE_USER_OR_DISPATCHING_AGENT} "
-    "which worktree is kept, quoting each line that begins FAILED or REFUSED.")
+    "which worktree is kept, quoting each line that says FAILED or REFUSED.")
 
 WORKTREE_LISTING_FAILED_NOTICE = (
     "Not checked: the hook that ships a worktree's cold-read-records and sanity-check records "

@@ -336,7 +336,7 @@ MEANINGS = {
            "If that makes a change, first save each text the change adds that has not had a fast read to a "
            "scratch file, run `python3 {checkout}/nn-systems/cold-read/cold-read-fast-read.py --target "
            "<that file>`, and apply the findings that hold.",
-           "If a fast read prints a line opening FAILED, tell the user that line and make no change.",
+           "If a fast read prints a line holding #cold_read_fast_read_failed#, tell the user that line and make no change.",
            "If a finding would change what your recommendation decides, put the changed recommendation to "
            "the user instead of acting on it.",
            "Otherwise act on it.")),
@@ -427,7 +427,7 @@ OPTION_TAKEN_LINES = (
      "If the option makes a change, first save each text it adds that has not had a fast read to a scratch "
      "file, run `python3 {checkout}/nn-systems/cold-read/cold-read-fast-read.py --target <that file>`, and "
      "apply the findings that hold.",
-     "If a fast read prints a line opening FAILED, tell the user that line and make no change."),
+     "If a fast read prints a line holding #cold_read_fast_read_failed#, tell the user that line and make no change."),
 )
 MEANINGS.update({f"O{option}": tuple(tuple(line.replace("{option}", option) for line in lines)
                                      for lines in OPTION_TAKEN_LINES) for option in ("2", "3")})

@@ -115,7 +115,7 @@ if "report_source" in plan:
     report = pathlib.Path(plan["report_copy"])
     shutil.copyfile(plan["report_source"], report)
     print("stand-in progress line", file=sys.stderr)
-    record_line = plan.get("record_line", "cold-read-fast-read: record: FAILED: ned-box "
+    record_line = plan.get("record_line", "cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ned-box "
                            "could not be reached; the record stays on disk.")
     print(record_line, file=sys.stderr)
     print(report)
@@ -229,10 +229,10 @@ def main() -> int:
         check("success keeps the fast read's progress lines off stdout",
               "stand-in progress line" not in output)
         check("success passes on the fast read's record-shipping line",
-              "cold-read-fast-read: record: FAILED: ned-box could not be reached; "
+              "cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ned-box could not be reached; "
               "the record stays on disk." in output, output[-400:])
         check("a record line saying FAILED is followed by the instruction to tell him",
-              "cold-read-fast-read: record: FAILED: ned-box could not be reached; "
+              "cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ned-box could not be reached; "
               "the record stays on disk.\n" + TELL_HIM_RECORD_INSTRUCTION in output,
               output[-400:])
 
@@ -259,9 +259,10 @@ def main() -> int:
                 timeout=60)
             refused_lines.append(shipped.stdout.strip())
         check("the real shipper refuses the second record of one name",
-              refused_lines[1].startswith("REFUSED: explain-reply-draft-2026-10-01 — "),
+              refused_lines[1].startswith(
+                  "cold-read-record-ship: #cold_read_record_ship_refused# REFUSED: explain-reply-draft-2026-10-01 — "),
               str(refused_lines))
-        refused_record_line = f"cold-read-fast-read: record: {refused_lines[1]}"
+        refused_record_line = f"cold-read-fast-read: #cold_read_record_not_shipped# record: {refused_lines[1]}"
         completed, _ = run_program(
             scratch, dict(success_plan, record_line=refused_record_line), GOOD_INPUT)
         rename_instruction = (
@@ -288,7 +289,7 @@ def main() -> int:
               f"exit {completed.returncode}, stdout {completed.stdout!r}")
         completed, _ = run_program(
             scratch, {"stdout": f"{report_copy}\n", "exit": 4,
-                      "stderr": "cold-read-fast-read: record: FAILED: ned-box could not be reached\n"},
+                      "stderr": "cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ned-box could not be reached\n"},
             GOOD_INPUT)
         check("a record line does not excuse an exit other than 1",
               completed.returncode == 1
@@ -296,7 +297,7 @@ def main() -> int:
               f"exit {completed.returncode}, stdout {completed.stdout!r}")
         completed, _ = run_program(
             scratch, {"stdout": f"{report_copy}\n", "killed_by_sigterm": True,
-                      "stderr": "cold-read-fast-read: record: FAILED: ned-box could not be reached\n"},
+                      "stderr": "cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ned-box could not be reached\n"},
             GOOD_INPUT)
         check("a record line does not excuse a fast read killed by a signal",
               completed.returncode == 1
@@ -324,7 +325,7 @@ def main() -> int:
               real.returncode == 0
               and f"Report: {real_records}/" in real.stdout
               and "word149" in real.stdout
-              and re.search(r"cold-read-fast-read: record: FAILED: [^\n]*\n"
+              and re.search(r"cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: [^\n]*\n"
                             + re.escape(TELL_HIM_RECORD_INSTRUCTION), real.stdout) is not None,
               f"exit {real.returncode}, stdout {real.stdout[-800:]!r}, stderr {real.stderr[-400:]!r}")
 
@@ -443,7 +444,7 @@ def main() -> int:
 
         # Oracle: stdout and exit code. Red: exit 0, or no instruction to send
         # anyway, or the fast read's FAILED line not passed on.
-        failed_line = ("FAILED (the fast-clarify cell failed on Gemini, exit 1: exit-1 — "
+        failed_line = ("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (the fast-clarify cell failed on Gemini, exit 1: exit-1 — "
                        "an error, and on the Sonnet backup claude-sonnet-5-5, exit 1: "
                        "exit-1 — an error; no report)")
         completed, _ = run_program(
@@ -510,7 +511,7 @@ def main() -> int:
         fast_read_own_line = ("cold-read-fast-read: the cell launcher refused the "
                               "invocation (exit 64); not retried, because the same "
                               "invocation would be refused the same way.")
-        launcher_failed_line = ("FAILED (the fast-clarify cell failed on Gemini, exit 64: "
+        launcher_failed_line = ("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (the fast-clarify cell failed on Gemini, exit 64: "
                                 "cold-read-agy-cell: refused before agy started, and on "
                                 "the Sonnet backup claude-sonnet-5-5, exit 1: no-report "
                                 f"— no report written; no report at {scratch / 'fast-read.md'})")

@@ -455,6 +455,15 @@ LOG_STORE_RECORD_SHIPPERS = (
     ("cold-read-records", REPO_ROOT / "nn-systems" / "cold-read" / "cold-read-record-ship.py"),
     ("sanity-check-records", REPO_ROOT / "scripts" / "sanity-check-record-ship.py"),
 )
+COLD_READ_RECORD_SHIPPER = LOG_STORE_RECORD_SHIPPERS[0][1]
+# The cold-read shipper's REFUSED_LINE_OPENING; the other shippers' refusals open with REFUSED_LINE_OPENING.
+COLD_READ_RECORD_SHIP_REFUSED_LINE_OPENING = "cold-read-record-ship: #cold_read_record_ship_refused# REFUSED: "
+REFUSED_LINE_OPENING = "REFUSED:"
+
+
+def shipper_line_is_a_refusal(shipper, line):
+    return line.startswith(COLD_READ_RECORD_SHIP_REFUSED_LINE_OPENING if shipper == COLD_READ_RECORD_SHIPPER
+                           else REFUSED_LINE_OPENING)
 
 # Each file git keeps in a worktree's git directory while an operation is stopped partway, with the operation.
 IN_PROGRESS_GIT_OPERATION_FILES = (
@@ -1537,20 +1546,20 @@ def remove_worktree(worktree, branch, repo, verdict, one_named=False):
             # keeps an agent-seat's own worktree while its owner runs.
             return False
         # No next-step line may contain FAILED: the handoff-supervisor counts each such line as a failure.
-        if any(line.startswith("REFUSED:") and shipper != WALK_FILES_SHIPPER
+        if any(shipper_line_is_a_refusal(shipper, line) and shipper != WALK_FILES_SHIPPER
                for shipper, line in unshipped):
-            print(f"{worktree.name}: for each record whose line starts REFUSED:, rename its directory "
+            print(f"{worktree.name}: for each record whose line holds REFUSED:, rename its directory "
                   f"as that line says; the next scripts/clean-worktrees.py --remove then ships it "
                   f"and removes the worktree")
         # A walk's refusal names add-only files the store holds with other bytes; no rename resolves it.
-        if any(line.startswith("REFUSED:") and shipper == WALK_FILES_SHIPPER
+        if any(shipper_line_is_a_refusal(shipper, line) and shipper == WALK_FILES_SHIPPER
                for shipper, line in unshipped):
             print(f"{worktree.name}: for each walk whose line starts REFUSED:, the log-store holds "
                   f"another copy of each file that line names; the walk's owner decides which copy "
                   f"is right and makes the worktree's file match it; the next "
                   f"scripts/clean-worktrees.py --remove then ships the walk and removes the worktree")
-        if not all(line.startswith("REFUSED:") for _, line in unshipped):
-            print(f"{worktree.name}: for each record whose line does not start REFUSED:, do nothing "
+        if not all(shipper_line_is_a_refusal(shipper, line) for shipper, line in unshipped):
+            print(f"{worktree.name}: for each record whose line does not hold REFUSED:, do nothing "
                   f"now: the next scripts/clean-worktrees.py --remove, daily or at a handoff, "
                   f"ships the record again; "
                   f"if the record fails the same way there, fix the cause its line names")

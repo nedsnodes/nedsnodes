@@ -299,7 +299,7 @@ clashing_store_copy.mkdir(parents=True)
 code, output, stderr = run_hook_process(f"git worktree remove {worktree}", checkout)
 reason = refusal(output) or ""
 check("a record the shipper refuses refuses the removal of its worktree, quoting the shipper's mv",
-      f"Record {clash_record} (worktree {worktree}): REFUSED:" in reason
+      f"Record {clash_record} (worktree {worktree}): cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:" in reason
       and "`mv " in reason and "clash-doc-2026-11-03-2" in reason, (code, output, stderr))
 code, output, stderr = run_hook_process(f"git worktree remove {clash_other_worktree}", checkout)
 check("removing another worktree goes ahead while a record the log-store refuses is in the first",
@@ -314,7 +314,7 @@ check("a removal the hook cannot place is refused while any worktree holds a rec
                         "which worktree this command removes (the path $W holds a variable, a glob or a "
                         "substitution), so it shipped the records of every worktree of this repository, and 1 "
                         "record(s) did not reach it.")
-      and f"Record {clash_record} (worktree {worktree}): REFUSED:" in reason, (code, output, stderr))
+      and f"Record {clash_record} (worktree {worktree}): cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:" in reason, (code, output, stderr))
 check("that refusal asks for the removal again with its path written out, keeping -f",
       "If the worktree you remove is not one that a Record line above names, do not follow the lines below; "
       "instead: Run the removal again as `git worktree remove -f <path>`, with the worktree's path written out in "

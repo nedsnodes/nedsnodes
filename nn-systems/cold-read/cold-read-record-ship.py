@@ -204,7 +204,7 @@ already in the store, which is how a seat catches up after the box was down,
 and how the cold-read-records that predate the store were shipped once.
 
 OUTPUT. Exactly one line on stdout per cold-read-record -- `shipped:`,
-`REFUSED:` or `FAILED:`, or under --all `skipped:` for an empty directory,
+`cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:` or `FAILED:`, or under --all `skipped:` for an empty directory,
 which is not a cold-read-record -- and, under --all, one summary line after
 them. Everything else is on stderr, the REPLACED line rule 4 announces
 included: that line is a trace for whoever reads the store, never the summary a
@@ -257,6 +257,8 @@ record_names = importlib.util.module_from_spec(_record_names_spec)
 _record_names_spec.loader.exec_module(record_names)
 RECORDS_DIR = record_names.RECORDS_DIR
 PROGRAM = "cold-read-record-ship"
+COLD_READ_RECORD_SHIP_REFUSED_HASHTAG = "#cold_read_record_ship_refused#"
+REFUSED_LINE_OPENING = f"{PROGRAM}: {COLD_READ_RECORD_SHIP_REFUSED_HASHTAG} REFUSED: "
 
 # The one constant. Host and path in scp form; the path's parent is the
 # store's root, where the README lives.
@@ -579,7 +581,7 @@ def log_store_claim_failed_so_record_name_may_collide_warning_line(program: str,
             f"checkout may already hold {record_dir.name} there.\n"
             f"This run goes ahead: of all it does, only shipping the record needs the "
             f"log-store.\n"
-            f"If shipping this record prints a line that opens REFUSED and names another "
+            f"If shipping this record prints a line that holds {COLD_READ_RECORD_SHIP_REFUSED_HASHTAG} and names another "
             f"read's files, run the `mv` command and the ship command that line gives.")
 
 
@@ -1434,7 +1436,7 @@ def ship_one(host, records_path: pathlib.PurePosixPath, record_dir: pathlib.Path
                 store_line = described_provenance_comment(
                     local_first_line, pathlib.Path(store_dir) / relative)
             described.append(f"{relative} (store: {store_line}; local: {local_line})")
-        print(f"REFUSED: {name} — already in the store with different content: "
+        print(f"{REFUSED_LINE_OPENING}{name} — already in the store with different content: "
               f"{'; '.join(described)}. {rename_and_ship_instruction()}")
         return EXIT_REFUSED
 
@@ -1457,14 +1459,14 @@ def ship_one(host, records_path: pathlib.PurePosixPath, record_dir: pathlib.Path
             held_only_in_store, local, in_store)
         if local_triage_name is not None:
             store_triage_name = held_only_in_store[0]
-            print(f"REFUSED: {name} — nothing was copied: the store's record {citation} holds "
+            print(f"{REFUSED_LINE_OPENING}{name} — nothing was copied: the store's record {citation} holds "
                   f"its triage file as {store_triage_name}, and this directory {record_dir} "
                   f"holds it only as {local_triage_name}. Rename the local triage file with "
                   f"`mv {shlex.quote(str(record_dir / local_triage_name))} "
                   f"{shlex.quote(str(record_dir / store_triage_name))}`, then ship again with "
                   f"`{shlex.join([sys.argv[0], str(record_dir)])}`.")
             return EXIT_REFUSED
-        print(f"REFUSED: {name} — nothing was copied: the store's record {citation} holds "
+        print(f"{REFUSED_LINE_OPENING}{name} — nothing was copied: the store's record {citation} holds "
               f"files this directory {record_dir} does not, so the store's record is "
               f"another read's: {', '.join(held_only_in_store)}. "
               f"{rename_and_ship_instruction()}")
@@ -1515,7 +1517,7 @@ def ship_one(host, records_path: pathlib.PurePosixPath, record_dir: pathlib.Path
         fetch = shlex.join((["scp", f"{host}:{stored_triage_path}"] if host
                             else ["cp", str(stored_triage_path)]) + [str(local_triage_path)])
         ship_again = shlex.join([sys.argv[0], str(record_dir)])
-        print(f"REFUSED: {name} — the log-store's {triage_name} in {citation} was modified "
+        print(f"{REFUSED_LINE_OPENING}{name} — the log-store's {triage_name} in {citation} was modified "
               f"at {utc_text_of_epoch_seconds(store_seconds)}, after this checkout's "
               f"{local_triage_path} at {utc_text_of_epoch_seconds(local_seconds)}, and "
               f"holds other content, so the log-store's copy was kept and not replaced by "

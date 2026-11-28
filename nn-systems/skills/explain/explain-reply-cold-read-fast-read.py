@@ -8,8 +8,8 @@ Pipe a draft beginning with `The user wrote:` and containing a line
 nn-systems/cold-read/cold-read-fast-read.py. This program exits 0 when it
 printed a report, 1 when the fast read failed or timed out, and 64 on invalid
 input. The fast read may name its report and exit 1 only because its record
-did not reach the log-store, which its stderr says in a `record:` line saying
-FAILED or REFUSED. Then this program prints the report like any other, with
+did not reach the log-store, which its stderr says in a `record:` line marked
+`#cold_read_record_not_shipped#`. Then this program prints the report like any other, with
 that line and what to do about it, and this program exits 0.
 
 Every output line requiring action must carry its own instruction, because
@@ -43,9 +43,12 @@ NO_SEAT_NAME = "no-seat"
 USER_WORDS_LABEL = "The user wrote:"
 REPLY_LABEL = "The reply to him:"
 QUESTION_2_MARKER = "Question 2"
+# The openings nn-systems/cold-read/cold-read-fast-read.py and nn-systems/cold-read/cold-read-record-ship.py
+# print; the fast read's run from the Mac gives an older ned-box clone's lines these forms too.
 RECORD_SHIP_LINE_PREFIX = "cold-read-fast-read: record:"
-RECORD_SHIP_FAILED_MARKER = "FAILED"
-RECORD_SHIP_REFUSED_MARKER = "REFUSED"
+RECORD_NOT_SHIPPED_LINE_PREFIX = "cold-read-fast-read: #cold_read_record_not_shipped# record:"
+RECORD_SHIP_REFUSED_HASHTAG = "#cold_read_record_ship_refused#"
+FAST_READ_FAILED_LINE_OPENING = "cold-read-fast-read: #cold_read_fast_read_failed# FAILED ("
 RECORD_SHIP_FAILED_INSTRUCTION = (
     "Tell the user what the record line above says, remedy included, before "
     "your closing line.")
@@ -136,7 +139,7 @@ def run_fast_read(draft_path: pathlib.Path):
 
 def record_ship_lines(stderr: str) -> list:
     return [line.strip() for line in (stderr or "").split("\n")
-            if line.strip().startswith(RECORD_SHIP_LINE_PREFIX)]
+            if line.strip().startswith((RECORD_SHIP_LINE_PREFIX, RECORD_NOT_SHIPPED_LINE_PREFIX))]
 
 
 def cell_launcher_lines(stderr: str) -> list:
@@ -194,11 +197,9 @@ def main() -> int:
     report_line = last_nonempty_line(stdout)
     # Exit 1 means other failures too, so only the record line says the record was all that failed.
     only_the_record_not_shipped = exit_code == 1 and any(
-        line[len(RECORD_SHIP_LINE_PREFIX):].strip().startswith(
-            (RECORD_SHIP_FAILED_MARKER, RECORD_SHIP_REFUSED_MARKER))
-        for line in record_ship_lines(stderr))
+        line.startswith(RECORD_NOT_SHIPPED_LINE_PREFIX) for line in record_ship_lines(stderr))
     if ((exit_code != 0 and not only_the_record_not_shipped)
-            or not report_line or report_line.startswith("FAILED")):
+            or not report_line or report_line.startswith(FAST_READ_FAILED_LINE_OPENING)):
         return print_failure(report_line or last_nonempty_line(stderr), stderr)
     report_path = pathlib.Path(report_line)
     try:
@@ -211,12 +212,11 @@ def main() -> int:
     print(f"Report: {report_path}")
     for line in record_ship_lines(stderr):
         print(line)
-        outcome = line[len(RECORD_SHIP_LINE_PREFIX):].strip()
-        if outcome.startswith(RECORD_SHIP_FAILED_MARKER):
-            print(RECORD_SHIP_FAILED_INSTRUCTION)
-        elif outcome.startswith(RECORD_SHIP_REFUSED_MARKER):
+        if RECORD_SHIP_REFUSED_HASHTAG in line:
             print(RECORD_SHIP_REFUSED_INSTRUCTION.format(
                 record_directory=report_path.parent))
+        elif line.startswith(RECORD_NOT_SHIPPED_LINE_PREFIX):
+            print(RECORD_SHIP_FAILED_INSTRUCTION)
     print(SUCCESS_INSTRUCTION)
     return 0
 

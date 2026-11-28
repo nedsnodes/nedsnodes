@@ -3084,9 +3084,10 @@ try:
         "COLD_READ_GRID_TEST_STUB_ANOTHER_READ_STORE_RECORDS_DIRECTORY":
             str(repository / SCRATCH_LOG_STORE_RELATIVE)})
     record_lines = [line for line in result.stdout.splitlines() if line.startswith("record: ")]
-    check("a store holding the record's name with other bytes prints record: REFUSED, "
+    check("a store holding the record's name with other bytes prints the shipper's refusal on its record: line, "
           "the run finishes all seven, and exits 1",
-          len(record_lines) == 1 and record_lines[0].startswith("record: REFUSED:")
+          len(record_lines) == 1 and record_lines[0].startswith(
+              "record: cold-read-record-ship: #cold_read_record_ship_refused# REFUSED:")
           and result.returncode == 1 and "All seven reports landed" in result.stdout,
           f"exit {result.returncode}; {record_lines!r}; stderr={result.stderr[-400:]!r}")
 

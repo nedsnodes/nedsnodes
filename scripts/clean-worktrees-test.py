@@ -1677,10 +1677,11 @@ with tempfile.TemporaryDirectory() as scratch:
           unreachable.stdout)
     check("--remove tells a worktree whose records failed to ship that the next --remove retries, "
           "and gives no rename step when no record was refused",
-          "unreachable-wt: for each record whose line does not start REFUSED:, do nothing now: "
+          "unreachable-wt: for each record whose line does not hold REFUSED:, do nothing now: "
           "the next scripts/clean-worktrees.py --remove, daily or at a handoff, ships the record again; "
           "if the record fails the same way there, fix the cause its line names"
           in unreachable.stdout
+          and "whose line holds REFUSED:" not in unreachable.stdout
           and "whose line starts REFUSED:" not in unreachable.stdout,
           unreachable.stdout)
     unreachable_lines = unreachable.stdout.splitlines()
@@ -1702,19 +1703,27 @@ with tempfile.TemporaryDirectory() as scratch:
     refused_wt = worktree_holding_records("refused-wt")
     refused = run_clean_shipping_to(str(refused_store / "cold-read-records"), None, "--remove")
     check("--remove keeps a worktree whose record the log-store refuses, and exits 1",
-          refused_wt.exists() and "REFUSED:" in refused.stdout
+          refused_wt.exists()
+          and "cold-read-record-ship: #cold_read_record_ship_refused# REFUSED: " in refused.stdout
           and "refused-wt: record shipment FAILED, worktree kept — " in refused.stdout
           and refused.returncode == 1,
           refused.stdout + refused.stderr)
     check("--remove tells a worktree whose record was refused to rename it, and gives no retry "
           "step when every unshipped record was refused",
-          "refused-wt: for each record whose line starts REFUSED:, rename its directory as that "
+          "refused-wt: for each record whose line holds REFUSED:, rename its directory as that "
           "line says; the next scripts/clean-worktrees.py --remove then ships it and removes "
           "the worktree" in refused.stdout
-          and "whose line does not start REFUSED:" not in refused.stdout
+          and "whose line does not hold REFUSED:" not in refused.stdout
           and "for each walk whose line starts REFUSED:" not in refused.stdout,
           refused.stdout)
     remove_worktree_for_next_case(refused_wt)
+    shipper_spec = importlib.util.spec_from_file_location(
+        "cold_read_record_ship", CLEAN_SCRIPT.parent.parent / "nn-systems" / "cold-read" / "cold-read-record-ship.py")
+    shipper_module = importlib.util.module_from_spec(shipper_spec)
+    shipper_spec.loader.exec_module(shipper_module)
+    check("the cold-read shipper's refusal opening that clean-worktrees.py matches is the one the shipper prints",
+          load_clean_worktrees_module().COLD_READ_RECORD_SHIP_REFUSED_LINE_OPENING
+          == shipper_module.REFUSED_LINE_OPENING)
 
     # A shipper that dies before printing its line: a record file it cannot read raises, uncaught.
     silent_wt = worktree_holding_records("silent-wt")
@@ -1797,9 +1806,10 @@ with tempfile.TemporaryDirectory() as scratch:
           unreachable.stdout + unreachable.stderr)
     check("--remove tells a worktree whose walk failed to ship that the next --remove retries, "
           "on a line with no FAILED in it",
-          "unreachable-walk-wt: for each record whose line does not start REFUSED:, do nothing now: "
+          "unreachable-walk-wt: for each record whose line does not hold REFUSED:, do nothing now: "
           "the next scripts/clean-worktrees.py --remove, daily or at a handoff, ships the record again; "
           "if the record fails the same way there, fix the cause its line names" in unreachable.stdout
+          and "whose line holds REFUSED:" not in unreachable.stdout
           and "whose line starts REFUSED:" not in unreachable.stdout
           and "file(s) in docs/walk/ no walk ships" not in unreachable.stdout,
           unreachable.stdout)
