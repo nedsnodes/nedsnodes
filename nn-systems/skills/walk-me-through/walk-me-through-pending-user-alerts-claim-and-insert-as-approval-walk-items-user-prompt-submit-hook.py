@@ -40,9 +40,9 @@ FAILURES. A payload that is not JSON: one line on stderr, exit 1. A failure clai
 Claude Code shows the user, says that alerts may be waiting unseen, since an alert is how a program reaches
 him, and that an agent on ned-box should fix the cause; additionalContext tells the agent what failed and
 that the user has been told. A transcript the hook cannot read, or a record in it record_text cannot read: the
-prompt's opening decides, as above, and a systemMessage and additionalContext say so and why, on every prompt
-that reaches the transcript, typed or not and alerts claimed or not, since no other hook reports it on every one.
-typed_by_user_and_transcript_read_error gives the short-answer hook the same decision and error.
+prompt's opening decides, as above, and additionalContext, ahead of any other, says so and what to do, on every
+prompt whose transcript it reads, typed or not and alerts claimed or not, since no other hook reports the error on
+every one. typed_by_user_and_transcript_read_error gives the short-answer hook the same decision and error.
 
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
@@ -125,15 +125,20 @@ CLAIM_FAILED_LINES = (
 )
 TRANSCRIPT_READ_FAILED_LINES = (
     "The user-alerts hook could not read this agent-session's transcript {path}: {error}. So it judged by how the "
-    "prompt opens whether the user typed it, and counted it as {whose}.",
-    "The hook has shown the user this sentence, so do not repeat it: \"{user_sentence}\"",
-    "If the record it could not read is one Claude Code writes in normal use, then after you act on the user's "
-    "prompt, change record_text in {hook} to read it, on an nn-topic-branch with a test.",
+    "prompt opens whether the user typed it, counted it as {whose}, and {claim}. No other hook reports this "
+    "error on every prompt.",
+    "After you act on the user's prompt:",
+    "If the error is an OSError, such as a PermissionError: run `ls -l {path}`, and if the file is yours but not "
+    "readable, run `chmod u+r {path}`; if it is not yours, or the disk is at fault, tell the user: "
+    "\"{user_sentence}\"",
+    "If the error is a ValueError: read the newest record in that transcript that carries `turnOrigin`. If it is a "
+    "shape Claude Code writes in normal use, change record_text in {hook} to read it, on an nn-topic-branch with a "
+    "test; if the record is damaged, tell the user: \"{user_sentence}\"",
 )
-TRANSCRIPT_READ_FAILED_USER_SENTENCE = ("The hook that brings program alerts into your approval-walk could not read "
-                                        "this agent-session's transcript {path} on ned-box ({error}), so it judged "
-                                        "by how your prompt opens whether you typed it. An agent on ned-box should "
-                                        "find out why.")
+TRANSCRIPT_READ_FAILED_USER_SENTENCE = ("On ned-box, the hook that brings program alerts into your approval-walk could "
+                                        "not read this agent-session's transcript ({error}), so it judged from how "
+                                        "your prompt opens whether you typed it. No alert is lost: one it claimed "
+                                        "that no approval-walk records is offered again after 30 minutes.")
 CLAIM_FAILED_USER_SENTENCE = ("The hook that brings program alerts into your approval-walk failed on ned-box "
                               "({error}), so a program's alert may be waiting unseen in {directory}. An agent on ned-box "
                               "should fix the cause.")
@@ -249,13 +254,14 @@ def output_for(payload, environment, user_alerts=None):
     if transcript_error is None:
         return output
     path = payload.get("transcript_path")
-    user_sentence = TRANSCRIPT_READ_FAILED_USER_SENTENCE.format(path=path, error=repr(transcript_error))
-    lines = [line.format(path=path, error=repr(transcript_error), whose="his" if typed else "not his",
-                         user_sentence=user_sentence, hook=Path(__file__).resolve()) for line in TRANSCRIPT_READ_FAILED_LINES]
+    claim = ("the lines below say what it claimed" if output else "claimed no alert, since none was pending" if typed
+             else "claimed no alert")
+    lines = [line.format(path=path, error=repr(transcript_error), whose="his" if typed else "not his", claim=claim,
+                         user_sentence=TRANSCRIPT_READ_FAILED_USER_SENTENCE.format(error=repr(transcript_error)),
+                         hook=Path(__file__).resolve()) for line in TRANSCRIPT_READ_FAILED_LINES]
     output = output or {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": ""}}
     specific = output["hookSpecificOutput"]
     specific["additionalContext"] = "\n".join(lines + [specific["additionalContext"]]).rstrip("\n")
-    output["systemMessage"] = " ".join(filter(None, [user_sentence, output.get("systemMessage")]))
     return output
 
 
