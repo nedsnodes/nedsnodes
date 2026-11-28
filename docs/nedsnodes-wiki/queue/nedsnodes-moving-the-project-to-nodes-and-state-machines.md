@@ -1,8 +1,8 @@
 # Moving NedsNodes to nodes and state machines
 
-This page is the project's overview and design document for turning the bulk of NedsNodes into nodes and state machines. It does not teach what a state machine is. It says how they relate to this project and its plans, how the work will be done, and what is still undecided.
+This page is the project's overview and design document for turning the bulk of NedsNodes into nodes and state machines. It does not teach what a state machine is. It says how they relate to this project and its plans, and how the work will be done.
 
-**Status.** Pending the user's review, in `docs/nedsnodes-wiki/queue/`: a wiki page needs the user's approval before it moves to `docs/nedsnodes-wiki/`. The work is filed as [GHI 5227, Move the whole project to nodes and state machines](https://github.com/nedsnodes/nedsnodes/issues/5227), and nothing here is built. It carries out the user-rulings of approval-walk nodes-design-forks-2026-11-21, whose walk-minutes are `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/nodes-design-forks-2026-11-21-minutes.md`; an item number below, such as "item 4", is an item of that approval-walk. Where the user has not decided something, this design says so and lists it in section 13. The approval page, `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md`, gains an exception that covers this page: "An edit to a wiki page whose plan the user has approved, carrying out a general instruction he gave for that page, for each part of the edit that makes no decision he has not made; the commit message quotes his instruction, the agent brings him the other parts, and, unlike the other exceptions, the agent tells him in one line what changed." (user-ruling of 2026-11-24).
+**Status.** Pending the user's review, in `docs/nedsnodes-wiki/queue/`: a wiki page needs the user's approval before it moves to `docs/nedsnodes-wiki/`. The work is filed as [GHI 5227, Move the whole project to nodes and state machines](https://github.com/nedsnodes/nedsnodes/issues/5227), and nothing here is built. It carries out the user-rulings of approval-walk nodes-design-forks-2026-11-21, whose walk-minutes are `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/nodes-design-forks-2026-11-21-minutes.md`; an item number below, such as "item 4", is an item of that approval-walk. The approval page, `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md`, gains an exception that covers this page: "An edit to a wiki page whose plan the user has approved, carrying out a general instruction he gave for that page, for each part of the edit that makes no decision he has not made; the commit message quotes his instruction, the agent brings him the other parts, and, unlike the other exceptions, the agent tells him in one line what changed." (user-ruling of 2026-11-24).
 
 ## 1. The goal
 
@@ -23,13 +23,13 @@ The user's overview of NedsNodes describes "many modular building blocks that fi
 
 ### 1.2 Work already planned that this page must fit
 
-- **[GHI 2505, Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedsnodes/nedsnodes/issues/2505).** The user asked for it on 2026-11-03 and said "it's going to affect almost everything. Well, it's going to affect a lot". It holds these records in one store, moves them with one machine in code, and makes the Markdown walk-minutes generated views. It is a large part of this plan already written down, with real failures as evidence: a review decision kept in prose that the fix-round program could not see, and ten programs parsing `#next_to_present`. This page supplies what GHI 2505 leaves generic, namely the tool contract, the machine format and the runner. GHI 2505 supplies the records for its domain. Two points need the user: whether it is the first slice, and how its one store fits the record this page keeps for each state-machine-run (open questions 4 and 15).
+- **[GHI 2505, Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedsnodes/nedsnodes/issues/2505).** The user asked for it on 2026-11-03 and said "it's going to affect almost everything. Well, it's going to affect a lot". It holds these records in one store, moves them with one machine in code, and makes the Markdown walk-minutes generated views. It is a large part of this plan already written down, with real failures as evidence: a review decision kept in prose that the fix-round program could not see, and ten programs parsing `#next_to_present`. This page supplies what GHI 2505 leaves generic, namely the tool contract, the machine format and the runner. GHI 2505 supplies the records for its domain. GHI 2505 is not the first slice: the tool contract and runner are built first, then background work, then GHI 2505's approval-walk half as the first large machine, and its pull-request half follows.
 - **[GHI 972, A small HTTP service with SQLite on ned-box keeps one record of every agent-seat on both machines](https://github.com/nedsnodes/nedsnodes/issues/972).** Its nn-shared-database is GHI 2505's first candidate for that store.
 - **[GHI 282, Build the design-to-main state machine: the Python machine, its per-state agent-instructions, and the nine items the design defers to the build](https://github.com/nedsnodes/nedsnodes/issues/282).** Deferred (section 12).
 
 ## 2. Terms
 
-**cpc-node** and **cpc-tool** are the terms of [PR 4325, Glossary: add cpc-node and cpc-tool as the two kinds of code-prompt-code](https://github.com/nedsnodes/nedsnodes/pull/4325), not yet merged. This design proposes the terms below for the glossary, in the pull request that builds each one:
+**cpc-node** and **cpc-tool**, the two kinds of code-prompt-code, are glossary terms, added by [PR 4325, Glossary: add cpc-node and cpc-tool as the two kinds of code-prompt-code](https://github.com/nedsnodes/nedsnodes/pull/4325). The term code-prompt-code stays, and `CLAUDE.md`'s code-prompt-code bullet does not name the two kinds: the glossary carries them. This design proposes the terms below for the glossary, in the pull request that builds each one:
 
 - **machine**: a workflow's state machine, stored as one JSON file.
 - **node**: one state's work in a machine. Its kind is code, cpc-node, user, machine or parallel (section 4).
@@ -51,7 +51,7 @@ Each node follows one contract (item 3), built by one shared contract module fro
 - `--schema` prints as JSON Schema the node's input, output and output states.
 - `--help` states the one question the node answers.
 - It reads JSON on stdin or from files named by flags, and takes subcommands as `git` and `gh` do.
-- Under `--json`, which the runner always passes, it prints one JSON object on stdout, naming its output state; without `--json` it prints sentences on stdout, as the exit-code page says. Progress and errors go to stderr.
+- Under `--json`, which the runner always passes, it prints one JSON object on stdout, naming its output state in the field `output_state`; without `--json` it prints sentences on stdout, as the exit-code page says. Progress and errors go to stderr.
 - Its exit code follows the exit-code page, `docs/nedsnodes-wiki/nedsnodes-how-a-program-reports-success-failure-and-findings-with-its-exit-code.md`: 0 yes, 1 no, 2 could not answer. On exit 0 or 1 the runner reads the one JSON object on stdout. On exit 2, or when stdout is not exactly one valid JSON object, as after a crash, the runner takes the output state `could-not-run`. The output state, not the exit code, picks the next node.
 
 For example, `background-task-check` answers "Did the task finish?":
@@ -85,7 +85,7 @@ A machine is one JSON file that lists its nodes and, for each output state, the 
 | User interaction | a `user` node |
 | End state | a name beginning `end:` |
 
-A counter is data the state-machine-run keeps. No counter node is needed (item 12). This example is a writer's cold-read loop, with item 12's limit of two rounds:
+A transition has no general guard; a loop limit is the only condition on it, and a node that must choose from data reports a different output state. A counter is data the state-machine-run keeps. No counter node is needed (item 12). This example is a writer's cold-read loop, with item 12's limit of two rounds:
 
 ```json
 {
@@ -136,7 +136,7 @@ One runner has three commands (item 4):
 - `next <state-machine-run>` runs code and fresh-agent nodes itself until the machine ends or a node needs the agent-seat's interactive agent or the user, then prints that step. It is also what notices a crash: it reads the state-machine-run's record and finds a node started and never ended.
 - `answer <state-machine-run>` takes that node's output state and output JSON, and refuses any other output state or output that fails the node's schema.
 
-The runner validates each node's output against the input schema of the node that receives it, so no node repeats that validation. It counts every loop. The project uses one JSON Schema library, compared in section 5.1, which replaces the hand-written `answer_problems()` validator in `scripts/merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py`.
+The runner validates each node's output against the input schema of the node that receives it, so no node repeats that validation. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are. It counts every loop. The project uses one JSON Schema library, compared in section 5.1, which replaces the hand-written `answer_problems()` validator in `scripts/merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py`.
 
 **Extraction.** Item 4 extracts the runner from the three existing step programs. Because the user deferred design-to-main on 2026-11-23, the runner is extracted from two: the approval-walk's check program, `nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py`, and the `next-step` of `scripts/pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py`.
 
@@ -159,7 +159,7 @@ The runner holds each node's schema as a JSON document, because a node is a sepa
 | Static typing | No `py.typed` in the package; needs the separate [`types-jsonschema`](https://pypi.org/project/types-jsonschema/) stubs for mypy | Ships `py.typed` |
 | Builds a schema from a dataclass | No: the shared contract module needs a small generator | Yes |
 
-Pydantic is the stronger choice inside one Python process, and it would save the small generator. It does not do the runner's job, which is validating a JSON document against a schema document, without a second library. Recommended, for the user to decide (open question 3): python-jsonschema 4.26.0, pinned in `nn-systems/general-tools/python-libraries-pinned-requirements.txt`, with `types-jsonschema` for mypy.
+Pydantic is the stronger choice inside one Python process, and it would save the small generator. It does not do the runner's job, which is validating a JSON document against a schema document, without a second library. The project's one JSON Schema library is python-jsonschema 4.26.0, pinned in `nn-systems/general-tools/python-libraries-pinned-requirements.txt`, with `types-jsonschema` for mypy.
 
 **What is installed today.** ned-box's default `python3` has `jsonschema` 4.19.2 from the Ubuntu package `python3-jsonschema`, installed automatically as a dependency of `cloud-init-base`. No program in the repository imports it and the pinned requirements do not list it, so the project cannot rely on that copy. Whether the Mac has it is not known: ned-box's key on the Mac admits only a fixed set of requests, none of which reports this.
 
@@ -214,7 +214,7 @@ Every program that starts `claude -p` passes `--strict-mcp-config` through the s
 
 The user asked to log "the beginning and end of each state", what is passed in and out, and time and tokens, modelled on agent-session JSONL files. Item 4 asks for an append-only record of each state-machine-run. This design makes them one file, a JSONL file per state-machine-run, which is both the state the runner resumes from and the log for analysis.
 
-Each line is one event: `state-machine-run-started`, `state-machine-node-started`, `state-machine-node-ended`, `state-machine-user-question-asked`, `state-machine-user-question-answered` or `state-machine-run-ended`. A `state-machine-node-ended` line carries the node, output state, exit code, duration, tokens, a hash and path of the input and output, and for an agent node its agent-session id and JSONL path. Where the file is kept, and whether it feeds or gives way to GHI 2505's one store, is open question 4.
+Each line is one event: `state-machine-run-started`, `state-machine-node-started`, `state-machine-node-ended`, `state-machine-user-question-asked`, `state-machine-user-question-answered` or `state-machine-run-ended`. A `state-machine-node-ended` line carries the node, output state, exit code, duration, tokens, a hash and path of the input and output, and for an agent node its agent-session id and JSONL path. Each state-machine-run's record is one JSONL file in the log-store on ned-box; a state-machine-run on the Mac waits while ned-box cannot be reached.
 
 ## 10. First use: background work across a session-handoff
 
@@ -268,27 +268,9 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 4. Build the runner and lint, extracted from the two step programs, with the JSONL record.
 5. Build the first use, background work, and write the report on session-handoffs held at high context.
 6. Test the state-machine-user-answer-node mechanism of section 6.
-7. Move approval-walks onto the runner, with GHI 2505's records if the user makes it this slice, then cold reads and reviews (open questions 2 and 15).
+7. Move approval-walks onto the runner, as GHI 2505's approval-walk half, then cold reads and reviews. The approval-walk's bookkeeping moves into code, and out of `/walk-me-through`, when approval-walks move onto the runner; the walk check program gains no step chain before then, and [GHI 3896, Move approval-walk bookkeeping from the walk-me-through skill into the walk check program](https://github.com/nedsnodes/nedsnodes/issues/3896) stays open, listing the steps the runner must take over; if the nodes design is not approved, GHI 3896 can still be built as it stands. Each approval-walk item gets a lasting id from its record when approval-walks move onto the runner, with no `#approval_walk_item_id` line before then.
 8. Review the remaining programs a few at a time, as section 11 says.
 
 **Deferred: design-to-main.** The user decided on 2026-11-23 to defer all continued work on design-to-main until other parts have stabilized, and to keep what this design raised about it in [GHI 282, Build the design-to-main state machine: the Python machine, its per-state agent-instructions, and the nine items the design defers to the build](https://github.com/nedsnodes/nedsnodes/issues/282). No step above changes or depends on it. Its code and design stay as they are.
 
-**Testing.** Each step carries its tests. The runner's tests cover every output state, a loop reaching its limit, a nested machine, a parallel branch that fails and one that times out, resuming a state-machine-run from its record, and refused answers. Each failure path is caused in a test, as `CLAUDE.md` requires. The lint is tested on one bad machine per rule.
-
-## 13. Open questions for the user
-
-1. Each node's JSON object names how it ended in the field `output_state`.
-2. Which comes first after the runner: background work, as item 67 approved, or approval-walks, which the user said on 2026-11-23 "we could do" first?
-3. The project's one JSON Schema library is python-jsonschema 4.26.0, pinned, with `types-jsonschema` for mypy.
-4. Each state-machine-run's record is one JSONL file in the log-store on ned-box; a state-machine-run on the Mac waits while ned-box cannot be reached.
-5. A transition has no general guard; a loop limit is the only condition on it, and a node that must choose from data reports a different output state.
-6. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are.
-7. Should the code-prompt-code bullet of `CLAUDE.md` name its two kinds, cpc-tool and cpc-node?
-8. Should create-GHI and edit-GHI write their own rerun task, reversing the user-ruling of 2026-10-10?
-9. Did the user's remark "The code prompt code, it seems like it's just adding some formalism" point at the term? Items 10.1 and 10.2 have since kept and extended the term.
-10. One shared function prints a test file's last line and exits with its code: `END <UTC time> passed=<N> failed=<M> #nc_test_suite_pass`, `#nc_test_suite_fail` or `#nc_test_suite_could_not_run`, with exit 0, 1 or 2 to match, as in `END 2026-11-24T23:10:02Z passed=12 failed=0 #nc_test_suite_pass`.
-11. Should the shared skip function take the cause from a fixed set and write the reason's opening itself?
-12. Should the approval-walk's check program hand out its bookkeeping one step at a time, each step validated before the next?
-13. Should a Stop hook refuse to end a turn until a discussion that changes a waiting approval-walk item is in the walk-minutes, with the session-handoff deferred until then?
-14. Should each approval-walk item carry a lasting `#approval_walk_item_id` line?
-15. GHI 2505 is not the first slice: the tool contract and runner are built first, then background work, then GHI 2505's approval-walk half as the first large machine, and its pull-request half follows.
+**Testing.** Each step carries its tests. The runner's tests cover every output state, a loop reaching its limit, a nested machine, a parallel branch that fails and one that times out, resuming a state-machine-run from its record, and refused answers. Each failure path is caused in a test, as `CLAUDE.md` requires. One shared function prints a test file's last line and exits with its code: `END <UTC time> passed=<N> failed=<M> #nc_test_suite_pass`, `#nc_test_suite_fail` or `#nc_test_suite_could_not_run`, with exit 0, 1 or 2 to match, as in `END 2026-11-24T23:10:02Z passed=12 failed=0 #nc_test_suite_pass`. The lint is tested on one bad machine per rule.
