@@ -352,7 +352,8 @@ check("the table's jobs are the two typed by hand before this program, the workt
       "Mac, the deletion of exited agent-sessions' temp folders, the no-sandbox test "
       "suites' run on main, the GHI-MD edit pull "
       "requests' check, approval and merge, the daily search for credential files no "
-      "cold-read-cell is denied, the daily check for a newer model of each pinned model id's family, the weekly count of each hook rule ID in both machines' "
+      "cold-read-cell is denied, the daily check for a newer model of each pinned model id's "
+      "family, the weekly count of each hook rule ID in both machines' "
       "transcripts, the one count of cold-read-fast-read finding outcomes, the deletion of "
       "old agent-seat terminal captures, the open-pull-request watcher's poll, the standing "
       "user-rulings store's each-minute add, and no other",

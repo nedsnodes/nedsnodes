@@ -23,6 +23,12 @@ PROGRAM = (Path(__file__).resolve().parents[1]
 _specification = importlib.util.spec_from_file_location("pinned_model_ids_daily_check", PROGRAM)
 program = importlib.util.module_from_spec(_specification)
 _specification.loader.exec_module(program)
+_removal_specification = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    PROGRAM.parents[2] / "scripts" / "git-redirecting-environment-removal-test-fixture.py")
+git_redirecting_removal = importlib.util.module_from_spec(_removal_specification)
+_removal_specification.loader.exec_module(git_redirecting_removal)
+git_redirecting_removal.remove_git_redirecting_environment_variables_from_this_process()
 
 FAILURES = []
 
@@ -203,10 +209,12 @@ failure_case("agy cannot be started", {"agy": raises(PermissionError(13, "Permis
              "could not be started", "agy models")
 failure_case("claude does not know the alias",
              {"claude:opus": json.dumps({"modelUsage": {}, "is_error": True, "terminal_reason": "api_error"})},
-             "names 0 models of the family opus, not one", "claude -p --model opus")
+             "names 0 models of the family opus, not one",
+             "claude -p 'Reply with the single word ok.' --model opus --output-format json")
 failure_case("claude prints text that is not JSON",
              {"claude:opus": "[claude-code:unrecognized_model] {\"model\":\"opus\"}"},
-             "is not the JSON result it should print", "claude -p --model opus")
+             "is not the JSON result it should print",
+             "claude -p 'Reply with the single word ok.' --model opus --output-format json")
 
 with scratch() as (repository, home):
     exit_code, output, errors = run_main(repository, fake_run({"claude:opus": json.dumps(

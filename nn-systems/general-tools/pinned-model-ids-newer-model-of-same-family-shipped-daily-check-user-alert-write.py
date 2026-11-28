@@ -35,6 +35,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -234,7 +235,8 @@ def listings(pins, run_command):
                 prefix = headless.claude_code_headless_run_command_line_prefix_build("default", program=path or CLAUDE)
                 command = prefix + [CLAUDE_ALIAS_PROBE_PROMPT, "--model", families[0], "--output-format", "json",
                                     "--tools", "", "--no-session-persistence"]
-                shown = f"claude -p --model {families[0]}"
+                shown = shlex.join([CLAUDE, "-p", CLAUDE_ALIAS_PROBE_PROMPT, "--model", families[0],
+                                    "--output-format", "json"])
             else:
                 command = [path or agent_binary, *arguments]
                 shown = " ".join([agent_binary, *arguments])
@@ -243,7 +245,7 @@ def listings(pins, run_command):
                     raise AgentBinaryCannotListModels(
                         f"no {agent_binary} was found on PATH or in "
                         f"{' or '.join(map(str, AGENT_BINARY_DIRECTORIES_OUTSIDE_CRON_PATH))}")
-                # The Claude probe runs in an empty directory, so no project's CLAUDE.md is sent with it.
+                # An empty directory, so the Claude probe is sent no project's CLAUDE.md.
                 listed = parse(listing_output(command, run_command, cwd=empty_directory))
             except AgentBinaryCannotListModels as error:
                 failures.append((agent_binary, shown, families, str(error)))
