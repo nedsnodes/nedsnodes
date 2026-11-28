@@ -1179,13 +1179,13 @@ def before_the_merge_queue_stop_line(output):
 
 
 def merge_program_lock_and_merge_queue_stop_file_cases(scratch):
-    stop_file_name = program.MERGE_QUEUE_STOP_FILE_NAME
+    stop_file_name = "merge-queue-stopped.txt"
     exit_code, output, _, _, _ = run_case(
         scratch, "passes-leaves-no-stop-file", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT))
     outputs = scratch / "passes-leaves-no-stop-file" / "outputs"
     check("a merge that exits 0 writes no merge queue stop file, and leaves the lock file",
           exit_code == 0 and not (outputs / stop_file_name).exists()
-          and (outputs / program.MERGE_PROGRAM_RUN_LOCK_FILE_NAME).is_file(),
+          and (outputs / "merge-program.lock").is_file(),
           f"exit {exit_code}\n{output}")
 
     exit_code, output, _, _, _ = run_case(
