@@ -526,6 +526,12 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
     check("a missing placements directory is a bad invocation, exit 2",
           run("--placements", str(scratch / "nope"),
               "--defect-list", str(ruler)).returncode == 2)
+    for sizes in ("-1", "0"):
+        result = run("--placements", str(placements), "--defect-list", str(ruler),
+                     f"--union-sizes={sizes}")
+        check(f"unusable roster sizes {sizes!r} are rejected before any score is printed",
+              result.returncode == 2 and "--union-sizes" in result.stderr
+              and "Traceback" not in result.stderr and not result.stdout, result.stderr)
     check("a non-numeric --union-sizes is a bad invocation, exit 2",
           run("--placements", str(placements), "--defect-list", str(ruler),
               "--union-sizes", "two").returncode == 2)

@@ -513,6 +513,8 @@ def main() -> int:
         print(f"{PROGRAM}: --union-sizes takes comma-separated integers, not "
               f"{arguments.union_sizes!r}", file=sys.stderr)
         return EXIT_BAD_INVOCATION
+    if any(size <= 0 for size in sizes):
+        parser.error("--union-sizes takes positive roster sizes")
 
     weights = read_severity_weights(arguments.defect_list)
     declined = read_defect_list_declined_entries(arguments.defect_list)
