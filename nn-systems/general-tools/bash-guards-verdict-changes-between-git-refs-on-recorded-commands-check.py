@@ -35,7 +35,7 @@ Steps:
   4. Compare the two refs row by row and print each difference, then the recorded commands the
      guards the head adds refuse, in refusal groups: one guard and one refusal message each, with
      a few of its commands; every group in full is in added-guard-refusal-groups.json, and every group's
-     "refusal right" answer line, ready to copy, is in added-guard-refusal-group-rightly-refused-review-answer-lines.txt.
+     #bash_guard_refusal_right# answer line, ready to copy, is in added-guard-refusal-group-rightly-refused-review-answer-lines.txt.
 
 Exit status: 0 when no verdict differs and no added guard refuses a recorded command; 1 when a
 verdict differs or an added guard refuses a recorded command; 2 when the replay itself
@@ -160,7 +160,7 @@ VERDICT_CHANGED_MESSAGE = (
     "list of four items: [command, working directory]; the guard; the base's reading; and the head's reading. "
     "Each reading is a list whose first item is the verdict and whose second is the message the guard gave.\n"
     "Where the head's verdict is the one the pull request means to give, the answer is a line of its own:\n"
-    "  verdict change intended: <guard> | <working directory> | <command>\n"
+    "  #bash_guard_verdict_change_intended# <guard> | <working directory> | <command>\n"
     "copying from the difference's entry the guard, as the entry's first line names it before \"  in \" (a guard "
     "file's path, or, in the search-file main() mode, the literal text search-file main(), which stands for the "
     "search-file guard), the working directory, which follows \"  in \", and the command, the command last, in quotes as the entry prints it, which is how Python's repr() writes it. A "
@@ -171,8 +171,8 @@ VERDICT_CHANGED_MESSAGE = (
     "The answers go in the review of the nn-head-commit being merged; after a fix-round, that is the review of "
     "the fix-round's head; answers in a review of an earlier head do not count, so the review of the fix-round's head repeats them.\n"
     "merge-lane-2 holds the merge until every difference that this check, run on the nn-head-commit being merged, "
-    "finds has its \"verdict change intended\" line. When no NEW GUARD REFUSES block follows, merge-lane-2 then "
-    "merges despite the exit 1; when one follows, its refusal groups need their \"refusal right\" lines too, "
+    "finds has its #bash_guard_verdict_change_intended# line. When no NEW GUARD REFUSES block follows, merge-lane-2 then "
+    "merges despite the exit 1; when one follows, its refusal groups need their #bash_guard_refusal_right# lines too, "
     "as that block says. A difference answered with a finding holds the merge until the author's fix makes this "
     "check no longer find it.")
 NEW_GUARD_REFUSES_MESSAGE = (
@@ -190,27 +190,27 @@ NEW_GUARD_REFUSES_MESSAGE = (
     "one object per group: \"group\" is its id, \"guard\" the guard's path, \"reason\" the refusal message, "
     "\"modes\" the modes that refused, and \"refused commands\" a list of [command, working directory].\n"
     "Where every command in a group is rightly refused, the answer is a line of its own:\n"
-    "  refusal right: <guard file> | <group id>\n"
-    "for example, with a made-up guard path: refusal right: scripts/example-guard-hook.py | refusal-group-0a1b2c3d. "
+    "  #bash_guard_refusal_right# <guard file> | <group id>\n"
+    "for example, with a made-up guard path: #bash_guard_refusal_right# scripts/example-guard-hook.py | refusal-group-0a1b2c3d. "
     "Each group listed above prints its own line in that form, ready to copy, and the file "
     "{refusal_right_lines_file} holds that line for every group, the ones the list leaves out included.\n"
     "On the next line, write in one line why the guard is right to refuse that group's commands.\n"
-    "Where a command in a group is wrongly refused, the group gets no \"refusal right\" line: the answer is a "
+    "Where a command in a group is wrongly refused, the group gets no #bash_guard_refusal_right# line: the answer is a "
     "finding that names each wrongly refused command and its working directory, and the author then narrows the "
     "guard so that it lets that command through. Each other group still gets its own answer. A group whose "
     "guard and message the narrowing leaves unchanged keeps its id, and while the guard still refuses any of its "
-    "commands, such a group needs its one \"refusal right\" line in the review of the fix-round's head.\n"
+    "commands, such a group needs its one #bash_guard_refusal_right# line in the review of the fix-round's head.\n"
     "The answers go in the review of the nn-head-commit being merged; after a fix-round, that is the review of "
     "the fix-round's head; answers in a review of an earlier head do not count, so the review of the fix-round's head repeats them.\n")
 NEW_GUARD_REFUSES_ONLY_ENDING = (
     "merge-lane-2 holds the merge until every refusal group that this check, run on the nn-head-commit being "
-    "merged, finds has its \"refusal right\" line, and then merges despite the exit 1. A group answered with a "
+    "merged, finds has its #bash_guard_refusal_right# line, and then merges despite the exit 1. A group answered with a "
     "finding holds the merge until the author's narrowed guard no longer refuses the commands the finding names, "
     "so the check no longer lists them.")
 NEW_GUARD_REFUSES_AND_VERDICT_CHANGED_ENDING = (
-    "The VERDICT CHANGED block above holds the merge on its own: \"refusal right\" lines do not clear it. "
-    "merge-lane-2 merges despite the exit 1 only once every refusal group has its \"refusal right\" line "
-    "and every difference has its \"verdict change intended\" line.")
+    "The VERDICT CHANGED block above holds the merge on its own: #bash_guard_refusal_right# lines do not clear it. "
+    "merge-lane-2 merges despite the exit 1 only once every refusal group has its #bash_guard_refusal_right# line "
+    "and every difference has its #bash_guard_verdict_change_intended# line.")
 
 # Copied from the parent, never inherited: a git variable would point the checkouts' git at
 # another repository, and the attendance variables change the guards' messages.
@@ -1113,7 +1113,7 @@ def added_guard_refusal_groups(refusals_by_mode):
 
 
 def refusal_right_line(group):
-    return f"refusal right: {group['guard']} | {group['group']}"
+    return f"#bash_guard_refusal_right# {group['guard']} | {group['group']}"
 
 
 def print_added_guard_refusal_groups(groups, groups_file):

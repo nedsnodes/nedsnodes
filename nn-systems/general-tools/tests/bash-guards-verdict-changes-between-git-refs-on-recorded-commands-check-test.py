@@ -825,11 +825,11 @@ try:
           "clear the verdict change, and the merge waits for both kinds of answer",
           replay.NEW_GUARD_REFUSES_AND_VERDICT_CHANGED_ENDING in out
           and replay.NEW_GUARD_REFUSES_ONLY_ENDING not in out
-          and "\"refusal right\" lines do not clear it" in out
-          and "every difference has its \"verdict change intended\" line" in out, out)
+          and "#bash_guard_refusal_right# lines do not clear it" in out
+          and "every difference has its #bash_guard_verdict_change_intended# line" in out, out)
     check("a head that changes a guard's verdicts: the reviewer is told the answer line to write for each difference",
           replay.VERDICT_CHANGED_MESSAGE in out
-          and "  verdict change intended: <guard> | <working directory> | <command>\n" in out, out)
+          and "  #bash_guard_verdict_change_intended# <guard> | <working directory> | <command>\n" in out, out)
     check("a head that adds a guard: the guard is read at the head only, and the other guards are compared",
           f"guards the head adds, read at the head only: ['{TMUX_KILL_GUARD}']" in out
           and "in-process: rows whose verdict differs: 0" in out, out)
@@ -852,8 +852,8 @@ try:
           and out.count("    command: ") == 3 and "297 more commands of this group are left out here" in out
           and many_long_refused[0][0] not in out, out[:3000])
     check("a head that adds a guard refusing 300 long commands with one message: the printed group carries its "
-          "\"refusal right\" line, ready to copy",
-          f"    answer if every command of this group is rightly refused: refusal right: {TMUX_KILL_GUARD} | "
+          "#bash_guard_refusal_right# line, ready to copy",
+          f"    answer if every command of this group is rightly refused: #bash_guard_refusal_right# {TMUX_KILL_GUARD} | "
           f"{tmux_kill_group}\n" in out, out[:3000])
     check("a head that adds a guard refusing 300 long commands with one message: the refusal groups file holds the "
           "group with every command in full",
@@ -884,7 +884,7 @@ try:
     lines = lines_file.read_text().splitlines() if lines_file.exists() else []
     check("a head that adds a guard refusing 300 long commands, each with its own message: the refusal right lines "
           "file holds the ready line of every one of the 300 groups, the 290 the list leaves out included",
-          lines == [f"refusal right: {TMUX_KILL_GUARD} | {group['group']}" for group in groups] and len(lines) == 300,
+          lines == [f"#bash_guard_refusal_right# {TMUX_KILL_GUARD} | {group['group']}" for group in groups] and len(lines) == 300,
           f"{lines_file}: {lines[:5]}")
     check("a head that adds a guard refusing 300 long commands, each with its own message: the message names the "
           "groups file and the refusal right lines file by their full paths",
@@ -908,7 +908,7 @@ try:
     check("the message says the refusal right lines file holds the line of every group, the ones the list leaves "
           "out included, and that a group still refused after a fix-round needs one line, not one per command",
           "holds that line for every group, the ones the list leaves out included" in message
-          and "such a group needs its one \"refusal right\" line in the review of the fix-round's head" in message,
+          and "such a group needs its one #bash_guard_refusal_right# line in the review of the fix-round's head" in message,
           replay.NEW_GUARD_REFUSES_MESSAGE)
 
     before_search_file_guard = commit_without_guard(SEARCH_FILE_GUARD)
