@@ -546,9 +546,19 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
     ruler_without.write_text("# a list with no weights section\n", encoding="utf-8")
     result = run("--placements", str(placements), "--defect-list", str(ruler_without))
     check("a defect list with no weights section is refused, saying so",
-          result.returncode != 0 and "cannot be used as a ruler" in
+          result.returncode == 2 and "cannot be used as a ruler" in
           (result.stdout + result.stderr), result.stdout + result.stderr)
 
+    for label in ("defect-list", "placement"):
+        bad_dir = scratch / f"bad-encoding-{label}"
+        bad_dir.mkdir()
+        bad = bad_dir / "bad--placement.md"
+        bad.write_bytes(b"\xff")
+        result = run("--placements", str(bad_dir if label == "placement" else placements),
+                     "--defect-list", str(ruler if label == "placement" else bad))
+        check(f"unreadable {label} input names its path and yields no score",
+              result.returncode == 2 and str(bad) in result.stderr
+              and "Traceback" not in result.stderr and not result.stdout, result.stderr)
     # --- Parse anomalies are reported, not swallowed -----------------------
     stray = scratch / "stray"
     stray.mkdir()
