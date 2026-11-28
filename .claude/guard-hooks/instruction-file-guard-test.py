@@ -578,8 +578,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
 
     # Every refusal says how to write an obvious-fix marker, just before the route-around lines.
     obvious_fix_lines = [
-        "For an obvious error, write \"Obvious fix under CLAUDE.md's standing approval:\" "
-        "and what you are fixing into .walk-approved at the root of your session's own "
+        "For an obvious-error, write `#obvious_error_fix#` as the first word, "
+        "then what you are fixing, into .walk-approved at the root of your session's own "
         "checkout, then resubmit.",
         "If the edit then does not happen, delete .walk-approved."]
     for label, target in (

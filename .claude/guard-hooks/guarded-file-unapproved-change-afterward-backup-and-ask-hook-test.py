@@ -33,7 +33,10 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 HOOK = Path(os.environ.get(
     "GUARDED_FILE_HOOK_PATH",
     Path(__file__).resolve().parent / "guarded-file-unapproved-change-afterward-backup-and-ask-hook.py"))
-OBVIOUS_FIX = "Obvious fix under CLAUDE.md's standing approval: a typo in CLAUDE.md"
+OBVIOUS_FIX = "#obvious_error_fix# a typo in CLAUDE.md"
+# Marker files written before the hashtag, or in its open form, must still approve.
+OBVIOUS_FIX_OLDER_FORMS = ("Obvious fix under CLAUDE.md's standing approval: a typo in CLAUDE.md",
+                           "#obvious_error_fix a typo in CLAUDE.md")
 SETTINGS = Path(__file__).resolve().parents[2] / ".claude" / "settings.json"
 
 failures = 0
@@ -350,6 +353,31 @@ def cases(scratch):
     check("an obvious-fix marker written before a shell edit approves the edit's version",
           result.returncode == 0 and key in world.store_file(claude, "approved"), result.stderr)
 
+    for number, older_form in enumerate(OBVIOUS_FIX_OLDER_FORMS):
+        world = fresh(scratch, f"obvious-fix-older-form-{number}")
+        claude = world.repo / "CLAUDE.md"
+        claude.write_text("project v1, an accident\n")
+        key = world.key(claude)
+        world.run()
+        world.marker(older_form, before=time.time_ns() + 10_000_000_000)
+        result = world.command("--approve", claude, key)
+        check(f"an obvious-fix marker in an older form ({older_form.split()[0]}) is still read as "
+              "one, so written late it is refused with the fix it names",
+              result.returncode == 1
+              and "so it needs your yes: a typo in CLAUDE.md\"" in result.stderr, result.stderr)
+
+    world = fresh(scratch, "obvious-fix-hashtag-longer-word")
+    claude = world.repo / "CLAUDE.md"
+    claude.write_text("project v1, a longer word\n")
+    key = world.key(claude)
+    world.run()
+    # Built in two pieces so the hashtag glossary's test does not take it for a hashtag in use.
+    world.marker("#obvious_error_fix" + "es a typo", before=time.time_ns() + 10_000_000_000)
+    result = world.command("--approve", claude, key)
+    check("a marker opening with a longer word than the open hashtag is no obvious-fix marker, "
+          "so its late time does not refuse it",
+          result.returncode == 0 and key in world.store_file(claude, "approved"), result.stderr)
+
     world = fresh(scratch, "obvious-fix-after")
     claude = world.repo / "CLAUDE.md"
     claude.write_text("project v1, an accident\n")
@@ -367,7 +395,7 @@ def cases(scratch):
     claude.write_text("project v1, a quoted accident\n")
     key = world.key(claude)
     world.run()
-    world.marker("Obvious fix under CLAUDE.md's standing approval: a typo\n  in CLAUDE.md\n",
+    world.marker("#obvious_error_fix# a typo\n  in CLAUDE.md\n",
                  before=time.time_ns() + 10_000_000_000)
     result = world.command("--approve", claude, key)
     check("a late obvious-fix marker's refusal gives the line that opens the question to the "
@@ -382,7 +410,7 @@ def cases(scratch):
     claude.write_text("project v1, an unexplained accident\n")
     key = world.key(claude)
     world.run()
-    world.marker("Obvious fix under CLAUDE.md's standing approval:",
+    world.marker("#obvious_error_fix#",
                  before=time.time_ns() + 10_000_000_000)
     result = world.command("--approve", claude, key)
     check("a late obvious-fix marker with no words after its opening gives "

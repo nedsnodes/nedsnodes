@@ -55,6 +55,7 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#not_asked_touches#` — the approval-walk item evidence line that lists every file a change edits or deletes; an item without it comes to the user.
 - `#not_asked_unused#` — the approval-walk item evidence line that names a thing a change removes because nothing uses it.
 - `#not_in_this_run#` — a design's Deferred-decisions line for a decision left out of this run of design-to-main, with its `#reason#`.
+- `#obvious_error_fix#` — the first word of an obvious-fix marker, which the project glossary defines, followed by what the agent fixes.
 - `#open_question#` — the line that opens an open question in a document.
 - `#pre_approved_change#` — the first line of `.walk-approved` when a change to a guarded-file needs no approval, with the exception it falls under on the second line.
 - `#prose#` — a project glossary label: the term of the entry it ends covers prose.
