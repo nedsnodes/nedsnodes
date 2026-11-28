@@ -11,14 +11,14 @@ one of:
     gemini-<version>-<name>[-…]   family gemini-*-<name>[-…], listed by `agy models`
     claude-<name>-<major>-<minor> family <name>, the newest being the model `claude --model <name>` runs
 Within a family the highest version is the newest, compared as numbers part by part. A pin whose source line
-carries `pin kept: <reason>` is skipped. The program changes no pin.
+carries `pin kept: <reason>`, as in the comment `# pin kept: <reason>`, is skipped. The program changes no pin.
 
 It writes up to two user-alerts, through
 nn-systems/general-tools/user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py:
 one with a line per pin older than the newest of its family, and one naming each agent-binary that could not
 list its models (not found, exit not 0, timed out, or output it cannot parse) and each pin whose family no
 listing holds. A pin whose agent-binary failed is named only in the second. It keeps no state, so the alerts
-come again each day until the pins are updated or marked.
+come again each day until the pins are updated or marked `pin kept:` on main.
 
 It runs once a day on ned-box, from the table nn-systems/general-tools/scheduled-jobs-on-each-machine.json,
 which nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py installs as this cron line:
@@ -81,22 +81,34 @@ CLAUDE_ALIAS_PROBE_PROMPT = "Reply with the single word ok."
 STALE_TITLE = "A newer model has shipped for a pinned model id"
 STALE_LINE = ("A newer model has shipped for a pinned model id: {file}:{line} pins {id}; the newest of its family is "
               "{newer}. Update the pin in a pull request, or add `pin kept: <reason>` to its line.")
-STALE_ACTION = "Update each pin named in a pull request, or add `pin kept: <reason>` to its line."
+STALE_ACTION = (
+    "For each line, ask the user in an approval-walk whether to move the pin to the newer model or keep it, with "
+    "your recommendation. Either way the change goes in a pull request: to move it, replace the old id with the "
+    "newer one on that line; to keep it, add the comment `# pin kept: <reason>` to that line, with the user's "
+    "reason. The alert comes again each day until main holds the change.")
 UNCHECKED_TITLE = "The daily check for newer models could not check every pinned model id"
 AGENT_BINARY_FAILED_LINE = "`{command}` could not list its models, so pins of {families} went unchecked: {reason}"
 FAMILY_NOT_LISTED_LINE = ("{file}:{line} pins {id}, but `{command}` lists no model of its family, so it went "
                           "unchecked; the family may be retired, or the id mistyped.")
 UNCHECKED_ACTION = (
-    "For each agent-binary that could not list its models: an agent on ned-box runs the command named by hand and "
-    "reads what it prints. When it says the agent-binary is logged out, tell the user, quoting what it printed, that "
-    "this agent-binary on ned-box is logged out, so its pinned models go unchecked; he logs it in from a Terminal on "
-    "his Mac with ssh nedlern@ned-box. Otherwise fix the cause it prints.\n"
-    "For each pin whose family no listing holds: update the pin in a pull request, or add `pin kept: <reason>` to "
-    "its line.\n"
-    f"Then run python3 {THIS_PROGRAM} on ned-box again; it exits 0 when every pin was checked.")
+    "For each line naming an agent-binary that could not list its models, read the reason the line quotes:\n"
+    "When it says the agent-binary is not logged in, only the user can log it in: ask him in an approval-walk item, "
+    "quoting the reason, to log that agent-binary in on ned-box from a Terminal on his Mac, through ssh "
+    "nedlern@ned-box, since until then the newer-model check skips its pinned models; a subagent asks the agent "
+    "that dispatched it instead.\n"
+    "When the cause is in this project's code, fix it in a pull request.\n"
+    "When the cause is outside it, such as an agent-binary that is not installed or one that fails by itself, tell "
+    "the user in one sentence what failed on ned-box and which families of pins went unchecked.\n"
+    "For each line naming a pin whose family no listing holds, ask the user in an approval-walk whether to move the "
+    "pin to a listed model or keep it, then make that change in a pull request; to keep it, add the comment "
+    "`# pin kept: <reason>` to that line.\n"
+    "The next daily run, at 07:45 on ned-box, checks every pin again; do not run the program by hand to confirm, "
+    "since each run writes its alerts again.")
 SEARCH_FAILED_TITLE = "The daily search of main's code for pinned model ids failed"
-SEARCH_FAILED_ACTION = (f"An agent on ned-box runs python3 {THIS_PROGRAM} by hand, reads the error it prints, and "
-                        "fixes its cause; until then no pinned model id is checked for a newer model.")
+SEARCH_FAILED_ACTION = (
+    "The alert's text quotes the error. When its cause is in this project's code, such as a tracked Python file "
+    "that does not parse, fix it in a pull request. Otherwise tell the user in one sentence what failed on ned-box; "
+    "until it is fixed, no pinned model id is checked for a newer model.")
 
 
 @dataclass(frozen=True)
