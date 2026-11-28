@@ -720,8 +720,8 @@ def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
         inside = path[2:] if path.startswith("~/") else ("" if path == "~" else path)
         if home:
             placed = home + ("/" + inside if inside else "")
-            if _names_this_machine(host):
-                return _placed_as_the_system_places_it(placed)
+            if locator.names_this_machine(host):
+                return locator.placed_as_the_system_places_it(placed)
             # Another machine's symlinks cannot be read from here.
             return os.path.normpath(placed)
         if "/" in inside.rstrip("/") or not fragment_allowed:
@@ -740,21 +740,7 @@ def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
             raise CitedQueryCannotBePlaced(
                 "Give the file's absolute path: the current directory no longer exists, so %r cannot be placed "
                 "from it." % query)
-    return _placed_as_the_system_places_it(os.path.join(cwd, path))
-
-
-def _names_this_machine(host):
-    return host.split(".")[0] == socket.gethostname().split(".")[0]
-
-
-def _placed_as_the_system_places_it(path):
-    # realpath, not normpath: ".." must climb from the directory a symlink leads to, as the system does. The
-    # file name is kept as given, so a symlink at the path itself is replaced, not the file it leads to.
-    parent, name = os.path.split(path)
-    if name in ("", ".", ".."):
-        return os.path.realpath(path)
-    return os.path.join(os.path.realpath(parent), name)
-
+    return locator.placed_as_the_system_places_it(os.path.join(cwd, path))
 
 
 def is_git_blob_id(query):
