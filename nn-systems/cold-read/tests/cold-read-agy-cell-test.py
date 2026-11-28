@@ -31,11 +31,14 @@ WHAT IS PINNED HERE.
 
   - A cell stopped by SIGTERM stops agy too, though agy runs in a session
     of its own, even when the SIGTERM lands while the cell is still starting
-    agy: injected just after the fork, it leaves no agy running and the cell
-    exits 128 plus SIGTERM's number. When agy cannot be started, a SIGTERM
-    that came during that start still ends the cell with that exit, and with
-    none the start error reaches the caller with SIGTERM's handler back in
-    place.
+    agy, and when a second SIGTERM lands while the cell stops agy: injected
+    just after the fork, or sent during the stop's grace wait, it leaves no
+    agy running and the cell exits 128 plus SIGTERM's number. A SIGINT
+    injected just after the fork leaves no agy running either. When agy
+    cannot be started, a SIGTERM that came during that start still ends the
+    cell with that exit, and with none the start error reaches the caller
+    with SIGTERM's and SIGINT's handlers back in place, an ignored SIGINT
+    still ignored.
 
   - The chat-instead-of-file quirk. The campaign measured gemini-3.8-flash
     sometimes answering the whole review in chat rather than writing the
@@ -1049,37 +1052,63 @@ with tempfile.TemporaryDirectory() as scratch:
           launcher.returncode == 128 + signal.SIGTERM, repr(launcher.returncode))
     kill_left_over_processes(child_pids)
 
-    # --- A SIGTERM that lands while the cell starts agy --------------------
+    # --- A second SIGTERM while the cell stops agy ------------------------
+    # The first SIGTERM starts the stop; the second lands during its grace wait,
+    # before the SIGKILL agy needs, because agy ignores SIGTERM.
+    repository = build_scratch_repository(scratch)
+    report = report_path_for(repository, "second-sigterm-while-stopping")
+    pid_file = scratch / "second-sigterm-while-stopping-child-pids"
+    launcher = start_agy_cell_in_own_session(
+        repository, stubs, {"*": {"ignore_sigterm": True, "hang_writing_child_pid_to": str(pid_file)}},
+        report)
+    wait_for_pids_written_to(pid_file, 60)
+    os.kill(launcher.pid, signal.SIGTERM)
+    time.sleep(cell_common.REVIEWER_PROCESS_GROUP_STOP_GRACE_SECONDS / 3)
+    os.kill(launcher.pid, signal.SIGTERM)
+    launcher.wait(timeout=60)
+    child_pids = pids_written_to(pid_file)
+    check("a second SIGTERM while the cell stops agy still kills the process agy started",
+          len(child_pids) == 1 and all(process_gone_within(pid, 10) for pid in child_pids),
+          repr(child_pids))
+    check("a cell sent SIGTERM twice exits 128 plus SIGTERM's number",
+          launcher.returncode == 128 + signal.SIGTERM, repr(launcher.returncode))
+    kill_left_over_processes(child_pids)
+
+    # --- A SIGTERM or SIGINT that lands while the cell starts agy ----------
     # Python runs a signal handler at the next bytecode, which can be inside
-    # Popen after the fork; the wrapper below sends SIGTERM at that point.
-    def run_reviewer_with_sigterm_during_launch(mode, pid_file):
+    # Popen after the fork; the wrapper below sends the signal at that point.
+    def run_reviewer_with_signal_during_launch(mode, pid_file, signal_name="SIGTERM"):
         return subprocess.run([sys.executable, "-c", (
             "import importlib.util, os, signal, subprocess, sys\n"
             "spec = importlib.util.spec_from_file_location('cell_common', sys.argv[1])\n"
             "cell_common = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(cell_common)\n"
-            "mode, pid_file = sys.argv[2], sys.argv[3]\n"
+            "mode, pid_file, signal_number = sys.argv[2], sys.argv[3], getattr(signal, sys.argv[4])\n"
+            "if mode == 'start-fails-with-sigint-ignored':\n"
+            "    signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
             "real_init = subprocess.Popen.__init__\n"
-            "def init_with_sigterm(self, *arguments, **keywords):\n"
-            "    if mode == 'sigterm-after-start':\n"
+            "def init_with_signal(self, *arguments, **keywords):\n"
+            "    if mode == 'signal-after-start':\n"
             "        real_init(self, *arguments, **keywords)\n"
             "        open(pid_file, 'w').write('%d\\n' % self.pid)\n"
-            "    if mode != 'start-fails':\n"
-            "        os.kill(os.getpid(), signal.SIGTERM)\n"
-            "    if mode != 'sigterm-after-start':\n"
+            "    if not mode.startswith('start-fails'):\n"
+            "        os.kill(os.getpid(), signal_number)\n"
+            "    if mode != 'signal-after-start':\n"
             "        raise OSError('injected start failure')\n"
-            "subprocess.Popen.__init__ = init_with_sigterm\n"
+            "subprocess.Popen.__init__ = init_with_signal\n"
             "try:\n"
             "    cell_common.run_reviewer_program_in_own_process_group_until_timeout(\n"
             "        [sys.executable, '-c', 'import time; time.sleep(60)'], None, None, 60.0,\n"
             "        lambda line: None)\n"
             "except OSError as error:\n"
-            "    print(error, signal.getsignal(signal.SIGTERM) is cell_common.exit_on_sigterm)\n"),
-            str(SYSTEM_DIRECTORY / "cold-read-cell-common.py"), mode, str(pid_file)],
+            "    print(error, signal.getsignal(signal.SIGTERM) is cell_common.exit_on_sigterm,\n"
+            "          signal.getsignal(signal.SIGINT) in (signal.default_int_handler, signal.SIG_IGN),\n"
+            "          signal.getsignal(signal.SIGINT) is signal.SIG_IGN)\n"),
+            str(SYSTEM_DIRECTORY / "cold-read-cell-common.py"), mode, str(pid_file), signal_name],
             capture_output=True, text=True, check=False, timeout=60)
 
     pid_file = scratch / "sigterm-during-launch-agy-pid"
-    result = run_reviewer_with_sigterm_during_launch("sigterm-after-start", pid_file)
+    result = run_reviewer_with_signal_during_launch("signal-after-start", pid_file)
     agy_pids = pids_written_to(pid_file)
     check("a SIGTERM that lands while the cell is still starting agy leaves no agy running",
           len(agy_pids) == 1 and all(process_gone_within(pid, 10) for pid in agy_pids),
@@ -1088,14 +1117,29 @@ with tempfile.TemporaryDirectory() as scratch:
           result.returncode == 128 + signal.SIGTERM,
           f"exit {result.returncode}; stderr={result.stderr!r}")
     kill_left_over_processes(agy_pids)
-    result = run_reviewer_with_sigterm_during_launch("sigterm-then-start-fails", pid_file)
+    pid_file = scratch / "sigint-during-launch-agy-pid"
+    result = run_reviewer_with_signal_during_launch("signal-after-start", pid_file, "SIGINT")
+    agy_pids = pids_written_to(pid_file)
+    check("a SIGINT that lands while the cell is still starting agy leaves no agy running",
+          len(agy_pids) == 1 and all(process_gone_within(pid, 10) for pid in agy_pids),
+          f"{agy_pids}; exit {result.returncode}; stderr={result.stderr!r}")
+    check("a cell given SIGINT while starting agy ends as SIGINT ends it",
+          result.returncode == -signal.SIGINT and "KeyboardInterrupt" in result.stderr,
+          f"exit {result.returncode}; stderr={result.stderr!r}")
+    kill_left_over_processes(agy_pids)
+    result = run_reviewer_with_signal_during_launch("signal-then-start-fails", pid_file)
     check("a SIGTERM that came while agy failed to start still ends the cell with 128 plus "
           "SIGTERM's number",
           result.returncode == 128 + signal.SIGTERM,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
-    result = run_reviewer_with_sigterm_during_launch("start-fails", pid_file)
-    check("with no SIGTERM, agy's start error reaches the caller and SIGTERM ends the cell again",
-          result.returncode == 0 and result.stdout == "injected start failure True\n",
+    result = run_reviewer_with_signal_during_launch("start-fails", pid_file)
+    check("with no signal, agy's start error reaches the caller, SIGTERM ends the cell again "
+          "and SIGINT interrupts it again",
+          result.returncode == 0 and result.stdout == "injected start failure True True False\n",
+          f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
+    result = run_reviewer_with_signal_during_launch("start-fails-with-sigint-ignored", pid_file)
+    check("a cell started with SIGINT ignored still ignores it after starting agy",
+          result.returncode == 0 and result.stdout == "injected start failure True True True\n",
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
 
     # --- The being-written lock reaches agy on the timeout path ------------

@@ -690,8 +690,8 @@ def run_reviewer_program_in_own_process_group_until_timeout(
     """Run `command` in a session of its own and return its result; when it
     runs past `timeout_seconds`, kill its whole process group and return a
     result whose returncode is None. The group is also killed when this
-    process is interrupted while waiting, or sent SIGTERM at any point from
-    the program's start on.
+    process is sent SIGTERM or SIGINT at any point from the program's start
+    on, and a second signal during that stop does not cut it short.
 
     With `parse_agent_binary_final_result_from_stdout_line`, a function given each
     stdout line that returns None or (exit code, response text), the first
@@ -710,20 +710,32 @@ def run_reviewer_program_in_own_process_group_until_timeout(
     pipes to close once the run has ended; a process outside the group that
     holds them past that loses what it printed after, and stderr says so."""
     # The reviewer's own session puts it outside the group the grid stops, so
-    # SIGTERM must reach the except BaseException handler below that stops
-    # the reviewer's group. Until `process` is bound inside that try, SIGTERM
-    # is only recorded: raised inside Popen after the fork, it would leave the
-    # started reviewer running with nothing to stop it. A Python handler is
-    # reset at exec, unlike SIG_IGN or a blocked signal, so the reviewer still
-    # starts with SIGTERM's default action.
-    sigterm_during_launch = []
-    signal.signal(signal.SIGTERM, lambda number, _frame: sigterm_during_launch.append(number))
+    # only the except BaseException handler below stops it. SIGTERM and SIGINT
+    # are therefore only recorded while Popen runs, where one raised after the
+    # fork would leave the reviewer running unbound, and while the handler
+    # stops the group, where one would cut short the SIGKILL agy needs, since
+    # it ignores SIGTERM. A Python handler is reset at exec, unlike SIG_IGN or
+    # a blocked signal, so the reviewer starts with the default actions.
+    deferred_signals = []
+    interrupt_handler = signal.getsignal(signal.SIGINT)
 
-    def exit_on_sigterm_from_now_and_now_if_one_came_during_launch():
+    def defer_sigterm_and_sigint():
+        def record(number, _frame):
+            deferred_signals.append(number)
+        signal.signal(signal.SIGTERM, record)
+        if callable(interrupt_handler):
+            signal.signal(signal.SIGINT, record)
+
+    def restore_sigterm_and_sigint_and_act_on_any_deferred():
         signal.signal(signal.SIGTERM, exit_on_sigterm)
-        if sigterm_during_launch:
-            exit_on_sigterm(sigterm_during_launch[0], None)
+        if callable(interrupt_handler):
+            signal.signal(signal.SIGINT, interrupt_handler)
+        if signal.SIGTERM in deferred_signals:
+            exit_on_sigterm(signal.SIGTERM, None)
+        if deferred_signals:
+            interrupt_handler(signal.SIGINT, None)
 
+    defer_sigterm_and_sigint()
     try:
         process = subprocess.Popen(
             command,
@@ -731,10 +743,10 @@ def run_reviewer_program_in_own_process_group_until_timeout(
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             cwd=REPO_ROOT, env=child_environment, text=True, start_new_session=True, pass_fds=pass_fds)
     except BaseException:
-        exit_on_sigterm_from_now_and_now_if_one_came_during_launch()
+        restore_sigterm_and_sigint_and_act_on_any_deferred()
         raise
     try:
-        exit_on_sigterm_from_now_and_now_if_one_came_during_launch()
+        restore_sigterm_and_sigint_and_act_on_any_deferred()
         if parse_agent_binary_final_result_from_stdout_line is not None:
             return run_reviewer_program_until_its_result_line(
                 process, command, stdin_text, timeout_seconds,
@@ -750,7 +762,11 @@ def run_reviewer_program_in_own_process_group_until_timeout(
     except BaseException:
         # Not gated on the leader running: it may have exited while a
         # descendant still holds its pipes, which keeps communicate waiting.
-        stop_process_tree(process, REVIEWER_PROCESS_GROUP_STOP_GRACE_SECONDS)
+        defer_sigterm_and_sigint()
+        try:
+            stop_process_tree(process, REVIEWER_PROCESS_GROUP_STOP_GRACE_SECONDS)
+        finally:
+            restore_sigterm_and_sigint_and_act_on_any_deferred()
         raise
 
 
