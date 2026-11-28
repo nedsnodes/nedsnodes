@@ -48,15 +48,16 @@ and nits by, using its NIT_MARK, and the category marks that
 pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py
 reads non-blocking findings by:
 - each comment is posted opening with review_comment_opening_mark_for_finding_category() of its
-  category: "**Blocks** " for must-fix-now, and the category in bold, as in
-  "**fix-next** ", for the other three, and NIT_MARK,
-  "**fix-in-maintenance, nit** ", for a nit; a comment whose body already opens
-  with a blocking mark, a category mark or the nit mark is refused;
+  category: "**Blocks** #review_finding_blocks# " for must-fix-now, the
+  category in bold, as in "**fix-next** ", for the other three, and NIT_MARK,
+  "**fix-in-maintenance, nit** #review_finding_fix_in_maintenance_nit# ", for
+  a nit; a comment whose body already opens with a blocking mark, a category
+  mark or the nit mark is refused;
 - a comment with the same path, line and posted body as an earlier one is
   dropped, since the fix-round program counts such a repost once;
 - when N comments are must-fix-now, N at least 1, the body carries
-  "**Blocking: N**" alone on its line, after the verdict line and a blank
-  line, the only place the fix-round program's BLOCKING_COUNT_PATTERN reads
+  "**Blocking: N** #review_blocking_finding_count#" alone on its line, after
+  the verdict line and a blank line, the only place the fix-round program's BLOCKING_COUNT_PATTERN reads
   it, and only on merge-lane-2's reviews. No count is written when N is 0;
 - after the count, a blank line and the fix-round program's REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_FORMAT
   naming the merge-lane that posts the review, the agent-seat GIT_AUTHOR_NAME names, which
@@ -193,9 +194,12 @@ FINDING_CATEGORIES = ("must-fix-now", "fix-next", "fix-in-maintenance", "file-fo
 BLOCKING_CATEGORY = "must-fix-now"
 # The only category a finding marked "nit" may have; the fix-round program carries its nits.
 NIT_CATEGORY = "fix-in-maintenance"
-BLOCKING_MARK = "**Blocks** "
+BLOCKING_MARK_BOLD_WORD = "**Blocks**"
+BLOCKING_MARK = f"{BLOCKING_MARK_BOLD_WORD} {fix_round.REVIEW_FINDING_BLOCKS_HASHTAG} "
 NON_BLOCKING_CATEGORY_MARK_FORMAT = "**{category}** "
+# Messages name the count by BLOCKING_COUNT_FORMAT; BLOCKING_COUNT_LINE_FORMAT is the line a review carries.
 BLOCKING_COUNT_FORMAT = "**Blocking: {count}**"
+BLOCKING_COUNT_LINE_FORMAT = f"{BLOCKING_COUNT_FORMAT} {fix_round.REVIEW_BLOCKING_FINDING_COUNT_HASHTAG}"
 DOES_NOT_HOLD_GRADE = "does-not-hold"
 CODEX_FINDING_GRADES_KEY = "merge_lane_codex_review_finding_grades"
 NO_REVIEWER_TIER = "no-reviewer-tier"
@@ -805,8 +809,9 @@ def finding_category_and_text_read_from_review_comment_opening_mark(body):
     blocking = fix_round.BLOCKING_MARKER_PATTERN.match(stripped)
     if blocking:
         return BLOCKING_CATEGORY, stripped[blocking.end():].strip(), False
-    if stripped.startswith(fix_round.NIT_MARK):
-        return NIT_CATEGORY, stripped[len(fix_round.NIT_MARK):].strip(), True
+    nit = fix_round.NIT_MARK_PATTERN.match(stripped)
+    if nit:
+        return NIT_CATEGORY, stripped[nit.end():].strip(), True
     for category in FINDING_CATEGORIES:
         mark = review_comment_opening_mark_for_finding_category(category)
         if category != BLOCKING_CATEGORY and stripped.startswith(mark):
@@ -839,7 +844,7 @@ def with_finding_category_marks(body, comments, merge_lane):
     count = len(fix_round.marked(comments))
     verdict = "REQUEST_CHANGES" if count else "APPROVE"
     if count:
-        body = (BLOCKING_COUNT_FORMAT.format(count=count) + "\n\n"
+        body = (BLOCKING_COUNT_LINE_FORMAT.format(count=count) + "\n\n"
                 + fix_round.REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_FORMAT.format(merge_lane=merge_lane) + "\n\n" + body)
     return verdict, body, comments
 
@@ -865,7 +870,7 @@ def posted_verdict_review_missing_review_posting_program_marks_reason_or_none(re
         fix_round.marked(outside_the_diff_comments_read_back_from_review_body(body)))
     if found != stated:
         return (f"its body states {BLOCKING_COUNT_FORMAT.format(count=stated)}, but {found} of its comments "
-                f"open with {BLOCKING_MARK.strip()}")
+                f"open with {BLOCKING_MARK_BOLD_WORD}")
     return None
 
 

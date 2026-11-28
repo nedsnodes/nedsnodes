@@ -62,6 +62,9 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#reason#` — on a design's Deferred-decisions line, marks the reason the decision was deferred or rejected.
 - `#rejected#` — a design's Deferred-decisions line for a choice the design rejects, with its `#reason#`.
 - `#replaces#` — the pull request description line `#replaces <link>` naming the pull request this one replaces, whose findings and review rounds carry over.
+- `#review_blocking_finding_count#` — follows `**Blocking: N**`, after one space, on the line `scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py` writes near the top of a pull request review with N blocking findings, N at least 1.
+- `#review_finding_blocks#` — follows the bold word `**Blocks**`, after one space, at the start of a pull request review comment whose finding blocks the merge.
+- `#review_finding_fix_in_maintenance_nit#` — follows the bold words `**fix-in-maintenance, nit**`, after one space, at the start of a pull request review comment whose finding is a nit: a small fix, such as a misspelt name, that the author makes in the fix-round although it does not block the merge.
 - `#revisit_after#` — on a design's Deferred-decisions line, names the event the deferred work waits on.
 - `#revisit_before#` — on a design's Deferred-decisions line, names the event after which the deferred decision becomes expensive to change.
 - `#root_cause#` — the pull request description line that names the root cause of a defect that the change removes.

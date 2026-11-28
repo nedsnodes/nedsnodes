@@ -35,7 +35,7 @@ with the same path, line and body counts once. A review's stated **Blocking: N**
 its own marked comments, or, when it has none, against those of the round's other reviews, such as
 the commissioned reviewer's Blocks it grades or a later review that re-posts its blockers.
 The nits are the inline comments of merge-lane-2's own reviews of the round whose body starts with
-NIT_MARK, a re-posted nit counted once; a nit the posting program moved into a review's body is not
+a match of NIT_MARK_PATTERN, a re-posted nit counted once; a nit the posting program moved into a review's body is not
 read, since the bodies' text is never parsed for findings. A round with nits but no blocking
 finding is refused as a round with no blocking finding is, so nits alone produce no brief.
 
@@ -207,18 +207,28 @@ MERGE_LANE_2_REVIEWER_LOGIN = "ned-review-merge"
 # apart; a merge-lane named anywhere else in the body, such as "merge-lane-2 merges", names nothing.
 REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_FORMAT = "**Merge-lane: {merge_lane}**"
 REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_PATTERN = re.compile(
-    r"\AREQUEST_CHANGES\n\n\*\*Blocking: \d+\*\*\n\n\*\*Merge-lane: (merge-lane-\d+)\*\*(?:\n|\Z)")
+    r"\AREQUEST_CHANGES\n\n\*\*Blocking: \d+\*\*(?: #review_blocking_finding_count#)?"
+    r"\n\n\*\*Merge-lane: (merge-lane-\d+)\*\*(?:\n|\Z)")
 # merge-lane-2 reviewed every pull request before the posting program wrote the line.
 MERGE_LANE_OF_REVIEW_WITHOUT_POSTED_BY_MERGE_LANE_LINE = "merge-lane-2"
 # Reviewers spell the mark several ways, such as "**Blocks.**", "**Blocks:**", "**Blocks**" or "**Blocks** (...)"; no instruction fixes one.
-BLOCKING_MARKER_PATTERN = re.compile(r"\*\*Blocks\b[^*\n]*\*\*")
+# The posting program writes REVIEW_FINDING_BLOCKS_HASHTAG after the bold word; a posted comment cannot be
+# rewritten, so the bold word alone is read too.
+REVIEW_FINDING_BLOCKS_HASHTAG = "#review_finding_blocks#"
+BLOCKING_MARKER_PATTERN = re.compile(r"\*\*Blocks\b[^*\n]*\*\*(?: #review_finding_blocks#)?")
 BLOCKING_MARKER_DESCRIPTION = "the bold word **Blocks**"
 # merge-lane-pull-request-reviewer-review-post-and-read-back.py writes the count as a line of its own after
 # the verdict line and a blank line; the same words anywhere else, such as a reviewer quoting them, are prose.
-BLOCKING_COUNT_PATTERN = re.compile(r"\AREQUEST_CHANGES\n\n\*\*Blocking: (\d+)\*\*\n")
-# merge-lane-pull-request-reviewer-review-post-and-read-back.py opens a nit's comment with this mark;
-# BLOCKING_MARKER_PATTERN must never match it, or a nit would block.
-NIT_MARK = "**fix-in-maintenance, nit** "
+# The line carries REVIEW_BLOCKING_FINDING_COUNT_HASHTAG; a posted review cannot be rewritten, so a count
+# line without it is read too.
+REVIEW_BLOCKING_FINDING_COUNT_HASHTAG = "#review_blocking_finding_count#"
+BLOCKING_COUNT_PATTERN = re.compile(r"\AREQUEST_CHANGES\n\n\*\*Blocking: (\d+)\*\*(?: #review_blocking_finding_count#)?\n")
+# merge-lane-pull-request-reviewer-review-post-and-read-back.py opens a nit's comment with NIT_MARK;
+# a posted comment cannot be rewritten, so NIT_MARK_PATTERN also reads the bold words without the hashtag.
+# BLOCKING_MARKER_PATTERN must never match either, or a nit would block.
+REVIEW_FINDING_FIX_IN_MAINTENANCE_NIT_HASHTAG = "#review_finding_fix_in_maintenance_nit#"
+NIT_MARK = f"**fix-in-maintenance, nit** {REVIEW_FINDING_FIX_IN_MAINTENANCE_NIT_HASHTAG} "
+NIT_MARK_PATTERN = re.compile(r"\*\*fix-in-maintenance, nit\*\* (?:#review_finding_fix_in_maintenance_nit# )?")
 # merge-lane-pull-request-reviewer-review-post-and-read-back.py moves each comment GitHub would refuse,
 # on a line outside the diff, into its review's body under this heading, one comment each.
 OUTSIDE_THE_DIFF_HEADING = "Comments on lines outside this pull request's diff:"
@@ -699,7 +709,8 @@ def blocking_findings(number, anchor, reviews, reviewer_login=MERGE_LANE_2_REVIE
 
 
 def nit_findings_of_merge_lane_2_reviews_in_round(number, reviews, reviewer_login=MERGE_LANE_2_REVIEWER_LOGIN):
-    """The inline comments of merge-lane-2's reviews of the round that open with NIT_MARK, reposts dropped."""
+    """The inline comments of merge-lane-2's reviews of the round that open with a nit mark NIT_MARK_PATTERN
+    matches, reposts dropped."""
     nits = []
     for review in reviews:
         if (review.get("user") or {}).get("login") != reviewer_login:
@@ -707,7 +718,7 @@ def nit_findings_of_merge_lane_2_reviews_in_round(number, reviews, reviewer_logi
         comments = gh_json_lines(["api", "--paginate",
                                   f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{review['id']}/comments",
                                   "--jq", ".[]"])
-        nits += [comment for comment in comments if (comment.get("body") or "").lstrip().startswith(NIT_MARK)]
+        nits += [comment for comment in comments if NIT_MARK_PATTERN.match((comment.get("body") or "").lstrip())]
     return without_reposts(nits)
 
 
