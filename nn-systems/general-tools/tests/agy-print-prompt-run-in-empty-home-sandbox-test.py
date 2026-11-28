@@ -290,7 +290,7 @@ def working_directory_cases():
 
 def main() -> int:
     if not sys.platform.startswith("linux"):
-        print("SKIP  every case: the empty-home sandbox is bwrap on Linux, and this "
+        print("SKIP  [this machine cannot run it] every case: the empty-home sandbox is bwrap on Linux, and this "
               "machine is not Linux.")
         return 0
     real_sandbox_cases_only = REAL_SANDBOX_CASES_ONLY_FLAG in sys.argv[1:]
