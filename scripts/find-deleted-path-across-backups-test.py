@@ -2751,6 +2751,12 @@ check("every mounted snapshot is released afterwards, with diskutil unmount and 
       and not any(c.startswith("sudo") and "umount" in c for c in tm_warm_miss.calls),
       str(tm_warm_miss.calls))
 
+report = finder.search_time_machine("a/b.md", newest_date_held="2026-08-14",
+                                    snapshot_limit=1, runner=tm_warm_miss)
+check("a miss after checking one of two eligible snapshots is incomplete and gives the larger limit",
+      report.status == UNAVAILABLE and "--time-machine-snapshot-limit 2" in " ".join(report.lines),
+      (report.status, report.lines))
+
 tm_warm_hit = FakeRunner(WARM + [
     ("sudo -n mount_apfs", (0, "", "")),
     (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/a/b.md\n", "")),
@@ -2943,6 +2949,12 @@ def run_main(argv, runner):
         code = finder.main(argv, runner=runner)
     return code, out.getvalue()
 
+
+tm_only = ["a/b.md", "--skip", "localsnapshots", "--skip", "git", "--skip", "reflog",
+           "--skip", "transcripts", "--skip", "timeshift", "--skip", "logstore"]
+code, output = run_main(tm_only + ["--time-machine-snapshot-limit", "1"], tm_warm_miss)
+check("a limited Time Machine path search exits incomplete with the limit for a full search",
+      code == 3 and "--time-machine-snapshot-limit 3" in output, (code, output))
 
 NOT_A_REPO = ("rev-parse --git-dir", (128, "", "fatal: not a git repository (or any of the parent directories): .git"))
 code, text = run_main(["a/b.md", "--repo", "/nonexistent-not-a-repo", "--transcripts-dir", "/nonexistent",

@@ -226,6 +226,20 @@ with scratch() as base:
 
 with scratch() as base:
     s = Scratch(base)
+    path = write_transcript(s.transcripts, "damaged", [
+        assistant("Shall I use bwrap?", "2026-10-03T10:00:00Z"),
+        user("yes", "2026-10-03T10:00:01Z"),
+    ])
+    with path.open("a") as handle:
+        handle.write("{broken}\n" + "x" * (4 * 1024 * 1024) + "\n")
+    result = s.run("bwrap")
+    check("skipped transcript records mark the place searched in part and keep the answer",
+          result.returncode == 1 and "User:  yes" in result.stdout
+          and f"{s.transcripts} (in part)" in result.stdout and str(path) in result.stdout
+          and "1 malformed" in result.stdout and "1 oversized" in result.stdout, result.stdout)
+
+with scratch() as base:
+    s = Scratch(base)
     write_transcript(s.transcripts, "two-questions", [
         assistant("First: the bwrap plan, part one.", "2026-10-03T10:00:00Z"),
         assistant("Second: shall I build bwrap now?", "2026-10-03T10:00:01Z"),

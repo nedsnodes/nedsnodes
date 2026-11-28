@@ -2086,7 +2086,8 @@ def search_time_machine(wanted, newest_date_held=None, snapshot_limit=DEFAULT_TI
             ["%r is mounted at %s but lists no snapshots" % (name, mount_point)],
         )
 
-    candidates, dated_by_git = _time_machine_candidates(snapshots, newest_date_held, snapshot_limit)
+    eligible, dated_by_git = _time_machine_candidates(snapshots, newest_date_held)
+    candidates = eligible[:snapshot_limit]
     can_sudo, _, _ = runner(["sudo", "-n", "true"])
 
     hits = []
@@ -2134,12 +2135,17 @@ def search_time_machine(wanted, newest_date_held=None, snapshot_limit=DEFAULT_TI
                              prints_copy_command=True, copy_command_may_ask_password=not rule_carried_it)
     if searched:
         lines.append("searched %s and did not find it" % ", ".join(searched))
+    omitted = len(eligible) - len(candidates)
+    if omitted:
+        lines.append("%d eligible snapshot(s) were outside the search limit. "
+                     "Rerun with --time-machine-snapshot-limit %d to check all eligible snapshots."
+                     % (omitted, len(eligible)))
     if unsearched:
         return SurfaceReport("time machine", UNAVAILABLE, lines,
                              _time_machine_manual_recovery(unsearched[0][0], device,
                                                            clear_first=bool(stuck)))
     # A failed release does not undo a completed search; provide the clear command for the next run.
-    return SurfaceReport("time machine", NOT_FOUND, lines,
+    return SurfaceReport("time machine", UNAVAILABLE if omitted else NOT_FOUND, lines,
                          [_time_machine_clear_mount_point_command()] if stuck else [])
 
 
@@ -2255,14 +2261,14 @@ def _time_machine_snapshots(device, runner):
     return sorted(names, reverse=True), None
 
 
-def _time_machine_candidates(snapshots, newest_date_held, limit):
+def _time_machine_candidates(snapshots, newest_date_held):
     """Prefer snapshots near the last date git held the file."""
     if newest_date_held:
         compact = newest_date_held.replace("-", "")
         before = [s for s in snapshots if _snapshot_datestamp(s) <= compact]
         if before:
-            return before[:limit], True
-    return snapshots[:limit], False
+            return before, True
+    return snapshots, False
 
 
 def _candidate_line(candidate, dated_by_git):
@@ -2437,7 +2443,7 @@ def _combine(statuses):
 
 def build_report(wanted, repo, transcripts_dir, box_ssh_host, snapshot_root, search_roots, skip=(),
                  runner=run_command, prompt_for_root=False, log_store_root=DEFAULT_LOG_STORE_ROOT,
-                 on_surface_done=None, on_ned_box=None):
+                 on_surface_done=None, on_ned_box=None, time_machine_snapshot_limit=DEFAULT_TIME_MACHINE_SNAPSHOT_LIMIT):
     if on_ned_box is None:
         on_ned_box = running_on_ned_box()
     reports = []
@@ -2471,7 +2477,7 @@ def build_report(wanted, repo, transcripts_dir, box_ssh_host, snapshot_root, sea
     if "box" not in skip and "timeshift" not in skip:
         finished(search_timeshift(wanted, box_ssh_host, snapshot_root, search_roots, runner, on_ned_box=on_ned_box))
     if "timemachine" not in skip:
-        finished(search_time_machine(wanted, newest_date_held, runner=runner,
+        finished(search_time_machine(wanted, newest_date_held, snapshot_limit=time_machine_snapshot_limit, runner=runner,
                                      prompt_for_root=prompt_for_root))
     return reports
 
@@ -2579,11 +2585,15 @@ def main(argv=None, runner=run_command):
                              "the file's repo-relative or absolute path, not a fragment of it; a git blob id, or a "
                              "<path> ending in /, . or .., is refused as a usage error. Exits 0 when the copy was "
                              "made, and 1 when it was not, printing what failed on stderr")
+    parser.add_argument("--time-machine-snapshot-limit", type=int, default=DEFAULT_TIME_MACHINE_SNAPSHOT_LIMIT,
+                        help="maximum eligible Time Machine snapshots to inspect in a path search (default: %(default)s)")
     parser.add_argument("--prompt-for-root", action="store_true",
                         help="mount the Time Machine snapshot from here, letting sudo ask for your "
                              "password in this terminal, instead of printing the command. Only ever "
                              "pass this by hand: a hook has no terminal to answer a prompt in")
     args = parser.parse_args(argv)
+    if args.time_machine_snapshot_limit < 1:
+        parser.error("--time-machine-snapshot-limit must be at least 1")
     rerun = rerun_command(sys.argv[1:] if argv is None else argv)
 
     if args.restore is not None:
@@ -2662,6 +2672,7 @@ def main(argv=None, runner=run_command):
         prompt_for_root=args.prompt_for_root,
         log_store_root=args.log_store_root,
         on_surface_done=print_surface_as_it_finishes,
+        time_machine_snapshot_limit=args.time_machine_snapshot_limit,
     )
     print(render_summary(reports), flush=True)
     return exit_status(reports)

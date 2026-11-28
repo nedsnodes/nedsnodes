@@ -28,8 +28,8 @@ Usage:
   python3 scripts/backup-health-check.py                 full diagnosis, always prints
   python3 scripts/backup-health-check.py --status-line   one terse line, SILENT when healthy
 
-Exit code is 0 when healthy and 1 when any check fails, so a caller can branch on
-it without parsing the text.
+Exit 0 when healthy, 1 when a backup check finds a problem, or 2 when a
+snapshot cannot be checked.
 """
 
 # The status line imports this module under the Mac's system Python 3.9.
@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -90,28 +91,30 @@ def newest_run_log_age(log_directory: Path):
 
 
 def newest_scheduled_snapshot_age(snapshot_directory: Path):
-    """Return seconds since the newest scheduled snapshot, or None."""
+    """Return (age in seconds, path that prevented checking), newest first."""
     # A purely on-demand snapshot says nothing about scheduler health.
     try:
         entries = sorted((entry for entry in snapshot_directory.iterdir()
                           if entry.is_dir()), reverse=True)
+    except FileNotFoundError:
+        return None, None
     except OSError:
-        return None
+        return None, snapshot_directory
     for entry in entries:
         try:
             info = json.loads((entry / "info.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        tags = str(info.get("tags", "")).split()
-        if not any(tag in ("hourly", "daily", "weekly", "monthly") for tag in tags):
-            continue
-        try:
-            created = float(info.get("created", 0))
-        except (TypeError, ValueError):
-            continue
-        if created:
-            return time.time() - created
-    return None
+            if not isinstance(info, dict):
+                return None, entry
+            tags = str(info.get("tags", "")).split()
+            if not any(tag in ("hourly", "daily", "weekly", "monthly") for tag in tags):
+                continue
+            created = float(info["created"])
+        except (OSError, ValueError, TypeError, KeyError, OverflowError):
+            return None, entry
+        if math.isfinite(created) and created > 0:
+            return time.time() - created, None
+        return None, entry
+    return None, None
 
 
 def diagnose():
@@ -124,7 +127,7 @@ def diagnose():
 
     if not is_mounted(BACKUP_MOUNT):
         detail.append(f"{BACKUP_MOUNT} is not a mount point — the backup drive is absent.")
-        snapshot_age = newest_scheduled_snapshot_age(TIMESHIFT_SNAPSHOT_DIRECTORY)
+        snapshot_age, _ = newest_scheduled_snapshot_age(TIMESHIFT_SNAPSHOT_DIRECTORY)
         age_text = format_age(snapshot_age) if snapshot_age is not None else "unknown"
         detail.append(f"Last scheduled snapshot: {age_text} ago.")
         detail.append("Check the drive's connection, then remount it.")
@@ -138,7 +141,9 @@ def diagnose():
         detail.append("The scheduler is not firing. Check that file and whether cron is running.")
         return f"BACKUP STALLED {age_text}", detail
 
-    snapshot_age = newest_scheduled_snapshot_age(TIMESHIFT_SNAPSHOT_DIRECTORY)
+    snapshot_age, unchecked = newest_scheduled_snapshot_age(TIMESHIFT_SNAPSHOT_DIRECTORY)
+    if unchecked is not None:
+        return f"BACKUP UNCHECKED {unchecked.name}", [f"Could not read snapshot metadata at {unchecked}."]
     if snapshot_age is None or snapshot_age > MAXIMUM_SNAPSHOT_AGE_SECONDS:
         age_text = format_age(snapshot_age) if snapshot_age is not None else "never"
         detail.append(f"Timeshift is running (last run {format_age(log_age)} ago) but the "
@@ -161,17 +166,15 @@ def main() -> int:
 
     headline, detail = diagnose()
 
-    if arguments.status_line:
-        if headline:
-            print(f"⚠ {headline}")
-        return 1 if headline else 0
-
     if headline:
         print(f"⚠ {headline}")
-    else:
+    elif not arguments.status_line:
         print("Backups healthy.")
-    for line in detail:
-        print(f"  {line}")
+    if not arguments.status_line:
+        for line in detail:
+            print(f"  {line}")
+    if headline and headline.startswith("BACKUP UNCHECKED "):
+        return 2
     return 1 if headline else 0
 
 

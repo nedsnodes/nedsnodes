@@ -163,6 +163,23 @@ def document(stamp="2026-05-01", status="design", body=""):
 CODE = "".join(f"line {n}\n" for n in range(1, 61))
 
 
+with tempfile.TemporaryDirectory() as workspace:
+    root = new_repository(workspace)
+    base = git(root, "rev-parse", "HEAD").strip()
+    write_code(root, "scripts/moved.py", CODE, date="2026-06-01")
+    write_document(root, "docs/moved.md",
+                   document(body="See `scripts/moved.py` lines 20-24."))
+    unreadable = write_document(root, "docs/bad.md", document())
+    unreadable.write_bytes(bytes([255]))
+    for mode, arguments in (("named documents", ["docs/bad.md", "docs/moved.md"]),
+                            ("changed paths", ["--base", base])):
+        code, out, err = run(root, *arguments)
+        check(f"{mode} reports unreadable documents alongside confirmed findings",
+              code == 2 and "docs/moved.md:" in out and "docs/bad.md" in err
+              and "Could not check" in err and "Traceback" not in err,
+              f"{code} {out} {err}")
+
+
 # --- The cited file's history since the stamp is the key ------------------
 with tempfile.TemporaryDirectory() as workspace:
     root = new_repository(workspace)

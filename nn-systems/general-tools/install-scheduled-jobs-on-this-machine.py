@@ -156,11 +156,11 @@ only in its output file.
 
 Exit codes: 0 done, or for --check every job matches; 1 a step failed after
 this program began changing the machine, or for --check a job differs or is
-not in the table, or for --remove-not-in-table a crontab line was KEPT; 2 not run — a bad invocation, a table this program cannot
+not in the table, or for --remove-not-in-table a crontab line was KEPT or a plist could not be read; 2 not run — a bad invocation, a table this program cannot
 use, a machine the table does not name, a job's program missing, a crontab
 that could not be read, or a shell parser that could not be installed; or for
 --check, a job not checked because `launchctl print` could not report it, or
-a crontab line it could not read.
+a crontab line or plist it could not read.
 
 Every option of main() beyond argv is a seam for
 nn-systems/general-tools/tests/install-scheduled-jobs-on-this-machine-test.py,
@@ -820,17 +820,18 @@ def cron_lines_not_in_table(machine: dict, placed: list, lines: list) -> list:
     return found
 
 
-def plists_not_in_table(machine: dict, placed: list, launch_agents_directory: Path) -> list:
-    """Return (path, label) pairs for marked plists whose jobs are absent from the table."""
+def plists_not_in_table(machine: dict, placed: list, launch_agents_directory: Path) -> tuple:
+    """Return the marked plists absent from the table and the errors reading other plists."""
     # Search even with no launchd jobs: the last job may have retired. Unmarked plists are not ours.
     if machine["platform"] != "darwin" or not launch_agents_directory.is_dir():
-        return []
+        return [], []
     labels = {placement["label"] for _, placement in placed if placement["scheduler"] == "launchd"}
-    found = []
+    found, errors = [], []
     for plist_path in sorted(launch_agents_directory.glob("*.plist")):
         try:
             written = plist_path.read_bytes()
-        except OSError:
+        except OSError as error:
+            errors.append(error)
             continue
         if PLIST_WRITTEN_BY_THIS_PROGRAM not in written:
             continue
@@ -841,7 +842,7 @@ def plists_not_in_table(machine: dict, placed: list, launch_agents_directory: Pa
         label = label if isinstance(label, str) else plist_path.stem
         if label not in labels:
             found.append((plist_path, label))
-    return found
+    return found, errors
 
 
 
@@ -966,15 +967,17 @@ def remove_not_in_table_mode(machine, placed, launch_agents_directory: Path,
     if left_in_place:
         print("To take the retired job off a KEPT line, ask the user to edit the line by hand in "
               "this machine's crontab, and keep the job that is not the clone's.")
-    plists = plists_not_in_table(machine, placed, launch_agents_directory)
-    every_step_worked = True
+    plists, plist_errors = plists_not_in_table(machine, placed, launch_agents_directory)
+    for error in plist_errors:
+        print(f"KEPT: could not read plist: {error}", file=sys.stderr)
+    every_step_worked = not plist_errors
     for plist_path, label in plists:
         if not booted_out_or_reported(f"{launchd_domain()}/{label}", plist_path, run):
             every_step_worked = False
             continue
         plist_path.unlink()
         print(f"removed: not in the table — deleted {plist_path}.")
-    if not found and not plists:
+    if not found and not plists and not plist_errors:
         print("absent: no crontab line runs a program from the clone, and no plist this "
               "installer wrote, outside the table.")
     return 0 if every_step_worked and not left_in_place else 1
@@ -1034,6 +1037,7 @@ def check_mode(machine, placed, launch_agents_directory: Path, table_path: Path,
             print(f"matches: {name} — {placement['scheduler']}.")
     not_in_table = shares_a_line = 0
     lines_not_read = []
+    plist_errors = []
     if every_job_selected:
         if installed_text is None:
             installed_text = read_crontab(run)
@@ -1046,7 +1050,10 @@ def check_mode(machine, placed, launch_agents_directory: Path, table_path: Path,
                   + (" The line also runs a job that is not a program of the clone, so "
                      "--remove-not-in-table leaves the line in place." if also_runs_others else ""))
         lines_not_read = _cron_lines_not_read(placed, lines)
-        for plist_path, label in plists_not_in_table(machine, placed, launch_agents_directory):
+        stray_plists, plist_errors = plists_not_in_table(machine, placed, launch_agents_directory)
+        for error in plist_errors:
+            print(f"NOT CHECKED: could not read plist: {error}", file=sys.stderr)
+        for plist_path, label in stray_plists:
             not_in_table += 1
             print(f"NOT IN THE TABLE: {plist_path}, label {label} — no job of the table "
                   f"names it for this machine.")
@@ -1086,7 +1093,7 @@ def check_mode(machine, placed, launch_agents_directory: Path, table_path: Path,
               f"by hand.", file=sys.stderr)
         print("When it runs no program of the clone, tell the user, quoting the line: --check "
               "exits 2 for as long as the line is in the crontab.", file=sys.stderr)
-    if not_checked or lines_not_read:
+    if not_checked or lines_not_read or plist_errors:
         return 2
     return 1 if differences or not_in_table else 0
 

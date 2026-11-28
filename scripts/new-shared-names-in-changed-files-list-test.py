@@ -12,6 +12,7 @@ lister is shown able to report before any case asserts that it stays silent.
 
 import importlib.util
 import io
+import hashlib
 import json
 import os
 import re
@@ -319,6 +320,52 @@ def case_git_failure_exits_nonzero(root):
     code, _, error = run_lister(lonely)
     check("a checkout with no origin/main exits 2", code == 2, f"exit {code}")
     check("the failure names the git command", "git " in error, error)
+
+
+def case_incomplete_search(root):
+    clone = make_clone(root, BASE_MAIN_FILES)
+    write(clone, "good.md", "A `shared-example-name` here.")
+    write(clone, "broken.py", "def incomplete(")
+    (clone / "bad.md").write_bytes(bytes([255]))
+    (clone / "image.png").write_bytes(bytes([255]))
+    code, names, errors = run_lister(clone)
+    check("an incomplete scan reports each unsearched source and still lists confirmed names",
+          code == 2 and "shared-example-name" in names_only(names)
+          and "broken.py" in errors and "bad.md" in errors and "image.png" not in errors,
+          str((code, names, errors)))
+    state = root / "hook-state"
+    state.mkdir()
+    payload = {"tool_name": "Edit", "tool_input": {"file_path": "good.md"}}
+    code, first = run_hook(clone, state, payload)
+    _, second = run_hook(clone, state, payload)
+    check("the reminder includes confirmed names and reports each unsearched path once",
+          code == 0 and "shared-example-name" in first and "Could not search broken.py" in first
+          and "Could not search bad.md" in first and not second, str((first, second)))
+    (clone / "docs/project-glossary.md").write_bytes(bytes([255]))
+    code, names, errors = run_lister(clone)
+    check("an undecodable changed glossary is reported once and independent names survive",
+          code == 2 and errors.count("Could not search docs/project-glossary.md:") == 1
+          and "shared-example-name" in names_only(names), str((code, names, errors)))
+    lister = load_module("lister_for_incomplete_scan", LISTER_PATH)
+    lister.MAIN_TOKEN_CACHE_DIRECTORY = root / "token-cache"
+    # A pre-fix cache contains an empty successful result for these same invalid bytes.
+    old_digest = hashlib.sha256((clone / "bad.md").read_bytes() + lister.git(
+        ["rev-parse", lister.MAIN_REF], clone).strip().encode()).hexdigest()
+    cache = {"bad.md": {"digest": old_digest, "candidates": []}}
+    unreadable = clone / "good.md"
+    unreadable.chmod(0)
+    try:
+        unchecked = {}
+        lister.new_shared_names(clone, file_cache=cache, unchecked=unchecked)
+        if not os.access(unreadable, os.R_OK):
+            check("a source that cannot be opened is reported and stays out of the cache",
+                  "good.md" in unchecked and "good.md" not in cache, str(unchecked))
+    finally:
+        unreadable.chmod(0o644)
+    lister.new_shared_names(clone, file_cache=cache, unchecked=unchecked)
+    check("an invalid source cached by an older version is retried and discarded",
+          "bad.md" in unchecked and "bad.md" not in cache and "broken.py" not in cache
+          and "good.md" in cache, str((cache, unchecked)))
 
 
 def case_file_cache(root):
@@ -1207,7 +1254,7 @@ def main() -> int:
              case_changed_file_on_main_is_not_a_new_path, case_function_listed_once_its_caller_appears,
              case_same_name_defined_in_two_files_is_not_a_use, case_one_word_constant_used_elsewhere_is_listed,
              case_markdown_names, case_exemptions, case_forms_of_a_listed_word, case_new_glossary_entry, case_new_branch_name_is_not_listed,
-             case_nothing_new_is_silent, case_git_failure_exits_nonzero, case_file_cache, case_file_only_main_has_counts_as_on_main,
+             case_nothing_new_is_silent, case_git_failure_exits_nonzero, case_incomplete_search, case_file_cache, case_file_only_main_has_counts_as_on_main,
              case_paths_git_would_quote_are_read_whole,
              case_binary_file_naming_a_candidate_does_not_hide_other_uses,
              case_timeout_failure_text_is_stable, case_hook_shows_names_past_the_cap_later,

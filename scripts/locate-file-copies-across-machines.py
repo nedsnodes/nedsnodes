@@ -472,8 +472,8 @@ def split_surface(surface, stem):
                 elif (entry.is_file(follow_symlinks=False)
                       and name_matches(entry.name, stem)):
                     files.append(entry.path)
-            except OSError:
-                continue
+            except OSError as error:
+                report["failures"].append(f"{entry.path} could not be inspected: {error}")
     return directories, files, report
 
 
@@ -505,7 +505,7 @@ def run_find(directory, stem, print_git_entries):
     return files, git_entries, failure
 
 
-def git_dirs_of(git_entries):
+def git_dirs_of(git_entries, failures=None):
     """Return distinct clone Git directories from clone and worktree entries."""
     # One git log --reflog on the common directory covers every worktree's HEAD reflog.
     found = {}
@@ -516,7 +516,9 @@ def git_dirs_of(git_entries):
             try:
                 with open(entry, encoding="utf-8") as handle:
                     line = handle.readline().strip()
-            except OSError:
+            except OSError as error:
+                if failures is not None:
+                    failures.append(f"{entry} could not be read: {error}")
                 continue
             if not line.startswith("gitdir:"):
                 continue
@@ -618,9 +620,9 @@ def search_this_machine(machine_plan, stem, name, check_tracked=False):
     git_dirs, logs = set(), []
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
 
-        def search_clones(git_entries):
+        def search_clones(git_entries, failures):
             # Overlap clone history searches with the remaining slower file searches.
-            for git_dir in git_dirs_of(git_entries):
+            for git_dir in git_dirs_of(git_entries, failures):
                 if git_dir not in git_dirs:
                     git_dirs.add(git_dir)
                     logs.append(pool.submit(run_git_log, git_dir, stem,
@@ -645,7 +647,7 @@ def search_this_machine(machine_plan, stem, name, check_tracked=False):
             surface, report = pending[future]
             files, entries, failure = future.result()
             file_paths += [(surface["name"], path) for path in files]
-            search_clones(entries)
+            search_clones(entries, report["failures"])
             if failure:
                 report["failures"].append(failure)
         git_hits, git_failures, git_cut = [], [], 0
@@ -656,11 +658,13 @@ def search_this_machine(machine_plan, stem, name, check_tracked=False):
             if failure:
                 git_failures.append(failure)
 
+    reports_by_surface = {report["name"]: report for report in reports}
     stated = []
     for surface_name, path in file_paths:
         try:
             status = os.stat(path)
-        except OSError:
+        except OSError as error:
+            reports_by_surface[surface_name]["failures"].append(f"{path} could not be inspected: {error}")
             continue
         stated.append((status.st_mtime, surface_name, path, status.st_size))
     stated.sort(key=lambda entry: -entry[0])
@@ -682,7 +686,6 @@ def search_this_machine(machine_plan, stem, name, check_tracked=False):
         if placed and check_tracked:
             in_checkouts.setdefault(placed[0], []).append((hit, placed[1]))
     # An untracked file belongs only to its checkout, not to equivalent paths in other seats.
-    reports_by_surface = {report["name"]: report for report in reports}
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
         asked = {pool.submit(tracked_in_checkout, root,
                              sorted({inside for _, inside in placed_hits})):

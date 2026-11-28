@@ -979,13 +979,22 @@ def main() -> int:
               result.returncode == 0 and "new-session" in sandbox.tmux_argv()
               and "was not started" not in result.stderr,
               (result.returncode, result.stderr[-600:]))
+        sandbox = MacLaunchSandbox(root / "no-attach-tmux-fails")
+        write_stub(sandbox.stubs, "tmux",
+                   'case " $* " in *" has-session "*) exit 1;; '
+                   '*" new-session "*) echo "cannot create test socket" >&2; exit 42;; esac\n')
+        result = sandbox.run("~/agents")
+        check("a detached launch reports the tmux error when it cannot create the session",
+              result.returncode == 1 and "cannot create test socket" in result.stderr
+              and "already exists" not in result.stdout, (result.returncode, result.stdout, result.stderr))
         # A running seat's launch is not a start, so it must not be refused as one.
         sandbox = MacLaunchSandbox(root / "no-attach-running-seat-missing-github-token-file")
         sandbox.github_token_check_runs_the_real_supervisor()
         sandbox.seat_already_running()
         result = sandbox.run("~/agents", seat_name="seat-t7")
         check("missing token file, seat already running: the launch is not refused as a start",
-              result.returncode == 0 and "was not started" not in result.stderr,
+              result.returncode == 0 and "already exists" in result.stdout
+              and "new-session" not in sandbox.tmux_argv() and "was not started" not in result.stderr,
               (result.returncode, result.stderr[-600:]))
 
         # --- the account override is refused, not ignored: the launcher does
@@ -1195,6 +1204,16 @@ def main() -> int:
         check("new agent-home: marked with agent-home-marker in its git directory",
               (sandbox.agent_home_git_directory / "agent-home-marker").is_file(),
               list(sandbox.agent_home_git_directory.iterdir()))
+
+        sandbox = MacLaunchSandbox(root / "new-agent-home-worktree-failed")
+        write_stub(sandbox.stubs, "git",
+                   'case "$*" in *"rev-parse --show-toplevel"*) exit 1;; '
+                   '*"worktree add"*) echo "checkout failure" >&2; exit 128;; esac\n')
+        result = sandbox.run("~/agents", seat_name="seat-j")
+        check("a failed worktree add stops the launch with the git error and agent-home",
+              result.returncode == 1 and "checkout failure" in result.stderr
+              and str(sandbox.home / "agents" / "seat-j") in result.stderr
+              and "new-session" not in sandbox.tmux_argv(), (result.returncode, result.stderr))
 
         sandbox = MacLaunchSandbox(root / "new-agent-home-marker-not-written")
         sandbox.agent_home_is_a_checkout = False

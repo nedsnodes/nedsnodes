@@ -10,7 +10,7 @@ before its first caller is listed once the caller exists; a caller may pass a
 per-file cache so unchanged files are not parsed again.
 
 Output lines are `<file>\t<kind>\t<name>`. Exit 0 with no output when nothing is new;
-exit 2, naming the git command, when git cannot answer.
+exit 2 if git cannot answer or a changed source could not be searched.
 """
 
 import argparse
@@ -145,10 +145,7 @@ def main_token_set(checkout: Path, main_commit: str):
 
 
 def python_top_level_names(text: str):
-    try:
-        tree = ast.parse(text)
-    except (SyntaxError, ValueError):
-        return []
+    tree = ast.parse(text)
     names = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -180,22 +177,29 @@ def glossary_terms(text: str):
     return {match.group(1).strip() for match in GLOSSARY_ENTRY_PATTERN.finditer(text)}
 
 
-def every_glossary_term(checkout: Path):
+def naming_reference_text(checkout, path, unchecked):
+    try:
+        return (checkout / path).read_text()
+    except FileNotFoundError:
+        return ""
+    except (OSError, UnicodeDecodeError) as error:
+        if unchecked is not None:
+            unchecked[path] = str(error)
+        elif isinstance(error, UnicodeDecodeError):
+            raise
+        return ""
+
+
+def every_glossary_term(checkout: Path, unchecked=None):
     terms = set()
     for path in git_output.nul_separated_fields(
             git(["ls-files", "-z", f"*{GLOSSARY_FILE_SUFFIX}"], checkout)):
-        try:
-            terms.update(term.lower() for term in glossary_terms((checkout / path).read_text()))
-        except OSError:
-            continue
+        terms.update(term.lower() for term in glossary_terms(naming_reference_text(checkout, path, unchecked)))
     return terms
 
 
-def ordinary_hyphenated_words(checkout: Path):
-    try:
-        text = (checkout / ORDINARY_HYPHENATED_WORDS_LIST_PATH).read_text()
-    except OSError:
-        return set()
+def ordinary_hyphenated_words(checkout: Path, unchecked=None):
+    text = naming_reference_text(checkout, ORDINARY_HYPHENATED_WORDS_LIST_PATH, unchecked)
     return set(ORDINARY_HYPHENATED_WORD_LINE_PATTERN.findall(text))
 
 
@@ -255,20 +259,23 @@ def names_used_in_other_files(names_and_files, checkout: Path):
             if files_mentioning.get(name, set()) - defining_files[name]}
 
 
-def new_shared_names(checkout: Path, already_reported=frozenset(), file_cache=None):
+def new_shared_names(checkout: Path, already_reported=frozenset(), file_cache=None, unchecked=None):
     """Find the branch's new shared names.
 
     already_reported holds "kind\\tname" keys the caller has already shown, which are
     skipped before the costly checks. file_cache maps a path to its content digest and
-    candidates, and is updated in place. Returns sorted (file, kind, name) triples.
+    candidates, and is updated in place. When provided, unchecked collects path-specific errors.
+    Returns sorted (file, kind, name) triples.
     """
     file_cache = {} if file_cache is None else file_cache
     main_commit = git(["rev-parse", MAIN_REF], checkout).strip()
     merge_base = git(["merge-base", "HEAD", MAIN_REF], checkout).strip()
     main_paths = set(git_output.nul_separated_fields(
         git(["ls-tree", "-r", "--name-only", "-z", main_commit], checkout)))
-    known_terms = every_glossary_term(checkout)
-    exempt_phrases = ordinary_hyphenated_words(checkout)
+    unchecked = {} if unchecked is None else unchecked
+    known_terms = every_glossary_term(checkout, unchecked)
+    exempt_phrases = ordinary_hyphenated_words(checkout, unchecked)
+    filters_incomplete = bool(unchecked)
     paths = changed_files(checkout, merge_base)
 
     found = []
@@ -276,26 +283,27 @@ def new_shared_names(checkout: Path, already_reported=frozenset(), file_cache=No
     for path in paths:
         if path not in main_paths:
             found.append((path, KIND_FILE_PATH, path))
+        if PurePosixPath(path).suffix not in (".md", ".py"):
+            continue
         try:
             content = (checkout / path).read_bytes()
-        except OSError:
+            # Older cache entries could contain empty results for files that never parsed.
+            digest = hashlib.sha256(b"parsed-source\0" + content + main_commit.encode()).hexdigest()
+            cached = file_cache.get(path)
+            if cached and cached.get("digest") == digest:
+                file_candidates = [tuple(pair) for pair in cached["candidates"]]
+            else:
+                file_candidates = candidates_in_file(path, content.decode(), checkout, main_commit)
+                file_cache[path] = {"digest": digest, "candidates": [list(pair) for pair in file_candidates]}
+        except (OSError, ValueError, SyntaxError) as error:
+            file_cache.pop(path, None)
+            unchecked[path] = str(error)
             continue
-        digest = hashlib.sha256(content + main_commit.encode()).hexdigest()
-        cached = file_cache.get(path)
-        if cached and cached.get("digest") == digest:
-            file_candidates = [tuple(pair) for pair in cached["candidates"]]
-        else:
-            try:
-                text = content.decode()
-            except UnicodeDecodeError:
-                text = ""
-            file_candidates = candidates_in_file(path, text, checkout, main_commit) if text else []
-            file_cache[path] = {"digest": digest, "candidates": [list(pair) for pair in file_candidates]}
         for kind, name in file_candidates:
             if f"{kind}\t{name}" in already_reported:
                 continue
             if kind == KIND_MARKDOWN_HYPHENATED_PHRASE and (
-                    name in known_terms or listed_word_or_its_form(name, exempt_phrases)):
+                    filters_incomplete or name in known_terms or listed_word_or_its_form(name, exempt_phrases)):
                 continue
             candidates.append((path, kind, name))
     for stale in set(file_cache) - set(paths):
@@ -365,13 +373,16 @@ def main() -> int:
     arguments = parser.parse_args()
     try:
         checkout = Path(git(["rev-parse", "--show-toplevel"], Path(arguments.checkout)).strip())
-        names = new_shared_names(checkout)
+        unchecked = {}
+        names = new_shared_names(checkout, unchecked=unchecked)
     except GitFailure as failure:
         print(f"new-shared-names-in-changed-files-list: {failure}", file=sys.stderr)
         return 2
     for path, kind, name in names:
         print(f"{path}\t{kind}\t{name}")
-    return 0
+    for path, reason in unchecked.items():
+        print(f"Could not search {path}: {reason}", file=sys.stderr)
+    return 2 if unchecked else 0
 
 
 if __name__ == "__main__":

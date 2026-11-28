@@ -1781,6 +1781,11 @@ def main():
         driven.run_codex = lambda prompt, checkout=None: (
             launched.append("codex") or (0, any_adversarial_prompt_report, "a-test-model", ""))
         code, out, err = drive_main(driven, [
+            "--target", "docs/design.md", "--adversarial-prompt", "fresh-eyes"])
+        check("fresh-eyes alone requires the problem statement before starting a run",
+              code == 2 and "--problem-statement" in err and not out and not launched
+              and not driven.RECORDS_ROOT.exists(), (code, out, err, launched))
+        code, out, err = drive_main(driven, [
             "--target", "docs/design.md", "--adversarial-prompt", "fresh-eyes",
             "--adversarial-prompt", "cut"])
         skipped = [line for line in out.splitlines() if line.startswith("SKIPPED:")]

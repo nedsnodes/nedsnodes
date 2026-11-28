@@ -16,14 +16,15 @@ agent-session and not a child started from its shell, and failing that, says
 "this agent-seat's new session".
 
 The line is shown once per marker file, because a refused handoff leaves the
-marker file in place and a wrong notice must not repeat on every message. Before
-printing, the hook writes the marker file's modification time, in nanoseconds,
+marker file in place and a wrong notice must not repeat on every message. After
+flushing the notice to stdout, the hook writes the marker file's modification time, in nanoseconds,
 into a file beside it, named for the marker file; a marker file written later, after a compaction
 deleted the first, has another modification time, so the line is shown again.
 
 A fault, such as stdin that is not a JSON object: one line on stderr naming the
-hook and the fault, nothing on stdout, exit 1, which Claude Code records as a
-non-blocking error. Exit 2 would block the user's message and is never used.
+hook and the fault, exit 1, which Claude Code records as a non-blocking error.
+If recording fails after output, the next prompt may show the notice again.
+Exit 2 would block the user's message and is never used.
 """
 
 import importlib.util
@@ -125,10 +126,18 @@ def main() -> int:
         except FileNotFoundError:
             pass
         notice = user_notice(new_session_name(payload.get("transcript_path"), session_id))
-        shown_record.write_text(marker_modified + "\n", encoding="utf-8")
-        print(json.dumps({"systemMessage": notice}))
+        # Closing this wrapper flushes here, so interpreter shutdown cannot retry a failed write.
+        with open(sys.stdout.fileno(), "w", encoding=sys.stdout.encoding, closefd=False) as output:
+            print(json.dumps({"systemMessage": notice}), file=output)
     except Exception as error:
         print(HOOK_FAILED_MESSAGE.format(error=f"{type(error).__name__}: {error}"), file=sys.stderr)
+        return 1
+    try:
+        shown_record.write_text(marker_modified + "\n", encoding="utf-8")
+    except OSError as error:
+        print(f"{PROGRAM}: the hook sent the handoff notice but could not record it. "
+              f"The notice may appear again on the next prompt. {type(error).__name__}: {error}",
+              file=sys.stderr)
         return 1
     return 0
 

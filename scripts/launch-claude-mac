@@ -276,7 +276,8 @@ if ! git -C "$AGENT_DIRECTORY" rev-parse --show-toplevel >/dev/null 2>&1; then
             && touch "$AGENT_HOME_GIT_DIRECTORY/agent-home-marker" \
             || echo "launch-claude-mac: could not write agent-home-marker into the git directory of $AGENT_DIRECTORY, so git does not refuse commits made there; git's or touch's error is just above this line. Tell the user this line." >&2
     else
-        echo "launch-claude-mac: could not make $AGENT_DIRECTORY a checkout; the agent will start without project settings" >&2
+        echo "launch-claude-mac: could not make $AGENT_DIRECTORY a checkout; see the git error above" >&2
+        exit 1
     fi
 fi
 
@@ -522,14 +523,14 @@ fi
 # there is never seen and the launch would still exit 0. The supervisor's own
 # GitHub token check runs first, outside the pane, so a missing or unreadable
 # token file stops this launch with the supervisor's refusal and its exit 5.
-# A seat already running is left to the "already exists" line below.
-if ! tmux -L "$SEAT_TMUX_SOCKET" has-session -t "=$AGENT_NAME" 2>/dev/null; then
-    python3 "$SUPERVISOR" --agent "$AGENT_NAME" --agent-seat-github-token-file-readable-check-only
+if tmux -L "$SEAT_TMUX_SOCKET" has-session -t "=$AGENT_NAME" 2>/dev/null; then
+    echo "launch-claude-mac: a tmux session named $AGENT_NAME already exists — a running seat, or its after-exit shell (attach with: launch-claude-mac $AGENT_NAME)"
+    exit 0
 fi
+python3 "$SUPERVISOR" --agent "$AGENT_NAME" --agent-seat-github-token-file-readable-check-only
 # The trailing `exit $?` stops the pane's shell from exec'ing into the
 # supervisor: with tmux as its direct parent, tmux wakes it at once after a
 # `kill -STOP`. The pane still closes with the supervisor's exit status.
 tmux -L "$SEAT_TMUX_SOCKET" new-session -d -s "$AGENT_NAME" -c "$AGENT_DIRECTORY" "$SUPERVISOR_COMMAND; exit \$?" \; \
         set-option -g set-titles on \; set-option -g set-titles-string "$SEAT_WINDOW_TITLE_FORMAT" \; \
-        set-option -g mouse on \; set-option -s copy-command pbcopy 2>/dev/null \
-    || echo "launch-claude-mac: a tmux session named $AGENT_NAME already exists — a running seat, or its after-exit shell (attach with: launch-claude-mac $AGENT_NAME)"
+        set-option -g mouse on \; set-option -s copy-command pbcopy || exit 1

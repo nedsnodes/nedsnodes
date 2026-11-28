@@ -22,6 +22,9 @@ patterns, which no agent's grep reads; and an absolute glob, which cannot begin 
 It answers for the machine as it is now, so over old transcripts a program installed since,
 or a directory changed since, gives a different answer than it would have then.
 
+Transcript measurement exits 2 for an invalid directory argument and 1 when an
+input could not be read. It still reports the runs it could read.
+
 It can fail when ssh, the directory listing or the agent's ugrep cannot run; it then says
 which cause it could not check, and the command-line mode exits 3. It changes nothing on
 any machine, and runs nothing of the agent's command but the grep pattern on /dev/null.
@@ -45,6 +48,7 @@ PROGRAM = "unvalidated-negative-result-check"
 
 EXIT_QUIET = 0
 EXIT_FIRED = 1
+EXIT_MEASUREMENT_INCOMPLETE = 1
 EXIT_BAD_INVOCATION = 2
 EXIT_A_CAUSE_COULD_NOT_BE_CHECKED = 3
 
@@ -674,11 +678,7 @@ def bash_pairs_in_transcript(path):
     """Yield (command, cwd, exit_code, output) for each Bash run a transcript records."""
     # toolUseResult is a dict on success, and a string holding both streams on failure.
     commands = {}
-    try:
-        handle = open(path, encoding="utf-8", errors="replace")
-    except OSError:
-        return
-    with handle:
+    with open(path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             try:
                 record = json.loads(line)
@@ -712,10 +712,23 @@ def measure_transcripts(directories, limit=None, top=10, out=sys.stdout, machine
     counts = collections.Counter()
     by_signal = collections.Counter()
     by_command = collections.Counter()
-    pairs = ((transcript,) + pair for directory in directories
-             for transcript in sorted(pathlib.Path(directory).rglob("*.jsonl"))
-             for pair in bash_pairs_in_transcript(transcript))
-    for transcript, command, cwd, exit_code, output in itertools.islice(pairs, limit):
+
+    def report_read_error(error):
+        counts["read errors"] += 1
+        print(f"{PROGRAM}: could not read a measurement input: {error}", file=out)
+
+    def pairs():
+        for directory in directories:
+            paths = (pathlib.Path(root) / name
+                     for root, _, names in os.walk(directory, onerror=report_read_error)
+                     for name in names if name.endswith(".jsonl"))
+            for path in sorted(paths):
+                try:
+                    yield from bash_pairs_in_transcript(path)
+                except OSError as error:
+                    report_read_error(error)
+
+    for command, cwd, exit_code, output in itertools.islice(pairs(), limit):
         counts["pairs"] += 1
         try:
             verdict = judge_command_result(command, cwd, output, exit_code, machines)
@@ -767,9 +780,13 @@ def main(argv=None, stdin=sys.stdin, stdout=sys.stdout, machines=None):
     if arguments.run_as_claude_code_post_tool_use_hook:
         return unvalidated_negative_result_warning_post_tool_use_hook(stdin, stdout, machines)
     if arguments.transcripts:
-        measure_transcripts(arguments.transcripts, arguments.limit, arguments.top, stdout,
-                            machines)
-        return EXIT_QUIET
+        for directory in arguments.transcripts:
+            if not pathlib.Path(directory).is_dir():
+                print(f"{PROGRAM}: --transcripts requires a directory: {directory}", file=stdout)
+                return EXIT_BAD_INVOCATION
+        counts, _ = measure_transcripts(arguments.transcripts, arguments.limit, arguments.top,
+                                        stdout, machines)
+        return EXIT_MEASUREMENT_INCOMPLETE if counts["read errors"] else EXIT_QUIET
     output = ""
     if arguments.output_file:
         with open(arguments.output_file, encoding="utf-8", errors="replace") as handle:

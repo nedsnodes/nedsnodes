@@ -153,18 +153,6 @@ def shortened(text: str) -> str:
     return flat if len(flat) <= EXCERPT_CHARACTERS else flat[:EXCERPT_CHARACTERS] + "…"
 
 
-def dialog_with_timestamps(transcript_path: Path):
-    """Return the transcript's dialog turns, each with voice, text and timestamp.
-
-    The handoff extractor's rules leave out injected notices, tool results and
-    subagent turns. Every agent message is kept, a short acknowledgement of a
-    notification included: a reply is attributed to the message it followed,
-    and dropping a message by its length could drop the question answered.
-    """
-    turns, _ = _extractor.read_dialog_turns(transcript_path, drop_acknowledgements=False)
-    return turns
-
-
 def tail_excerpt(text: str) -> str:
     """Return the end of a message, where an agent's question usually sits."""
     flat = " ".join(text.split())
@@ -217,10 +205,13 @@ def pairs_in_transcript(arguments):
     """Worker: return (path, pairs, error) for one transcript."""
     path, words, all_words = arguments
     try:
-        turns = dialog_with_timestamps(Path(path))
+        # A short acknowledgement can be the question the user answered.
+        turns, skipped = _extractor.read_dialog_turns(Path(path), drop_acknowledgements=False)
     except OSError as error:
         return path, [], f"{path}: {error.strerror or error}"
-    return path, question_answer_pairs(turns, words, all_words), None
+    missing = [f"{skipped[kind]} {kind}" for kind in ("malformed", "oversized") if skipped[kind]]
+    error = f"{path}: skipped records ({', '.join(missing)})" if missing else None
+    return path, question_answer_pairs(turns, words, all_words), error
 
 
 def run_command(command, timeout=COMMAND_TIMEOUT_SECONDS):
@@ -362,7 +353,7 @@ def search_transcripts(entry, words, all_words, since, include_unanswered=False)
     if result.returncode == 2:
         problems.append(in_part_failure(result.stderr))
     if errors:
-        problems.append(f"{len(errors)} transcript(s) grep listed could not be read, first: {errors[0]}")
+        problems.append(f"{len(errors)} transcript(s) grep listed could not be read completely, first: {errors[0]}")
     if problems:
         place["failure"] = "; ".join(problems)
     return place

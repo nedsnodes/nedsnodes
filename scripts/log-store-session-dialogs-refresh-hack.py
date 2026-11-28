@@ -176,6 +176,11 @@ def refresh_all(root: pathlib.Path, failures_only: bool) -> int:
                 written += 1
             else:
                 current += 1
+        except refresh_common.SubagentTurnsLeftOut as error:
+            written += 1
+            if tracker_failure is None:  # A missing tracker was already reported for the whole pass.
+                failed += 1
+                print(f"FAILED: {transcript} — {error}")
         except Exception as error:
             # One unreadable transcript must not keep every other session's dialog stale.
             failed += 1

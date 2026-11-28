@@ -138,6 +138,12 @@ check("a fence opened on a list item's marker line is code, and prose after it i
 
 forms = file_hit_forms("Run `git\nswitch seat --quiet` now.\n")
 check("a code span that wraps across a line break is code on both lines", forms == [], forms)
+forms = file_hit_forms("Run ``a ` b\nseat c`` now.\n")
+check("a single backtick inside a wrapped double-backtick span is code", forms == [], forms)
+text = "Run ``a ``` b\nseat c`` then check the seat.\n"
+hits = checker.find_style_guide_word_hits_in_markdown(text, checker.APPLIES_TO_FILES)
+check("only prose after the matching double-backtick closer is flagged",
+      [(hit.form, hit.offset) for hit in hits] == [("seat", text.rindex("seat"))], hits)
 forms = file_hit_forms("Run `git\nswitch seat` now, then the seat moves.\n")
 check("prose after a wrapped code span closes is still read", forms == ["seat"], forms)
 forms = file_hit_forms("A lone ` backtick.\nThe seat is free.\n")
@@ -172,6 +178,14 @@ for case_name, text in EXEMPT_TEXT_CASES:
 
 forms = file_hit_forms("```\ncode\n```\nThe seat after the fence.\n")
 check("a fence closes: prose after the closing fence is flagged", forms == ["seat"], forms)
+for content_line in ("- ```", "1. ```", "    ```"):
+    text = f"```\n{content_line}\ngit switch seat\n```\n\nThe seat is free.\n"
+    hits = checker.find_style_guide_word_hits_in_markdown(text, checker.APPLIES_TO_FILES)
+    check(f"{content_line!r} inside a top-level fence is code",
+          [(hit.line_number, hit.form) for hit in hits] == [(6, "seat")], hits)
+
+forms = file_hit_forms("10. ```sh\n    git switch seat\n    ```\n\nThe seat is free.\n")
+check("a four-space closer aligns with an ordered list item's content", forms == ["seat"], forms)
 
 NAMED_COMPOUNDS = ("agent-seat", "seat-branch", "seat-brief", "reincarnate-seat", "retire-seat",
                    "agent-home", "queue-drain", "frozen-head", "approval-walk",
@@ -323,6 +337,12 @@ INDENTED_CODE_CASES = {
         ("- a\n\nthe seat\n\n    code seat\n", ["seat"]),
     "a four-space paragraph after a two-space continuation of a list item is prose":
         ("- item\n\n  continuation\n\n    about the seat\n", ["seat"]),
+    "a heading interrupts a list before an indented code block":
+        ("- item\n# Heading\n\n    ~~~\n\nThe seat is free.\n", ["seat"]),
+    "a heading aligned with the list content stays inside the item":
+        ("- item\n  # Heading\n\n    The seat is free.\n", ["seat"]),
+    "a hash joined to a word is a lazy continuation":
+        ("- item\n#tag\n\n    The seat is free.\n", ["seat"]),
     "a lazy continuation keeps the list item open":
         ("- item\nlazy line\n\n    about the seat\n", ["seat"]),
     "a list marker inside an indented code block is code, and a fence there opens nothing":

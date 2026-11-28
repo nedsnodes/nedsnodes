@@ -634,11 +634,11 @@ check("--help ends with the docstring's exit-codes paragraph and prints nothing 
       and " ".join(help_text.split()).endswith(
           "Exit codes: 0 done, or for --check every job matches; 1 a step failed after this "
           "program began changing the machine, or for --check a job differs or is not in the "
-          "table, or for --remove-not-in-table a crontab line was KEPT; 2 not run — a bad "
+          "table, or for --remove-not-in-table a crontab line was KEPT or a plist could not be read; 2 not run — a bad "
           "invocation, a table this program cannot use, a machine the table does not name, a "
           "job's program missing, a crontab that could not be read, or a shell parser that "
           "could not be installed; or for --check, a job not checked because `launchctl print` "
-          "could not report it, or a crontab line it could not read.")
+          "could not report it, or a crontab line or plist it could not read.")
       and "WHY THIS EXISTS" not in help_text and "THE TABLE is " not in help_text
       and "user-ruled" not in help_text, help_text)
 check("--check's help names both reasons for exit 1",
@@ -1682,7 +1682,7 @@ with tempfile.TemporaryDirectory() as temporary:
     check("a plist this program wrote is found when the table names no launchd job and no "
           "launchd_path; a plist written before the marker line is not",
           installer.plists_not_in_table(mac_without_launchd_path, [], marked_dir)
-          == [(last_retired_path, "com.nedsnodes.the-last-launchd-job")])
+          == ([(last_retired_path, "com.nedsnodes.the-last-launchd-job")], []))
     no_launchd_table = json.loads(FIXTURE_TABLE_PATH.read_text(encoding="utf-8"))
     for job in no_launchd_table["jobs"]:
         job["on"] = {machine_name: placement for machine_name, placement
@@ -1703,7 +1703,20 @@ with tempfile.TemporaryDirectory() as temporary:
           and f"removed: not in the table — deleted {last_retired_path}.\n" in printed,
           (exit_code, printed, errors))
     check("and nothing is looked for on a machine that is not macOS",
-          installer.plists_not_in_table(table["machines"]["ned-box"], [], marked_dir) == [])
+          installer.plists_not_in_table(table["machines"]["ned-box"], [], marked_dir) == ([], []))
+
+    unreadable_plist = marked_dir / "unreadable.plist"
+    unreadable_plist.symlink_to(marked_dir / "missing-target")
+    LAUNCH_AGENTS = marked_dir
+    try:
+        for mode, expected_code in (("--check", 2), ("--remove-not-in-table", 1)):
+            code, output, errors = run_main([mode], MAC, stub, no_launchd_table_path)
+            check(f"{mode} names an unreadable plist and leaves it alone",
+                  code == expected_code and str(unreadable_plist) in errors
+                  and "absent: no crontab line" not in output and unreadable_plist.is_symlink(),
+                  (code, output, errors))
+    finally:
+        LAUNCH_AGENTS = saved_launch_agents
 
     plist_path.write_bytes(plistlib.dumps(expected_plist, sort_keys=False))
     stub.loaded.add(TARGET)

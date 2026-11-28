@@ -23,6 +23,12 @@ mkdir -p "$STUBS" "$WORKSPACE/home/Projects" "$WORKSPACE/agents"
 # refuses when that file is missing.
 ln -s "$(cd "$SCRIPT_DIRECTORY/.." && pwd)" "$WORKSPACE/home/Projects/nedsnodes"
 
+# The supervisor checks the machine account's token file before a detached start.
+mkdir -p "$WORKSPACE/home/.config/nedsnodes"
+for account in mac-claude ubuntu-claude; do
+    echo stand-in-token > "$WORKSPACE/home/.config/nedsnodes/$account.token"
+done
+
 # Stubs. `claude update` behavior comes from CLAUDE_UPDATE_MODE: hang, fail,
 # or ok — each leaves a marker so a test can assert whether update ran. A hang
 # that ends leaves a second marker, so a hang that was waited out is told from
@@ -42,14 +48,10 @@ cat > "$STUBS/tmux" << 'EOF'
 echo "tmux $*" >> "${TMUX_CALL_LOG:?}"
 # Each argument bracketed, so a test can tell one argument from two.
 printf '<%s>' "$@" >> "${TMUX_CALL_LOG:?}.arguments"; echo >> "${TMUX_CALL_LOG:?}.arguments"
-# The transition-fallback case makes the SEAT's own server look empty: a
-# has-session against the socket named by TMUX_STUB_SEATLESS_SOCKET fails,
-# while every other call (the default socket's has-session included)
-# succeeds.
-if [ -n "${TMUX_STUB_SEATLESS_SOCKET:-}" ] \
-        && [ "${1:-}" = "-L" ] && [ "${2:-}" = "$TMUX_STUB_SEATLESS_SOCKET" ] \
-        && [ "${3:-}" = "has-session" ]; then
-    exit 1
+# Only the transition case has a pre-existing session on the default socket.
+if [ "${3:-}" = "has-session" ]; then
+    [ "${2:-}" = "default" ] && [ "${TMUX_STUB_DEFAULT_SESSION:-}" = "${5#=}" ]
+    exit $?
 fi
 exit 0
 EOF
@@ -141,12 +143,12 @@ HOME="$WORKSPACE/home" NEDSNODES_AGENTS_ROOT="$WORKSPACE/agents" \
     PATH="$STUBS:$PATH" \
     CLAUDE_UPDATE_MARKER="$WORKSPACE/update-ran-transition" CLAUDE_UPDATE_MODE=ok \
     TMUX_CALL_LOG="$WORKSPACE/tmux-calls-transition" LAUNCH_CLAUDE_UPDATE_TIMEOUT_SECONDS=2 \
-    TMUX_STUB_SEATLESS_SOCKET="seat-transition" \
+    TMUX_STUB_DEFAULT_SESSION="seat-transition" \
     sh "$SCRIPT_DIRECTORY/launch-claude-mac" seat-transition --no-attach \
     > "$WORKSPACE/out-transition" 2>&1
 grep -q -- "-L default has-session" "$WORKSPACE/tmux-calls-transition"
 check "the launcher checks the default server for a pre-change seat" $?
-grep -q -- "-L default new-session" "$WORKSPACE/tmux-calls-transition"
+grep -q "already exists" "$WORKSPACE/out-transition" && ! grep -q "new-session" "$WORKSPACE/tmux-calls-transition"
 check "a seat live on the default server is reached there, not duplicated" $?
 
 # The ubuntu twin: its box-side command carries the same step, update before

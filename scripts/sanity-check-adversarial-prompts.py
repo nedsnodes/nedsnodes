@@ -164,8 +164,9 @@ Running a sanity-check, and reading its output:
   that the audit is unreviewed when none did. A report saved by an agent's
   second launch carries `relaunched_after=<cause class>` in its provenance
   line.
-- Without `--problem-statement` the fresh-eyes agents print `SKIPPED`, loudly,
-  never silently — that audit works from the problem statement alone.
+- The fresh-eyes audit requires `--problem-statement`. Without it, a run
+  requesting only fresh-eyes exits 2. A mixed run prints `SKIPPED` for those
+  cells and runs the other audits.
 - Cut and mechanization reports get a quote scan: every quoted span of four
   or more words is searched for across the tracked files, and a span found in
   none prints `WARNING: <audit>-adversarial-prompt-<runtime> quote found in no tracked file: ...` — triage
@@ -1851,7 +1852,7 @@ def main() -> int:
                         help="context document, inside this checkout (repeatable)")
     parser.add_argument("--problem-statement", type=pathlib.Path, default=None,
                         help="review-request file for the fresh-eyes audit; "
-                             "without it the fresh-eyes agents are SKIPPED, loudly")
+                             "required for a fresh-eyes-only run, otherwise fresh-eyes is skipped")
     parser.add_argument("--adversarial-prompt", action="append",
                         choices=list(ADVERSARIAL_PROMPTS), default=None,
                         help="run only this audit (repeatable); default: all three")
@@ -1932,6 +1933,10 @@ def main() -> int:
         print(assemble_prompt(args.print_surface, args.target, args.context,
                               args.problem_statement, str(illustrative_scratch)))
         return 0
+
+    if args.problem_statement is None and set(args.adversarial_prompt or ()) == {"fresh-eyes"}:
+        print("--adversarial-prompt fresh-eyes alone needs --problem-statement", file=sys.stderr)
+        return 2
 
     # Everything the run prints from here is also kept for its record.
     run_log = RunOutputCopiedToRecordLog(sys.stdout)
@@ -2029,11 +2034,6 @@ def run_cells_in_review_copy(args, target_path: pathlib.Path, run_log: RunOutput
     # lazily inside each cell.
     for adversarial_prompt in dict.fromkeys(cell_prompt for cell_prompt, _ in cells):
         prompt_body(adversarial_prompt)
-
-    if not cells:
-        print("sanity-check wrote no reports: every agent above failed or was "
-              "skipped; there is nothing to triage.", flush=True)
-        return 0
 
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT,

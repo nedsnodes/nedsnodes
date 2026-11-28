@@ -128,7 +128,8 @@ be slow, and ripgrep is not reliably on the Mac's PATH.
 FAILURES. A record that could not be searched prints a line opening FAILED,
 naming what failed and what to do, after the hits found elsewhere: a missing
 log-store or kind directory, a file ripgrep could not read, a transcript the
-reader could not read, a session dialog that could not be read after ripgrep
+reader could not read in full (including malformed records, or oversized records skipped when dating
+a dialog), a session dialog that could not be read after ripgrep
 searched it, a session dialog the extractor could not build again
 whole, a session dialog not written again from its changed transcript, a
 directory of transcripts not looked through for changed ones, ripgrep missing,
@@ -750,7 +751,8 @@ def dialog_line_turn_times(transcript_text, dialog_text, wanted, written_left_ou
     """
     extractor = extractor_in_this_process()
     try:
-        built, left_out_notes = extractor.complete_dialog_lines_with_turn_timestamps(Path(transcript_text))
+        turns, report = extractor.complete_dialog_turns_and_report(Path(transcript_text))
+        built, left_out_notes = extractor.dialog_lines_with_turn_timestamps(turns, report)
     except OSError as error:
         return {}, (f"could not read the transcript {transcript_text} to date the session dialog's hits "
                     f"by their turns: {error}")
@@ -772,7 +774,9 @@ def dialog_line_turn_times(transcript_text, dialog_text, wanted, written_left_ou
     for number, line, occurrence in wanted:
         stamps = stamps_by_line.get(line, [])
         times[number] = stamps[occurrence] if occurrence < len(stamps) else ""
-    return times, None
+    skipped = [f"{report.skip_counts[key]} {key}" for key in ("malformed", "oversized") if report.skip_counts[key]]
+    error = f"{transcript_text}: skipped records ({', '.join(skipped)})" if skipped else None
+    return times, error
 
 
 def dialog_turn_dates(hits, root, failures, jobs):
@@ -956,24 +960,24 @@ def speaker_test_in_this_process():
 
 
 def typed_user_messages(path):
-    """(timestamp, text) of each message the user typed in one transcript, as the shared speaker test,
-    search-user-messages-in-transcripts.py's TurnReader, tells them. Raises OSError when it cannot be read."""
-    reader = speaker_test_in_this_process().TurnReader()
+    """Return typed (timestamp, text) pairs and the number of malformed records. Read errors raise OSError."""
+    speaker = speaker_test_in_this_process()
+    reader = speaker.TurnReader()
     messages = []
+    malformed = 0
     with path.open("r", errors="replace") as handle:
-        for line in handle:
-            try:
-                record = json.loads(line)
-            except ValueError:
+        for record in speaker.transcript_records(handle):
+            if record is None:
+                malformed += 1
                 continue
             # A subagent's records belong to its own transcript; its task, written by the agent, reads as typed.
-            if not isinstance(record, dict) or record.get("isSidechain"):
+            if record.get("isSidechain"):
                 continue
             turn = reader.turn(record)
             if turn is not None and turn[0] == "user":
                 stamp = record.get("timestamp")
                 messages.append((stamp if isinstance(stamp, str) else "", turn[1]))
-    return messages
+    return messages, malformed
 
 
 def matching_user_messages(path_text, pattern, since, until):
@@ -982,7 +986,7 @@ def matching_user_messages(path_text, pattern, since, until):
     Runs in a worker process, so it takes and returns only plain values.
     """
     try:
-        messages = typed_user_messages(Path(path_text))
+        messages, malformed = typed_user_messages(Path(path_text))
     except OSError as error:
         return [], f"could not read the transcript {path_text}: {error}"
     regex = re.compile(pattern, re.IGNORECASE)
@@ -994,7 +998,8 @@ def matching_user_messages(path_text, pattern, since, until):
         flat = " ".join(text[:found.start()].split())
         whole = " ".join(text.split())
         found_messages.append((stamp, USER_MARK + " " + excerpt(whole, len(flat))))
-    return found_messages, None
+    error = f"{path_text}: skipped records ({malformed} malformed)" if malformed else None
+    return found_messages, error
 
 
 def newest_first_results(paths, pattern, since, until, jobs):
@@ -1070,7 +1075,6 @@ def user_message_hits(root, candidates, pattern, since, until, jobs, page_size, 
         found_messages, error = results[path]
         if error:
             failures.append(error)
-            continue
         transcript_machine, key = session_parts(path, root)
         latest = max((date for date, _ in found_messages), default="")
         if latest > utc_iso(modified + MODIFICATION_TIME_MARGIN_SECONDS) and (stopped_early or since):

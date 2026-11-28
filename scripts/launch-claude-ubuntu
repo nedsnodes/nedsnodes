@@ -327,7 +327,7 @@ if ! git -C \"$AGENT_DIRECTORY_REMOTE\" rev-parse --show-toplevel >/dev/null 2>&
     && touch \"\$agent_home_git_directory/agent-home-marker\" \
     || echo \"launch-claude-ubuntu: could not write agent-home-marker into the git directory of $AGENT_DIRECTORY_REMOTE on ned-box, so git does not refuse commits made there; git's or touch's error is just above this line. Tell the user this line.\" >&2; \
   else \
-    echo \"launch-claude-ubuntu: could not make $AGENT_DIRECTORY_REMOTE a checkout; the agent will start without project settings\" >&2; \
+    echo \"launch-claude-ubuntu: could not make $AGENT_DIRECTORY_REMOTE a checkout; see the git error above\" >&2; exit 1; \
   fi; \
 fi"
 

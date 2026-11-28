@@ -137,6 +137,35 @@ def commit_change(root: Path, relative: str, text: str, executable=False):
 
 
 with tempfile.TemporaryDirectory() as workspace:
+    root = Path(workspace)
+    build_repository(root)
+    (root / "docs/bad.txt").write_bytes(b"scripts/already-here.py\xff\n")
+    (root / "docs/good.md").write_text("See `scripts/already-here.py`.\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "citations")
+    base = git(root, "rev-parse", "HEAD").stdout.strip()
+    git(root, "rm", "-q", "scripts/already-here.py")
+    git(root, "commit", "-qm", "remove cited file")
+    code, out, err = run_check(root, base, "--only-citations-of-removed-paths")
+    check("an unreadable candidate for a removed path is named beside the confirmed citation",
+          code == 2 and "docs/bad.txt" in err and "docs/good.md:1:" in out, (code, out, err))
+
+
+with tempfile.TemporaryDirectory() as workspace:
+    root = Path(workspace)
+    base = build_repository(root)
+    (root / "docs/bad.txt").write_bytes(b"bad\xff\n")
+    (root / "docs/picture.bin").write_bytes(b"\x00\xff")
+    (root / "docs/good.md").write_text("See `scripts/does-not-exist.py`.\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "changed files")
+    code, out, err = run_check(root, base)
+    check("changed text that cannot be decoded leaves other findings visible and binary files alone",
+          code == 2 and "docs/bad.txt" in err and "docs/picture.bin" not in err
+          and "docs/good.md:1:" in out, (code, out, err))
+
+
+with tempfile.TemporaryDirectory() as workspace:
     root = Path(workspace) / "repo"
     root.mkdir()
     base = build_repository(root)

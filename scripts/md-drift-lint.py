@@ -65,7 +65,7 @@ FROZEN_MEASURED_DATA_DIRECTORIES.
 
 Output: one "path:line: problem" per finding on stdout, then one
 "path: note: ..." per note.
-Exit codes: 0 clean, 1 findings, 2 bad invocation, 3 GitHub could not be
+Exit codes: 0 clean, 1 findings, 2 bad invocation or unreadable input, 3 GitHub could not be
 queried for an overview's Planned work, so the check did not finish.
 """
 
@@ -259,7 +259,28 @@ def check_dates(line: str):
             yield f"impossible date {match.group(0)}"
 
 
-def check_backtick_paths(line: str, md_path: Path, repo_root: Path):
+def read_text_for_check(path: Path, unchecked, *, skip_binary=False):
+    """Read a UTF-8 source, recording a failed read once per path when a collector is given."""
+    try:
+        if skip_binary:
+            data = path.read_bytes()
+            if b"\0" in data[:8000]:
+                return None
+            return data.decode("utf-8")
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        if unchecked is None:
+            raise
+        unchecked[path] = str(error)
+        return None
+
+
+def report_unchecked_files(unchecked):
+    for path, reason in unchecked.items():
+        print(f"Could not check {path}: {reason}", file=sys.stderr)
+
+
+def check_backtick_paths(line: str, md_path: Path, repo_root: Path, unchecked):
     for match in BACKTICK_TOKEN.finditer(line):
         token = match.group(1).strip()
         words = PLACEHOLDER_SPAN.sub("<placeholder>", token).split()
@@ -279,9 +300,8 @@ def check_backtick_paths(line: str, md_path: Path, repo_root: Path):
             first = words[1]
         script = resolve(first, md_path, repo_root) if first.endswith(".py") else None
         if script is not None:
-            try:
-                source = script.read_text(encoding="utf-8")
-            except OSError:
+            source = read_text_for_check(script, unchecked)
+            if source is None:
                 continue
             for flag in FLAG_TOKEN.findall(token):
                 # Reject flag prefixes such as --dry when only --dry-run exists.
@@ -332,14 +352,14 @@ def sentences(line: str):
     return pieces + [line[start:]]
 
 
-def check_code_numbers(line: str, md_path: Path, repo_root: Path):
+def check_code_numbers(line: str, md_path: Path, repo_root: Path, unchecked):
     # A Markdown paragraph is written as one line, so the sentence, not the
     # line, is the unit in which a number and a file are one claim.
     for sentence in sentences(line):
-        yield from check_code_numbers_in_sentence(sentence, md_path, repo_root)
+        yield from check_code_numbers_in_sentence(sentence, md_path, repo_root, unchecked)
 
 
-def check_code_numbers_in_sentence(sentence: str, md_path: Path, repo_root: Path):
+def check_code_numbers_in_sentence(sentence: str, md_path: Path, repo_root: Path, unchecked):
     """Yield findings for backticked numbers absent from the sentence's sole referenced code file."""
     number_spans = [
         match.group(1).strip() for match in BACKTICK_TOKEN.finditer(sentence)
@@ -353,13 +373,10 @@ def check_code_numbers_in_sentence(sentence: str, md_path: Path, repo_root: Path
     ]
     if len(sources) != 1:
         return
-    try:
-        source_numbers = {
-            canonical_number(token)
-            for token in NUMBER_ONLY.findall(sources[0].read_text(encoding="utf-8"))
-        }
-    except (OSError, UnicodeDecodeError):
+    source = read_text_for_check(sources[0], unchecked)
+    if source is None:
         return
+    source_numbers = {canonical_number(token) for token in NUMBER_ONLY.findall(source)}
     for span in number_spans:
         if canonical_number(span) not in source_numbers:
             yield f"number {span} not found in {sources[0].name}"
@@ -398,27 +415,30 @@ HOOK_COMPONENT = re.compile(
     r"`(?P<path>[^`\s]+)`(?:, the [^,`]+)?, an? `(?P<event>[A-Za-z]+)` hook\b")
 
 
-def registered_hook_commands(repo_root: Path) -> dict:
+def registered_hook_commands(repo_root: Path, unchecked):
     """Map each hook event in .claude/settings.json to its hooks' commands."""
     settings = repo_root / ".claude" / "settings.json"
     if not settings.is_file():
         return {}
-    events = json.loads(settings.read_text(encoding="utf-8")).get("hooks", {})
+    text = read_text_for_check(settings, unchecked)
+    if text is None:
+        return None
+    events = json.loads(text).get("hooks", {})
     return {
         event: [hook.get("command", "") for group in groups for hook in group.get("hooks", [])]
         for event, groups in events.items()
     }
 
 
-def check_overview_hooks(line: str, repo_root: Path):
+def check_overview_hooks(line: str, repo_root: Path, unchecked):
     for match in HOOK_COMPONENT.finditer(line):
         path, event = match.group("path"), match.group("event")
         if PLACEHOLDER_SPAN.search(path):
             continue
         # Commands name the script after "$CLAUDE_PROJECT_DIR"/, so the path may follow a slash.
         named = re.compile(rf"(?:^|[\s\"'/]){re.escape(path.lstrip('/'))}(?=$|[\s\"'])")
-        if not any(named.search(command)
-                   for command in registered_hook_commands(repo_root).get(event, [])):
+        commands = registered_hook_commands(repo_root, unchecked)
+        if commands is not None and not any(named.search(command) for command in commands.get(event, [])):
             yield f"hook {path} is not registered under {event} in .claude/settings.json"
 
 
@@ -440,7 +460,7 @@ def files_named_in_backticks(line: str, md_path: Path, repo_root: Path):
 
 
 def check_overview_lock_and_environment_variable_sources(line: str, md_path: Path,
-                                                         repo_root: Path):
+                                                         repo_root: Path, unchecked):
     claims = [match.group(1).strip() for match in BACKTICK_TOKEN.finditer(line)
               if LOCK_NAME.fullmatch(match.group(1).strip())
               or ENVIRONMENT_VARIABLE.fullmatch(match.group(1).strip())]
@@ -449,8 +469,9 @@ def check_overview_lock_and_environment_variable_sources(line: str, md_path: Pat
     components = files_named_in_backticks(line, md_path, repo_root)
     if not components:
         return
-    sources = [component.read_text(encoding="utf-8", errors="replace")
-               for component in components]
+    sources = [read_text_for_check(component, unchecked) for component in components]
+    if None in sources:
+        return
     for claim in claims:
         in_order = re.compile(".*?".join(re.escape(part) for part in PLACEHOLDER_SPAN.split(claim)),
                               re.DOTALL)
@@ -557,26 +578,34 @@ def check_overview_planned_work(lines):
 PROGRAM_SUFFIXES = (".py", ".sh")
 
 
-def is_program(path: Path) -> bool:
+def is_program(path: Path, unchecked) -> bool:
     if path.suffix in PROGRAM_SUFFIXES:
         return True
-    with path.open("rb") as handle:
-        return handle.read(2) == b"#!"
+    try:
+        with path.open("rb") as handle:
+            return handle.read(2) == b"#!"
+    except OSError as error:
+        if unchecked is None:
+            raise
+        unchecked[path] = str(error)
+        return False
 
 
-def architecture_overview_unnamed_programs(path: Path, repo_root: Path):
+def architecture_overview_unnamed_programs(path: Path, repo_root: Path, unchecked=None):
     """Return the programs under the overview's nn-systems/<system>/, outside
     tests/, whose file name the overview does not contain."""
     system = architecture_overview_system(path, repo_root)
     if system is None:
         return []
     system_directory = repo_root / "nn-systems" / system
-    text = path.read_text(encoding="utf-8")
+    text = read_text_for_check(path, unchecked)
+    if text is None:
+        return []
     unnamed = []
     for candidate in sorted(system_directory.rglob("*")):
         parts = candidate.relative_to(system_directory).parts
         if (not candidate.is_file() or "tests" in parts[:-1]
-                or "__pycache__" in parts or not is_program(candidate)):
+                or "__pycache__" in parts or not is_program(candidate, unchecked)):
             continue
         # The lookbehind keeps handoff-supervisor.py from naming supervisor.py.
         if not re.search(rf"(?<![\w.-]){re.escape(candidate.name)}(?![\w-])", text):
@@ -615,12 +644,15 @@ def in_frozen_measured_data(path: Path, repo_root: Path) -> bool:
                for frozen in map(Path, FROZEN_MEASURED_DATA_DIRECTORIES))
 
 
-def lint_markdown(path: Path, repo_root: Path, architecture_overview_checks=False):
+def lint_markdown(path: Path, repo_root: Path, architecture_overview_checks=False, unchecked=None):
     """Yield (line number, problem). The nn-architecture-overview checks, one of
     which queries GitHub, run only when architecture_overview_checks is true."""
     if in_frozen_measured_data(path, repo_root):
         return
-    lines = path.read_text(encoding="utf-8").splitlines()
+    text = read_text_for_check(path, unchecked)
+    if text is None:
+        return
+    lines = text.splitlines()
     overview = (architecture_overview_checks
                 and architecture_overview_system(path, repo_root) is not None)
     for line_number, line in lines_outside_fenced_code_blocks(lines):
@@ -629,14 +661,14 @@ def lint_markdown(path: Path, repo_root: Path, architecture_overview_checks=Fals
         else:
             checks = (
                 check_dates(line),
-                check_backtick_paths(line, path, repo_root),
+                check_backtick_paths(line, path, repo_root, unchecked),
                 check_markdown_links(line, path, repo_root),
-                check_code_numbers(line, path, repo_root),
+                check_code_numbers(line, path, repo_root, unchecked),
             )
             if overview:
                 checks += (
-                    check_overview_hooks(line, repo_root),
-                    check_overview_lock_and_environment_variable_sources(line, path, repo_root),
+                    check_overview_hooks(line, repo_root, unchecked),
+                    check_overview_lock_and_environment_variable_sources(line, path, repo_root, unchecked),
                 )
         for check in checks:
             for problem in check:
@@ -645,8 +677,10 @@ def lint_markdown(path: Path, repo_root: Path, architecture_overview_checks=Fals
         yield from check_overview_planned_work(lines)
 
 
-def lint_json(path: Path):
-    text = path.read_text(encoding="utf-8")
+def lint_json(path: Path, unchecked=None):
+    text = read_text_for_check(path, unchecked)
+    if text is None:
+        return
     collisions = []
     try:
         json.loads(text, object_pairs_hook=lambda pairs: find_duplicate_keys(pairs, collisions))
@@ -669,6 +703,7 @@ def main(argv=None) -> int:
 
     findings = 0
     notes = []
+    unchecked = {}
     for name in arguments:
         path = Path(name)
         if not path.is_file():
@@ -679,12 +714,12 @@ def main(argv=None) -> int:
         if in_frozen_measured_data(path, REPO_ROOT):
             continue
         if path.suffix == ".json":
-            problems = lint_json(path)
+            problems = lint_json(path, unchecked)
         else:
-            problems = lint_markdown(path, REPO_ROOT, architecture_overview_checks=True)
+            problems = lint_markdown(path, REPO_ROOT, architecture_overview_checks=True, unchecked=unchecked)
             notes += [
                 f"{name}: note: {program} is a program the overview does not name"
-                for program in architecture_overview_unnamed_programs(path, REPO_ROOT)]
+                for program in architecture_overview_unnamed_programs(path, REPO_ROOT, unchecked)]
         try:
             for line_number, problem in problems:
                 print(f"{name}:{line_number}: {problem}")
@@ -696,6 +731,9 @@ def main(argv=None) -> int:
 
     for note in notes:
         print(note)
+    if unchecked:
+        report_unchecked_files(unchecked)
+        return 2
     return 1 if findings else 0
 
 

@@ -100,10 +100,14 @@ with tempfile.TemporaryDirectory() as workspace:
         check("a dialog the subagent tracker failed on is refused, not written, when the caller asks",
               str(error) == "The subagent tracker failed." and dialog.stat().st_mtime_ns != transcript.stat().st_ctime_ns,
               error)
-    written = refresh_common.refresh_session_dialog_file_unless_current_with_transcript(
-        failing_extractor, "ab12", True, transcript, dialog)
-    check("a dialog the subagent tracker failed on is written when the caller does not refuse it",
-          written and dialog.stat().st_mtime_ns == transcript.stat().st_ctime_ns, written)
+    try:
+        refresh_common.refresh_session_dialog_file_unless_current_with_transcript(
+            failing_extractor, "ab12", True, transcript, dialog)
+    except refresh_common.SubagentTurnsLeftOut as error:
+        check("a partial dialog is written and marked for retry when its caller permits it",
+              str(error) == "The subagent tracker failed." and dialog.stat().st_mtime_ns == 0, error)
+    else:
+        check("the caller learns that the written dialog is incomplete", False)
 
     replaced_from = []
     real_replace = os.replace
