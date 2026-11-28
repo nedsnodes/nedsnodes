@@ -360,13 +360,13 @@ def main(argv=None) -> int:
     run_log = pathlib.Path(args.run_log).resolve() if args.run_log else report.with_name(
         report.name + ".run.log")
     if not checkout.is_dir():
-        return fail(f"the checkout {checkout} is not a directory.")
+        parser.error(f"the checkout {checkout} is not a directory.")
     try:
         prompt = brief.read_text(encoding="utf-8")
-    except OSError as error:
-        return fail(f"could not read the brief {brief}: {error}")
+    except (OSError, UnicodeError) as error:
+        parser.error(f"could not read the brief {brief}: {error}")
     if not prompt.strip():
-        return fail(f"the brief {brief} is empty.")
+        parser.error(f"the brief {brief} is empty.")
     # A report left by an earlier run must not pass for this run's.
     report.unlink(missing_ok=True)
     last_message = report.with_name(report.name + ".last-message")

@@ -829,11 +829,20 @@ try:
 
     empty_brief = scratch / "empty.md"
     empty_brief.write_text("  \n")
-    completed = subprocess.run(
-        [sys.executable, str(PROGRAM), "-C", str(checkout), "--brief", str(empty_brief),
-         "-o", str(scratch / "r.md")], capture_output=True, text=True, check=False)
-    check("an empty brief exits 1 without running Codex",
-          completed.returncode == 1 and "is empty" in completed.stderr, completed.stderr)
+    bad_encoding = scratch / "bad-encoding.md"
+    bad_encoding.write_bytes(b"\xff")
+    for directory, input_file, reason in (
+        (scratch / "missing-checkout", brief, "not a directory"),
+        (checkout, scratch / "missing-brief", "could not read the brief"),
+        (checkout, bad_encoding, "could not read the brief"),
+        (checkout, empty_brief, "is empty"),
+    ):
+        completed = subprocess.run(
+            [sys.executable, str(PROGRAM), "-C", str(directory), "--brief", str(input_file),
+             "-o", str(scratch / "r.md")], capture_output=True, text=True, check=False)
+        check(f"invalid input {input_file.name} in {directory.name} exits 2 with usage and cause",
+              completed.returncode == 2 and "usage:" in completed.stderr
+              and reason in completed.stderr and not completed.stdout, completed.stderr)
 
     completed = subprocess.run(
         [sys.executable, str(PROGRAM), "--brief", str(brief), "-o", str(scratch / "r.md")],
