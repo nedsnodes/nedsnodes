@@ -89,8 +89,8 @@ alone stay silent, logged only: a stop on purpose, and a seat not seen running
 since the machine booted. A restart it carries out shows no
 notice: recover-crashed-seats.py opens a window on the Mac attached to the
 restarted seat's tmux session. The one exception is a restart whose recovery
-output holds `STARTED OUTSIDE THE USER'S SYSTEMD MANAGER` (the constant
-AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER):
+output holds `#agent_seat_started_outside_user_systemd_manager#` before
+`STARTED OUTSIDE THE USER'S SYSTEMD MANAGER`:
 the seat runs, but outside the user's systemd manager, so the test suites' low CPU weight does
 not reach it, and that gets a notice, with no alert. A page or window the Mac cannot be reached for,
 a notice's or a restarted seat's, stays pending and is tried again on every run. Every decision, each restart
@@ -191,11 +191,11 @@ MAC_BROWSER_PAGE_REFUSED_EXIT_STATUS = 2
 # the seat came up, but its window on the Mac did not open.
 RECOVERY_WINDOW_NOT_OPENED_EXIT_STATUS = 3
 
-# recover-crashed-seats.py's AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER.
-AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER = "STARTED OUTSIDE THE USER'S SYSTEMD MANAGER"
-
-# recover-crashed-seats.py's SEAT_ALREADY_RUNNING_REPORT_MARKER.
-SEAT_ALREADY_RUNNING_REPORT_MARKER = "ALREADY RUNNING"
+_recovery_specification = importlib.util.spec_from_file_location("recover_crashed_seats", RECOVERY_PROGRAM)
+_recovery = importlib.util.module_from_spec(_recovery_specification)
+_recovery_specification.loader.exec_module(_recovery)
+AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_HASHTAG = _recovery.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_HASHTAG
+AGENT_SEAT_ALREADY_RUNNING_HASHTAG = _recovery.AGENT_SEAT_ALREADY_RUNNING_HASHTAG
 
 # How a notice hands its problem on: the user sits at his Mac, whose windows onto
 # ned-box's agent-seats are where he types to them.
@@ -940,7 +940,7 @@ class Watcher:
             return
         exit_code, output = self.recover(seat)
         if (exit_code in (0, RECOVERY_WINDOW_NOT_OPENED_EXIT_STATUS)
-                and SEAT_ALREADY_RUNNING_REPORT_MARKER not in output):
+                and AGENT_SEAT_ALREADY_RUNNING_HASHTAG not in output):
             # Recovery exits 0 or 3 only once the seat's supervisor survived its settle: a sighting.
             self.mark_seen_running(record, self.now)
             self.record_recovery_attempt(record, died_at, "restarted")
@@ -950,7 +950,7 @@ class Watcher:
                 self.show({"attach_seat": seat})
             outside_lines = [
                 line.strip() for line in output.splitlines()
-                if AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER in line]
+                if AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_HASHTAG in line]
             if outside_lines:
                 self.write_notice(seat, "started-outside-user-systemd-manager",
                                   STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_NOTICE_TEMPLATE,

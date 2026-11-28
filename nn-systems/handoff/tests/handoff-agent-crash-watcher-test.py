@@ -405,23 +405,27 @@ def run_decision_cases(root: Path):
           harness.recoveries == ["merge-lane-2"], repr(harness.recoveries))
 
     harness = Harness(root / "already-running",
-                      recovery_result=(0, "merge-lane-2: ALREADY RUNNING — a supervisor is watching"))
+                      recovery_result=(0, "recover-crashed-seats: #agent_seat_already_running# merge-lane-2: "
+                                         "ALREADY RUNNING — a supervisor is watching"))
     crash_after_running(harness)
     check("a seat already running again when recovery runs gets no notice and no restart record",
           harness.notices() == []
           and not harness.state["seats"]["merge-lane-2"].get("recovery_attempts"),
           repr(harness.state))
 
-    check("the watcher's already-running marker is recovery's",
-          watcher_module.SEAT_ALREADY_RUNNING_REPORT_MARKER
-          == recovery_module.SEAT_ALREADY_RUNNING_REPORT_MARKER)
-    check("the watcher's started-outside-the-user-systemd-manager marker is recovery's",
-          watcher_module.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER
-          == recovery_module.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER)
-    check("the watcher's docstring quotes the text recovery prints, not only the constant's name",
-          f"`{recovery_module.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER}`"
+    check("the watcher's docstring quotes the hashtag and the words recovery prints",
+          f"`{recovery_module.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_HASHTAG}`"
+          in " ".join((watcher_module.__doc__ or "").split())
+          and f"`{recovery_module.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER}`"
           in " ".join((watcher_module.__doc__ or "").split()))
-    outside_line = ("recover-crashed-seats: merge-lane-2: "
+    harness = Harness(root / "already-running-words-without-the-hashtag",
+                      recovery_result=(0, "recover-crashed-seats: merge-lane-2: relaunched; "
+                                          "its old supervisor was ALREADY RUNNING elsewhere"))
+    crash_after_running(harness)
+    check("a recovery line holding the words ALREADY RUNNING without the hashtag is a restart",
+          harness.state["seats"]["merge-lane-2"].get("recovery_attempts"), repr(harness.state))
+    outside_line = ("recover-crashed-seats: "
+                    f"{recovery_module.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_HASHTAG} merge-lane-2: "
                     f"{recovery_module.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER}"
                     ": its tmux server could not be put in a scope, because systemd-run exited 1")
     harness = Harness(root / "started-outside-user-systemd-manager",
@@ -602,7 +606,8 @@ def run_handled_crash_cases(root: Path):
           == watcher_module.timestamp(restarted_at), repr(harness.state["seats"]))
 
     harness = Harness(root / "already-running-sighting",
-                      recovery_result=(0, "merge-lane-2: ALREADY RUNNING — a supervisor is watching"))
+                      recovery_result=(0, "recover-crashed-seats: #agent_seat_already_running# merge-lane-2: "
+                                         "ALREADY RUNNING — a supervisor is watching"))
     confirmed = crash_after_running(harness)
     record = harness.state["seats"]["merge-lane-2"]
     check("a seat already running when recovery runs counts as a sighting",
@@ -1744,7 +1749,8 @@ def run_user_alert_cases(root: Path):
           and len(harness.notices()) == 1 and [window[0] for window in harness.windows] == ["page"],
           repr(harness.decisions()))
     written = []
-    outside_line = ("recover-crashed-seats: merge-lane-2: "
+    outside_line = ("recover-crashed-seats: "
+                    f"{recovery_module.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_HASHTAG} merge-lane-2: "
                     f"{recovery_module.AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER}"
                     ": its tmux server could not be put in a scope, because systemd-run exited 1")
     harness = Harness(root / "alert-not-for-a-restart", recovery_result=(0, f"{outside_line}\n"

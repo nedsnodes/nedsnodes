@@ -802,12 +802,14 @@ with tempfile.TemporaryDirectory() as temporary:
           restart.recovery_command_for_seat("s", Path("/h")))
 
     # Whether a seat came up is read from the recovery tool's exit code and
-    # its report markers, so the two programs agree on what a failure is.
+    # the hashtag the recovery tool puts on its report line, so the two programs agree on what a failure is.
     check("a clean report with exit 0 is a seat that came up",
           restart.seat_came_up(0, "recover-crashed-seats: s: relaunched fresh") is True)
     for marker in restart.recovery.SEAT_NOT_RECOVERED_REPORT_MARKERS:
         check(f"a report marked {marker} is a seat that did not, whatever the exit code",
-              restart.seat_came_up(0, f"recover-crashed-seats: s: {marker} — x") is False)
+              restart.seat_came_up(0, "recover-crashed-seats: "
+                                   + restart.recovery.recovery_report_with_its_agent_seat_state_hashtag(
+                                       f"s: {marker} — x")) is False)
     check("a nonzero exit is a seat that did not, whatever the report says",
           restart.seat_came_up(1, "recover-crashed-seats: s: relaunched fresh") is False)
     # A seat already running when this program hands it over is not down

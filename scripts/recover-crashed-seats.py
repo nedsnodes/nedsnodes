@@ -141,10 +141,10 @@ and the test suites' low-CPU-weight slice, also under that manager, are
 siblings and the suites yield CPU to the seat. Cron, which runs the crash
 watcher that calls this tool, gives no XDG_RUNTIME_DIR, so it is set to
 /run/user/<uid> when missing. When the manager cannot be reached, the seat is
-still started, outside it, and a line holding
-`STARTED OUTSIDE THE USER'S SYSTEMD MANAGER` (the constant
-AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER) is printed to
-stderr with the reason; the crash watcher shows the user a notice for it.
+still started, outside it, and a line opening with
+`#agent_seat_started_outside_user_systemd_manager#` and holding
+`STARTED OUTSIDE THE USER'S SYSTEMD MANAGER` is printed to stderr with the
+reason; the crash watcher shows the user a notice for it.
 
 Usage:
   recover-crashed-seats.py <seat-name>... [--dry-run] [--fresh-session-from-conversation-tail]
@@ -160,6 +160,11 @@ window would run. On ned-box, after each seat a run brings up, it opens a
 window on the Mac attached to the seat, through open-mac-window-from-ned-box.py,
 unless a window is already attached; the flag is accepted there and changes
 nothing.
+
+Each seat's report line opens with `#agent_seat_not_recovered#` when the seat
+is still down, or `#agent_seat_already_running#` when it needed no recovery,
+before the words that say why; the restart at login and the crash watcher read
+those hashtags.
 
 Exit status: 0 when every named seat is recovered or already running; 1 when
 any is not; 3 when every seat is recovered but a window on the Mac did not
@@ -281,8 +286,9 @@ def run_tmux(*arguments_after_tmux, socket_name=None, environment=None, command_
         return None
 
 
-# The crash watcher finds this text in recovery's output and shows the user a notice.
 AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER = "STARTED OUTSIDE THE USER'S SYSTEMD MANAGER"
+# The crash watcher finds this hashtag in recovery's output and shows the user a notice.
+AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_HASHTAG = "#agent_seat_started_outside_user_systemd_manager#"
 
 
 def agent_seat_tmux_server_user_systemd_scope_command_prefix_or_manager_unreachable_reason(
@@ -839,7 +845,7 @@ def launch_seat(name: str, seat_directory: Path, handoff_directory: Path,
             name, environment))
     if scope_failure is not None:
         # A seat that does not start is worse than one at equal CPU priority with the test suites.
-        print(f"recover-crashed-seats: {name}: "
+        print(f"recover-crashed-seats: {AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_HASHTAG} {name}: "
               f"{AGENT_SEAT_STARTED_OUTSIDE_USER_SYSTEMD_MANAGER_RECOVERY_REPORT_LINE_MARKER}"
               f": the agent-seat's tmux server could not be put in a scope of nedlern's systemd "
               f"user manager on ned-box, because {scope_failure}\n"
@@ -1091,7 +1097,7 @@ def came_up_or_failure_report(name: str, handoff_directory: Path,
     return f"{name}: LAUNCHED BUT DID NOT COME UP — {why}{offer}"
 
 
-# Count every report that leaves a seat down; ALREADY RUNNING needs no recovery.
+# Every report that leaves a seat down holds one of these; ALREADY RUNNING needs no recovery.
 SEAT_ASKED_TO_BE_CONSULTED_REPORT_MARKER = "NOT RELAUNCHED, AT ITS OWN REQUEST"
 SEAT_NOT_RELAUNCHED_AFTER_RECORDED_EXIT_REPORT_MARKER = "NOT RELAUNCHED AFTER A RECORDED EXIT"
 SEAT_NOT_RESTARTED_AFTER_THE_OPERATORS_YES_REPORT_MARKER = "NOT RESTARTED"
@@ -1104,6 +1110,8 @@ SEAT_NOT_RECOVERED_REPORT_MARKERS = (
     SEAT_NOT_RESTARTED_AFTER_THE_OPERATORS_YES_REPORT_MARKER,
 )
 SEAT_ALREADY_RUNNING_REPORT_MARKER = "ALREADY RUNNING"
+AGENT_SEAT_NOT_RECOVERED_HASHTAG = "#agent_seat_not_recovered#"
+AGENT_SEAT_ALREADY_RUNNING_HASHTAG = "#agent_seat_already_running#"
 # A predicted refusal needs operator action anyway; a running seat must keep its window.
 LEFTOVER_IDLE_SHELL_PREDICTIONS_REPORTED_WITHOUT_ASKING = {
     "refuse": "REFUSED",
@@ -1112,6 +1120,15 @@ LEFTOVER_IDLE_SHELL_PREDICTIONS_REPORTED_WITHOUT_ASKING = {
 LEFTOVER_IDLE_SHELL_NOT_PROVEN_AGAIN_REPORT = (
     f"{SEAT_NOT_RESTARTED_AFTER_THE_OPERATORS_YES_REPORT_MARKER} — something may have "
     "started in it while you were answering, so it was left alone")
+
+
+def recovery_report_with_its_agent_seat_state_hashtag(report: str) -> str:
+    """Put the hashtag of the seat's state before the report, or return it unchanged."""
+    if any(marker in report for marker in SEAT_NOT_RECOVERED_REPORT_MARKERS):
+        return f"{AGENT_SEAT_NOT_RECOVERED_HASHTAG} {report}"
+    if SEAT_ALREADY_RUNNING_REPORT_MARKER in report:
+        return f"{AGENT_SEAT_ALREADY_RUNNING_HASHTAG} {report}"
+    return report
 
 
 def recover_seat(name: str, agents_root: Path, handoff_directory: Path,
@@ -1507,10 +1524,11 @@ def main(argv=None) -> int:
             window_clause, window_failed = window_clause_for_a_seat_left_running(name)
             report = report[:-len(reach)] + window_clause + reach
             windows_not_opened += window_failed
+        report = recovery_report_with_its_agent_seat_state_hashtag(report)
         print(f"recover-crashed-seats: {report}")
         if not arguments.dry_run:
             append_to_recovery_log(handoff_directory, report)
-        if any(marker in report for marker in SEAT_NOT_RECOVERED_REPORT_MARKERS):
+        if report.startswith(AGENT_SEAT_NOT_RECOVERED_HASHTAG):
             not_recovered += 1
     if not_recovered:
         return 1
