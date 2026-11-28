@@ -11,6 +11,7 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#approval_walk_item_in_category_must_fix_now#` — the walk-document line that puts an approval-walk item in the category of a fix that must be made now.
 - `#approval_walk_item_waits_on#` — the walk-document line under an approval-walk item that names, by its heading, an item it must be shown after.
 - `#approval_walk_paused#` — the walk-minutes line that pauses an approval-walk, with the user's words; until a later `#next_to_present#` line, the walk has no item waiting.
+- `#approval_walk_text_changed_by_advisor#` — written in an approval-walk item right after text the agent changed on the advisor's advice.
 - `#approved_after_advisor#` — written in the walk-minutes right after "approved" when the user answered Aa, approving after an advisor check.
 - `#approved_obvious#` — written in the walk-minutes right after "approved" when the user answered AO, approving an item he found obvious.
 - `#canary_fail#` — the last line an nn-canary-test prints, with exit 1, when the outside program it checks did not behave as the project relies on.

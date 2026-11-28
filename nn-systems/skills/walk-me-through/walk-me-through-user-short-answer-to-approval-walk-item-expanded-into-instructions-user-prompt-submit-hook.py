@@ -285,7 +285,7 @@ AA_SKILL_TEXT = (
     "**Aa** approves after an advisor check. Write in the conversation, for the advisor, the question "
     "whether anything it sees would change what the item decides, then the six questions listed in the "
     "section \"Advisor\", then call the advisor. If the advisor finds something that would change what the "
-    "item decides, revise the item, mark what changed [advisor], and show the revised item again for the "
+    "item decides, revise the item, mark what changed `#approval_walk_text_changed_by_advisor#`, and show the revised item again for the "
     "user to answer. Otherwise record the approval and go to the next item; what the advisor raised "
     "outside the item becomes a new item in the walk or a loose end. If the call fails, say so and show "
     "the item again, unapproved; the user may then answer A to approve it without the check."
