@@ -98,7 +98,7 @@ if mode.startswith("stopped"):
     time.sleep(2)  # The check is stopped while it waits for this fast read.
     sys.exit(0)
 if mode == "failed":
-    print("FAILED: the stand-in cold-read-cell failed twice")
+    print("cold-read-fast-read: #cold_read_fast_read_failed# FAILED (the stand-in cold-read-cell failed twice)")
     sys.exit(1)
 if mode == "silent-exit":
     sys.exit(3)
@@ -116,7 +116,7 @@ if mode == "path-then-exit-1":
 if mode == "target-changed":
     sys.stderr.write("cold-read-fast-read: #cold_read_target_changed_during_run: the target changed while it was read.\n")
 if mode in ("record-not-shipped", "record-not-shipped-then-exit-4", "record-not-shipped-then-killed"):
-    sys.stderr.write("cold-read-fast-read: record: FAILED: ned-box could not be reached (ssh exit 255); "
+    sys.stderr.write("cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ned-box could not be reached (ssh exit 255); "
                      "the record stays on disk.\n")
     sys.stdout.flush()
     sys.stderr.flush()
@@ -125,7 +125,7 @@ if mode in ("record-not-shipped", "record-not-shipped-then-exit-4", "record-not-
         os.kill(os.getpid(), signal.SIGTERM)
     sys.exit(4 if mode == "record-not-shipped-then-exit-4" else 1)
 if mode == "record-refused":
-    sys.stderr.write("cold-read-fast-read: record: REFUSED: already in the store with different content.\n")
+    sys.stderr.write("cold-read-fast-read: #cold_read_record_not_shipped# record: cold-read-record-ship: #cold_read_record_ship_refused# REFUSED: already in the store with different content.\n")
     sys.exit(1)
 '''
 
@@ -2210,7 +2210,7 @@ def test_a_failed_fast_read_stops_the_check():
     result = case.run("check", "--obvious", mode="failed")
     check("a FAILED fast read is printed as it is, with exit 1",
           result.returncode == 1
-          and result.stdout.split("\n")[0] == "FAILED: the stand-in cold-read-cell failed twice"
+          and result.stdout.split("\n")[0] == "cold-read-fast-read: #cold_read_fast_read_failed# FAILED (the stand-in cold-read-cell failed twice)"
           and "The item stays waiting" in result.stdout
           and f"{check_command_for(case, '--obvious', '--user-reply-as-typed', 'a')}` again" in result.stdout,
           described(result))
@@ -2431,14 +2431,14 @@ def test_a_record_line_does_not_excuse_an_exit_other_than_1():
         check(f"a fast read that did not ship its record but exits {exit_code} is reported as FAILED",
               result.returncode == 1 and result.stdout.startswith("FAILED: ")
               and f"exited {exit_code} " in result.stdout
-              and "its stderr: cold-read-fast-read: record: FAILED: ned-box could not be reached" in result.stdout
+              and "its stderr: cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ned-box could not be reached" in result.stdout
               and case.minutes.read_text() == before, described(result))
 
 
 def test_a_fast_read_whose_record_was_refused_is_used_and_reported():
     case = Case()
     result = case.run("check", mode="record-refused")
-    note = "cold-read-fast-read: record: REFUSED: already in the store with different content."
+    note = "cold-read-fast-read: #cold_read_record_not_shipped# record: cold-read-record-ship: #cold_read_record_ship_refused# REFUSED: already in the store with different content."
     check("a fast read that exits 1 because the store refused its record is used, and the refusal reported, "
           "with exit 2",
           result.returncode == 2
@@ -2459,7 +2459,7 @@ def test_the_real_fast_read_whose_record_did_not_ship_is_used():
           "answer is recorded, each status line names its report, and the record line is reported, with exit 2",
           result.returncode == 2
           and result.stdout.count(f"fast read had to be run ({records}/") == 2
-          and result.stdout.count("did not ship its record: cold-read-fast-read: record: FAILED: ") == 2
+          and result.stdout.count("did not ship its record: cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ") == 2
           and "the user answered approved" in case.minutes.read_text()
           and len(list(records.glob("*/cold-read-fast-read.md"))) == 2, described(result))
 
@@ -2467,7 +2467,7 @@ def test_the_real_fast_read_whose_record_did_not_ship_is_used():
 def test_a_fast_read_whose_record_was_not_shipped_is_reported():
     case = Case()
     result = case.run("check", mode="record-not-shipped")
-    note = ("cold-read-fast-read: record: FAILED: ned-box could not be reached (ssh exit 255); the record stays "
+    note = ("cold-read-fast-read: #cold_read_record_not_shipped# record: FAILED: ned-box could not be reached (ssh exit 255); the record stays "
             "on disk.")
     check("a fast read that exits 1 because it did not ship its record is used, and has its line in the status "
           "line, in the minutes, and in what to do, with exit 2",
@@ -6518,8 +6518,8 @@ def test_a_read_ahead_that_failed_or_ended_without_an_outcome_is_run_again():
     check("a read ahead that failed is run again before the item is shown, naming the failure",
           result.returncode == 0
           and result.stdout.startswith("item 4 of 5: its cold-read-fast-read, of its text as it stands, had to be run "
-                                       "now, because the read started ahead of it failed: FAILED: the stand-in "
-                                       "cold-read-cell failed twice: ")
+                                       "now, because the read started ahead of it failed: cold-read-fast-read: "
+                                       "#cold_read_fast_read_failed# FAILED (the stand-in cold-read-cell failed twice): ")
           and times_read(case, "## Item 4 of 5: four") == 2, described(result))
     case = item_read_case()
     answered_and_closed(case)
@@ -6569,7 +6569,7 @@ def test_a_read_that_fails_in_the_read_step_says_not_to_present_the_item():
     result = case.run(WAITING_ITEM_READ, mode="failed")
     lines = result.stdout.rstrip("\n").split("\n")
     check("a failed read of the waiting item exits 1 and says not to present it, with the command to run again",
-          result.returncode == 1 and lines[0] == "FAILED: the stand-in cold-read-cell failed twice"
+          result.returncode == 1 and lines[0] == "cold-read-fast-read: #cold_read_fast_read_failed# FAILED (the stand-in cold-read-cell failed twice)"
           and lines[1].startswith("item 3 of 5 has had no cold-read-fast-read of its text as it stands, so do not "
                                   "present it yet")
           and lines[2] == (f"Run `python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ} --cwd "

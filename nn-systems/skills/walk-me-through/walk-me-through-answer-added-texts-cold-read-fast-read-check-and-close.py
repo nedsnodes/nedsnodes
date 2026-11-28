@@ -231,13 +231,13 @@ answer, or its one set of part answers, for every item that line names; CHECK
 then tells the agent to add a `#next_to_present` line naming one of those items
 before each check run.
 
-A fast read that prints a line opening FAILED, or exits nonzero, ends CHECK
+A fast read that prints its failure line, which holds #cold_read_fast_read_failed#, or exits nonzero, ends CHECK
 before the walk-minutes are written: the program prints that line, or a FAILED
 line of its own, then says the item stays waiting and tells the agent to ask
 the user whether to run check again, and exits 1. The one exception is a fast
 read that names its report on stdout and exits 1 because its record did not
-reach the log-store, which its stderr says in a `record: FAILED` or
-`record: REFUSED` line: its report is used like any other. A fast read whose
+reach the log-store, which its stderr says in a line marked
+`#cold_read_record_not_shipped#`: its report is used like any other. A fast read whose
 report is used but says on stderr that its record was not
 shipped, or that its target changed during the read, has that line added to its
 status line. An unshipped record, a log-store this machine cannot reach, and a
@@ -994,8 +994,10 @@ STATUS_ALREADY_DONE = "`{mark}` text {number}, \"{excerpt}\": fast read already 
 STATUS_HAD_TO_BE_RUN = "`{mark}` text {number}, \"{excerpt}\": fast read had to be run ({record})."
 STATUS_FAST_READ_NOTE = " The fast read also said: {note}"
 # The fast read reports these on stderr after writing its report; an unshipped record also makes it exit 1.
-FAST_READ_RECORD_NOT_SHIPPED_MARKERS = ("cold-read-fast-read: record: FAILED",
-                                        "cold-read-fast-read: record: REFUSED")
+# nn-systems/cold-read/cold-read-fast-read.py's own openings, which its run from the Mac also gives the lines an
+# older ned-box clone relays.
+FAST_READ_RECORD_NOT_SHIPPED_MARKERS = ("cold-read-fast-read: #cold_read_record_not_shipped#",)
+FAST_READ_FAILED_LINE_OPENING = "cold-read-fast-read: #cold_read_fast_read_failed# FAILED ("
 FAST_READ_NOTE_MARKERS = FAST_READ_RECORD_NOT_SHIPPED_MARKERS + ("#cold_read_target_changed_during_run",)
 HOLD_ANSWER_FLAG = "--hold-answer-until-new-item-answered"
 CHECK_JUDGEMENT_LINES = (
@@ -2383,7 +2385,7 @@ def run_fast_read(text, name, fast_read_program, after_removal):
         result = subprocess.run([sys.executable, str(fast_read_program), "--target", str(target),
                                  FAST_READ_WITHOUT_QUESTION_4_OPTION], capture_output=True, text=True)
     lines = result.stdout.strip().split("\n")
-    failed = [line for line in lines if line.startswith("FAILED")]
+    failed = [line for line in lines if line.startswith(FAST_READ_FAILED_LINE_OPENING)]
     if failed:
         raise FastReadFailed(failed[0])
     notes = [line.strip() for line in result.stderr.split("\n")

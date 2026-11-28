@@ -1609,7 +1609,7 @@ def test_all_a_and_all_ao():
               and "that text" not in lines[1]
               and any(line.startswith("If that makes a change, first save each text the change adds that has not had "
                                       "a fast read to a scratch file, run `python3 ") for line in lines[2:])
-              and any(line.startswith("If a fast read prints a line opening FAILED") for line in lines[2:]),
+              and any(line.startswith("If a fast read prints a line holding #cold_read_fast_read_failed#") for line in lines[2:]),
               f"lines {lines!r}")
     lines = Case(next_to_present="items 3 and 4 of 9").lines("all a")
     check("all a over an item with no recommendation reports that item",
