@@ -15,9 +15,9 @@ Documents that only report what happened are not reviewable the way work-directi
 
 "Record" is rejected as the umbrella: it carries three meanings already (a database row, records management's authoritative account, an architecture decision record), and the files it would cover are not one kind. "Specimen" is rejected for `-capture` because this project already uses it for an example of a kind of thing shown to a reviewer ("a specimen input is listed read-first and marked not-for-review"); a captured payload is not an example of a kind.
 
-**The mechanism.** The review instruments — `scripts/sanity-check-attacks.py` and md-review — refuse a target whose name ends in a genre suffix, and say which rule fired rather than silently doing nothing. A suffix list can miss a genre nobody anticipated; announcing the skip is what makes that visible instead of silent.
+**The mechanism.** The review instruments — `scripts/sanity-check-adversarial-prompts.py` and the cold read — refuse a target whose name ends in a genre suffix, and say which rule fired rather than silently doing nothing. A suffix list can miss a genre nobody anticipated; announcing the skip is what makes that visible instead of silent.
 
-**The rename pass.** Four to six committed files are genuinely in this class, among them `docs/cross-project/git-gatekeeper-first-live-check-in-record.md` (a captured payload) and `docs/issues/3-slice-6-review-evidence-not-built.md` (a decision account). Each rename fixes inbound citations first, so nothing points at a dead path.
+**The rename pass.** Four to six committed files are genuinely in this class, among them `nn-systems/main-gatekeeper/main-gatekeeper-first-live-check-in-record.md` (a captured payload) and `docs/issues/3-slice-6-review-evidence-not-built.md` (a decision account). Each rename fixes inbound citations first, so nothing points at a dead path.
 
 **Open, for the user:** whether the two gitignored working directories `sanity-check-records/` and `md-review-records/` rename to match, or keep their name as machine-local material that never enters the review path anyway.
 
