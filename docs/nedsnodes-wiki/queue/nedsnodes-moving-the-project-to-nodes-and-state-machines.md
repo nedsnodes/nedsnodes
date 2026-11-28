@@ -195,7 +195,7 @@ This section names the steps that need judgment, as `CLAUDE.md` requires. Everyt
 | Pick an output state where the choice is a judgment | Yes | The node's agent, from its fixed list |
 | Say whether a program should become a node | Yes | The agent reviewing that program (section 11) |
 
-Each writer and each reviewing agent starts as a fresh-agent and stays the same agent for later rounds on that document, up to the loop's limit (item 9.2; for the writer, item 12). A writer revises its own text from the cold-read reports. A pull request's fix-round keeps its forked subagent (item 9.2). The runner, not the writer, counts cold-read rounds, and after the second round the document moves on whatever that read reports (item 12).
+Each writer and each reviewing agent starts as a fresh-agent and stays the same agent for later rounds on that document, up to the loop's limit, as design-to-main's rule that an agent lives through its design version already says (`docs/design-to-main/design-to-main-state-machine.system.design.md`, §1, user-ruled 2026-09-11); the writer's limit is item 12's. A writer revises its own text from the cold-read reports. A pull request's fix-round keeps its forked subagent, as `scripts/pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-answered-check.py` dispatches it. The runner, not the writer, counts cold-read rounds, and after the second round the document moves on whatever that read reports (item 12).
 
 The runner withholds the Agent tool from a writer it launches, so that the writer cannot hand its reports to a fresh-agent.
 
