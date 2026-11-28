@@ -345,6 +345,9 @@ _claude_code_session_transcript_lookup_and_text_search_common_spec.loader.exec_m
 # Live supervisors resolve this path at import; moving the extractor would break those processes.
 EXTRACTOR_PATH = SCRIPTS_DIRECTORY / "handoff-extract-conversation.py"
 CLEAN_WORKTREES_PATH = SCRIPTS_DIRECTORY / "clean-worktrees.py"
+# The cleaner's file, loaded as a module for the hashtags its lines carry; tests replace
+# CLEAN_WORKTREES_PATH with stand-in programs, but never this.
+CLEAN_WORKTREES_OUTCOME_HASHTAGS_MODULE_PATH = SCRIPTS_DIRECTORY / "clean-worktrees.py"
 FINISHED_WORKTREE_REMOVAL_TIMEOUT_SECONDS = 180
 WORKTREE_CLEANER_STOP_GRACE_SECONDS = 5
 HANDOFF_POLL_SECONDS = 2.0
@@ -2011,19 +2014,25 @@ def remove_finished_worktrees_at_handoff(
         stdout, stderr = cleaner.communicate(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         partial = stop_worktree_cleaner_process_group(cleaner)
-        return (summarize_worktree_cleanup_output(partial.splitlines())
+        return (worktree_cleanup_output_summary_or_why_not(partial.splitlines(),
+                                                           *worktree_cleaner_module_or_why_not())
                 + f"; clean-worktrees.py --remove did not finish in {timeout_seconds} s "
                   f"and was stopped, so the counts cover only what it did before the stop")
     except (OSError, subprocess.SubprocessError) as error:
         return (f"worktree cleanup: clean-worktrees.py could not be run: "
                 f"{type(error).__name__}: {error}")
-    report = summarize_worktree_cleanup_output(stdout.splitlines())
+    cleaner_tags, why_not = worktree_cleaner_module_or_why_not()
+    report = worktree_cleanup_output_summary_or_why_not(stdout.splitlines(), cleaner_tags, why_not)
     # Only a run that finished prints this line; any other nonzero exit aborted or was refused.
-    finished = CLEANER_FINISHED_WITH_FAILURES_LINE in stdout.splitlines()
+    finished = (cleaner_tags is not None
+                and cleaner_tags.FINISHED_WITH_FAILURES_LINE in stdout.splitlines())
     if cleaner.returncode != 0 and not finished:
         # A stopped run's cause line is followed by next-step lines; any other failure's cause is last.
         lines = stderr.strip().splitlines()
-        stopped = [line for line in lines if line.startswith(CLEANER_STOPPED_LINE_START)]
+        stopped = ([] if cleaner_tags is None else
+                   [cleaner_tags.outcome_line_hashtags_and_words(line)[1] for line in lines
+                    if cleaner_tags.WORKTREE_CLEANER_STOPPED_HASHTAG
+                    in cleaner_tags.outcome_line_hashtags_and_words(line)[0]])
         detail = (stopped or lines[-1:] or ["no detail"])[0]
         report += f"; clean-worktrees.py exited {cleaner.returncode}: {detail}"
     return report
@@ -2047,53 +2056,52 @@ def stop_worktree_cleaner_process_group(cleaner) -> str:
     return partial
 
 
-CLEANER_FINISHED_WITH_FAILURES_LINE = "clean-worktrees: finished; each failure is named above"
-CLEANER_STOPPED_LINE_START = "clean-worktrees: stopped, because "
-# clean-worktrees.py prints this for each record that did not ship; the line ends with the shipper's own line.
-KEPT_FOR_RECORDS_MARKER = (": record shipment FAILED, worktree kept — removing it would delete "
-                           "a record the log-store does not hold: ")
-# clean-worktrees.py prints these two lines after a log-of-removals FAILED line: the command that
-# writes the unwritten line, and what to do if it fails; without them the report loses that line.
-LOG_OF_REMOVALS_RECORD_BY_HAND_PHRASES = (
-    ": to record it, run this once: ",
-    ": if that printf command fails too, do not run scripts/clean-worktrees.py again; ")
+def worktree_cleaner_module_or_why_not():
+    """Return (clean-worktrees.py loaded as a module, for the hashtags its lines carry, None), or
+    (None, why it could not be loaded)."""
+    # Loaded when a cleanup ends, not at import: a supervisor runs for days, and the cleaner it
+    # runs is the one on disk now, so its hashtags must come from that same file.
+    try:
+        specification = importlib.util.spec_from_file_location(
+            "clean_worktrees", CLEAN_WORKTREES_OUTCOME_HASHTAGS_MODULE_PATH)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+    except Exception as error:  # noqa: BLE001 - any failure to load leaves the handoff to go on
+        return None, f"{type(error).__name__}: {error}"
+    return module, None
 
 
-# clean-worktrees.py prints this for a branch it deleted with git branch -D, which held commits
-# origin/main lacks, so it is not counted among the branches with nothing beyond main.
-FORCE_DELETED_BRANCH_MARKER = ": deleted with git branch -D, its last commit "
+def worktree_cleanup_output_summary_or_why_not(lines, cleaner, why_not) -> str:
+    """Return summarize_worktree_cleanup_output's line, or why the output could not be summed up."""
+    if cleaner is None:
+        return (f"worktree cleanup: its {len(lines)} line(s) of output could not be summed up, "
+                f"because clean-worktrees.py could not be loaded to read their hashtags: {why_not}")
+    return summarize_worktree_cleanup_output(lines, cleaner)
 
 
-def summarize_worktree_cleanup_output(lines) -> str:
-    """Return one report line from the cleaner's output."""
-    removed = sum(1 for line in lines if ": removed" in line)
-    force_deleted = [line for line in lines
-                     if line.startswith("branch ") and FORCE_DELETED_BRANCH_MARKER in line]
-    deleted = sum(1 for line in lines
-                  if (line.startswith("branch ") and ": deleted" in line
-                      and FORCE_DELETED_BRANCH_MARKER not in line)
-                  or (": removed" in line and line.endswith(" deleted")))
-    kept_for_records = [line for line in lines if KEPT_FOR_RECORDS_MARKER in line]
-    # A kept-for-records line holds FAILED, so it is counted here and not again among the failures.
-    failed = [line for line in lines if "FAILED" in line and KEPT_FOR_RECORDS_MARKER not in line]
-    refused = [line for line in lines if "left in place" in line]
-    unchecked = [line for line in lines
-                 if ": kept — " in line
-                 and ("(lsof)" in line or "lsof is not installed" in line)]
-    discarded = [line for line in lines if ": discarded with it " in line]
-    snapshots_deleted = [line for line in lines
-                         if line.startswith("work-snapshot ") and ": deleted, first listed " in line]
+def summarize_worktree_cleanup_output(lines, cleaner) -> str:
+    """Return one report line from the cleaner's output, counted by the hashtags its lines carry."""
+    ws = cleaner.work_snapshots
+    tagged = [cleaner.outcome_line_hashtags_and_words(line) for line in lines]
+
+    def words_of_lines_tagged(hashtag):
+        return [words for hashtags, words in tagged if hashtag in hashtags]
+
+    removed = len(words_of_lines_tagged(cleaner.WORKTREE_REMOVED_HASHTAG))
+    force_deleted = words_of_lines_tagged(cleaner.WORKTREE_BRANCH_FORCE_DELETED_HASHTAG)
+    deleted = len(words_of_lines_tagged(cleaner.WORKTREE_BRANCH_DELETED_HASHTAG))
+    kept_for_records = words_of_lines_tagged(cleaner.WORKTREE_KEPT_FOR_RECORDS_HASHTAG)
+    failed = words_of_lines_tagged(cleaner.WORKTREE_CLEANER_STEP_FAILED_HASHTAG)
+    refused = words_of_lines_tagged(cleaner.WORKTREE_BRANCH_LEFT_IN_PLACE_HASHTAG)
+    unchecked = words_of_lines_tagged(cleaner.WORKTREE_KEPT_VACANCY_NOT_CHECKED_HASHTAG)
+    discarded = words_of_lines_tagged(cleaner.WORKTREE_FILES_DISCARDED_HASHTAG)
+    snapshots_deleted = words_of_lines_tagged(ws.WORK_SNAPSHOT_DELETED_HASHTAG)
     # A duplicate held nothing a newer leftover does not, so only its count is worth a line.
-    duplicates_deleted = [line for line in lines
-                          if line.startswith("work-snapshot ") and ": deleted, a duplicate " in line]
-    snapshot_failures = [line for line in lines
-                         if line.startswith("work-snapshots: could not be listed")
-                         or (line.startswith("work-snapshot ")
-                             and (": deletion failed: " in line
-                                  or ": could not be checked, kept: " in line))]
-    announced = {line.partition(": removing it will discard ")[0]:
-                 line.partition(": removing it will discard ")[2]
-                 for line in lines if ": removing it will discard " in line}
+    duplicates_deleted = words_of_lines_tagged(ws.WORK_SNAPSHOT_DUPLICATE_DELETED_HASHTAG)
+    snapshot_failures = words_of_lines_tagged(ws.WORK_SNAPSHOT_CLEANUP_FAILED_HASHTAG)
+    announced = {words.partition(": removing it will discard ")[0]:
+                 words.partition(": removing it will discard ")[2]
+                 for words in words_of_lines_tagged(cleaner.WORKTREE_REMOVAL_WILL_DISCARD_FILES_HASHTAG)}
     # Each worktree lands in one bucket: confirmed, failed (with what it announced), or unconfirmed.
     settled = ({line.partition(": discarded with it ")[0] for line in discarded}
                | {line.partition(": removal FAILED")[0] for line in failed})
@@ -2115,13 +2123,12 @@ def summarize_worktree_cleanup_output(lines) -> str:
         report += (f"; {len(unconfirmed)} removal(s) started but not confirmed, so these "
                    f"files may be partly gone: " + "; ".join(unconfirmed))
     if failed:
-        record_by_hand = [line for line in lines
-                          if any(phrase in line for phrase in LOG_OF_REMOVALS_RECORD_BY_HAND_PHRASES)]
+        record_by_hand = words_of_lines_tagged(cleaner.WORKTREE_REMOVALS_LOG_RECORD_BY_HAND_HASHTAG)
         report += f"; {len(failed)} failed: " + "; ".join(failed)
         if record_by_hand:
             report += "; to record by hand what the log of removals is missing: " + "; ".join(record_by_hand)
     if kept_for_records:
-        kept_worktrees = {line.partition(KEPT_FOR_RECORDS_MARKER)[0] for line in kept_for_records}
+        kept_worktrees = {line.partition(": ")[0] for line in kept_for_records}
         report += (f"; {len(kept_worktrees)} worktree(s) kept because a record did not "
                    f"reach the log-store: " + "; ".join(kept_for_records))
     if refused:
