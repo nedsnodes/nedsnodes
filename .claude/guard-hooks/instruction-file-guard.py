@@ -62,11 +62,30 @@ MISSING_SESSION_DIRECTORY_DENY_MESSAGE = (
     "unrelated checkout approve this write."
 )
 
-# The marker's opening words stay exact: the glossary's obvious-fix marker is
-# defined by them, and a check that exempts such markers would match on them.
+OBVIOUS_FIX_MARKER_HASHTAG = "#obvious_error_fix#"
+# Marker files written before the hashtag, or before hashtags took their closing `#`, still
+# open with one of the later forms.
+OBVIOUS_FIX_MARKER_OPENING_FORMS = (OBVIOUS_FIX_MARKER_HASHTAG, OBVIOUS_FIX_MARKER_HASHTAG[:-1],
+                                    "Obvious fix under CLAUDE.md's standing approval:")
+
+
+def obvious_fix_marker_fix_words(marker_words):
+    """The words after an obvious-fix marker's opening, or None when the marker words are not an
+    obvious-fix marker."""
+    for opening in OBVIOUS_FIX_MARKER_OPENING_FORMS:
+        if not marker_words.startswith(opening):
+            continue
+        rest = marker_words[len(opening):]
+        # The open form must end where its word ends, so a longer word that starts with it is not it.
+        if opening.startswith("#") and rest[:1] not in ("", " ", "\t", "\n"):
+            continue
+        return rest
+    return None
+
+
 OBVIOUS_FIX_MARKER_LINES = (
-    "\nFor an obvious error, write \"Obvious fix under CLAUDE.md's standing approval:\" "
-    "and what you are fixing into {marker} at the root of your session's own checkout, "
+    "\nFor an obvious-error, write `" + OBVIOUS_FIX_MARKER_HASHTAG + "` as the first word, "
+    "then what you are fixing, into {marker} at the root of your session's own checkout, "
     "then resubmit.\n"
     "If the edit then does not happen, delete {marker}."
 )

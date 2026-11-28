@@ -99,8 +99,6 @@ SEAT_BRIEF_FILE_NAME = "CLAUDE.local.md"
 AGENT_SEAT_FILES_STOCKED_KEY = "agent_seat_files_stocked"
 COPY_MODE = 0o600
 APPROVAL_MARKER_NAME = ".walk-approved"
-# The obvious-fix marker's opening words, as instruction-file-guard.py's refusal gives them.
-OBVIOUS_FIX_MARKER_PREFIX = "Obvious fix under CLAUDE.md's standing approval:"
 DIFF_MAX_LINES = 40
 DIFF_MAX_CHARACTERS = 4000
 
@@ -1607,7 +1605,8 @@ def approve(pairs, cwd: Path):
                       "the exception on the approval page the change falls under, or `on neither "
                       "list`, so it approves nothing. Put that on its second line and run this "
                       "command again")
-    obvious_fix = words.startswith(OBVIOUS_FIX_MARKER_PREFIX)
+    fix_words = guard().obvious_fix_marker_fix_words(words)
+    obvious_fix = fix_words is not None
     if pre_approved:
         # One log field: a tab in the agent's words would split it.
         exception = " ".join(words.splitlines()[1].split())
@@ -1618,7 +1617,7 @@ def approve(pairs, cwd: Path):
             return (f"A change to the guarded file {path} that needs no approval as "
                     f"`{exception}`; the marker was written after the change, so it needs your yes")
     elif obvious_fix:
-        fix = " ".join(line.strip() for line in words[len(OBVIOUS_FIX_MARKER_PREFIX):].splitlines()
+        fix = " ".join(line.strip() for line in fix_words.splitlines()
                        if line.strip()) or "(the marker does not say what)"
         how, extra_fields = HOW_OBVIOUS_FIX, []
         late_marker_kind = "obvious-fix marker"
