@@ -24,6 +24,7 @@ This page lists every hashtag in alphabetical order and is the one place a hasht
 - `#case_against_weak#` — written in the walk-minutes beside the user's answer when the item's case against was rated weak.
 - `#code#` — a project glossary label: the term of the entry it ends covers code.
 - `#cold_read_fast_read_sonnet_backup_ran#` — the line a cold-read-fast-read report carries when the Sonnet backup wrote it in place of the first model, with the reason.
+- `#cold_read_no_findings#` — opens a cold-read reviewer's line saying it found nothing: `#cold_read_no_findings# Report complete: no findings.`, the first line of an empty defect-hunt or terminology report, and `#cold_read_no_findings# No issues`, a cold-read-fast-read's answer under Question 2 or 3 when that question found nothing; the Question 4 answer does not carry it.
 - `#cold_read_target_changed_during_run#` — the line a cold-read program prints when the document changed while the reviewer read it, so the report is triaged against the copy the reviewer was given.
 - `#data#` — a project glossary label: the term of the entry it ends covers data.
 - `#declined_because#` — the cold-read approval-walk item line that gives the reason a finding was declined, opening with `cost` when cost is the only reason.

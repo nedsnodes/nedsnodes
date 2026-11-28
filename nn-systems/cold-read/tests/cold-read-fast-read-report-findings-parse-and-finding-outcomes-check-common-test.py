@@ -94,6 +94,11 @@ check("a question headed with # or ###, as some reviewers write them, holds find
       ids(other_levels) == ["Q2.1", "Q3.1", "Q4.1"], ids(other_levels))
 check("a report with no numbered item under a finding question has no findings",
       module.cold_read_fast_read_report_findings("## Question 2: Where you struggled\n\nNo issues\n") == [])
+check("the answer the fast-clarify prompt asks for under a question with no findings, which opens with "
+      "#cold_read_no_findings#, has no findings, and the question after it still holds its own",
+      ids(module.cold_read_fast_read_report_findings(
+          "## Question 2: Where you struggled\n\n#cold_read_no_findings# No issues\n\n"
+          "## Question 3: What it does not cover that it implies it should\n\n1. b\n")) == ["Q3.1"])
 
 long_finding = [module.Finding(2, 1, "x" * 150)]
 check("a finding's opening is cut to FINDING_OPENING_CHARACTERS_SHOWN characters in the list",
